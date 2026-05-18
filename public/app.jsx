@@ -324,6 +324,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [search, setSearch] = useState('');
+  const [syncing, setSyncing] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const sseRef = useRef(null);
@@ -505,6 +506,20 @@ function App() {
             Intelligence
           </button>
         )}
+        <button className="header-btn" disabled={syncing} onClick={async () => {
+          setSyncing(true);
+          try {
+            await api('POST', '/api/sync/seed-from-bridge');
+            const r = await api('POST', '/api/sync/ghl');
+            addToast(r.error ? 'GHL sync: ' + r.error : 'Sync started — refreshing in 3s');
+            setTimeout(() => { loadConversations(); setSyncing(false); }, 3000);
+          } catch (e) {
+            addToast('Sync: ' + e.message);
+            setSyncing(false);
+          }
+        }}>
+          {syncing ? '⏳ Syncing…' : '↻ Sync History'}
+        </button>
         <button className="header-btn" onClick={handleLogout}>Logout</button>
       </div>
       <div className="layout">
