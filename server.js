@@ -70,6 +70,7 @@ const sendLimiter = rateLimit({
 
 app.use('/webhook', require('./routes/webhook')(broadcastSSE));
 app.use('/webhook', require('./routes/webhook-ghl')(broadcastSSE));
+app.use('/webhook', express.json(), require('./routes/webhook-send')(broadcastSSE));
 app.use('/auth', require('./routes/auth'));
 app.use('/api/sse', requireAuth, require('./routes/sse')(sseClients));
 app.use('/api/send', requireAuth, sendLimiter, require('./routes/send')(broadcastSSE));
