@@ -3,6 +3,8 @@ const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 
+const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
+
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
 
@@ -20,9 +22,40 @@ module.exports = (broadcastSSE) => {
       }
 
       const event = body?.data;
-      if (event?.event_type !== 'message.received') return;
+      const eventType = event?.event_type;
+      const payload = event?.payload;
 
-      const payload = event.payload;
+      // ── Delivery status update ──────────────────────────────────────────────
+      if (DELIVERY_EVENTS.has(eventType)) {
+        const messageId = payload?.id;
+        if (!messageId) return;
+
+        const toEntry = Array.isArray(payload.to) ? payload.to[0] : payload.to;
+        const providerStatus = toEntry?.status || payload?.status || '';
+        const toPhone = toEntry?.phone_number;
+
+        let status;
+        if (['delivered', 'received'].includes(providerStatus)) status = 'delivered';
+        else if (['delivery_failed', 'sending_failed', 'failed', 'gw_timeout'].includes(providerStatus)) status = 'failed';
+        else status = 'sent';
+
+        const { data: updated } = await supabase
+          .from('sms_messages')
+          .update({ status })
+          .eq('telnyx_message_id', messageId)
+          .select('contact_phone')
+          .maybeSingle();
+
+        if (updated) {
+          broadcastSSE({ type: 'status_update', messageId, status, phone: updated.contact_phone });
+          console.log(`Delivery update: ${messageId} → ${status}`);
+        }
+        return;
+      }
+
+      // ── Inbound message ─────────────────────────────────────────────────────
+      if (eventType !== 'message.received') return;
+
       const messageId = payload?.id;
       const fromPhone = payload?.from?.phone_number;
       const text = payload?.text;
@@ -62,13 +95,10 @@ module.exports = (broadcastSSE) => {
 
       await supabase.from('sms_contacts').update({
         last_seen: new Date().toISOString(),
-        ghl_contact_id: ghlContactId,
-        unread_count: supabase.rpc ? undefined : 1
+        ghl_contact_id: ghlContactId
       }).eq('phone', fromPhone);
 
-      // Increment unread_count via raw SQL workaround
-      await supabase.rpc('increment_contact_messages', { p_phone: fromPhone })
-        .catch(() => {});
+      await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }).catch(() => {});
 
       broadcastSSE({ type: 'new_message', phone: fromPhone, body: text, direction: 'inbound' });
 

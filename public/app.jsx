@@ -1,6 +1,8 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 // --- Helpers ---
+const TZ = 'America/New_York';
+
 function relativeTime(ts) {
   if (!ts) return '';
   const diff = Date.now() - new Date(ts).getTime();
@@ -11,16 +13,17 @@ function relativeTime(ts) {
   if (h < 24) return `${h}h`;
   const d = Math.floor(h / 24);
   if (d < 7) return `${d}d`;
-  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(ts).toLocaleDateString('en-US', { timeZone: TZ, month: 'short', day: 'numeric' });
 }
 
 function formatTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
-  const now = new Date();
-  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  if (d.toDateString() === now.toDateString()) return time;
-  return `${time} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  const time = d.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+  const todayStr = new Date().toLocaleDateString('en-US', { timeZone: TZ });
+  const msgStr  = d.toLocaleDateString('en-US', { timeZone: TZ });
+  if (todayStr === msgStr) return time;
+  return `${time} · ${d.toLocaleDateString('en-US', { timeZone: TZ, month: 'short', day: 'numeric' })}`;
 }
 
 function getAvatar(c) {
@@ -384,6 +387,20 @@ function App() {
       try {
         const evt = JSON.parse(e.data);
         if (evt.type === 'connected') return;
+        if (evt.type === 'status_update') {
+          const { messageId, status, phone } = evt;
+          setMessages(m => {
+            if (!m[phone]) return m;
+            return {
+              ...m,
+              [phone]: m[phone].map(msg =>
+                msg.telnyx_message_id === messageId ? { ...msg, status } : msg
+              )
+            };
+          });
+          return;
+        }
+
         if (evt.type === 'new_message') {
           const { phone, body, direction } = evt;
           // Update conversations
@@ -575,7 +592,13 @@ function App() {
                       <div className={`msg-meta ${m.direction}`}>
                         {formatTime(m.created_at)}
                         {m.direction === 'outbound' && m.status && (
-                          <span className="msg-status"> · {m.status}</span>
+                          <span className="msg-status" style={{
+                            color: m.status === 'delivered' ? 'rgba(255,255,255,0.9)'
+                                 : m.status === 'failed'    ? '#fca5a5'
+                                 : 'rgba(255,255,255,0.55)'
+                          }}>
+                            {' · '}{m.status === 'queued' ? 'Sending…' : m.status === 'sent' ? 'Sent' : m.status === 'delivered' ? '✓ Delivered' : '✗ Failed'}
+                          </span>
                         )}
                       </div>
                     </div>
