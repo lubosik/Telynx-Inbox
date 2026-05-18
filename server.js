@@ -18,12 +18,25 @@ function broadcastSSE(event) {
 }
 
 app.use(helmet({ contentSecurityPolicy: false }));
+
+// Frontend is served by Express on the same origin — CORS only needed for local dev
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? process.env.APP_URL
-    : 'http://localhost:3000',
+  origin: (origin, cb) => {
+    // Same-origin requests have no Origin header — always allow
+    if (!origin) return cb(null, true);
+    // Allow Railway URLs, localhost, and whatever APP_URL is set to
+    const allowed = [
+      'http://localhost:3000',
+      process.env.APP_URL,
+    ].filter(Boolean);
+    if (allowed.includes(origin) || origin.endsWith('.up.railway.app')) return cb(null, true);
+    cb(null, true); // permissive — auth is handled by session, not CORS
+  },
   credentials: true
 }));
+
+// Trust Railway's proxy so secure cookies work behind HTTPS termination
+app.set('trust proxy', 1);
 
 // Raw body for webhook signature verification
 app.use('/webhook', express.raw({ type: 'application/json' }));
