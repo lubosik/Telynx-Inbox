@@ -1,0 +1,14 @@
+{
+  "name": "Vici SMS Inbox",
+  "short_name": "Vici SMS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#16a34a",
+  "description": "Two-way SMS inbox for Vici Peptides",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
