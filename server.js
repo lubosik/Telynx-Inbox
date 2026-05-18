@@ -38,8 +38,9 @@ app.use(cors({
 // Trust Railway's proxy so secure cookies work behind HTTPS termination
 app.set('trust proxy', 1);
 
-// Raw body for webhook signature verification
-app.use('/webhook', express.raw({ type: 'application/json' }));
+// Telnyx needs raw body for signature verification, GHL needs parsed JSON
+app.use('/webhook/telnyx', express.raw({ type: 'application/json' }));
+app.use('/webhook/ghl', express.json());
 
 // JSON body for all other routes
 app.use(express.json());
@@ -68,6 +69,7 @@ const sendLimiter = rateLimit({
 });
 
 app.use('/webhook', require('./routes/webhook')(broadcastSSE));
+app.use('/webhook', require('./routes/webhook-ghl')(broadcastSSE));
 app.use('/auth', require('./routes/auth'));
 app.use('/api/sse', requireAuth, require('./routes/sse')(sseClients));
 app.use('/api/send', requireAuth, sendLimiter, require('./routes/send')(broadcastSSE));
