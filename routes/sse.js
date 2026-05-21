@@ -11,9 +11,10 @@ module.exports = (sseClients) => {
     sseClients.add(res);
     res.write('data: {"type":"connected"}\n\n');
 
+    // Ping every 15s — Railway drops idle connections at 30s
     const ping = setInterval(() => {
       try { res.write(':ping\n\n'); } catch { clearInterval(ping); }
-    }, 25000);
+    }, 15000);
 
     req.on('close', () => {
       clearInterval(ping);

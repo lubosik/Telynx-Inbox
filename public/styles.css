@@ -138,6 +138,8 @@ body::before {
 }
 .hdr-btn:hover { color: var(--accent); border-color: var(--border-bright); }
 .hdr-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.hdr-btn-catchup { color: var(--blue); border-color: rgba(56,189,248,0.2); }
+.hdr-btn-catchup:hover { color: var(--blue); border-color: rgba(56,189,248,0.5); box-shadow: 0 0 8px rgba(56,189,248,0.15); }
 
 /* ─── Main content area ─────────────────────────────────── */
 .main-content { flex: 1; overflow: hidden; display: flex; flex-direction: column; }

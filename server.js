@@ -81,6 +81,7 @@ app.use('/api/conversations', requireAuth, require('./routes/conversations'));
 app.use('/api/intelligence', requireAuth, require('./routes/intelligence'));
 app.use('/api/sync', requireAuth, require('./routes/sync'));
 app.use('/api/contacts', requireAuth, require('./routes/contacts'));
+app.use('/api/catchup', requireAuth, require('./routes/catchup'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });

@@ -486,7 +486,9 @@ function ContactCard({ contact, onClick }) {
       <div className="card-phone">{contact.phone?.replace('+1', '')}</div>
       <div className="card-meta">
         {latestStatus !== 'none' && (
-          <span className={`card-order-badge ${latestStatus}`}>{latestStatus}</span>
+          <span className={`card-order-badge ${latestStatus}`} title="Most recent order status">
+            Latest: {latestStatus}
+          </span>
         )}
         {contact.unread_count > 0 && (
           <span className="card-unread">{contact.unread_count}</span>
@@ -732,6 +734,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [catchingUp, setCatchingUp] = useState(false);
   const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
 
@@ -901,6 +904,29 @@ function App() {
     setAuth({ checking: false, ok: false });
   }
 
+  async function runCatchup() {
+    try {
+      const preview = await api('GET', '/api/catchup/preview');
+      if (preview.total_to_send === 0) {
+        addToast('No catch-up messages to send — everyone is up to date');
+        return;
+      }
+      const confirmed = window.confirm(
+        `Send catch-up SMS to:\n• ${preview.processing.count} processing orders (order confirmed)\n• ${preview.shipped.count} shipped orders (tracking)\n\nTotal: ${preview.total_to_send} messages\n\nProceed?`
+      );
+      if (!confirmed) return;
+      setCatchingUp(true);
+      addToast(`Sending ${preview.total_to_send} catch-up messages…`);
+      const result = await api('POST', '/api/catchup/send');
+      addToast(`Done — ${result.sent} sent, ${result.failed} failed`);
+      loadConversations();
+    } catch (e) {
+      addToast('Catch-up error: ' + e.message);
+    } finally {
+      setCatchingUp(false);
+    }
+  }
+
   async function syncWoo() {
     setSyncing(true);
     try {
@@ -960,6 +986,9 @@ function App() {
         <div className="header-actions">
           <button className="hdr-btn" disabled={syncing} onClick={syncWoo} title="Sync WooCommerce orders + contacts">
             {syncing ? '…' : '↻ WOO'}
+          </button>
+          <button className="hdr-btn hdr-btn-catchup" disabled={catchingUp} onClick={runCatchup} title="Send catch-up SMS to processing/shipped orders that never got automated messages">
+            {catchingUp ? '…' : '✉ CATCHUP'}
           </button>
           <button className="hdr-btn" onClick={handleLogout}>EXIT</button>
         </div>
