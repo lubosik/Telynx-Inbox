@@ -1,16 +1,16 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { runSync } = require('../sync-ghl');
+const { runWooSync } = require('../sync-woocommerce');
 
 let syncRunning = false;
 let lastSyncResult = null;
 
-// Trigger GHL sync
+// Trigger GHL contact sync
 router.post('/ghl', async (req, res) => {
   if (syncRunning) return res.json({ success: false, error: 'Sync already running' });
   syncRunning = true;
-  res.json({ success: true, message: 'Sync started' });
-
+  res.json({ success: true, message: 'GHL sync started' });
   try {
     lastSyncResult = await runSync();
   } catch (err) {
@@ -20,13 +20,27 @@ router.post('/ghl', async (req, res) => {
   }
 });
 
-// Sync status
+// Trigger WooCommerce orders + contacts backfill
+router.post('/woocommerce', async (req, res) => {
+  if (syncRunning) return res.json({ success: false, error: 'Sync already running' });
+  syncRunning = true;
+  res.json({ success: true, message: 'WooCommerce sync started' });
+  try {
+    lastSyncResult = await runWooSync();
+    console.log('WooCommerce sync complete:', lastSyncResult);
+  } catch (err) {
+    console.error('WooCommerce sync error:', err.message);
+    lastSyncResult = { success: false, error: err.message };
+  } finally {
+    syncRunning = false;
+  }
+});
+
 router.get('/status', (req, res) => {
   res.json({ running: syncRunning, last: lastSyncResult });
 });
 
-// Manual import — seed contacts + messages from an array
-// Body: [{ phone, name, messages: [{direction, body, created_at}] }]
+// Manual import
 router.post('/import', async (req, res) => {
   const { contacts } = req.body;
   if (!Array.isArray(contacts)) return res.status(400).json({ error: 'contacts array required' });
@@ -55,7 +69,7 @@ router.post('/import', async (req, res) => {
   res.json({ success: true, messages_imported: imported });
 });
 
-// Seed from the old Telnyx bridge in-memory log
+// Seed from old Telnyx bridge
 router.post('/seed-from-bridge', async (req, res) => {
   try {
     const r = await fetch('https://telynx-ghl-production.up.railway.app/dashboard.json');
@@ -71,7 +85,6 @@ router.post('/seed-from-bridge', async (req, res) => {
       const isOutbound = m.direction === 'OUT';
       const customerPhone = isOutbound ? m.to : m.from;
       const viciPhone = process.env.TELNYX_PHONE_NUMBER;
-
       if (!customerPhone || customerPhone === viciPhone) continue;
 
       await supabase.from('sms_contacts').upsert({
@@ -90,8 +103,7 @@ router.post('/seed-from-bridge', async (req, res) => {
       }, { onConflict: 'telnyx_message_id' });
       imported++;
     }
-
-    res.json({ success: true, messages_imported: imported, bridge_uptime_days: Math.floor(data.uptime / 86400) });
+    res.json({ success: true, messages_imported: imported });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

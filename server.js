@@ -5,7 +5,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const { verifyConnection } = require('./db');
+const { verifyConnection, supabase } = require('./db');
+const { checkAndSendDeliverySMS } = require('./routes/webhook-shipstation');
 
 const app = express();
 
@@ -19,30 +20,25 @@ function broadcastSSE(event) {
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// Frontend is served by Express on the same origin — CORS only needed for local dev
 app.use(cors({
   origin: (origin, cb) => {
-    // Same-origin requests have no Origin header — always allow
     if (!origin) return cb(null, true);
-    // Allow Railway URLs, localhost, and whatever APP_URL is set to
-    const allowed = [
-      'http://localhost:3000',
-      process.env.APP_URL,
-    ].filter(Boolean);
+    const allowed = ['http://localhost:3000', process.env.APP_URL].filter(Boolean);
     if (allowed.includes(origin) || origin.endsWith('.up.railway.app')) return cb(null, true);
-    cb(null, true); // permissive — auth is handled by session, not CORS
+    cb(null, true);
   },
   credentials: true
 }));
 
-// Trust Railway's proxy so secure cookies work behind HTTPS termination
 app.set('trust proxy', 1);
 
-// Telnyx needs raw body for signature verification, GHL needs parsed JSON
+// Raw body for HMAC signature verification on these webhooks
 app.use('/webhook/telnyx', express.raw({ type: 'application/json' }));
-app.use('/webhook/ghl', express.json());
+app.use('/webhook/woocommerce', express.raw({ type: 'application/json' }));
 
-// JSON body for all other routes
+// Parsed JSON for the rest
+app.use('/webhook/ghl', express.json());
+app.use('/webhook/shipstation', express.json());
 app.use(express.json());
 
 app.use(session({
@@ -68,15 +64,23 @@ const sendLimiter = rateLimit({
   message: { error: 'Too many messages, slow down' }
 });
 
+// Webhooks (no auth)
 app.use('/webhook', require('./routes/webhook')(broadcastSSE));
 app.use('/webhook', require('./routes/webhook-ghl')(broadcastSSE));
 app.use('/webhook', express.json(), require('./routes/webhook-send')(broadcastSSE));
+app.use('/webhook', require('./routes/webhook-woocommerce')(broadcastSSE));
+app.use('/webhook', require('./routes/webhook-shipstation')(broadcastSSE));
+
+// Auth
 app.use('/auth', require('./routes/auth'));
+
+// Authenticated API routes
 app.use('/api/sse', requireAuth, require('./routes/sse')(sseClients));
 app.use('/api/send', requireAuth, sendLimiter, require('./routes/send')(broadcastSSE));
 app.use('/api/conversations', requireAuth, require('./routes/conversations'));
 app.use('/api/intelligence', requireAuth, require('./routes/intelligence'));
 app.use('/api/sync', requireAuth, require('./routes/sync'));
+app.use('/api/contacts', requireAuth, require('./routes/contacts'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });
@@ -87,14 +91,28 @@ app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Daily delivery SMS check — runs every 6 hours
+// Sends review SMS to customers whose orders shipped 5+ days ago
+function startDeliveryCheck() {
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const sent = await checkAndSendDeliverySMS(broadcastSSE);
+      if (sent > 0) console.log(`Delivery cron: sent ${sent} review SMS`);
+    } catch (err) {
+      console.error('Delivery cron error:', err.message);
+    }
+  }, SIX_HOURS);
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
+  startDeliveryCheck();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
-  console.log(`GHL Location: ${process.env.GHL_LOCATION_ID}`);
   console.log(`Telnyx number: ${process.env.TELNYX_PHONE_NUMBER}`);
-  console.log(`GHL token: ${process.env.GHL_AGENCY_TOKEN?.slice(0, 8)}***`);
-  console.log(`OR key: ${process.env.OPENROUTER_API_KEY?.slice(0, 8)}***`);
+  console.log(`WooCommerce: ${process.env.WC_CONSUMER_KEY ? 'configured' : 'NOT configured'}`);
+  console.log(`ShipStation: ${process.env.SS_API_KEY ? 'configured' : 'NOT configured'}`);
 });
 
 module.exports = { app, broadcastSSE };
