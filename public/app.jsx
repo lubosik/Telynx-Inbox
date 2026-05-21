@@ -2,6 +2,18 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 const TZ = 'America/New_York';
 
+// Proper responsive hook — updates on resize, avoids stale window.innerWidth reads
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return isMobile;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function relativeTime(ts) {
@@ -486,7 +498,7 @@ function MessagesView({
   mobileSub, setMobileSub
 }) {
   const [search, setSearch] = useState('');
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = useIsMobile();
 
   const filtered = conversations.filter(c => {
     if (!search) return true;
@@ -839,7 +851,7 @@ function App() {
   }
 
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0);
-  const isMobile = window.innerWidth <= 768;
+  const isMobile = useIsMobile();
 
   if (auth.checking) {
     return (

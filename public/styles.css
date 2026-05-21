@@ -31,6 +31,10 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
   font-size: 14px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent iOS text size adjustment on rotate */
+  -webkit-text-size-adjust: 100%;
 }
 
 body::before {
@@ -163,7 +167,11 @@ body::before {
 .contacts-search:focus { border-color: var(--border-bright); }
 .contacts-search::placeholder { color: var(--text3); }
 
-.contacts-grid-wrap { flex: 1; overflow-y: auto; padding: 1.25rem; }
+.contacts-grid-wrap {
+  flex: 1; overflow-y: auto; padding: 1.25rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 
 .contacts-empty {
   text-align: center; padding: 4rem 1rem; color: var(--text3);
@@ -188,11 +196,15 @@ body::before {
   border-radius: 14px;
   padding: 1.25rem 1rem;
   cursor: pointer;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  /* Use opacity instead of transform for GPU-composited animation on mobile */
+  transition: border-color 0.2s, box-shadow 0.2s, opacity 0.15s;
   display: flex; flex-direction: column; align-items: center; text-align: center;
   gap: 0.5rem;
   position: relative;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  will-change: opacity;
 }
 .contact-card::before {
   content: '';
@@ -203,9 +215,9 @@ body::before {
 .contact-card:hover {
   border-color: var(--border-bright);
   box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 0 20px rgba(0,245,160,0.06);
-  transform: translateY(-2px);
 }
 .contact-card:hover::before { opacity: 1; }
+.contact-card:active { opacity: 0.75; }
 
 .card-avatar {
   width: 52px; height: 52px; border-radius: 14px;
@@ -266,16 +278,19 @@ body::before {
   width: 100%; max-width: 500px;
   max-height: 88vh;
   overflow-y: auto;
-  animation: modalPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  animation: modalPop 0.3s cubic-bezier(0.34, 1.2, 0.64, 1);
   box-shadow: 0 32px 80px rgba(0,0,0,0.75), 0 0 60px rgba(0,245,160,0.07);
   position: relative;
+  will-change: transform, opacity;
 }
 
 @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modalPop {
-  0%   { opacity: 0; transform: perspective(1200px) rotateX(12deg) scale(0.88) translateY(28px); }
-  65%  { opacity: 1; transform: perspective(1200px) rotateX(-2deg) scale(1.01) translateY(-4px); }
-  100% { opacity: 1; transform: perspective(1200px) rotateX(0deg) scale(1) translateY(0); }
+  0%   { opacity: 0; transform: scale(0.92) translateY(16px); }
+  60%  { opacity: 1; transform: scale(1.01) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .modal-header {
@@ -364,7 +379,11 @@ body::before {
 .conv-search:focus { border-color: var(--border-bright); }
 .conv-search::placeholder { color: var(--text3); }
 
-.conv-list { flex: 1; overflow-y: auto; }
+.conv-list {
+  flex: 1; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 .conv-empty {
   color: var(--text3); text-align: center; padding: 3rem 1rem;
   font-size: 0.8125rem; font-family: var(--mono);
@@ -377,6 +396,8 @@ body::before {
   border-bottom: 1px solid var(--border);
   border-left: 2px solid transparent;
   transition: background 0.1s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .conv-row:hover { background: var(--surface2); }
 .conv-row.active { border-left-color: var(--accent); background: var(--surface2); }
@@ -454,6 +475,8 @@ body::before {
 .messages-area {
   flex: 1; overflow-y: auto; padding: 1.25rem 1rem;
   display: flex; flex-direction: column; gap: 0.25rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .date-divider {
   text-align: center; font-size: 0.6875rem; color: var(--text3);
@@ -652,11 +675,39 @@ body::before {
 @media (max-width: 768px) {
   .bottom-nav { display: block; }
   .header-tabs { display: none; }
+
   .contacts-grid { grid-template-columns: repeat(2, 1fr); gap: 0.625rem; }
-  .contacts-grid-wrap { padding: 0.875rem; }
+  .contacts-grid-wrap { padding: 0.75rem; }
+  /* Slightly smaller cards on mobile */
+  .contact-card { padding: 1rem 0.75rem; gap: 0.375rem; }
+  .card-avatar { width: 44px; height: 44px; border-radius: 12px; font-size: 0.875rem; }
+  .card-name { font-size: 0.875rem; }
+  .card-preview { display: none; }
+
   .conv-sidebar { width: 100%; min-width: 0; border-right: none; }
   .conv-sidebar.hidden { display: none; }
   .thread-panel.hidden { display: none; }
   .back-btn { display: flex !important; }
-  .modal-card { max-height: 95vh; border-radius: 18px; }
+
+  /* Full-screen modal on mobile, slides up from bottom */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal-card {
+    max-height: 92vh;
+    border-radius: 22px 22px 0 0;
+    width: 100%;
+    max-width: 100%;
+    animation: modalSlideUp 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  /* Bigger tap targets */
+  .bnav-btn { min-height: 52px; }
+  .hdr-btn { padding: 0.4rem 0.75rem; font-size: 0.75rem; }
+
+  /* Smooth compose area above keyboard */
+  .compose-area { position: sticky; bottom: 0; }
+}
+
+@keyframes modalSlideUp {
+  from { transform: translateY(100%); opacity: 0.8; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
