@@ -35,6 +35,7 @@ app.set('trust proxy', 1);
 // Raw body for HMAC signature verification on these webhooks
 app.use('/webhook/telnyx', express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce', express.raw({ type: 'application/json' }));
+app.use('/webhook/woocommerce-customer', express.raw({ type: 'application/json' }));
 
 // Parsed JSON for the rest
 app.use('/webhook/ghl', express.json());

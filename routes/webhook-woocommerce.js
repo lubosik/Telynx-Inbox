@@ -27,6 +27,48 @@ function verifyWooSignature(rawBody, signature, secret) {
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
 
+  // customer.created webhook — upsert contact so they appear in the inbox immediately
+  router.post('/woocommerce-customer', async (req, res) => {
+    res.sendStatus(200);
+    try {
+      const sig = req.headers['x-wc-webhook-signature'];
+      if (sig && process.env.WC_WEBHOOK_SECRET) {
+        if (!verifyWooSignature(req.body, sig, process.env.WC_WEBHOOK_SECRET)) {
+          console.warn('WooCommerce customer webhook signature mismatch — processing anyway');
+        }
+      }
+
+      const customer = JSON.parse(req.body.toString());
+      console.log(`WooCommerce customer.created — customer #${customer.id} email=${customer.email}`);
+
+      const phone = normalizePhone(customer.billing?.phone || customer.phone);
+      if (!phone) {
+        console.warn(`customer.created #${customer.id}: no valid phone — skipping contact creation`);
+        return;
+      }
+
+      const firstName = customer.billing?.first_name || customer.first_name || '';
+      const lastName  = customer.billing?.last_name  || customer.last_name  || '';
+      const name      = [firstName, lastName].filter(Boolean).join(' ') || null;
+
+      await supabase.from('sms_contacts').upsert({
+        phone,
+        name,
+        email:           customer.billing?.email || customer.email || null,
+        city:            customer.billing?.city   || null,
+        state:           customer.billing?.state  || null,
+        country:         customer.billing?.country || null,
+        woo_customer_id: customer.id || null,
+        last_seen:       new Date().toISOString()
+      }, { onConflict: 'phone' });
+
+      broadcastSSE({ type: 'contact_added', phone, name });
+      console.log(`customer.created: contact upserted for ${phone} (${name})`);
+    } catch (err) {
+      console.error('WooCommerce customer webhook error:', err.message, err.stack);
+    }
+  });
+
   router.post('/woocommerce', async (req, res) => {
     res.sendStatus(200);
     try {
@@ -44,8 +86,8 @@ module.exports = (broadcastSSE) => {
       // Sync contact and order data — fromWebhook:true preserves SMS flags for live orders
       await syncOrder(order, { fromWebhook: true });
 
-      // Only fire SMS when transitioning to "processing"
-      if (order.status !== 'processing') return;
+      // Fire SMS on "processing" (paid, being packed) OR "completed" (paid, may ship same day)
+      if (!['processing', 'completed'].includes(order.status)) return;
 
       const phone = await resolvePhone(order);
       if (!phone) {

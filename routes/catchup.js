@@ -32,7 +32,7 @@ router.get('/preview', async (req, res) => {
     const { data: processingOrders } = await supabase
       .from('sms_orders')
       .select('id, contact_phone, woo_order_id, status')
-      .eq('status', 'processing')
+      .in('status', ['processing', 'completed'])
       .eq('order_sms_sent', false);
 
     const { data: shippedOrders } = await supabase
@@ -58,11 +58,11 @@ router.post('/send', async (req, res) => {
   const results = [];
 
   try {
-    // --- Processing orders ---
+    // --- Processing + completed orders (both mean paid, need order confirmation SMS) ---
     const { data: processingOrders } = await supabase
       .from('sms_orders')
       .select('id, contact_phone, woo_order_id, status')
-      .eq('status', 'processing')
+      .in('status', ['processing', 'completed'])
       .eq('order_sms_sent', false);
 
     for (const order of (processingOrders || [])) {
