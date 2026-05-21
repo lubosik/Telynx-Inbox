@@ -1,9 +1,8 @@
 const { useState, useEffect, useRef, useCallback } = React;
 
 const TZ = 'America/New_York';
-const IS_MOBILE = () => window.innerWidth <= 768;
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function relativeTime(ts) {
   if (!ts) return '';
@@ -29,16 +28,16 @@ function formatTime(ts) {
 }
 
 function formatDate(ts) {
-  if (!ts) return '';
+  if (!ts) return '—';
   return new Date(ts).toLocaleDateString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function getInitials(c) {
-  if (c.name) {
-    const parts = c.name.split(' ').filter(Boolean);
-    return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : c.name.slice(0, 2).toUpperCase();
-  }
-  return c.phone ? c.phone.slice(-4) : '??';
+function getInitials(contact) {
+  const name = contact?.name || contact?.phone;
+  if (!name) return '??';
+  const parts = name.split(' ').filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
 }
 
 function charCount(text) {
@@ -50,11 +49,6 @@ function charCount(text) {
 function truncate(str, n) {
   if (!str) return '';
   return str.length > n ? str.slice(0, n) + '…' : str;
-}
-
-function getLatestOrderStatus(contact) {
-  // contact may have an order status from conversations list enrichment
-  return contact.latest_order_status || 'none';
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -91,16 +85,15 @@ function LoginScreen({ onLogin }) {
     try {
       await api('POST', '/auth/login', { password: pw });
       onLogin();
-    } catch {
-      setError('Incorrect password');
-    } finally { setLoading(false); }
+    } catch { setError('Incorrect password'); }
+    finally { setLoading(false); }
   }
 
   return (
     <div className="login-screen">
       <div className="login-card">
-        <div className="login-logo">VICI<span style={{fontSize:'0.625rem',letterSpacing:'0.08em',color:'var(--text3)',marginLeft:'0.5rem'}}>// SMS</span></div>
-        <div className="login-subtitle">Inbox Access Required</div>
+        <div className="login-logo">VICI<small>// SMS</small></div>
+        <div className="login-subtitle">Secure Inbox Access</div>
         <form onSubmit={handleSubmit}>
           <div className="input-wrap">
             <input
@@ -115,7 +108,7 @@ function LoginScreen({ onLogin }) {
             </button>
           </div>
           <button className="btn-primary" type="submit" disabled={loading || !pw}>
-            {loading ? <span className="spinner" style={{borderTopColor:'#030712'}} /> : 'AUTHENTICATE'}
+            {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'AUTHENTICATE'}
           </button>
           <div className="error-msg">{error}</div>
         </form>
@@ -124,75 +117,37 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-// ─── Contact Row ─────────────────────────────────────────────────────────────
-
-function ContactRow({ c, active, onClick }) {
-  const preview = c.lastMessage
-    ? (c.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(c.lastMessage.body, 42)
-    : 'No messages yet';
-
-  const orderStatus = getLatestOrderStatus(c);
-
-  return (
-    <div className={`conv-item${active ? ' active' : ''}`} onClick={onClick}>
-      <div className="conv-avatar">
-        {getInitials(c)}
-        <span className={`order-status-dot ${orderStatus}`} title={orderStatus !== 'none' ? `Latest order: ${orderStatus}` : ''} />
-      </div>
-      <div className="conv-body">
-        <div className="conv-name-row">
-          <div className="conv-name">{c.name || 'Unknown'}</div>
-          <div className="conv-phone">{c.phone?.replace('+1', '')}</div>
-        </div>
-        <div className="conv-preview">{preview}</div>
-      </div>
-      <div className="conv-side">
-        <span className="conv-time">{relativeTime(c.last_seen)}</span>
-        {c.unread_count > 0 && <span className="unread-badge">{c.unread_count}</span>}
-      </div>
-    </div>
-  );
-}
-
-// ─── Order Card ───────────────────────────────────────────────────────────────
+// ─── Order Card (inside modal) ────────────────────────────────────────────────
 
 function OrderCard({ order }) {
-  const smsStates = [
-    { sent: order.order_sms_sent, label: 'Order SMS' },
-    { sent: order.shipped_sms_sent, label: 'Shipped SMS' },
-    { sent: order.delivery_sms_sent, label: 'Delivery SMS' }
+  const smsDots = [
+    { sent: order.order_sms_sent, title: 'Order confirmed SMS' },
+    { sent: order.shipped_sms_sent, title: 'Shipped SMS' },
+    { sent: order.delivery_sms_sent, title: 'Delivered SMS' }
   ];
-
   return (
     <div className="order-card">
-      <div className="order-header">
+      <div className="order-card-header">
         <span className="order-num">#{order.woo_order_id || '—'}</span>
         <span className={`order-badge ${order.status}`}>{order.status}</span>
         <span className="order-total">${parseFloat(order.total || 0).toFixed(2)}</span>
       </div>
-
-      <div className="order-items">
-        {(order.items || []).slice(0, 3).map((item, i) => (
-          <div key={i} className="order-item">
-            <span className="order-item-qty">×{item.quantity}</span>
-            {item.name}
-          </div>
-        ))}
-        {(order.items || []).length > 3 && (
-          <div className="order-item" style={{color:'var(--text3)'}}>+{order.items.length - 3} more items</div>
-        )}
-      </div>
-
+      {(order.items || []).slice(0, 3).map((item, i) => (
+        <div key={i} className="order-item">
+          <span className="order-item-qty">×{item.quantity}</span>{item.name}
+        </div>
+      ))}
+      {(order.items || []).length > 3 && (
+        <div className="order-item" style={{ color: 'var(--text3)' }}>+{order.items.length - 3} more items</div>
+      )}
       <div className="order-footer">
         <span className="order-date">{formatDate(order.created_at)}</span>
         {order.tracking_number && (
-          <span className="tracking-info">
-            📦 {order.carrier?.toUpperCase()} · {order.tracking_number}
-          </span>
+          <span className="tracking-line">📦 {order.carrier?.toUpperCase()} {order.tracking_number}</span>
         )}
-        <div className="sms-sent-indicators" title={smsStates.map(s => `${s.label}: ${s.sent ? 'sent' : 'pending'}`).join('\n')}>
-          {smsStates.map((s, i) => (
-            <div key={i} className={`sms-dot ${s.sent ? 'sent' : 'pending'}`} />
+        <div className="sms-dots" title={smsDots.map(d => d.title + ': ' + (d.sent ? '✓' : 'pending')).join('\n')}>
+          {smsDots.map((d, i) => (
+            <div key={i} className={`sms-dot ${d.sent ? 'sent' : 'unsent'}`} />
           ))}
         </div>
       </div>
@@ -204,45 +159,49 @@ function OrderCard({ order }) {
 
 function SuggestionCard({ s, onSend, onDismiss }) {
   const [sending, setSending] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed) return null;
+  const [gone, setGone] = useState(false);
+  if (gone) return null;
   return (
     <div className="suggestion-card">
-      <div className="sug-type-badge">{s.suggestion_type?.replace(/_/g, ' ')}</div>
+      <div className="sug-type">{s.suggestion_type?.replace(/_/g, ' ')}</div>
       <div className="sug-reason">{s.suggestion_text}</div>
       <div className="sug-msg">{s.suggested_message}</div>
       <div className="sug-actions">
-        <button className="btn-send-now" disabled={sending} onClick={async () => {
+        <button className="btn-sug-send" disabled={sending} onClick={async () => {
           setSending(true);
           await onSend(s.id);
-          setSending(false);
-          setDismissed(true);
+          setSending(false); setGone(true);
         }}>
-          {sending ? <span className="spinner" style={{borderTopColor:'#030712'}} /> : 'Send'}
+          {sending ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'Send'}
         </button>
-        <button className="btn-dismiss" onClick={() => { onDismiss(s.id); setDismissed(true); }}>Dismiss</button>
+        <button className="btn-sug-dismiss" onClick={() => { onDismiss(s.id); setGone(true); }}>Dismiss</button>
       </div>
     </div>
   );
 }
 
-// ─── Profile Panel ────────────────────────────────────────────────────────────
+// ─── Contact Modal (3D popup) ─────────────────────────────────────────────────
 
-function ProfilePanel({ phone, open, onClose, addToast }) {
-  const [tab, setTab] = useState('orders');
+function ContactModal({ phone, onClose, onGoToMessages, addToast }) {
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('orders');
   const [analysing, setAnalysing] = useState(false);
 
   useEffect(() => {
-    if (!phone || !open) return;
-    setProfile(null);
-    setLoading(true);
+    setProfile(null); setLoading(true); setTab('orders');
     api('GET', `/api/contacts/${encodeURIComponent(phone)}`)
       .then(setProfile)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [phone, open]);
+  }, [phone]);
+
+  // Close on escape or backdrop click
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
 
   async function reanalyse() {
     setAnalysing(true);
@@ -250,7 +209,7 @@ function ProfilePanel({ phone, open, onClose, addToast }) {
       await api('POST', `/api/intelligence/analyse/${encodeURIComponent(phone)}`);
       const d = await api('GET', `/api/contacts/${encodeURIComponent(phone)}`);
       setProfile(d);
-      addToast('Analysis complete');
+      addToast('Analysis updated');
     } catch { addToast('Analysis failed'); }
     setAnalysing(false);
   }
@@ -266,151 +225,421 @@ function ProfilePanel({ phone, open, onClose, addToast }) {
     await api('POST', `/api/intelligence/campaigns/${id}/dismiss`);
   }
 
-  const isMobile = IS_MOBILE();
-  const panelClass = isMobile
-    ? `profile-panel${open ? ' open' : ' closed'}`
-    : `profile-panel${open ? '' : ' closed'}`;
-
   const intel = profile?.intelligence;
   const suggestions = profile?.suggestions || [];
+  const latestOrderStatus = profile?.orders?.[0]?.status || 'none';
 
   return (
-    <div className={panelClass}>
-      <div className="profile-top">
-        <div className="profile-close">
-          <button className="close-btn" onClick={onClose}>✕</button>
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-card">
+        {/* Close button row */}
+        <div className="modal-header">
+          <div style={{ width: 30 }} />
+          <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
         {loading && (
-          <div style={{textAlign:'center', padding:'1rem'}}>
-            <span className="spinner" />
+          <div style={{ textAlign: 'center', padding: '3rem' }}>
+            <span className="spinner" style={{ width: '24px', height: '24px' }} />
           </div>
         )}
 
         {!loading && profile && (
-          <div className="profile-avatar-wrap">
-            <div className="profile-avatar">{getInitials(profile)}</div>
-            <div className="profile-info">
-              <div className="profile-name">{profile.name || 'Unknown'}</div>
-              <div className="profile-phone">{profile.phone}</div>
-              {profile.email && <div className="profile-email">{profile.email}</div>}
-              {(profile.city || profile.state) && (
-                <div className="profile-location">
-                  {[profile.city, profile.state, profile.country].filter(Boolean).join(', ')}
+          <>
+            {/* Identity */}
+            <div className="modal-identity">
+              <div className="modal-avatar">{getInitials(profile)}</div>
+              <div className="modal-info">
+                <div className="modal-name">{profile.name || 'Unknown'}</div>
+                <div className="modal-phone">{profile.phone}</div>
+                {profile.email && <div className="modal-email">{profile.email}</div>}
+                {(profile.city || profile.state) && (
+                  <div className="modal-location">
+                    {[profile.city, profile.state, profile.country].filter(Boolean).join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="modal-stats">
+              <div className="modal-stat">
+                <div className="modal-stat-val">{profile.total_orders}</div>
+                <div className="modal-stat-label">Orders</div>
+              </div>
+              <div className="modal-stat">
+                <div className="modal-stat-val">${profile.total_spent?.toFixed(0) || '0'}</div>
+                <div className="modal-stat-label">Spent</div>
+              </div>
+              <div className="modal-stat">
+                <div className="modal-stat-val" style={{ fontSize: '0.75rem' }}>
+                  {profile.orders?.[0] ? relativeTime(profile.orders[0].created_at) : '—'}
                 </div>
-              )}
+                <div className="modal-stat-label">Last Order</div>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
 
-      {profile && (
-        <div className="profile-stats">
-          <div className="stat-card">
-            <div className="stat-value">{profile.total_orders}</div>
-            <div className="stat-label">Orders</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value">${profile.total_spent?.toFixed(0)}</div>
-            <div className="stat-label">Spent</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{fontSize:'0.6875rem'}}>
-              {profile.orders?.[0] ? relativeTime(profile.orders[0].created_at) : '—'}
-            </div>
-            <div className="stat-label">Last Order</div>
-          </div>
-        </div>
-      )}
-
-      <div className="profile-tabs">
-        <button className={`profile-tab${tab === 'orders' ? ' active' : ''}`} onClick={() => setTab('orders')}>Orders</button>
-        <button className={`profile-tab${tab === 'intel' ? ' active' : ''}`} onClick={() => setTab('intel')}>Intel</button>
-      </div>
-
-      <div className="profile-body">
-        {tab === 'orders' && (
-          <>
-            {!profile && !loading && (
-              <div className="orders-empty">No profile data</div>
-            )}
-            {profile && profile.orders.length === 0 && (
-              <div className="orders-empty">No orders on record.<br />Run WooCommerce sync to backfill.</div>
-            )}
-            {(profile?.orders || []).map(order => (
-              <OrderCard key={order.id} order={order} />
-            ))}
-          </>
-        )}
-
-        {tab === 'intel' && (
-          <>
-            <div className="reanalyse-row">
-              <button className="reanalyse-btn" onClick={reanalyse} disabled={analysing}>
-                {analysing ? <span className="spinner" /> : '↺ Re-analyse'}
+            {/* Tabs */}
+            <div className="modal-tabs">
+              <button className={`modal-tab${tab === 'orders' ? ' active' : ''}`} onClick={() => setTab('orders')}>
+                Orders {profile.orders?.length > 0 && `(${profile.orders.length})`}
               </button>
-              {intel?.last_analysed && (
-                <span className="last-analysed">Last: {relativeTime(intel.last_analysed)}</span>
+              <button className={`modal-tab${tab === 'intel' ? ' active' : ''}`} onClick={() => setTab('intel')}>
+                Intelligence
+              </button>
+            </div>
+
+            {/* Tab body */}
+            <div className="modal-body">
+              {tab === 'orders' && (
+                <>
+                  {profile.orders.length === 0 ? (
+                    <div className="orders-empty">
+                      No orders found.<br />
+                      <span style={{ color: 'var(--text3)', fontSize: '0.75rem' }}>Click ↻ WOO to sync WooCommerce orders.</span>
+                    </div>
+                  ) : (
+                    profile.orders.map(order => <OrderCard key={order.id} order={order} />)
+                  )}
+                </>
+              )}
+
+              {tab === 'intel' && (
+                <>
+                  <div className="reanalyse-row">
+                    <button className="reanalyse-btn" onClick={reanalyse} disabled={analysing}>
+                      {analysing ? <span className="spinner" /> : '↺ Re-analyse'}
+                    </button>
+                    {intel?.last_analysed && (
+                      <span className="last-analysed-txt">Last: {relativeTime(intel.last_analysed)}</span>
+                    )}
+                  </div>
+
+                  {!intel ? (
+                    <div className="intel-summary" style={{ color: 'var(--text3)' }}>
+                      No analysis yet. Send this contact a message, then click re-analyse.
+                    </div>
+                  ) : (
+                    <>
+                      {intel.raw_summary && (
+                        <div className="intel-section">
+                          <div className="intel-label">AI Summary</div>
+                          <div className="intel-summary">{intel.raw_summary}</div>
+                        </div>
+                      )}
+                      {intel.sentiment && (
+                        <div className="intel-section">
+                          <div className="intel-label">Sentiment</div>
+                          <span className={`sentiment-badge ${intel.sentiment}`}>{intel.sentiment}</span>
+                        </div>
+                      )}
+                      {intel.inferred_interests?.length > 0 && (
+                        <div className="intel-section">
+                          <div className="intel-label">Interests</div>
+                          {intel.inferred_interests.map((x, i) => <span key={i} className="tag-chip green">{x}</span>)}
+                        </div>
+                      )}
+                      {intel.order_signals?.length > 0 && (
+                        <div className="intel-section">
+                          <div className="intel-label">Purchase Signals</div>
+                          <ul className="signal-list">
+                            {intel.order_signals.map((s, i) => <li key={i}>{s}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {intel.restock_interests?.length > 0 && (
+                        <div className="intel-section">
+                          <div className="intel-label">Restock Watch</div>
+                          {intel.restock_interests.map((x, i) => <span key={i} className="tag-chip orange">{x}</span>)}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {suggestions.length > 0 && (
+                    <div className="intel-section">
+                      <div className="intel-label" style={{ marginBottom: '0.625rem' }}>Campaign Suggestions</div>
+                      {suggestions.map(s => (
+                        <SuggestionCard key={s.id} s={s} onSend={sendSuggestion} onDismiss={dismissSuggestion} />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
-            {!intel ? (
-              <div className="intel-section">
-                <div className="intel-summary" style={{color:'var(--text3)'}}>
-                  No analysis yet. Send a message or click re-analyse.
-                </div>
-              </div>
-            ) : (
-              <>
-                {intel.raw_summary && (
-                  <div className="intel-section">
-                    <div className="intel-section-label">Summary</div>
-                    <div className="intel-summary">{intel.raw_summary}</div>
-                  </div>
-                )}
-                {intel.sentiment && (
-                  <div className="intel-section">
-                    <div className="intel-section-label">Sentiment</div>
-                    <span className={`sentiment-badge ${intel.sentiment}`}>{intel.sentiment}</span>
-                  </div>
-                )}
-                {intel.inferred_interests?.length > 0 && (
-                  <div className="intel-section">
-                    <div className="intel-section-label">Interests</div>
-                    {intel.inferred_interests.map((i, idx) => (
-                      <span key={idx} className="tag-chip green">{i}</span>
-                    ))}
-                  </div>
-                )}
-                {intel.order_signals?.length > 0 && (
-                  <div className="intel-section">
-                    <div className="intel-section-label">Purchase Signals</div>
-                    <ul className="signal-list">
-                      {intel.order_signals.map((s, idx) => <li key={idx}>{s}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {intel.restock_interests?.length > 0 && (
-                  <div className="intel-section">
-                    <div className="intel-section-label">Restock Watch</div>
-                    {intel.restock_interests.map((i, idx) => (
-                      <span key={idx} className="tag-chip orange">{i}</span>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
+            {/* Footer: go to messages */}
+            <div className="modal-footer">
+              <button className="btn-message" onClick={() => { onGoToMessages(profile.phone); onClose(); }}>
+                Open Message Thread →
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
-            {suggestions.length > 0 && (
-              <div className="intel-section">
-                <div className="intel-section-label">Campaign Suggestions</div>
-                {suggestions.map(s => (
-                  <SuggestionCard key={s.id} s={s} onSend={sendSuggestion} onDismiss={dismissSuggestion} />
-                ))}
-              </div>
+// ─── Contacts View ────────────────────────────────────────────────────────────
+
+function ContactsView({ contacts, onGoToMessages, addToast }) {
+  const [search, setSearch] = useState('');
+  const [modalPhone, setModalPhone] = useState(null);
+
+  const filtered = contacts.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return c.phone.includes(q) || (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q);
+  });
+
+  const totalUnread = contacts.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+
+  return (
+    <div className="contacts-view">
+      <div className="contacts-toolbar">
+        <div className="contacts-search-wrap">
+          <span className="contacts-search-icon">⌕</span>
+          <input
+            className="contacts-search"
+            placeholder={`Search ${contacts.length} contacts…`}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="contacts-grid-wrap">
+        {contacts.length === 0 ? (
+          <div className="contacts-empty">
+            // NO CONTACTS YET<br />
+            Click ↻ WOO in the header to sync your WooCommerce customers.
+          </div>
+        ) : (
+          <>
+            <div className="contacts-count">
+              {filtered.length} of {contacts.length} contacts
+              {totalUnread > 0 && ` · ${totalUnread} unread`}
+            </div>
+            <div className="contacts-grid">
+              {filtered.map(c => (
+                <ContactCard
+                  key={c.phone}
+                  contact={c}
+                  onClick={() => setModalPhone(c.phone)}
+                />
+              ))}
+            </div>
+            {filtered.length === 0 && search && (
+              <div className="contacts-empty">// NO MATCHES FOR "{search}"</div>
             )}
           </>
         )}
+      </div>
+
+      {modalPhone && (
+        <ContactModal
+          phone={modalPhone}
+          onClose={() => setModalPhone(null)}
+          onGoToMessages={(phone) => { onGoToMessages(phone); }}
+          addToast={addToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Contact Card (in grid) ───────────────────────────────────────────────────
+
+function ContactCard({ contact, onClick }) {
+  const latestStatus = contact.latest_order_status || 'none';
+  const preview = contact.lastMessage
+    ? (contact.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(contact.lastMessage.body, 48)
+    : null;
+
+  return (
+    <div className="contact-card" onClick={onClick}>
+      <div className="card-avatar">
+        {getInitials(contact)}
+        <span className={`card-status-dot ${latestStatus}`} />
+      </div>
+      <div className="card-name">{contact.name || 'Unknown'}</div>
+      <div className="card-phone">{contact.phone?.replace('+1', '')}</div>
+      <div className="card-meta">
+        {latestStatus !== 'none' && (
+          <span className={`card-order-badge ${latestStatus}`}>{latestStatus}</span>
+        )}
+        {contact.unread_count > 0 && (
+          <span className="card-unread">{contact.unread_count}</span>
+        )}
+      </div>
+      {preview && <div className="card-preview">{preview}</div>}
+    </div>
+  );
+}
+
+// ─── Messages View ────────────────────────────────────────────────────────────
+
+function MessagesView({
+  conversations, activePhone, messages, onSelectContact,
+  input, setInput, onSend, onKeyDown, sending, inputRef, messagesEndRef,
+  mobileSub, setMobileSub
+}) {
+  const [search, setSearch] = useState('');
+  const isMobile = window.innerWidth <= 768;
+
+  const filtered = conversations.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return c.phone.includes(q) || (c.name || '').toLowerCase().includes(q);
+  });
+
+  const activeMessages = activePhone ? (messages[activePhone] || []) : [];
+  const activeContact = conversations.find(c => c.phone === activePhone);
+  const cc = charCount(input);
+
+  return (
+    <div className="messages-view">
+      {/* Conversation sidebar */}
+      <div className={`conv-sidebar${isMobile && mobileSub === 'thread' ? ' hidden' : ''}`}>
+        <div className="conv-search-wrap">
+          <input
+            className="conv-search"
+            placeholder="Search messages…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="conv-list">
+          {filtered.length === 0 && (
+            <div className="conv-empty">
+              {search ? `// no results` : `// no conversations`}
+            </div>
+          )}
+          {filtered.map(c => (
+            <ConvRow
+              key={c.phone}
+              contact={c}
+              active={c.phone === activePhone}
+              onClick={() => {
+                onSelectContact(c.phone);
+                if (isMobile) setMobileSub('thread');
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Thread */}
+      <div className={`thread-panel${isMobile && mobileSub === 'list' ? ' hidden' : ''}`}>
+        {!activePhone ? (
+          <div className="no-thread">
+            <div className="no-thread-icon">✉</div>
+            <p>Select a conversation</p>
+          </div>
+        ) : (
+          <>
+            <div className="thread-header">
+              <button className="back-btn" onClick={() => setMobileSub('list')}>←</button>
+              <div className="thread-contact">
+                <div className="thread-name">{activeContact?.name || activePhone}</div>
+                {activeContact?.name && <div className="thread-phone">{activePhone}</div>}
+              </div>
+            </div>
+
+            <div className="messages-area">
+              {activeMessages.length === 0 ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontFamily: 'var(--mono)', fontSize: '0.8125rem' }}>
+                  // no messages yet
+                </div>
+              ) : (
+                activeMessages.map((m, idx) => {
+                  const prev = activeMessages[idx - 1];
+                  const showDate = !prev ||
+                    new Date(m.created_at).toDateString() !== new Date(prev.created_at).toDateString();
+                  return (
+                    <React.Fragment key={m.id || idx}>
+                      {showDate && (
+                        <div className="date-divider">
+                          {new Date(m.created_at).toLocaleDateString('en-US', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric' })}
+                        </div>
+                      )}
+                      <div className="msg-group">
+                        <div className={`msg-bubble ${m.direction}`}>{m.body}</div>
+                        <div className={`msg-meta ${m.direction}`}>
+                          {formatTime(m.created_at)}
+                          {m.direction === 'outbound' && m.status && (
+                            <span style={{
+                              marginLeft: '0.375rem',
+                              color: m.status === 'delivered' ? 'var(--accent)' : m.status === 'failed' ? 'var(--red)' : 'var(--text3)'
+                            }}>
+                              {m.status === 'queued' ? '· sending' : m.status === 'sent' ? '· sent' : m.status === 'delivered' ? '· ✓' : '· ✗ failed'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="compose-area">
+              <div className="compose-row">
+                <textarea
+                  ref={inputRef}
+                  className="compose-input"
+                  placeholder="Type a message…"
+                  value={input}
+                  onChange={e => {
+                    setInput(e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                  }}
+                  onKeyDown={onKeyDown}
+                  rows={1}
+                />
+                <button className="send-btn" onClick={onSend} disabled={!input.trim() || sending}>
+                  {sending
+                    ? <span className="spinner" style={{ width: '14px', height: '14px', borderTopColor: '#030712' }} />
+                    : '↑'}
+                </button>
+              </div>
+              <div className="compose-footer">
+                <span className={`char-counter${cc.isWarning ? ' warning' : ''}${cc.isDanger ? ' danger' : ''}`}>
+                  {cc.chars}/160
+                </span>
+                <span>{cc.segments} SMS</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Conversation Row ─────────────────────────────────────────────────────────
+
+function ConvRow({ contact: c, active, onClick }) {
+  const preview = c.lastMessage
+    ? (c.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(c.lastMessage.body, 40)
+    : 'No messages';
+  const orderStatus = c.latest_order_status || 'none';
+  return (
+    <div className={`conv-row${active ? ' active' : ''}`} onClick={onClick}>
+      <div className="conv-avatar">
+        {getInitials(c)}
+        <span className={`order-dot ${orderStatus}`} />
+      </div>
+      <div className="conv-body">
+        <div className="conv-name">{c.name || c.phone}</div>
+        <div className="conv-preview">{preview}</div>
+      </div>
+      <div className="conv-side">
+        <span className="conv-time">{relativeTime(c.last_seen)}</span>
+        {c.unread_count > 0 && <span className="unread-pill">{c.unread_count}</span>}
       </div>
     </div>
   );
@@ -425,13 +654,11 @@ function App() {
   const [messages, setMessages] = useState({});
   const [input, setInput] = useState('');
   const [sseStatus, setSseStatus] = useState('connecting');
-  const [profileOpen, setProfileOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [toasts, setToasts] = useState([]);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all'); // all | unread | orders
   const [syncing, setSyncing] = useState(false);
-  const [mobileView, setMobileView] = useState('contacts'); // contacts | thread | profile
+  const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages'
+  const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -494,12 +721,7 @@ function App() {
           const { messageId, status, phone } = evt;
           setMessages(m => {
             if (!m[phone]) return m;
-            return {
-              ...m,
-              [phone]: m[phone].map(msg =>
-                msg.telnyx_message_id === messageId ? { ...msg, status } : msg
-              )
-            };
+            return { ...m, [phone]: m[phone].map(msg => msg.telnyx_message_id === messageId ? { ...msg, status } : msg) };
           });
           return;
         }
@@ -523,26 +745,18 @@ function App() {
               return prev;
             }
           });
-
           setActivePhone(ap => {
             if (ap === phone) {
               setMessages(m => ({
                 ...m,
-                [phone]: [...(m[phone] || []), {
-                  id: Date.now(),
-                  contact_phone: phone,
-                  direction,
-                  body,
-                  created_at: new Date().toISOString(),
-                  status: 'delivered'
-                }]
+                [phone]: [...(m[phone] || []), { id: Date.now(), contact_phone: phone, direction, body, created_at: new Date().toISOString(), status: 'delivered' }]
               }));
             }
             return ap;
           });
-
           if (direction === 'inbound' && document.hidden) {
-            fireNotification(phone, body);
+            const contact = conversations.find(c => c.phone === phone);
+            fireNotification(contact?.name || phone, body);
           }
         }
       } catch {}
@@ -563,12 +777,9 @@ function App() {
     }
   }
 
-  function fireNotification(phone, body) {
+  function fireNotification(title, body) {
     if ('Notification' in window && Notification.permission === 'granted') {
-      const contact = conversations.find(c => c.phone === phone);
-      const title = `${contact?.name || phone}`;
-      const n = new Notification(title, { body, icon: '/icons/icon-192.png' });
-      n.onclick = () => { window.focus(); selectContact(phone); };
+      new Notification(title, { body, icon: '/icons/icon-192.png' });
     }
   }
 
@@ -582,10 +793,15 @@ function App() {
 
   function selectContact(phone) {
     setActivePhone(phone);
-    setMobileView('thread');
-    setProfileOpen(false);
     setConversations(prev => prev.map(c => c.phone === phone ? { ...c, unread_count: 0 } : c));
     setTimeout(() => inputRef.current?.focus(), 150);
+  }
+
+  // Called from ContactModal "Open Message Thread" button
+  function goToMessages(phone) {
+    selectContact(phone);
+    setMainTab('messages');
+    setMobileSub('thread');
   }
 
   async function handleSend() {
@@ -610,267 +826,116 @@ function App() {
     setAuth({ checking: false, ok: false });
   }
 
-  async function syncWooCommerce() {
+  async function syncWoo() {
     setSyncing(true);
     try {
       await api('POST', '/api/sync/woocommerce');
-      addToast('WooCommerce sync started — may take a minute');
-      setTimeout(() => { loadConversations(); setSyncing(false); }, 4000);
+      addToast('WooCommerce sync started — may take 1-2 min');
+      setTimeout(() => { loadConversations(); setSyncing(false); }, 5000);
     } catch (e) {
-      addToast('Sync error: ' + e.message);
+      addToast('WooCommerce sync: ' + e.message);
       setSyncing(false);
     }
   }
 
-  async function syncGHL() {
-    setSyncing(true);
-    try {
-      await api('POST', '/api/sync/seed-from-bridge');
-      await api('POST', '/api/sync/ghl');
-      addToast('GHL sync started');
-      setTimeout(() => { loadConversations(); setSyncing(false); }, 3000);
-    } catch (e) {
-      addToast('GHL sync: ' + e.message);
-      setSyncing(false);
-    }
-  }
-
-  const cc = charCount(input);
-  const activeContact = conversations.find(c => c.phone === activePhone);
-  const activeMessages = activePhone ? (messages[activePhone] || []) : [];
-
-  const filtered = conversations.filter(c => {
-    if (search) {
-      const q = search.toLowerCase();
-      if (!c.phone.includes(q) && !(c.name || '').toLowerCase().includes(q)) return false;
-    }
-    if (filter === 'unread') return (c.unread_count || 0) > 0;
-    if (filter === 'orders') return c.latest_order_status && c.latest_order_status !== 'none';
-    return true;
-  });
+  const totalUnread = conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+  const isMobile = window.innerWidth <= 768;
 
   if (auth.checking) {
     return (
       <div className="loading-screen">
-        <span className="spinner" style={{width:'24px',height:'24px'}} />
+        <span className="spinner" style={{ width: '28px', height: '28px' }} />
         <span>INITIALISING</span>
       </div>
     );
   }
-
-  if (!auth.ok) {
-    return <LoginScreen onLogin={() => setAuth({ checking: false, ok: true })} />;
-  }
-
-  const isMobile = IS_MOBILE();
+  if (!auth.ok) return <LoginScreen onLogin={() => setAuth({ checking: false, ok: true })} />;
 
   return (
     <div className="app">
       <ToastContainer toasts={toasts} />
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="header">
-        <div className="header-logo">
-          VICI <span>// INBOX</span>
+        <div className="header-logo">VICI<small>// SMS</small></div>
+
+        {/* Desktop tab navigation */}
+        <div className="header-tabs">
+          <button
+            className={`header-tab${mainTab === 'contacts' ? ' active' : ''}`}
+            onClick={() => setMainTab('contacts')}
+          >
+            CONTACTS
+          </button>
+          <button
+            className={`header-tab${mainTab === 'messages' ? ' active' : ''}`}
+            onClick={() => setMainTab('messages')}
+          >
+            MESSAGES {totalUnread > 0 && `(${totalUnread})`}
+          </button>
         </div>
-        <div className="conn-indicator">
+
+        <div className="header-spacer" />
+
+        <div className="conn-pill">
           <div className={`conn-dot ${sseStatus}`} />
           <span>{sseStatus}</span>
         </div>
+
         <div className="header-actions">
-          <button className="hdr-btn" disabled={syncing} onClick={syncWooCommerce} title="Sync WooCommerce orders">
+          <button className="hdr-btn" disabled={syncing} onClick={syncWoo} title="Sync WooCommerce orders + contacts">
             {syncing ? '…' : '↻ WOO'}
-          </button>
-          <button className="hdr-btn" disabled={syncing} onClick={syncGHL} title="Sync GHL history">
-            {syncing ? '…' : '↻ GHL'}
           </button>
           <button className="hdr-btn" onClick={handleLogout}>EXIT</button>
         </div>
       </div>
 
-      {/* Main layout */}
-      <div className="layout">
-
-        {/* Sidebar */}
-        <div className={`sidebar${isMobile && mobileView !== 'contacts' ? ' hidden' : ''}`}>
-          <div className="sidebar-top">
-            <div className="search-wrap">
-              <span className="search-icon">⌕</span>
-              <input
-                className="search-input"
-                placeholder="Search contacts…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
-            <div className="filter-tabs">
-              {[
-                { key: 'all', label: 'ALL' },
-                { key: 'unread', label: 'UNREAD' },
-                { key: 'orders', label: 'ORDERS' }
-              ].map(f => (
-                <button
-                  key={f.key}
-                  className={`filter-tab${filter === f.key ? ' active' : ''}`}
-                  onClick={() => setFilter(f.key)}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="conv-list">
-            {filtered.length === 0 && (
-              <div className="conv-empty">{search ? '// NO MATCHES' : '// NO CONTACTS'}</div>
-            )}
-            {filtered.map(c => (
-              <ContactRow
-                key={c.phone}
-                c={c}
-                active={c.phone === activePhone}
-                onClick={() => selectContact(c.phone)}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Thread panel */}
-        <div className={`thread-panel${isMobile && mobileView !== 'thread' ? ' hidden' : ''}`}>
-          {!activePhone ? (
-            <div className="no-thread">
-              <div className="no-thread-icon">⌨</div>
-              <p>Select a contact to view messages</p>
-            </div>
-          ) : (
-            <>
-              <div className="thread-header">
-                <button className="back-btn" onClick={() => { setMobileView('contacts'); setProfileOpen(false); }}>←</button>
-                <div className="thread-info">
-                  <div className="thread-name">{activeContact?.name || activePhone}</div>
-                  {activeContact?.name && <div className="thread-phone">{activePhone}</div>}
-                </div>
-                <div className="thread-actions">
-                  <button
-                    className={`profile-btn${profileOpen ? ' active' : ''}`}
-                    onClick={() => {
-                      if (isMobile) setMobileView('profile');
-                      setProfileOpen(o => !o);
-                    }}
-                  >
-                    Profile
-                  </button>
-                </div>
-              </div>
-
-              <div className="messages-area">
-                {activeMessages.length === 0 ? (
-                  <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', fontFamily:'var(--mono)', fontSize:'0.8125rem'}}>
-                    // no messages
-                  </div>
-                ) : (
-                  activeMessages.map((m, idx) => {
-                    const prevMsg = activeMessages[idx - 1];
-                    const showDate = !prevMsg ||
-                      new Date(m.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString();
-                    return (
-                      <React.Fragment key={m.id || idx}>
-                        {showDate && (
-                          <div className="date-divider">
-                            {new Date(m.created_at).toLocaleDateString('en-US', { timeZone: TZ, weekday: 'long', month: 'short', day: 'numeric' })}
-                          </div>
-                        )}
-                        <div className="msg-group">
-                          <div className={`msg-bubble ${m.direction}`}>{m.body}</div>
-                          <div className={`msg-meta ${m.direction}`}>
-                            {formatTime(m.created_at)}
-                            {m.direction === 'outbound' && m.status && (
-                              <span style={{
-                                marginLeft: '0.375rem',
-                                color: m.status === 'delivered' ? 'var(--accent)'
-                                     : m.status === 'failed' ? 'var(--red)'
-                                     : 'var(--text3)'
-                              }}>
-                                {m.status === 'queued' ? '· sending' : m.status === 'sent' ? '· sent' : m.status === 'delivered' ? '· ✓' : '· ✗ failed'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </React.Fragment>
-                    );
-                  })
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-
-              <div className="compose-area">
-                <div className="compose-row">
-                  <textarea
-                    ref={inputRef}
-                    className="compose-input"
-                    placeholder="Type a message…"
-                    value={input}
-                    onChange={e => {
-                      setInput(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-                    }}
-                    onKeyDown={handleKeyDown}
-                    rows={1}
-                  />
-                  <button className="send-btn" onClick={handleSend} disabled={!input.trim() || sending}>
-                    {sending ? <span className="spinner" style={{width:'14px',height:'14px',borderTopColor:'#030712'}} /> : '↑'}
-                  </button>
-                </div>
-                <div className="compose-footer">
-                  <span className={`char-counter${cc.isWarning ? ' warning' : ''}${cc.isDanger ? ' danger' : ''}`}>
-                    {cc.chars}/160
-                  </span>
-                  <span>{cc.segments} SMS</span>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Profile panel */}
-        <ProfilePanel
-          phone={activePhone}
-          open={profileOpen}
-          onClose={() => {
-            setProfileOpen(false);
-            if (isMobile) setMobileView('thread');
-          }}
-          addToast={addToast}
-        />
+      {/* ── Main content ── */}
+      <div className="main-content">
+        {mainTab === 'contacts' && (
+          <ContactsView
+            contacts={conversations}
+            onGoToMessages={goToMessages}
+            addToast={addToast}
+          />
+        )}
+        {mainTab === 'messages' && (
+          <MessagesView
+            conversations={conversations}
+            activePhone={activePhone}
+            messages={messages}
+            onSelectContact={selectContact}
+            input={input}
+            setInput={setInput}
+            onSend={handleSend}
+            onKeyDown={handleKeyDown}
+            sending={sending}
+            inputRef={inputRef}
+            messagesEndRef={messagesEndRef}
+            mobileSub={mobileSub}
+            setMobileSub={setMobileSub}
+          />
+        )}
       </div>
 
-      {/* Mobile bottom nav */}
+      {/* ── Mobile bottom nav ── */}
       {isMobile && (
         <nav className="bottom-nav">
           <div className="bottom-nav-inner">
             <button
-              className={`bnav-btn${mobileView === 'contacts' ? ' active' : ''}`}
-              onClick={() => setMobileView('contacts')}
+              className={`bnav-btn${mainTab === 'contacts' ? ' active' : ''}`}
+              onClick={() => setMainTab('contacts')}
             >
-              <span className="bnav-icon">☰</span>
+              <span className="bnav-icon">◎</span>
               Contacts
             </button>
             <button
-              className={`bnav-btn${mobileView === 'thread' ? ' active' : ''}`}
-              onClick={() => activePhone && setMobileView('thread')}
-              disabled={!activePhone}
+              className={`bnav-btn${mainTab === 'messages' ? ' active' : ''}`}
+              onClick={() => { setMainTab('messages'); if (activePhone) setMobileSub('list'); }}
             >
               <span className="bnav-icon">✉</span>
               Messages
-            </button>
-            <button
-              className={`bnav-btn${mobileView === 'profile' ? ' active' : ''}`}
-              onClick={() => { if (activePhone) { setProfileOpen(true); setMobileView('profile'); } }}
-              disabled={!activePhone}
-            >
-              <span className="bnav-icon">◎</span>
-              Profile
+              {totalUnread > 0 && <span className="bnav-badge">{totalUnread}</span>}
             </button>
           </div>
         </nav>

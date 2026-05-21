@@ -27,13 +27,22 @@ async function syncOrder(order) {
     sku: i.sku || null
   }));
 
+  // For historical backfill: mark all SMS as already sent so we don't spam old customers.
+  // Only NEW orders coming through the live webhook will trigger real SMS flows.
+  const isHistorical = true;
+  const alreadyShipped = ['shipped', 'completed', 'delivered', 'refunded', 'cancelled', 'failed'].includes(order.status);
+
   await supabase.from('sms_orders').upsert({
     contact_phone: phone,
     woo_order_id: order.id,
     status: order.status || 'pending',
     items,
     total: parseFloat(order.total) || 0,
-    created_at: order.date_created || new Date().toISOString()
+    created_at: order.date_created || new Date().toISOString(),
+    // Mark historical orders so the SMS engine skips them
+    order_sms_sent: isHistorical,
+    shipped_sms_sent: alreadyShipped,
+    delivery_sms_sent: alreadyShipped
   }, { onConflict: 'woo_order_id' });
 
   return true;
