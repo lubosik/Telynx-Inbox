@@ -20,13 +20,10 @@ function buildTrackingUrl(carrierCode, trackingNumber) {
 }
 
 const SHIPPED_SMS = (firstName, carrier, trackingNumber, trackingUrl) => {
-  const carrierName = carrier ? carrier.toUpperCase().replace('_', ' ') : '';
-  let msg = `Hi ${firstName}! Your Vici Peptides order has shipped`;
-  if (carrierName) msg += ` via ${carrierName}`;
-  msg += '.';
-  if (trackingUrl) msg += ` Track: ${trackingUrl}`;
+  let msg = `Hey ${firstName}! It's Dom, founder of Vici Peptides. Just wanted to personally let you know your order is on its way!`;
+  if (trackingUrl) msg += ` Track it here: ${trackingUrl}`;
   else if (trackingNumber) msg += ` Tracking: ${trackingNumber}`;
-  if (msg.length < 145) msg += ' Reply STOP to opt out.';
+  msg += ' Reply STOP to opt out.';
   return msg;
 };
 
