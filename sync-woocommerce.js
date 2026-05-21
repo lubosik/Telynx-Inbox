@@ -1,7 +1,9 @@
 const { supabase } = require('./db');
 const { normalizePhone, fetchOrders } = require('./woocommerce');
 
-async function syncOrder(order) {
+// fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
+// fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
+async function syncOrder(order, { fromWebhook = false } = {}) {
   const phone = normalizePhone(order.billing?.phone);
   if (!phone) return false;
 
@@ -27,23 +29,40 @@ async function syncOrder(order) {
     sku: i.sku || null
   }));
 
-  // For historical backfill: mark all SMS as already sent so we don't spam old customers.
-  // Only NEW orders coming through the live webhook will trigger real SMS flows.
-  const isHistorical = true;
   const alreadyShipped = ['shipped', 'completed', 'delivered', 'refunded', 'cancelled', 'failed'].includes(order.status);
 
-  await supabase.from('sms_orders').upsert({
-    contact_phone: phone,
-    woo_order_id: order.id,
-    status: order.status || 'pending',
-    items,
-    total: parseFloat(order.total) || 0,
-    created_at: order.date_created || new Date().toISOString(),
-    // Mark historical orders so the SMS engine skips them
-    order_sms_sent: isHistorical,
-    shipped_sms_sent: alreadyShipped,
-    delivery_sms_sent: alreadyShipped
-  }, { onConflict: 'woo_order_id' });
+  // Check if this order already exists in the DB
+  const { data: existing } = await supabase
+    .from('sms_orders')
+    .select('id')
+    .eq('woo_order_id', order.id)
+    .maybeSingle();
+
+  if (existing) {
+    // Order already in DB — only update mutable fields, never overwrite SMS sent flags
+    await supabase.from('sms_orders').update({
+      contact_phone: phone,
+      status: order.status || 'pending',
+      items,
+      total: parseFloat(order.total) || 0
+    }).eq('woo_order_id', order.id);
+  } else {
+    // New order — set SMS flags appropriately
+    // Historical (manual sync): mark all as sent so we don't spam customers retroactively
+    // Live webhook: leave order_sms_sent=false so the webhook handler fires the SMS
+    const historical = !fromWebhook;
+    await supabase.from('sms_orders').insert({
+      contact_phone: phone,
+      woo_order_id: order.id,
+      status: order.status || 'pending',
+      items,
+      total: parseFloat(order.total) || 0,
+      created_at: order.date_created || new Date().toISOString(),
+      order_sms_sent: historical,
+      shipped_sms_sent: historical || alreadyShipped,
+      delivery_sms_sent: historical || alreadyShipped
+    });
+  }
 
   return true;
 }

@@ -29,10 +29,10 @@ module.exports = (broadcastSSE) => {
 
       const order = JSON.parse(req.body.toString());
       const topic = req.headers['x-wc-webhook-topic'] || 'unknown';
-      console.log(`WooCommerce webhook: ${topic} — order #${order.id} status=${order.status}`);
+      console.log(`WooCommerce webhook: ${topic} — order #${order.id} status=${order.status} phone=${order.billing?.phone || 'NONE'}`);
 
-      // Always sync contact and order data
-      await syncOrder(order);
+      // Sync contact and order data — fromWebhook:true preserves SMS flags for live orders
+      await syncOrder(order, { fromWebhook: true });
 
       // Only fire SMS when transitioning to "processing"
       if (order.status !== 'processing') return;
