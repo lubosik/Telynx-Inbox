@@ -674,11 +674,34 @@ function MessagesView({
 
 // ─── Conversation Row ─────────────────────────────────────────────────────────
 
+function smartTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) {
+    return d.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+  if (diffDays < 7) {
+    return d.toLocaleDateString('en-US', { timeZone: TZ, weekday: 'short' }) + ' ' +
+      d.toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+  return d.toLocaleDateString('en-US', { timeZone: TZ, month: 'short', day: 'numeric' });
+}
+
 function ConvRow({ contact: c, active, onClick }) {
   const preview = c.lastMessage
     ? (c.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(c.lastMessage.body, 40)
-    : 'No messages';
+    : 'No messages yet';
   const orderStatus = c.latest_order_status || 'none';
+  const timestamp = smartTime(c.lastMessage?.created_at || c.latest_order_date || c.last_seen);
+
   return (
     <div className={`conv-row${active ? ' active' : ''}`} onClick={onClick}>
       <div className="conv-avatar">
@@ -690,7 +713,7 @@ function ConvRow({ contact: c, active, onClick }) {
         <div className="conv-preview">{preview}</div>
       </div>
       <div className="conv-side">
-        <span className="conv-time">{relativeTime(c.last_seen)}</span>
+        <span className="conv-time">{timestamp}</span>
         {c.unread_count > 0 && <span className="unread-pill">{c.unread_count}</span>}
       </div>
     </div>
