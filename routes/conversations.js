@@ -3,23 +3,50 @@ const { supabase } = require('../db');
 
 router.get('/', async (req, res) => {
   try {
+    // Fetch all contacts
     const { data: contacts } = await supabase
       .from('sms_contacts')
-      .select('*')
-      .order('last_seen', { ascending: false });
+      .select('*');
 
-    const result = await Promise.all((contacts || []).map(async c => {
-      const { data: msgs } = await supabase
-        .from('sms_messages')
-        .select('body, direction, created_at')
-        .eq('contact_phone', c.phone)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      return { ...c, lastMessage: msgs?.[0] || null };
+    if (!contacts?.length) return res.json([]);
+
+    // Fetch latest message per contact in one batch
+    const { data: allMessages } = await supabase
+      .from('sms_messages')
+      .select('contact_phone, body, direction, created_at')
+      .in('contact_phone', contacts.map(c => c.phone))
+      .order('created_at', { ascending: false });
+
+    // Fetch latest order per contact in one batch
+    const { data: allOrders } = await supabase
+      .from('sms_orders')
+      .select('contact_phone, status, created_at, woo_order_id, total')
+      .in('contact_phone', contacts.map(c => c.phone))
+      .order('created_at', { ascending: false });
+
+    // Build lookup maps — first entry per phone = latest (already sorted desc)
+    const latestMessage = {};
+    for (const m of (allMessages || [])) {
+      if (!latestMessage[m.contact_phone]) latestMessage[m.contact_phone] = m;
+    }
+
+    const latestOrder = {};
+    for (const o of (allOrders || [])) {
+      if (!latestOrder[o.contact_phone]) latestOrder[o.contact_phone] = o;
+    }
+
+    // Enrich contacts with latest message + latest order info
+    const enriched = contacts.map(c => ({
+      ...c,
+      lastMessage: latestMessage[c.phone] || null,
+      latest_order_status: latestOrder[c.phone]?.status || null,
+      latest_order_date: latestOrder[c.phone]?.created_at || null,
+      latest_order_id: latestOrder[c.phone]?.woo_order_id || null
     }));
 
-    res.json(result);
+    res.json(enriched);
   } catch (err) {
+    console.error('Conversations load error:', err.message);
     res.status(500).json({ error: 'Failed to load conversations' });
   }
 });

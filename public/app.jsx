@@ -399,7 +399,14 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
   const [search, setSearch] = useState('');
   const [modalPhone, setModalPhone] = useState(null);
 
-  const filtered = contacts.filter(c => {
+  // Sort by most recent order date first, then by last_seen as fallback
+  const sorted = [...contacts].sort((a, b) => {
+    const aDate = a.latest_order_date || a.last_seen || '0';
+    const bDate = b.latest_order_date || b.last_seen || '0';
+    return bDate.localeCompare(aDate);
+  });
+
+  const filtered = sorted.filter(c => {
     if (!search) return true;
     const q = search.toLowerCase();
     return c.phone.includes(q) || (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q);
@@ -500,7 +507,21 @@ function MessagesView({
   const [search, setSearch] = useState('');
   const isMobile = useIsMobile();
 
-  const filtered = conversations.filter(c => {
+  // Sort: contacts with messages first (by last message time desc),
+  // then contacts with no messages but recent orders (by order date desc)
+  const sorted = [...conversations].sort((a, b) => {
+    const aMsg = a.lastMessage?.created_at;
+    const bMsg = b.lastMessage?.created_at;
+    if (aMsg && bMsg) return bMsg.localeCompare(aMsg);
+    if (aMsg && !bMsg) return -1;
+    if (!aMsg && bMsg) return 1;
+    // Both have no messages — sort by latest order date
+    const aOrd = a.latest_order_date || a.last_seen || '0';
+    const bOrd = b.latest_order_date || b.last_seen || '0';
+    return bOrd.localeCompare(aOrd);
+  });
+
+  const filtered = sorted.filter(c => {
     if (!search) return true;
     const q = search.toLowerCase();
     return c.phone.includes(q) || (c.name || '').toLowerCase().includes(q);
@@ -528,17 +549,36 @@ function MessagesView({
               {search ? `// no results` : `// no conversations`}
             </div>
           )}
-          {filtered.map(c => (
-            <ConvRow
-              key={c.phone}
-              contact={c}
-              active={c.phone === activePhone}
-              onClick={() => {
-                onSelectContact(c.phone);
-                if (isMobile) setMobileSub('thread');
-              }}
-            />
-          ))}
+          {filtered.map((c, idx) => {
+            const prevHasMsg = idx > 0 && !!filtered[idx - 1].lastMessage;
+            const thisHasMsg = !!c.lastMessage;
+            const showDivider = prevHasMsg && !thisHasMsg;
+            return (
+              <React.Fragment key={c.phone}>
+                {showDivider && (
+                  <div style={{
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.6rem',
+                    color: 'var(--text3)',
+                    letterSpacing: '0.1em',
+                    fontFamily: 'var(--mono)',
+                    borderBottom: '1px solid var(--border)',
+                    background: 'var(--bg)'
+                  }}>
+                    // NO MESSAGES YET
+                  </div>
+                )}
+                <ConvRow
+                  contact={c}
+                  active={c.phone === activePhone}
+                  onClick={() => {
+                    onSelectContact(c.phone);
+                    if (isMobile) setMobileSub('thread');
+                  }}
+                />
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
 
