@@ -5,7 +5,7 @@ const { syncOrder, runWooSync } = require('../sync-woocommerce');
 const { normalizePhone } = require('../woocommerce');
 
 const ORDER_PROCESSING_SMS = (firstName, orderNum, total) =>
-  `Hi ${firstName}! Your Vici Peptides order #${orderNum} is confirmed ($${parseFloat(total).toFixed(2)}). We're prepping it now and will text you when it ships!`;
+  `Hey ${firstName}! It's Dom, founder of Vici Peptides. Huge thank you for your order - it genuinely means everything to me. We're getting it packed up right now and I'll personally text you the moment it ships!`;
 
 function verifyWooSignature(rawBody, signature, secret) {
   try {

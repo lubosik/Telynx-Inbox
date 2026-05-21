@@ -20,15 +20,15 @@ function buildTrackingUrl(carrierCode, trackingNumber) {
 }
 
 const SHIPPED_SMS = (firstName, carrier, trackingNumber, trackingUrl) => {
-  let msg = `Hey ${firstName}! It's Dom, founder of Vici Peptides. Just wanted to personally let you know your order is on its way!`;
-  if (trackingUrl) msg += ` Track it here: ${trackingUrl}`;
-  else if (trackingNumber) msg += ` Tracking: ${trackingNumber}`;
-  msg += ' Reply STOP to opt out.';
+  let msg = `Hey ${firstName}! It's Dom from Vici Peptides. Your order is officially on its way to you!`;
+  if (trackingUrl) msg += ` You can track it right here: ${trackingUrl}`;
+  else if (trackingNumber) msg += ` Tracking number: ${trackingNumber}`;
+  msg += ' Reach out anytime if you need me. Reply STOP to opt out.';
   return msg;
 };
 
 const DELIVERED_SMS = (firstName) =>
-  `Hi ${firstName}! Your Vici Peptides order has arrived. We hope you love it! A quick review means the world to us: vicipeptides.com/reviews Reply STOP to opt out.`;
+  `Hey ${firstName}! It's Dom from Vici Peptides. I really hope your order arrived safe and you're already loving it. If you get 30 seconds, an honest review would mean the absolute world to us: https://g.page/r/Cdab3lrLfvy1EBM/review Thank you so much!`;
 
 // Process a single ShipStation shipment object from SHIP_NOTIFY
 async function processShipment(shipment, broadcastSSE) {
