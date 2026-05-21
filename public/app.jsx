@@ -399,11 +399,15 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
   const [search, setSearch] = useState('');
   const [modalPhone, setModalPhone] = useState(null);
 
-  // Sort by most recent order date first, then by last_seen as fallback
+  // Contacts with orders first (newest order date → oldest), then no-order contacts below
   const sorted = [...contacts].sort((a, b) => {
-    const aDate = a.latest_order_date || a.last_seen || '0';
-    const bDate = b.latest_order_date || b.last_seen || '0';
-    return bDate.localeCompare(aDate);
+    const aHasOrder = !!a.latest_order_date;
+    const bHasOrder = !!b.latest_order_date;
+    if (aHasOrder && !bHasOrder) return -1;
+    if (!aHasOrder && bHasOrder) return 1;
+    if (aHasOrder && bHasOrder) return b.latest_order_date.localeCompare(a.latest_order_date);
+    // Both have no orders — sort by last_seen
+    return (b.last_seen || '0').localeCompare(a.last_seen || '0');
   });
 
   const filtered = sorted.filter(c => {
@@ -509,18 +513,22 @@ function MessagesView({
   const [search, setSearch] = useState('');
   const isMobile = useIsMobile();
 
-  // Sort: contacts with messages first (by last message time desc),
-  // then contacts with no messages but recent orders (by order date desc)
+  // Sort: contacts with messages first (newest message → oldest),
+  // then contacts with orders but no messages (newest order → oldest),
+  // then contacts with no messages and no orders at the bottom
   const sorted = [...conversations].sort((a, b) => {
     const aMsg = a.lastMessage?.created_at;
     const bMsg = b.lastMessage?.created_at;
     if (aMsg && bMsg) return bMsg.localeCompare(aMsg);
     if (aMsg && !bMsg) return -1;
     if (!aMsg && bMsg) return 1;
-    // Both have no messages — sort by latest order date
-    const aOrd = a.latest_order_date || a.last_seen || '0';
-    const bOrd = b.latest_order_date || b.last_seen || '0';
-    return bOrd.localeCompare(aOrd);
+    // Both have no messages — contacts with orders before contacts without
+    const aHasOrder = !!a.latest_order_date;
+    const bHasOrder = !!b.latest_order_date;
+    if (aHasOrder && !bHasOrder) return -1;
+    if (!aHasOrder && bHasOrder) return 1;
+    if (aHasOrder && bHasOrder) return b.latest_order_date.localeCompare(a.latest_order_date);
+    return (b.last_seen || '0').localeCompare(a.last_seen || '0');
   });
 
   const filtered = sorted.filter(c => {
