@@ -27,7 +27,7 @@ function verifyWooSignature(rawBody, signature, secret) {
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
 
-  // customer.created webhook — upsert contact so they appear in the inbox immediately
+  // customer.created + customer.updated — single endpoint, both topics point here
   router.post('/woocommerce-customer', async (req, res) => {
     res.sendStatus(200);
     try {
@@ -39,31 +39,66 @@ module.exports = (broadcastSSE) => {
       }
 
       const customer = JSON.parse(req.body.toString());
-      console.log(`WooCommerce customer.created — customer #${customer.id} email=${customer.email}`);
+      const topic = req.headers['x-wc-webhook-topic'] || 'customer.unknown';
+      console.log(`WooCommerce ${topic} — customer #${customer.id} email=${customer.email}`);
 
       const phone = normalizePhone(customer.billing?.phone || customer.phone);
       if (!phone) {
-        console.warn(`customer.created #${customer.id}: no valid phone — skipping contact creation`);
+        console.warn(`${topic} #${customer.id}: no valid phone — skipping`);
         return;
       }
 
       const firstName = customer.billing?.first_name || customer.first_name || '';
       const lastName  = customer.billing?.last_name  || customer.last_name  || '';
       const name      = [firstName, lastName].filter(Boolean).join(' ') || null;
+      const email     = customer.billing?.email || customer.email || null;
+      const city      = customer.billing?.city    || null;
+      const state     = customer.billing?.state   || null;
+      const country   = customer.billing?.country || null;
+      const wooId     = customer.id || null;
 
-      await supabase.from('sms_contacts').upsert({
-        phone,
-        name,
-        email:           customer.billing?.email || customer.email || null,
-        city:            customer.billing?.city   || null,
-        state:           customer.billing?.state  || null,
-        country:         customer.billing?.country || null,
-        woo_customer_id: customer.id || null,
-        last_seen:       new Date().toISOString()
-      }, { onConflict: 'phone' });
+      // Check if contact already exists (match by phone or woo_customer_id)
+      const { data: existing } = await supabase
+        .from('sms_contacts')
+        .select('phone, name, email, city, state, country, woo_customer_id')
+        .or(`phone.eq.${phone}${wooId ? `,woo_customer_id.eq.${wooId}` : ''}`)
+        .maybeSingle();
 
-      broadcastSSE({ type: 'contact_added', phone, name });
-      console.log(`customer.created: contact upserted for ${phone} (${name})`);
+      if (!existing) {
+        // Brand new contact
+        await supabase.from('sms_contacts').upsert({
+          phone, name, email, city, state, country,
+          woo_customer_id: wooId,
+          last_seen: new Date().toISOString()
+        }, { onConflict: 'phone' });
+
+        broadcastSSE({ type: 'contact_added', phone, name });
+        console.log(`${topic}: new contact created — ${phone} (${name})`);
+        return;
+      }
+
+      // Contact exists — build diff, only write fields that actually changed
+      const updates = {};
+      if (name    && name    !== existing.name)    updates.name    = name;
+      if (email   && email   !== existing.email)   updates.email   = email;
+      if (city    && city    !== existing.city)     updates.city    = city;
+      if (state   && state   !== existing.state)   updates.state   = state;
+      if (country && country !== existing.country) updates.country = country;
+      if (wooId   && wooId   !== existing.woo_customer_id) updates.woo_customer_id = wooId;
+
+      if (Object.keys(updates).length === 0) {
+        console.log(`${topic}: contact ${phone} already up to date — no changes`);
+        return;
+      }
+
+      updates.last_seen = new Date().toISOString();
+
+      await supabase.from('sms_contacts')
+        .update(updates)
+        .eq('phone', existing.phone);
+
+      broadcastSSE({ type: 'contact_updated', phone: existing.phone, updates });
+      console.log(`${topic}: updated contact ${existing.phone} — changed fields: ${Object.keys(updates).filter(k => k !== 'last_seen').join(', ')}`);
     } catch (err) {
       console.error('WooCommerce customer webhook error:', err.message, err.stack);
     }
