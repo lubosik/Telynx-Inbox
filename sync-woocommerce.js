@@ -1,10 +1,11 @@
 const { supabase } = require('./db');
-const { normalizePhone, fetchOrders } = require('./woocommerce');
+const { normalizePhone, fetchOrders, wooGet } = require('./woocommerce');
 
 // fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
 // fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
-async function syncOrder(order, { fromWebhook = false } = {}) {
-  const phone = normalizePhone(order.billing?.phone);
+// phoneOverride: pre-resolved phone (used by runWooSync batch lookup).
+async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = {}) {
+  const phone = phoneOverride || normalizePhone(order.billing?.phone);
   if (!phone) return false;
 
   const firstName = order.billing?.first_name || '';
@@ -68,7 +69,6 @@ async function syncOrder(order, { fromWebhook = false } = {}) {
 }
 
 async function runWooSync() {
-  let page = 1;
   let totalOrders = 0;
   let syncedContacts = 0;
 
@@ -79,17 +79,15 @@ async function runWooSync() {
     if (await syncOrder(o)) syncedContacts++;
   }
   totalOrders += firstPage.length;
-  page++;
 
-  while (page <= totalPages) {
+  for (let page = 2; page <= totalPages; page++) {
     await new Promise(r => setTimeout(r, 250));
     const { orders } = await fetchOrders(page, 100, 'any');
     for (const o of orders) {
       if (await syncOrder(o)) syncedContacts++;
     }
     totalOrders += orders.length;
-    page++;
-    console.log(`WooCommerce sync: page ${page - 1}/${totalPages} done`);
+    console.log(`WooCommerce sync: page ${page}/${totalPages} done`);
   }
 
   return { total_orders: totalOrders, synced_contacts: syncedContacts };

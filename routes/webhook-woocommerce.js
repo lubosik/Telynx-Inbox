@@ -2,7 +2,17 @@ const crypto = require('crypto');
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { syncOrder, runWooSync } = require('../sync-woocommerce');
-const { normalizePhone } = require('../woocommerce');
+const { normalizePhone, wooGet } = require('../woocommerce');
+
+async function resolvePhone(order) {
+  const fromBilling = normalizePhone(order.billing?.phone);
+  if (fromBilling) return fromBilling;
+  if (!order.customer_id) return null;
+  try {
+    const { data: cust } = await wooGet('/customers/' + order.customer_id);
+    return normalizePhone(cust.billing?.phone) || null;
+  } catch { return null; }
+}
 
 const ORDER_PROCESSING_SMS = (firstName, orderNum, total) =>
   `Hey ${firstName}! It's Dom, founder of Vici Peptides. Huge thank you for your order - it genuinely means everything to me. We're getting it packed up right now and I'll personally text you the moment it ships!`;
@@ -37,9 +47,9 @@ module.exports = (broadcastSSE) => {
       // Only fire SMS when transitioning to "processing"
       if (order.status !== 'processing') return;
 
-      const phone = normalizePhone(order.billing?.phone);
+      const phone = await resolvePhone(order);
       if (!phone) {
-        console.warn(`WooCommerce order #${order.id}: no valid phone number in billing`);
+        console.warn(`WooCommerce order #${order.id}: no phone in billing or customer profile — SMS skipped`);
         return;
       }
 
