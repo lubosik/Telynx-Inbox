@@ -30,7 +30,9 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     sku: i.sku || null
   }));
 
-  const alreadyShipped = ['shipped', 'completed', 'delivered', 'refunded', 'cancelled', 'failed'].includes(order.status);
+  // "Already done" — order won't ship or has already shipped
+  const neverShips = ['refunded', 'cancelled', 'failed'].includes(order.status);
+  const alreadyShipped = ['shipped', 'completed', 'delivered'].includes(order.status);
 
   // Check if this order already exists in the DB
   const { data: existing } = await supabase
@@ -49,8 +51,9 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     }).eq('woo_order_id', order.id);
   } else {
     // New order — set SMS flags appropriately
-    // Historical (manual sync): mark all as sent so we don't spam customers retroactively
-    // Live webhook: leave order_sms_sent=false so the webhook handler fires the SMS
+    // Historical (manual sync): suppress order_sms_sent to avoid re-confirming old orders,
+    // but only suppress shipped/delivery SMS if the order has actually shipped or will never ship.
+    // Live webhook: start everything at false so each handler fires when the time is right.
     const historical = !fromWebhook;
     await supabase.from('sms_orders').insert({
       contact_phone: phone,
@@ -60,8 +63,8 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
       total: parseFloat(order.total) || 0,
       created_at: order.date_created || new Date().toISOString(),
       order_sms_sent: historical,
-      shipped_sms_sent: historical || alreadyShipped,
-      delivery_sms_sent: historical || alreadyShipped
+      shipped_sms_sent: neverShips || (historical && alreadyShipped),
+      delivery_sms_sent: neverShips || (historical && alreadyShipped)
     });
   }
 
