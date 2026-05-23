@@ -64,34 +64,49 @@ async function processShipment(shipment, broadcastSSE) {
     shipped_at: shipment.shipDate || new Date().toISOString()
   }).eq('woo_order_id', wooId);
 
-  // Send shipped SMS once
-  if (!order.shipped_sms_sent) {
-    const { data: contact } = await supabase
-      .from('sms_contacts')
-      .select('name')
-      .eq('phone', phone)
-      .maybeSingle();
+  // Atomically claim the shipped SMS — race-safe, same pattern as order_sms_sent
+  const { data: claimed, error: claimErr } = await supabase
+    .from('sms_orders')
+    .update({ shipped_sms_sent: true })
+    .eq('woo_order_id', wooId)
+    .eq('shipped_sms_sent', false)
+    .select('id');
 
-    const firstName = contact?.name?.split(' ')?.[0] || 'there';
-    const msg = SHIPPED_SMS(firstName, carrier, trackingNumber, trackingUrl);
+  if (claimErr) {
+    console.error(`ShipStation order #${orderNumber}: claim error — ${claimErr.message}`);
+    return;
+  }
+  if (!claimed?.length) {
+    console.log(`ShipStation order #${orderNumber}: shipped SMS already sent or claimed — skipping`);
+    return;
+  }
 
-    try {
-      const { messageId } = await sendSMS(phone, msg);
-      await supabase.from('sms_messages').insert({
-        telnyx_message_id: messageId,
-        contact_phone: phone,
-        direction: 'outbound',
-        body: msg,
-        status: 'sent',
-        created_at: new Date().toISOString()
-      });
-      await supabase.from('sms_orders').update({ shipped_sms_sent: true }).eq('woo_order_id', wooId);
-      await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', phone);
-      if (broadcastSSE) broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
-      console.log(`Shipped SMS → ${phone} for order #${orderNumber}`);
-    } catch (err) {
-      console.error(`Failed shipped SMS for order #${orderNumber}:`, err.message);
-    }
+  const { data: contact } = await supabase
+    .from('sms_contacts')
+    .select('name')
+    .eq('phone', phone)
+    .maybeSingle();
+
+  const firstName = contact?.name?.split(' ')?.[0] || 'there';
+  const msg = SHIPPED_SMS(firstName, carrier, trackingNumber, trackingUrl);
+
+  try {
+    const { messageId } = await sendSMS(phone, msg);
+    await supabase.from('sms_messages').insert({
+      telnyx_message_id: messageId,
+      contact_phone: phone,
+      direction: 'outbound',
+      body: msg,
+      status: 'sent',
+      created_at: new Date().toISOString()
+    });
+    await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', phone);
+    if (broadcastSSE) broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
+    console.log(`Shipped SMS → ${phone} for order #${orderNumber}`);
+  } catch (err) {
+    // Roll back the claim so a retry can attempt again
+    await supabase.from('sms_orders').update({ shipped_sms_sent: false }).eq('woo_order_id', wooId);
+    console.error(`Failed shipped SMS for order #${orderNumber}:`, err.message);
   }
 }
 

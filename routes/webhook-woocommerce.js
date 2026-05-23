@@ -130,42 +130,47 @@ module.exports = (broadcastSSE) => {
         return;
       }
 
-      // Guard against duplicate processing SMS
-      const { data: existingOrder } = await supabase
+      // Atomically claim this SMS send — only the first concurrent request wins.
+      // UPDATE WHERE order_sms_sent = false returns 0 rows if already sent (race-safe).
+      const { data: claimed, error: claimErr } = await supabase
         .from('sms_orders')
-        .select('order_sms_sent')
+        .update({ order_sms_sent: true })
         .eq('woo_order_id', order.id)
-        .maybeSingle();
+        .eq('order_sms_sent', false)
+        .select('id');
 
-      if (existingOrder?.order_sms_sent) {
-        console.log(`Order #${order.id}: processing SMS already sent, skipping`);
+      if (claimErr) {
+        console.error(`Order #${order.id}: claim update error — ${claimErr.message}`);
+        return;
+      }
+      if (!claimed?.length) {
+        console.log(`Order #${order.id}: processing SMS already sent or claimed — skipping`);
         return;
       }
 
       const firstName = order.billing?.first_name || 'there';
       const msg = ORDER_PROCESSING_SMS(firstName, order.number || order.id, order.total || '0');
 
-      const { messageId } = await sendSMS(phone, msg);
-
-      await supabase.from('sms_messages').insert({
-        telnyx_message_id: messageId,
-        contact_phone: phone,
-        direction: 'outbound',
-        body: msg,
-        status: 'sent',
-        created_at: new Date().toISOString()
-      });
-
-      await supabase.from('sms_orders')
-        .update({ order_sms_sent: true })
-        .eq('woo_order_id', order.id);
-
-      await supabase.from('sms_contacts')
-        .update({ last_seen: new Date().toISOString() })
-        .eq('phone', phone);
-
-      broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
-      console.log(`Order processing SMS sent to ${phone} for order #${order.id}`);
+      try {
+        const { messageId } = await sendSMS(phone, msg);
+        await supabase.from('sms_messages').insert({
+          telnyx_message_id: messageId,
+          contact_phone: phone,
+          direction: 'outbound',
+          body: msg,
+          status: 'sent',
+          created_at: new Date().toISOString()
+        });
+        await supabase.from('sms_contacts')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('phone', phone);
+        broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
+        console.log(`Order processing SMS sent to ${phone} for order #${order.id}`);
+      } catch (smsErr) {
+        // Roll back the claim so a retry can attempt again
+        await supabase.from('sms_orders').update({ order_sms_sent: false }).eq('woo_order_id', order.id);
+        console.error(`WooCommerce SMS send failed for order #${order.id}:`, smsErr.message);
+      }
     } catch (err) {
       console.error('WooCommerce webhook error:', err.message, err.stack);
     }
