@@ -95,13 +95,18 @@ async function processShipment(shipment, broadcastSSE) {
 }
 
 // Called by the 6-hour delivery cron in server.js.
-// Uses 5-day post-ship delay to determine delivery (ShipStation API not available).
+// Sends delivery review SMS 5 days after shipping.
+// Guards: order must have been shipped through our system (order_sms_sent=true),
+// and shipped within the last 30 days (no point reviewing ancient orders).
 async function checkAndSendDeliverySMS(broadcastSSE) {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data: shippedOrders } = await supabase
     .from('sms_orders')
     .select('id, contact_phone, woo_order_id, tracking_number, carrier, shipped_at')
     .eq('shipped_sms_sent', true)
-    .eq('delivery_sms_sent', false);
+    .eq('delivery_sms_sent', false)
+    .eq('order_sms_sent', true)       // only customers we actually confirmed the order for
+    .gte('shipped_at', thirtyDaysAgo); // shipped within last 30 days only
 
   if (!shippedOrders?.length) return 0;
 
@@ -122,6 +127,15 @@ async function checkAndSendDeliverySMS(broadcastSSE) {
     const firstName = contact?.name?.split(' ')?.[0] || 'there';
     const msg = DELIVERED_SMS(firstName);
 
+    // Atomically claim the delivery SMS — prevents double-send if cron overlaps
+    const { data: claimed } = await supabase
+      .from('sms_orders')
+      .update({ delivery_sms_sent: true, delivered_at: new Date().toISOString(), status: 'delivered' })
+      .eq('id', order.id)
+      .eq('delivery_sms_sent', false)
+      .select('id');
+    if (!claimed?.length) continue; // already claimed by concurrent run
+
     try {
       const { messageId } = await sendSMS(order.contact_phone, msg);
       await supabase.from('sms_messages').insert({
@@ -132,11 +146,6 @@ async function checkAndSendDeliverySMS(broadcastSSE) {
         status: 'sent',
         created_at: new Date().toISOString()
       });
-      await supabase.from('sms_orders').update({
-        delivery_sms_sent: true,
-        delivered_at: new Date().toISOString(),
-        status: 'delivered'
-      }).eq('id', order.id);
       await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
       if (broadcastSSE) broadcastSSE({ type: 'new_message', phone: order.contact_phone, body: msg, direction: 'outbound' });
       sent++;

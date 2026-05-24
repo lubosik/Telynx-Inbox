@@ -239,8 +239,15 @@ async function main() {
     if (STATUS_ONLY) continue;
 
     // ── 4. Send missing order confirmation SMS (Message 1) ──────────────────
+    // Safety: only send for orders placed within the last 21 days.
+    // Older orders are likely already delivered — messaging them about packing is wrong.
     const orderRow = existingOrder || { order_sms_sent: neverShips, shipped_sms_sent: neverShips };
-    const needsConfirmSMS = !orderRow.order_sms_sent && ['processing', 'completed'].includes(order.status);
+    const orderAgeDays = order.date_created
+      ? (Date.now() - new Date(order.date_created).getTime()) / 86400000
+      : 999;
+    const needsConfirmSMS = !orderRow.order_sms_sent
+      && ['processing', 'completed'].includes(order.status)
+      && orderAgeDays <= 21;
 
     if (needsConfirmSMS) {
       const msg = ORDER_SMS(resolvedFirst);
@@ -276,9 +283,10 @@ async function main() {
     }
 
     // ── 5. Send missing shipped SMS (Message 2) ─────────────────────────────
-    // Send if: order has a tracking number AND shipped SMS was never sent
-    const currentTrackingNum = hasTracking ? tracking.trackingNumber : existingOrder?.tracking_number;
-    const needsShippedSMS = currentTrackingNum && !orderRow.shipped_sms_sent && !neverShips;
+    // ONLY send if the tracking number came from WooCommerce meta_data RIGHT NOW.
+    // Never send shipped SMS based on a historical tracking_number stored in our DB —
+    // those customers have already received their orders.
+    const needsShippedSMS = hasTracking && !orderRow.shipped_sms_sent && !neverShips && orderAgeDays <= 21;
 
     if (needsShippedSMS) {
       const carrier = hasTracking ? tracking.carrier : existingOrder?.carrier;
@@ -300,8 +308,11 @@ async function main() {
 
       if (canSend) {
         try {
+          const carrier = tracking.carrier;
+          const trackingUrl = buildTrackingUrl(carrier, tracking.trackingNumber);
+          const msg = SHIPPED_SMS(resolvedFirst, carrier, tracking.trackingNumber, trackingUrl);
           await sendAndRecord(phone, msg, 'shipped notification');
-          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${currentTrackingNum}`);
+          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${tracking.trackingNumber}`);
           shippedSent++;
         } catch (err) {
           if (!DRY_RUN) {

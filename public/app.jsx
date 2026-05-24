@@ -950,6 +950,81 @@ function App() {
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0);
   const isMobile = useIsMobile();
 
+  // ── Push notifications ─────────────────────────────────────────────────────
+  const [pushState, setPushState] = useState('loading'); // loading | unsupported | denied | prompt | subscribed
+  const [pushLoading, setPushLoading] = useState(false);
+
+  useEffect(() => {
+    if (!auth.ok) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setPushState('unsupported'); return;
+    }
+    if (Notification.permission === 'denied') { setPushState('denied'); return; }
+
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(async reg => {
+      const existing = await reg.pushManager.getSubscription();
+      if (existing) {
+        setPushState('subscribed');
+      } else {
+        setPushState(Notification.permission === 'granted' ? 'prompt' : 'prompt');
+      }
+    }).catch(() => setPushState('unsupported'));
+  }, [auth.ok]);
+
+  async function togglePush() {
+    if (pushLoading) return;
+    if (pushState === 'subscribed') {
+      // Unsubscribe
+      setPushLoading(true);
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetch('/api/push/unsubscribe', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+          await sub.unsubscribe();
+        }
+        setPushState('prompt');
+        addToast('Push notifications off');
+      } catch (e) { addToast('Error: ' + e.message); }
+      finally { setPushLoading(false); }
+      return;
+    }
+    // Subscribe
+    setPushLoading(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { setPushState('denied'); addToast('Notification permission denied'); return; }
+      const { publicKey } = await api('GET', '/api/push/vapid-key');
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey)
+      });
+      await api('POST', '/api/push/subscribe', sub.toJSON());
+      setPushState('subscribed');
+      addToast('Push notifications enabled');
+    } catch (e) { addToast('Push error: ' + e.message); }
+    finally { setPushLoading(false); }
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = window.atob(base64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  const pushIcon = pushLoading ? '…'
+    : pushState === 'subscribed' ? '🔔'
+    : pushState === 'denied' ? '🔕'
+    : '🔔';
+  const pushTitle = pushState === 'subscribed' ? 'Notifications ON — click to disable'
+    : pushState === 'denied' ? 'Notifications blocked — allow in browser settings'
+    : pushState === 'unsupported' ? 'Push notifications not supported'
+    : 'Enable push notifications';
+
   if (auth.checking) {
     return (
       <div className="loading-screen">
@@ -992,6 +1067,15 @@ function App() {
         </div>
 
         <div className="header-actions">
+          <button
+            className={`hdr-btn hdr-btn-push${pushState === 'subscribed' ? ' active' : ''}`}
+            onClick={togglePush}
+            disabled={pushLoading || pushState === 'unsupported' || pushState === 'denied'}
+            title={pushTitle}
+            style={{ opacity: pushState === 'unsupported' || pushState === 'denied' ? 0.45 : 1 }}
+          >
+            {pushIcon}
+          </button>
           <button className="hdr-btn" disabled={syncing} onClick={syncWoo} title="Sync WooCommerce orders + contacts">
             {syncing ? '…' : '↻ WOO'}
           </button>

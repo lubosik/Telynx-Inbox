@@ -2,6 +2,7 @@ const { supabase } = require('../db');
 const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
+const { sendPushToAll } = require('../push-notify');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -101,6 +102,20 @@ module.exports = (broadcastSSE) => {
       await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }).catch(() => {});
 
       broadcastSSE({ type: 'new_message', phone: fromPhone, body: text, direction: 'inbound' });
+
+      // Push notification to all subscribed devices
+      const { data: contactRow } = await supabase
+        .from('sms_contacts')
+        .select('name')
+        .eq('phone', fromPhone)
+        .maybeSingle();
+      const senderName = contactRow?.name || fromPhone;
+      sendPushToAll({
+        title: `New message from ${senderName}`,
+        body: text.length > 100 ? text.slice(0, 97) + '…' : text,
+        url: process.env.APP_URL || '/',
+        icon: '/icons/icon-192.png'
+      }).catch(err => console.error('Push notify error:', err.message));
 
       setTimeout(() => analyseConversation(fromPhone).catch(console.error), 5000);
 
