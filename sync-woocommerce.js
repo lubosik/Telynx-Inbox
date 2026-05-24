@@ -93,9 +93,13 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     // Historical (manual sync): suppress order_sms_sent to avoid re-confirming old orders,
     // but only suppress shipped/delivery SMS if the order has actually shipped or will never ship.
     // Live webhook: start everything at false so each handler fires when the time is right.
+    //
+    // Use upsert with ignoreDuplicates:true (ON CONFLICT DO NOTHING) so concurrent webhook
+    // requests that both see this order as "new" don't create duplicate rows. The UNIQUE
+    // constraint on woo_order_id enforces exactly one row per order.
     const historical = !fromWebhook;
     const hasTracking = !!tracking?.trackingNumber;
-    await supabase.from('sms_orders').insert({
+    await supabase.from('sms_orders').upsert({
       contact_phone: phone,
       woo_order_id: order.id,
       status: (hasTracking ? 'shipped' : order.status) || 'pending',
@@ -108,7 +112,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
       order_sms_sent: historical,
       shipped_sms_sent: neverShips || (historical && (alreadyShipped || hasTracking)),
       delivery_sms_sent: neverShips || (historical && (alreadyShipped || hasTracking))
-    });
+    }, { onConflict: 'woo_order_id', ignoreDuplicates: true });
   }
 
   return true;

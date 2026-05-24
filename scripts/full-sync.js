@@ -289,9 +289,10 @@ async function main() {
     const needsShippedSMS = hasTracking && !orderRow.shipped_sms_sent && !neverShips && orderAgeDays <= 21;
 
     if (needsShippedSMS) {
-      const carrier = hasTracking ? tracking.carrier : existingOrder?.carrier;
-      const trackingUrl = buildTrackingUrl(carrier, currentTrackingNum);
-      const msg = SHIPPED_SMS(resolvedFirst, carrier, currentTrackingNum, trackingUrl);
+      const carrier = tracking.carrier;
+      const trackingNum = tracking.trackingNumber;
+      const trackingUrl = buildTrackingUrl(carrier, trackingNum);
+      const msg = SHIPPED_SMS(resolvedFirst, carrier, trackingNum, trackingUrl);
 
       let canSend = true;
       if (!DRY_RUN && existingOrder) {
@@ -308,11 +309,8 @@ async function main() {
 
       if (canSend) {
         try {
-          const carrier = tracking.carrier;
-          const trackingUrl = buildTrackingUrl(carrier, tracking.trackingNumber);
-          const msg = SHIPPED_SMS(resolvedFirst, carrier, tracking.trackingNumber, trackingUrl);
           await sendAndRecord(phone, msg, 'shipped notification');
-          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${tracking.trackingNumber}`);
+          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${trackingNum}`);
           shippedSent++;
         } catch (err) {
           if (!DRY_RUN) {

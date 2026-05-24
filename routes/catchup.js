@@ -66,6 +66,21 @@ router.post('/send', async (req, res) => {
       .eq('order_sms_sent', false);
 
     for (const order of (processingOrders || [])) {
+      // Atomically claim the flag first — prevents duplicate sends if a webhook fires
+      // concurrently or if this endpoint is called twice at the same time.
+      const { data: claimed } = await supabase
+        .from('sms_orders')
+        .update({ order_sms_sent: true })
+        .eq('id', order.id)
+        .eq('order_sms_sent', false)
+        .select('id');
+
+      if (!claimed?.length) {
+        // Already claimed by another concurrent request or webhook
+        results.push({ phone: order.contact_phone, type: 'processing', status: 'skipped', reason: 'already claimed' });
+        continue;
+      }
+
       const { data: contact } = await supabase
         .from('sms_contacts')
         .select('name')
@@ -85,11 +100,12 @@ router.post('/send', async (req, res) => {
           status: 'sent',
           created_at: new Date().toISOString()
         });
-        await supabase.from('sms_orders').update({ order_sms_sent: true }).eq('id', order.id);
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
         results.push({ phone: order.contact_phone, name: contact?.name, type: 'processing', status: 'sent' });
         sent++;
       } catch (err) {
+        // Roll back the claim so a retry can attempt again
+        await supabase.from('sms_orders').update({ order_sms_sent: false }).eq('id', order.id);
         results.push({ phone: order.contact_phone, type: 'processing', status: 'failed', error: err.message });
         failed++;
       }
@@ -106,6 +122,19 @@ router.post('/send', async (req, res) => {
       .eq('shipped_sms_sent', false);
 
     for (const order of (shippedOrders || [])) {
+      // Atomically claim before sending — same pattern as above
+      const { data: claimed } = await supabase
+        .from('sms_orders')
+        .update({ shipped_sms_sent: true })
+        .eq('id', order.id)
+        .eq('shipped_sms_sent', false)
+        .select('id');
+
+      if (!claimed?.length) {
+        results.push({ phone: order.contact_phone, type: 'shipped', status: 'skipped', reason: 'already claimed' });
+        continue;
+      }
+
       const { data: contact } = await supabase
         .from('sms_contacts')
         .select('name')
@@ -125,11 +154,11 @@ router.post('/send', async (req, res) => {
           status: 'sent',
           created_at: new Date().toISOString()
         });
-        await supabase.from('sms_orders').update({ shipped_sms_sent: true }).eq('id', order.id);
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
         results.push({ phone: order.contact_phone, name: contact?.name, type: 'shipped', status: 'sent' });
         sent++;
       } catch (err) {
+        await supabase.from('sms_orders').update({ shipped_sms_sent: false }).eq('id', order.id);
         results.push({ phone: order.contact_phone, type: 'shipped', status: 'failed', error: err.message });
         failed++;
       }

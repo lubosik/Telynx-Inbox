@@ -38,39 +38,18 @@ async function main() {
 
   console.log(`Processing orders in DB: ${processingOrders.length}`);
 
-  // Check which phones have any SMS history at all
-  const phones = [...new Set(processingOrders.map(o => o.contact_phone))];
-  const { data: msgHistory } = await supabase
-    .from('sms_messages')
-    .select('contact_phone')
-    .in('contact_phone', phones);
+  // Only send to orders where order_sms_sent is explicitly false.
+  // Never reset a flag that's already true — the SMS may have been sent even if no
+  // sms_messages row exists (e.g. the logging insert failed after a successful Telnyx call).
+  const toSend = processingOrders.filter(o => !o.order_sms_sent);
 
-  const phonesWithHistory = new Set((msgHistory || []).map(m => m.contact_phone));
+  console.log(`  Already sent (skipping): ${processingOrders.length - toSend.length}`);
+  console.log(`  Pending (will send):     ${toSend.length}`);
 
-  // Eligible: processing AND contact has no SMS history whatsoever
-  const eligible = processingOrders.filter(o => !phonesWithHistory.has(o.contact_phone));
-
-  // Of those, split into already-flagged-unsent vs flagged-as-sent-but-untexted
-  const unsent    = eligible.filter(o => !o.order_sms_sent);
-  const resetable = eligible.filter(o =>  o.order_sms_sent);
-
-  console.log(`  With no SMS history:     ${eligible.length}`);
-  console.log(`  Already flagged unsent:  ${unsent.length}`);
-  console.log(`  Flagged sent (reset):    ${resetable.length}`);
-
-  if (eligible.length === 0) {
+  if (toSend.length === 0) {
     console.log('\nEveryone with a processing order has already been texted. Nothing to do.');
     process.exit(0);
   }
-
-  // Reset historical-but-untexted flags so they're in the same pool
-  if (resetable.length > 0) {
-    const ids = resetable.map(o => o.id);
-    await supabase.from('sms_orders').update({ order_sms_sent: false }).in('id', ids);
-    console.log(`\nReset ${resetable.length} order(s) from historical → pending\n`);
-  }
-
-  const toSend = eligible; // all eligible, flags now consistent
 
   console.log(`\nSending to ${toSend.length} customer(s)...\n`);
 

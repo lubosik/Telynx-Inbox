@@ -179,7 +179,14 @@ module.exports = (broadcastSSE) => {
       // ── MESSAGE 1: Order confirmation ──────────────────────────────────────
       // Fires once when order first hits processing or completed (paid + being packed).
       // Atomic flag prevents any double-send even if both statuses fire webhooks.
-      if (['processing', 'completed'].includes(order.status)) {
+      // Staleness guard: skip if the order is more than 48 hours old — sending "packing now!"
+      // days after purchase is confusing and wrong.
+      const orderAgeMs = order.date_created
+        ? Date.now() - new Date(order.date_created).getTime()
+        : Infinity;
+      const orderTooOld = orderAgeMs > 48 * 60 * 60 * 1000;
+
+      if (['processing', 'completed'].includes(order.status) && !orderTooOld) {
         const { data: claimed, error: claimErr } = await supabase
           .from('sms_orders')
           .update({ order_sms_sent: true })
