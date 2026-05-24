@@ -16,6 +16,87 @@ function normalizePhone(phone) {
   return null;
 }
 
+// Normalise carrier name from plugin labels to our internal codes
+function normalizeCarrier(provider) {
+  const p = (provider || '').toLowerCase().replace(/[_\-\s]/g, '');
+  if (p.includes('usps') || p.includes('stamps')) return 'usps';
+  if (p.includes('ups')) return 'ups';
+  if (p.includes('fedex')) return 'fedex';
+  if (p.includes('dhl')) return 'dhl';
+  if (p.includes('ontrac')) return 'ontrac';
+  return provider || null;
+}
+
+// Build a public tracking URL from carrier + tracking number
+function buildTrackingUrl(carrier, trackingNumber) {
+  if (!trackingNumber) return null;
+  const c = (carrier || '').toLowerCase().replace(/[_\-\s]/g, '');
+  if (c === 'usps' || c.includes('stamps'))
+    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber}`;
+  if (c === 'ups')
+    return `https://www.ups.com/track?tracknum=${trackingNumber}`;
+  if (c.includes('fedex'))
+    return `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
+  if (c.includes('dhl'))
+    return `https://www.dhl.com/en/express/tracking.html?AWB=${trackingNumber}`;
+  if (c === 'ontrac')
+    return `https://www.ontrac.com/tracking.asp?tn=${trackingNumber}`;
+  // Universal fallback
+  return `https://www.17track.net/en/track?nums=${trackingNumber}`;
+}
+
+// Extract tracking number + carrier from WooCommerce order meta_data.
+// Handles multiple popular WooCommerce shipment tracking plugins.
+function extractTracking(order) {
+  const meta = order.meta_data || [];
+  if (!meta.length) return null;
+
+  // WooCommerce Shipment Tracking (official) + Advanced Shipment Tracking
+  for (const key of ['_wc_shipment_tracking_items', 'wc_shipment_tracking_items']) {
+    const m = meta.find(m => m.key === key);
+    if (m?.value) {
+      const items = Array.isArray(m.value) ? m.value : [m.value];
+      const first = items[0];
+      if (first) {
+        const num = first.tracking_number || first.TrackingNumber || null;
+        if (num) {
+          return {
+            trackingNumber: num,
+            carrier: normalizeCarrier(first.tracking_provider || first.custom_tracking_provider || ''),
+            trackingUrl: first.tracking_link || null,
+            shippedDate: first.date_shipped || null
+          };
+        }
+      }
+    }
+  }
+
+  // Try flat key pairs from various plugins (TrackShip, WooShipping, generic)
+  const candidates = [
+    ['_wc_ast_tracking_number',   '_wc_ast_tracking_provider_name'],
+    ['_trackship_tracking_number','_trackship_carrier_code'],
+    ['tracking_number',           'tracking_provider'],
+    ['_tracking_number',          '_tracking_provider'],
+    ['_wc_shipment_tracking_number', '_wc_shipment_tracking_carrier'],
+    ['woo_tracking_number',       'woo_tracking_provider'],
+  ];
+
+  for (const [numKey, provKey] of candidates) {
+    const num = meta.find(m => m.key === numKey)?.value;
+    if (num && typeof num === 'string' && num.trim()) {
+      const provider = meta.find(m => m.key === provKey)?.value || '';
+      return {
+        trackingNumber: num.trim(),
+        carrier: normalizeCarrier(provider),
+        trackingUrl: null,
+        shippedDate: null
+      };
+    }
+  }
+
+  return null;
+}
+
 async function wooGet(path, params = {}) {
   const url = new URL(`${WC_URL}${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -41,4 +122,4 @@ async function fetchCustomers(page = 1, perPage = 100) {
   };
 }
 
-module.exports = { normalizePhone, fetchOrders, fetchCustomers, wooGet };
+module.exports = { normalizePhone, normalizeCarrier, buildTrackingUrl, extractTracking, fetchOrders, fetchCustomers, wooGet };

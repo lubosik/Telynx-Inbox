@@ -1,23 +1,7 @@
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
-const { fetchResourceUrl, ssGet } = require('../shipstation');
-
-// Build carrier tracking URLs from carrier code + tracking number
-function buildTrackingUrl(carrierCode, trackingNumber) {
-  if (!trackingNumber) return null;
-  const c = (carrierCode || '').toLowerCase();
-  if (c === 'stamps_com' || c === 'usps')
-    return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber}`;
-  if (c === 'ups')
-    return `https://www.ups.com/track?tracknum=${trackingNumber}`;
-  if (c.includes('fedex'))
-    return `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
-  if (c === 'dhl' || c === 'dhl_express')
-    return `https://www.dhl.com/en/express/tracking.html?AWB=${trackingNumber}`;
-  if (c === 'ontrac')
-    return `https://www.ontrac.com/tracking.asp?tn=${trackingNumber}`;
-  return null;
-}
+const { fetchResourceUrl } = require('../shipstation');
+const { buildTrackingUrl } = require('../woocommerce');
 
 const SHIPPED_SMS = (firstName, carrier, trackingNumber, trackingUrl) => {
   let msg = `Hey ${firstName}! It's Dom from Vici Peptides. Your order is officially on its way to you!`;
@@ -110,8 +94,8 @@ async function processShipment(shipment, broadcastSSE) {
   }
 }
 
-// Called by the 6-hour delivery cron in server.js
-// Uses ShipStation tracking API (status_code === "DE") with 5-day fallback
+// Called by the 6-hour delivery cron in server.js.
+// Uses 5-day post-ship delay to determine delivery (ShipStation API not available).
 async function checkAndSendDeliverySMS(broadcastSSE) {
   const { data: shippedOrders } = await supabase
     .from('sms_orders')
@@ -125,27 +109,8 @@ async function checkAndSendDeliverySMS(broadcastSSE) {
   const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
 
   for (const order of shippedOrders) {
-    let isDelivered = false;
-
-    // Check carrier tracking via ShipStation tracking API
-    if (order.tracking_number && order.carrier) {
-      try {
-        const trackData = await ssGet('/tracking', {
-          carrier_code: order.carrier,
-          tracking_number: order.tracking_number
-        });
-        // status_code "DE" = delivered; actual_delivery_date set = delivered
-        isDelivered = trackData.status_code === 'DE' || !!trackData.actual_delivery_date;
-      } catch (err) {
-        console.warn(`Tracking API failed for ${order.tracking_number}:`, err.message);
-        // Fallback: 5-day delay
-        isDelivered = order.shipped_at && new Date(order.shipped_at) < fiveDaysAgo;
-      }
-    } else {
-      // No tracking number — use 5-day delay
-      isDelivered = order.shipped_at && new Date(order.shipped_at) < fiveDaysAgo;
-    }
-
+    // Consider delivered if shipped_at is more than 5 days ago
+    const isDelivered = order.shipped_at && new Date(order.shipped_at) < fiveDaysAgo;
     if (!isDelivered) continue;
 
     const { data: contact } = await supabase

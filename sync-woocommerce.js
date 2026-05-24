@@ -1,11 +1,33 @@
 const { supabase } = require('./db');
-const { normalizePhone, fetchOrders, wooGet } = require('./woocommerce');
+const { normalizePhone, fetchOrders, wooGet, extractTracking } = require('./woocommerce');
+const { searchContactByEmail } = require('./ghl');
 
 // fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
 // fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
 // phoneOverride: pre-resolved phone (used by runWooSync batch lookup).
 async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = {}) {
-  const phone = phoneOverride || normalizePhone(order.billing?.phone);
+  let phone = phoneOverride || normalizePhone(order.billing?.phone);
+
+  // If billing phone is missing, try local DB or GHL lookup by email
+  if (!phone && order.billing?.email) {
+    const email = order.billing.email;
+    try {
+      const { data: local } = await supabase
+        .from('sms_contacts')
+        .select('phone')
+        .eq('email', email)
+        .maybeSingle();
+      if (local?.phone) phone = local.phone;
+    } catch {}
+
+    if (!phone) {
+      try {
+        const ghlContact = await searchContactByEmail(email);
+        phone = normalizePhone(ghlContact?.phone) || null;
+      } catch {}
+    }
+  }
+
   if (!phone) return false;
 
   const firstName = order.billing?.first_name || '';
@@ -30,41 +52,62 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     sku: i.sku || null
   }));
 
+  const tracking = extractTracking(order);
+
   // "Already done" — order won't ship or has already shipped
   const neverShips = ['refunded', 'cancelled', 'failed'].includes(order.status);
   const alreadyShipped = ['shipped', 'completed', 'delivered'].includes(order.status);
 
+  // Internal statuses we manage — never downgrade these from a WooCommerce status update
+  const PROTECTED_STATUSES = ['shipped', 'delivered'];
+
   // Check if this order already exists in the DB
   const { data: existing } = await supabase
     .from('sms_orders')
-    .select('id')
+    .select('id, status, tracking_number')
     .eq('woo_order_id', order.id)
     .maybeSingle();
 
   if (existing) {
-    // Order already in DB — only update mutable fields, never overwrite SMS sent flags
-    await supabase.from('sms_orders').update({
+    // Order already in DB — only update mutable fields, never overwrite SMS sent flags.
+    // Don't downgrade our internal shipped/delivered status with a WooCommerce status.
+    const keepStatus = PROTECTED_STATUSES.includes(existing.status);
+    const updateFields = {
       contact_phone: phone,
-      status: order.status || 'pending',
       items,
       total: parseFloat(order.total) || 0
-    }).eq('woo_order_id', order.id);
+    };
+    if (!keepStatus) updateFields.status = order.status || 'pending';
+
+    // Store tracking number if we have it and don't yet
+    if (tracking?.trackingNumber && !existing.tracking_number) {
+      updateFields.tracking_number = tracking.trackingNumber;
+      updateFields.carrier = tracking.carrier || null;
+      if (!keepStatus) updateFields.status = 'shipped';
+      if (tracking.shippedDate) updateFields.shipped_at = tracking.shippedDate;
+    }
+
+    await supabase.from('sms_orders').update(updateFields).eq('woo_order_id', order.id);
   } else {
-    // New order — set SMS flags appropriately
+    // New order — set SMS flags appropriately.
     // Historical (manual sync): suppress order_sms_sent to avoid re-confirming old orders,
     // but only suppress shipped/delivery SMS if the order has actually shipped or will never ship.
     // Live webhook: start everything at false so each handler fires when the time is right.
     const historical = !fromWebhook;
+    const hasTracking = !!tracking?.trackingNumber;
     await supabase.from('sms_orders').insert({
       contact_phone: phone,
       woo_order_id: order.id,
-      status: order.status || 'pending',
+      status: (hasTracking ? 'shipped' : order.status) || 'pending',
       items,
       total: parseFloat(order.total) || 0,
+      tracking_number: tracking?.trackingNumber || null,
+      carrier: tracking?.carrier || null,
+      shipped_at: tracking?.shippedDate || (hasTracking ? new Date().toISOString() : null),
       created_at: order.date_created || new Date().toISOString(),
       order_sms_sent: historical,
-      shipped_sms_sent: neverShips || (historical && alreadyShipped),
-      delivery_sms_sent: neverShips || (historical && alreadyShipped)
+      shipped_sms_sent: neverShips || (historical && (alreadyShipped || hasTracking)),
+      delivery_sms_sent: neverShips || (historical && (alreadyShipped || hasTracking))
     });
   }
 

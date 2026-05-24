@@ -10,16 +10,35 @@ function ghlHeaders() {
 
 async function searchContactByPhone(phone) {
   try {
-    const url = `${GHL_BASE}/contacts/search?locationId=${process.env.GHL_LOCATION_ID}&phone=${encodeURIComponent(phone)}`;
+    const url = `${GHL_BASE}/contacts/?locationId=${process.env.GHL_LOCATION_ID}&query=${encodeURIComponent(phone)}`;
     const res = await fetch(url, { headers: ghlHeaders() });
     if (!res.ok) {
-      console.error('GHL search failed:', res.status, await res.text());
+      console.error('GHL search failed:', res.status);
       return null;
     }
     const data = await res.json();
-    return data?.contacts?.[0] || null;
+    const contacts = data?.contacts || [];
+    return contacts.find(c => c.phone === phone) || contacts[0] || null;
   } catch (err) {
     console.error('GHL searchContactByPhone error:', err.message);
+    return null;
+  }
+}
+
+// Look up a GHL contact by email address — used when WooCommerce billing.phone is empty.
+// GHL contact search endpoint: GET /contacts/?locationId=...&query=...
+async function searchContactByEmail(email) {
+  if (!email) return null;
+  try {
+    const url = `${GHL_BASE}/contacts/?locationId=${process.env.GHL_LOCATION_ID}&query=${encodeURIComponent(email)}`;
+    const res = await fetch(url, { headers: ghlHeaders() });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const contacts = data?.contacts || [];
+    // Exact email match to avoid false positives from GHL's fuzzy search
+    return contacts.find(c => c.email?.toLowerCase() === email.toLowerCase()) || null;
+  } catch (err) {
+    console.error('GHL searchContactByEmail error:', err.message);
     return null;
   }
 }
@@ -132,6 +151,7 @@ async function addContactNote(contactId, noteText) {
 
 module.exports = {
   searchContactByPhone,
+  searchContactByEmail,
   upsertContact,
   addInboundMessage,
   addOutboundMessage,
