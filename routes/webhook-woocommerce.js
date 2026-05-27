@@ -1,9 +1,14 @@
 const crypto = require('crypto');
 const { supabase } = require('../db');
-const { sendSMS } = require('../telnyx');
 const { syncOrder, runWooSync } = require('../sync-woocommerce');
-const { normalizePhone, wooGet, extractTracking, buildTrackingUrl } = require('../woocommerce');
+const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
+
+// SMS flows
+const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
+const { handleOrderOnHold }                       = require('../flows/hold');
+const { handleOrderConfirmed }                    = require('../flows/confirmed');
+const { cancelScheduled }                         = require('../flows/utils');
 
 // Resolve a phone number for an order using multiple fallbacks:
 // 1. WooCommerce billing.phone
@@ -53,16 +58,7 @@ async function resolvePhone(order) {
   return null;
 }
 
-const ORDER_PROCESSING_SMS = (firstName) =>
-  `Hey ${firstName}! It's Dom, founder of Vici Peptides. Huge thank you for your order - it genuinely means everything to me. We're getting it packed up right now and I'll personally text you the moment it ships!`;
-
-const SHIPPED_SMS = (firstName, carrier, trackingNumber, trackingUrl) => {
-  let msg = `Hey ${firstName}! It's Dom from Vici Peptides. Your order is officially on its way to you!`;
-  if (trackingUrl) msg += ` You can track it right here: ${trackingUrl}`;
-  else if (trackingNumber) msg += ` Tracking number: ${trackingNumber}`;
-  msg += ' Reach out anytime if you need me. Reply STOP to opt out.';
-  return msg;
-};
+// Message templates moved to flows/confirmed.js and flows/shipped.js
 
 function verifyWooSignature(rawBody, signature, secret) {
   try {
@@ -152,7 +148,9 @@ module.exports = (broadcastSSE) => {
   });
 
   router.post('/woocommerce', async (req, res) => {
+    // Respond 200 immediately — WooCommerce retries if no quick ack
     res.sendStatus(200);
+
     try {
       const sig = req.headers['x-wc-webhook-signature'];
       if (sig && process.env.WC_WEBHOOK_SECRET) {
@@ -161,121 +159,44 @@ module.exports = (broadcastSSE) => {
         }
       }
 
-      const order = JSON.parse(req.body.toString());
-      const topic = req.headers['x-wc-webhook-topic'] || 'unknown';
-      console.log(`WooCommerce webhook: ${topic} — order #${order.id} status=${order.status} phone=${order.billing?.phone || 'NONE'}`);
+      const order  = JSON.parse(req.body.toString());
+      const topic  = req.headers['x-wc-webhook-topic'] || 'unknown';
+      const status = order.status;
+      const orderId = String(order.id);
 
-      // Sync contact and order data — fromWebhook:true preserves SMS flags for live orders
+      console.log(`[WEBHOOK] WooCommerce | topic=${topic} order=${orderId} status=${status}`);
+
+      // Sync contact + order record (preserves existing SMS flags)
       await syncOrder(order, { fromWebhook: true });
 
-      const phone = await resolvePhone(order);
-      if (!phone) {
-        console.warn(`WooCommerce order #${order.id}: no phone in billing or customer profile — SMS skipped`);
-        return;
-      }
+      switch (status) {
+        case 'failed':
+          await handleOrderFailed(order);
+          break;
 
-      const firstName = order.billing?.first_name || 'there';
+        case 'on-hold':
+          await handleOrderOnHold(order);
+          break;
 
-      // ── MESSAGE 1: Order confirmation ──────────────────────────────────────
-      // Fires once when order first hits processing or completed (paid + being packed).
-      // Atomic flag prevents any double-send even if both statuses fire webhooks.
-      // Staleness guard: skip if the order is more than 48 hours old — sending "packing now!"
-      // days after purchase is confusing and wrong.
-      const orderAgeMs = order.date_created
-        ? Date.now() - new Date(order.date_created).getTime()
-        : Infinity;
-      const orderTooOld = orderAgeMs > 48 * 60 * 60 * 1000;
+        case 'processing':
+        case 'completed':
+          // Cancel any failed/hold sequences (order recovered)
+          await handleOrderRecovered(orderId);
+          // Send confirmed SMS (deduped — fires once per order)
+          await handleOrderConfirmed(order);
+          break;
 
-      if (['processing', 'completed'].includes(order.status) && !orderTooOld) {
-        const { data: claimed, error: claimErr } = await supabase
-          .from('sms_orders')
-          .update({ order_sms_sent: true })
-          .eq('woo_order_id', order.id)
-          .eq('order_sms_sent', false)
-          .select('id');
+        case 'cancelled':
+        case 'refunded':
+          // Cancel any pending sequences for this order
+          await cancelScheduled(orderId);
+          break;
 
-        if (claimErr) {
-          console.error(`Order #${order.id}: claim update error — ${claimErr.message}`);
-        } else if (claimed?.length) {
-          const msg = ORDER_PROCESSING_SMS(firstName);
-          try {
-            const { messageId } = await sendSMS(phone, msg);
-            await supabase.from('sms_messages').insert({
-              telnyx_message_id: messageId,
-              contact_phone: phone,
-              direction: 'outbound',
-              body: msg,
-              status: 'sent',
-              created_at: new Date().toISOString()
-            });
-            await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', phone);
-            broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
-            console.log(`Order confirmation SMS → ${phone} order #${order.id}`);
-          } catch (smsErr) {
-            await supabase.from('sms_orders').update({ order_sms_sent: false }).eq('woo_order_id', order.id);
-            console.error(`Order confirmation SMS failed for #${order.id}:`, smsErr.message);
-          }
-        } else {
-          console.log(`Order #${order.id}: confirmation SMS already sent — skipping`);
-        }
-      }
-
-      // ── MESSAGE 2: Shipped notification ───────────────────────────────────
-      // Fires when a tracking number appears in WooCommerce order meta_data.
-      // This happens when the 3PL/warehouse enters the tracking number in WooCommerce.
-      // Atomic flag ensures exactly one shipped SMS per order regardless of how many
-      // order.updated webhooks fire.
-      const tracking = extractTracking(order);
-      if (tracking?.trackingNumber) {
-        console.log(`Order #${order.id}: tracking found — ${tracking.carrier} ${tracking.trackingNumber}`);
-
-        // Store tracking in DB (only if not already set — avoid overwrite on repeated webhooks)
-        await supabase.from('sms_orders')
-          .update({
-            tracking_number: tracking.trackingNumber,
-            carrier: tracking.carrier || null,
-            status: 'shipped',
-            shipped_at: tracking.shippedDate || new Date().toISOString()
-          })
-          .eq('woo_order_id', order.id)
-          .is('tracking_number', null); // idempotent — only update if not already set
-
-        // Atomically claim the shipped SMS
-        const { data: shippedClaimed, error: shippedErr } = await supabase
-          .from('sms_orders')
-          .update({ shipped_sms_sent: true })
-          .eq('woo_order_id', order.id)
-          .eq('shipped_sms_sent', false)
-          .select('id');
-
-        if (shippedErr) {
-          console.error(`Order #${order.id}: shipped SMS claim error — ${shippedErr.message}`);
-        } else if (shippedClaimed?.length) {
-          const trackingUrl = buildTrackingUrl(tracking.carrier, tracking.trackingNumber);
-          const msg = SHIPPED_SMS(firstName, tracking.carrier, tracking.trackingNumber, trackingUrl);
-          try {
-            const { messageId } = await sendSMS(phone, msg);
-            await supabase.from('sms_messages').insert({
-              telnyx_message_id: messageId,
-              contact_phone: phone,
-              direction: 'outbound',
-              body: msg,
-              status: 'sent',
-              created_at: new Date().toISOString()
-            });
-            await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', phone);
-            broadcastSSE({ type: 'new_message', phone, body: msg, direction: 'outbound' });
-            console.log(`Shipped SMS → ${phone} order #${order.id} tracking ${tracking.trackingNumber}`);
-          } catch (smsErr) {
-            await supabase.from('sms_orders').update({ shipped_sms_sent: false }).eq('woo_order_id', order.id);
-            console.error(`Shipped SMS failed for order #${order.id}:`, smsErr.message);
-          }
-        } else {
-          console.log(`Order #${order.id}: shipped SMS already sent — skipping`);
-        }
+        default:
+          console.log(`[WEBHOOK] WooCommerce status=${status} | order=${orderId} — no SMS flow`);
       }
     } catch (err) {
-      console.error('WooCommerce webhook error:', err.message, err.stack);
+      console.error('[WEBHOOK] WooCommerce handler error:', err.message, err.stack);
     }
   });
 

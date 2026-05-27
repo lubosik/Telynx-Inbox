@@ -239,7 +239,7 @@ async function main() {
     if (STATUS_ONLY) continue;
 
     // ── 4. Send missing order confirmation SMS (Message 1) ──────────────────
-    // Safety: only send for orders placed within the last 21 days.
+    // Safety: only send for orders placed within the last 2 days.
     // Older orders are likely already delivered — messaging them about packing is wrong.
     const orderRow = existingOrder || { order_sms_sent: neverShips, shipped_sms_sent: neverShips };
     const orderAgeDays = order.date_created
@@ -247,14 +247,14 @@ async function main() {
       : 999;
     const needsConfirmSMS = !orderRow.order_sms_sent
       && ['processing', 'completed'].includes(order.status)
-      && orderAgeDays <= 21;
+      && orderAgeDays <= 2;
 
     if (needsConfirmSMS) {
       const msg = ORDER_SMS(resolvedFirst);
 
-      // Atomically claim the flag — safe against concurrent runs
+      // Atomically claim the flag — safe against concurrent runs (same pattern for new and existing orders)
       let canSend = true;
-      if (!DRY_RUN && existingOrder) {
+      if (!DRY_RUN) {
         const { data: claimed } = await supabase
           .from('sms_orders')
           .update({ order_sms_sent: true })
@@ -262,8 +262,6 @@ async function main() {
           .eq('order_sms_sent', false)
           .select('id');
         canSend = !!claimed?.length;
-      } else if (!DRY_RUN && !existingOrder) {
-        await supabase.from('sms_orders').update({ order_sms_sent: true }).eq('woo_order_id', order.id);
       }
 
       if (canSend) {
@@ -286,16 +284,12 @@ async function main() {
     // ONLY send if the tracking number came from WooCommerce meta_data RIGHT NOW.
     // Never send shipped SMS based on a historical tracking_number stored in our DB —
     // those customers have already received their orders.
-    const needsShippedSMS = hasTracking && !orderRow.shipped_sms_sent && !neverShips && orderAgeDays <= 21;
+    const needsShippedSMS = hasTracking && !orderRow.shipped_sms_sent && !neverShips && orderAgeDays <= 2;
 
     if (needsShippedSMS) {
-      const carrier = tracking.carrier;
-      const trackingNum = tracking.trackingNumber;
-      const trackingUrl = buildTrackingUrl(carrier, trackingNum);
-      const msg = SHIPPED_SMS(resolvedFirst, carrier, trackingNum, trackingUrl);
-
+      // Atomically claim the shipped SMS flag
       let canSend = true;
-      if (!DRY_RUN && existingOrder) {
+      if (!DRY_RUN) {
         const { data: claimed } = await supabase
           .from('sms_orders')
           .update({ shipped_sms_sent: true })
@@ -303,14 +297,15 @@ async function main() {
           .eq('shipped_sms_sent', false)
           .select('id');
         canSend = !!claimed?.length;
-      } else if (!DRY_RUN && !existingOrder) {
-        await supabase.from('sms_orders').update({ shipped_sms_sent: true }).eq('woo_order_id', order.id);
       }
 
       if (canSend) {
         try {
+          const carrier = tracking.carrier;
+          const trackingUrl = buildTrackingUrl(carrier, tracking.trackingNumber);
+          const msg = SHIPPED_SMS(resolvedFirst, carrier, tracking.trackingNumber, trackingUrl);
           await sendAndRecord(phone, msg, 'shipped notification');
-          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${trackingNum}`);
+          console.log(`  ✓ Shipped SMS → ${name || phone}  order #${order.id}  tracking ${tracking.trackingNumber}`);
           shippedSent++;
         } catch (err) {
           if (!DRY_RUN) {
