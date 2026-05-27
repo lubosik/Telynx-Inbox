@@ -28,10 +28,17 @@ function buildMsg3(firstName, checkoutUrl) {
   return `Hey ${firstName}, your cart's still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nDP. Reply STOP to opt out.`;
 }
 
-function buildCheckoutUrl(order) {
-  const orderId   = order.id;
-  const orderKey  = order.order_key || '';
-  return `${process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com'}/checkout/order-pay/${orderId}/?pay_for_order=true&key=${orderKey}`;
+function buildCheckoutUrl(order, utmContent = 'msg1') {
+  const orderId  = order.id;
+  const orderKey = order.order_key || '';
+
+  if (!orderKey) {
+    console.warn(`[FAILED] order=${orderId} has no order_key — retry URL may not work`);
+  }
+
+  const base = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
+  const utmParams = `utm_source=sms&utm_medium=text&utm_campaign=failed_recovery&utm_content=${utmContent}`;
+  return `${base}/checkout/order-pay/${orderId}/?pay_for_order=true&key=${orderKey}&${utmParams}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +50,8 @@ async function handleOrderFailed(order) {
   const firstName   = order.billing?.first_name || 'there';
   const orderNumber = order.number || order.id;
   const orderId     = String(order.id);
-  const checkoutUrl = buildCheckoutUrl(order);
+  const checkoutUrl1 = buildCheckoutUrl(order, 'msg1');
+  const checkoutUrl3 = buildCheckoutUrl(order, 'msg3');
 
   if (!phone) {
     console.log(`[FAILED] No phone | order=${orderId} — skipping`);
@@ -55,7 +63,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg1',
-    message:  buildMsg1(firstName, orderNumber, checkoutUrl),
+    message:  buildMsg1(firstName, orderNumber, checkoutUrl1),
     sendAt:   new Date(Date.now() + 10 * 60 * 1000).toISOString()
   });
 
@@ -73,7 +81,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg3',
-    message:  buildMsg3(firstName, checkoutUrl),
+    message:  buildMsg3(firstName, checkoutUrl3),
     sendAt:   new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   });
 
@@ -153,7 +161,7 @@ async function backfillFailedOrders({ dryRun = false } = {}) {
       }
 
       const firstName   = order.billing?.first_name || 'there';
-      const checkoutUrl = buildCheckoutUrl(order);
+      const checkoutUrl = buildCheckoutUrl(order, 'backfill');
       const msg3        = buildMsg3(firstName, checkoutUrl);
 
       console.log(`[BACKFILL-FAILED] ${dryRun ? 'DRY RUN' : 'SENDING'} | order=${orderId} phone=...${phone.slice(-4)}`);
