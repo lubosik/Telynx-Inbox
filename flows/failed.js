@@ -100,6 +100,8 @@ async function backfillFailedOrders({ dryRun = false } = {}) {
 
   const baseUrl = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
   let page = 1, processed = 0, skipped = 0;
+  // Phone-level dedup: prevent sending to the same number twice in one backfill run
+  const phonesContacted = new Set();
 
   while (true) {
     const res = await fetch(
@@ -126,9 +128,27 @@ async function backfillFailedOrders({ dryRun = false } = {}) {
         skipped++; continue;
       }
 
-      // SAFETY: already sent MSG 3?
+      // SAFETY: already contacted this phone (same customer, multiple failed orders).
+      // Check in-memory set for this run, AND durably log skipped orders to sms_sent_log
+      // so re-runs never send to the same phone twice.
+      if (phonesContacted.has(phone)) {
+        console.log(`[BACKFILL-FAILED] Phone already contacted this run | order=${orderId} — skip+log`);
+        // Durably mark all 3 messages as skipped so this order is never picked up again
+        if (!dryRun) {
+          await supabase.from('sms_sent_log').upsert([
+            { order_id: orderId, flow_type: 'failed-msg1', phone, message_body: 'BACKFILL PHONE DEDUP' },
+            { order_id: orderId, flow_type: 'failed-msg2', phone, message_body: 'BACKFILL PHONE DEDUP' },
+            { order_id: orderId, flow_type: 'failed-msg3', phone, message_body: 'BACKFILL PHONE DEDUP' }
+          ], { onConflict: 'order_id,flow_type', ignoreDuplicates: true });
+        }
+        skipped++; continue;
+      }
+
+      // SAFETY: already sent or logged for this order?
       if (await alreadySent(orderId, 'failed-msg3')) {
         console.log(`[BACKFILL-FAILED] Already sent | order=${orderId} — skip`);
+        // Also track the phone so sibling orders are skipped in this run
+        phonesContacted.add(phone);
         skipped++; continue;
       }
 
@@ -147,11 +167,13 @@ async function backfillFailedOrders({ dryRun = false } = {}) {
 
         // Send MSG3 now
         await sendAndLog(phone, msg3, orderId, 'failed-msg3');
+        phonesContacted.add(phone);
         processed++;
 
         // Throttle: 1 per second
         await new Promise(r => setTimeout(r, 1000));
       } else {
+        phonesContacted.add(phone);
         processed++;
       }
     }

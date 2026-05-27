@@ -16,32 +16,44 @@ const { supabase } = require('../db');
 
 function detectPaymentMethod(order) {
   const method      = (order.payment_method       || '').toLowerCase();
-  const methodTitle = (order.payment_method_title || '').toLowerCase();
+  // Strip unicode / special chars before comparing (handles '𝓥enmo' etc.)
+  const methodTitle = (order.payment_method_title || '')
+    .normalize('NFKD')            // decompose unicode
+    .replace(/[^\x00-\x7F]/g, '') // strip non-ASCII
+    .toLowerCase();
 
-  if (method.includes('venmo') || methodTitle.includes('venmo')) {
-    return { label: 'Venmo', handle: process.env.VENMO_HANDLE || '@vicipeptides' };
+  if (method.includes('venmo') || methodTitle.includes('venmo') || methodTitle.includes('enmo')) {
+    return { label: 'Venmo', handle: process.env.VENMO_HANDLE || '@ViciPeptides' };
   }
   if (method.includes('zelle') || methodTitle.includes('zelle')) {
-    return { label: 'Zelle', handle: process.env.ZELLE_HANDLE || 'dom@vicipeptides.com' };
+    return { label: 'Zelle', handle: process.env.ZELLE_HANDLE || 'support@vicipeptides.com' };
   }
   // Default to Venmo if payment method is unclear
-  return { label: 'Venmo', handle: process.env.VENMO_HANDLE || '@vicipeptides' };
+  return { label: 'Venmo', handle: process.env.VENMO_HANDLE || '@ViciPeptides' };
 }
 
 // ---------------------------------------------------------------------------
 // Message builders — verbatim from Dom's approved copy
 // ---------------------------------------------------------------------------
 
+function paymentInstructions(method, handle, orderNumber) {
+  if (method === 'Zelle') {
+    return `Zelle to ${handle}. Please use your order number #${orderNumber} as the payment reference.`;
+  }
+  // Venmo
+  return `Pay via Venmo to ${handle}. Just include your name in the notes so I can match it.`;
+}
+
 function buildMsg1(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}! It's DP from Vici Peptides. Just got your order #${orderNumber} - so excited to get this to you!\n\nTo lock it in, just send $${total} to ${handle} on ${method}.\n\nOnce I see it come through I'll get it packed up straight away!`;
+  return `Hey ${firstName}! It's DP from Vici Peptides. Just got your order #${orderNumber} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll get it packed up straight away!`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, checking in on order #${orderNumber}. I'm holding the stock for you!\n\nWhen you get a chance, just send $${total} to ${handle} via ${method}.\n\nAny issues at all, just reply here. DP`;
+  return `Hey ${firstName}, checking in on order #${orderNumber}. I'm holding the stock for you!\n\nWhen you get a chance, send $${total} via ${method} to ${handle}${method === 'Zelle' ? ` (ref: #${orderNumber})` : ''}.\n\nAny issues at all, just reply here. DP`;
 }
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
-  return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} to ${handle} via ${method} to secure it.\n\nJust reply if anything's up. DP`;
+  return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} via ${method} to ${handle}${method === 'Zelle' ? ` - use #${orderNumber} as your reference` : ''}.\n\nJust reply if anything's up. DP`;
 }
 
 // ---------------------------------------------------------------------------
