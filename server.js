@@ -6,7 +6,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { verifyConnection, supabase } = require('./db');
-const { checkAndSendDeliverySMS } = require('./routes/webhook-shipstation');
+const { checkAndSendDeliverySMS, pollShipmentStatuses } = require('./routes/webhook-shipstation');
 require('./push-notify'); // initialises VAPID on startup
 
 const app = express();
@@ -95,16 +95,34 @@ app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Daily delivery SMS check — runs every 6 hours
-// Sends review SMS to customers whose orders shipped 5+ days ago
+// Every 30 minutes — poll ShipStation for real carrier scans.
+// Sends shipped SMS only when shipmentStatus === 'shipped' (carrier accepted).
+// This is the FIX: prevents SMS firing on label creation (SHIP_NOTIFY).
+function startShipmentPoll() {
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  // Run once shortly after startup to catch anything queued before restart
+  setTimeout(async () => {
+    try { await pollShipmentStatuses(broadcastSSE); } catch (err) {
+      console.error('[POLL] Startup poll error:', err.message);
+    }
+  }, 10 * 1000); // 10 seconds after boot
+
+  setInterval(async () => {
+    try { await pollShipmentStatuses(broadcastSSE); } catch (err) {
+      console.error('[POLL] Poll cron error:', err.message);
+    }
+  }, THIRTY_MINUTES);
+}
+
+// Every 6 hours — send delivery review SMS to customers shipped 5+ days ago
 function startDeliveryCheck() {
   const SIX_HOURS = 6 * 60 * 60 * 1000;
   setInterval(async () => {
     try {
       const sent = await checkAndSendDeliverySMS(broadcastSSE);
-      if (sent > 0) console.log(`Delivery cron: sent ${sent} review SMS`);
+      if (sent > 0) console.log(`[DELIVERY] Sent ${sent} review SMS`);
     } catch (err) {
-      console.error('Delivery cron error:', err.message);
+      console.error('[DELIVERY] Cron error:', err.message);
     }
   }, SIX_HOURS);
 }
@@ -112,6 +130,7 @@ function startDeliveryCheck() {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
+  startShipmentPoll();
   startDeliveryCheck();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx number: ${process.env.TELNYX_PHONE_NUMBER}`);
