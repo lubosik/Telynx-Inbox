@@ -1,6 +1,6 @@
 require('dotenv').config();
-const express = require('express');
-const session = require('express-session');
+const express      = require('express');
+const cookieSession = require('cookie-session');
 const cors    = require('cors');
 const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -44,16 +44,15 @@ app.use('/webhook/ghl',        express.json());
 app.use('/webhook/shipstation', express.json());
 app.use(express.json());
 
-app.use(session({
+// Cookie-session: signed client-side cookie — survives Railway restarts/redeploys.
+// Session only stores { authenticated: true } so cookie stays tiny (<100 bytes).
+app.use(cookieSession({
+  name:   'vici_sess',
   secret: process.env.SESSION_SECRET || 'fallback-secret-change-this',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  }
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict',
+  maxAge: 30 * 24 * 60 * 60 * 1000  // 30 days
 }));
 
 function requireAuth(req, res, next) {
