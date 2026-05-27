@@ -4,8 +4,8 @@
  *
  * Single message fired on order.processing.
  * Branches: new customer (1A) vs returning customer (1B).
- * New    = fewer than 3 completed orders.
- * Returning = 3+ completed orders.
+ * New       = 0 or 1 completed orders (first-time buyer).
+ * Returning = 2+ completed orders.
  * Deduped via sms_sent_log — fires exactly once per order.
  */
 
@@ -60,7 +60,7 @@ async function getCompletedOrderCount(email, customerId) {
 // ---------------------------------------------------------------------------
 
 function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm literally right here. — DP`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm literally right here.\n\nDP`;
 }
 
 function buildMsg1B(firstName, orderNumber) {
@@ -94,9 +94,10 @@ async function handleOrderConfirmed(order) {
   }
 
   // Determine new vs returning
-  // Returning = 3+ completed orders. New = fewer than 3.
+  // New      = 0 or 1 completed orders (first-time buyer, welcome message fires once).
+  // Returning = 2+ completed orders.
   const completedOrders = await getCompletedOrderCount(email, customerId);
-  const isNew      = completedOrders < 3;
+  const isNew      = completedOrders < 2;
   const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
   const message    = isNew
     ? buildMsg1A(firstName, orderNumber)
