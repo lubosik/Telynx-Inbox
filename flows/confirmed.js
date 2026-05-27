@@ -4,30 +4,52 @@
  *
  * Single message fired on order.processing.
  * Branches: new customer (1A) vs returning customer (1B).
- * New = 0 or 1 completed orders. Returning = 2+.
+ * New    = fewer than 3 completed orders.
+ * Returning = 3+ completed orders.
  * Deduped via sms_sent_log — fires exactly once per order.
  */
 
 const { formatPhone, sendAndLog } = require('./utils');
 
 // ---------------------------------------------------------------------------
-// Customer order count (WooCommerce completed orders for this email)
+// Customer order count (WooCommerce completed orders)
+//
+// NOTE: WooCommerce's ?email= filter is unreliable on this store — it ignores
+// the param and returns recent orders from anyone. Fix:
+//   1. Prefer ?customer=<id> when we have a registered customer_id (works reliably).
+//   2. Fall back to fetching by email with per_page=100 and filtering client-side.
 // ---------------------------------------------------------------------------
 
-async function getCompletedOrderCount(email) {
-  if (!email) return 0;
+async function getCompletedOrderCount(email, customerId) {
   try {
     const baseUrl    = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
     const authHeader = 'Basic ' + Buffer.from(
       `${process.env.WC_CONSUMER_KEY}:${process.env.WC_CONSUMER_SECRET}`
     ).toString('base64');
 
+    if (customerId && customerId > 0) {
+      // Registered customer — WC filters by customer_id correctly
+      const res    = await fetch(
+        `${baseUrl}/wp-json/wc/v3/orders?customer=${customerId}&status=completed&per_page=10`,
+        { headers: { Authorization: authHeader } }
+      );
+      const orders = await res.json();
+      return Array.isArray(orders) ? orders.length : 0;
+    }
+
+    if (!email) return 0;
+
+    // Guest order — fetch recent completed orders and filter client-side by email
+    // (WC ?email= filter is broken on this store — does not filter)
     const res    = await fetch(
-      `${baseUrl}/wp-json/wc/v3/orders?email=${encodeURIComponent(email)}&status=completed&per_page=5`,
+      `${baseUrl}/wp-json/wc/v3/orders?status=completed&per_page=100`,
       { headers: { Authorization: authHeader } }
     );
     const orders = await res.json();
-    return Array.isArray(orders) ? orders.length : 0;
+    if (!Array.isArray(orders)) return 0;
+
+    const normalised = email.toLowerCase().trim();
+    return orders.filter(o => (o.billing?.email || '').toLowerCase().trim() === normalised).length;
   } catch {
     return 0;
   }
@@ -38,7 +60,7 @@ async function getCompletedOrderCount(email) {
 // ---------------------------------------------------------------------------
 
 function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm literally right here.`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm literally right here. — DP`;
 }
 
 function buildMsg1B(firstName, orderNumber) {
@@ -55,6 +77,7 @@ async function handleOrderConfirmed(order) {
   const orderNumber = order.number || order.id;
   const orderId     = String(order.id);
   const email       = order.billing?.email || '';
+  const customerId  = order.customer_id || 0;
 
   if (!phone) {
     console.log(`[CONFIRMED] No phone | order=${orderId} — skipping`);
@@ -71,11 +94,9 @@ async function handleOrderConfirmed(order) {
   }
 
   // Determine new vs returning
-  const completedOrders = await getCompletedOrderCount(email);
-  // completedOrders = count of COMPLETED orders including possibly this one.
-  // If 0 or 1, this is effectively their first: use 1A.
-  // If 2+, they're returning: use 1B.
-  const isNew      = completedOrders <= 1;
+  // Returning = 3+ completed orders. New = fewer than 3.
+  const completedOrders = await getCompletedOrderCount(email, customerId);
+  const isNew      = completedOrders < 3;
   const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
   const message    = isNew
     ? buildMsg1A(firstName, orderNumber)
