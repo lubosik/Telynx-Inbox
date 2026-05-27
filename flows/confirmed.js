@@ -4,8 +4,8 @@
  *
  * Single message fired on order.processing.
  * Branches: new customer (1A) vs returning customer (1B).
- * New       = 0 or 1 completed orders (first-time buyer).
- * Returning = 2+ completed orders.
+ * New       = 0 prior completed orders (first order ever).
+ * Returning = 1+ prior completed orders (every order after the first).
  * Deduped via sms_sent_log — fires exactly once per order.
  */
 
@@ -94,10 +94,10 @@ async function handleOrderConfirmed(order) {
   }
 
   // Determine new vs returning
-  // New      = 0 or 1 completed orders (first-time buyer, welcome message fires once).
-  // Returning = 2+ completed orders.
+  // New       = 0 prior completed orders (first order ever, welcome fires once).
+  // Returning = 1+ prior completed orders (every subsequent order).
   const completedOrders = await getCompletedOrderCount(email, customerId);
-  const isNew      = completedOrders < 2;
+  const isNew      = completedOrders === 0;
   const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
   const message    = isNew
     ? buildMsg1A(firstName, orderNumber)
