@@ -145,7 +145,11 @@ async function generatePersonalisedConfirmed(baseMessage, context, firstName, or
 Customer context:
 ${contextParts.map(p => `- ${p}`).join('\n')}
 
-Task: Add ONE natural sentence that references what they ordered or where they're from. Insert it after the first sentence. Keep everything else exactly the same. The addition should feel like DP genuinely noticed the order.
+Task: Add ONE natural sentence after the first sentence. Use this style:
+- Mention what they ordered by name, then say it will be on its way to [their city] as soon as possible.
+- Example: "Your BPC-157 and TB-500 will be heading straight to London as soon as we pack it up."
+- Keep it simple and warm. No weird phrases. No "spotted". No "London-bound". Just natural.
+- Keep everything else in the message exactly the same.
 
 Return ONLY the modified message text. Nothing else.`;
 

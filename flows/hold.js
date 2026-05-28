@@ -73,6 +73,28 @@ async function handleOrderOnHold(order) {
     return;
   }
 
+  // PHONE-LEVEL DEDUP: one hold flow per customer at a time.
+  // If they already have pending hold messages (e.g. two on-hold orders in a row),
+  // update the order_id to the latest and bail — no duplicate flows.
+  const { supabase } = require('../db');
+  const { data: existingFlow } = await supabase
+    .from('sms_scheduled')
+    .select('id, order_id')
+    .eq('phone', phone)
+    .in('flow_type', ['hold-msg1', 'hold-msg2', 'hold-msg3'])
+    .eq('status', 'pending')
+    .limit(1);
+
+  if (existingFlow && existingFlow.length > 0) {
+    console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingFlow[0].order_id}) — updating to order=${orderId}`);
+    await supabase.from('sms_scheduled')
+      .update({ order_id: orderId })
+      .eq('phone', phone)
+      .in('flow_type', ['hold-msg1', 'hold-msg2', 'hold-msg3'])
+      .eq('status', 'pending');
+    return;
+  }
+
   // MSG 1 — 30 seconds (gives webhook 200 time to complete)
   await scheduleSMS({
     orderId,
