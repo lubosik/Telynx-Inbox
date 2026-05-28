@@ -140,6 +140,24 @@ async function cancelScheduled(orderId) {
   }
 }
 
+// Cancel ALL pending scheduled messages for a customer by phone number.
+// Used when a customer successfully pays — clears failed/hold flows from
+// any prior order IDs that cancelScheduled(orderId) would miss.
+async function cancelScheduledForCustomer(phone) {
+  if (!phone) return 0;
+  const { data } = await supabase
+    .from('sms_scheduled')
+    .update({ status: 'cancelled' })
+    .eq('phone', phone)
+    .eq('status', 'pending')
+    .select('id');
+  const count = data?.length || 0;
+  if (count > 0) {
+    console.log(`[SCHEDULE] Cancelled ${count} pending messages | phone=...${phone.slice(-4)}`);
+  }
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // Queue processor — called every 5 minutes by server.js
 // ---------------------------------------------------------------------------
@@ -223,6 +241,7 @@ module.exports = {
   sendAndLog,
   scheduleSMS,
   cancelScheduled,
+  cancelScheduledForCustomer,
   processScheduledQueue,
   checkOrderRecovered
 };

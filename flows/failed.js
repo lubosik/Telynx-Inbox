@@ -58,6 +58,27 @@ async function handleOrderFailed(order) {
     return;
   }
 
+  // PHONE-LEVEL DEDUP: one failed flow per customer at a time regardless of how many orders fail.
+  // If the customer is already in an active failed flow, update the order_id to the latest
+  // failed order (so recovery via processing/completed cancels correctly) and bail out.
+  const { data: existingFlow } = await supabase
+    .from('sms_scheduled')
+    .select('id, order_id')
+    .eq('phone', phone)
+    .in('flow_type', ['failed-msg1', 'failed-msg2', 'failed-msg3'])
+    .eq('status', 'pending')
+    .limit(1);
+
+  if (existingFlow && existingFlow.length > 0) {
+    console.log(`[FAILED] Customer ...${phone.slice(-4)} already in failed flow (order=${existingFlow[0].order_id}) — updating to order=${orderId}`);
+    await supabase.from('sms_scheduled')
+      .update({ order_id: orderId })
+      .eq('phone', phone)
+      .in('flow_type', ['failed-msg1', 'failed-msg2', 'failed-msg3'])
+      .eq('status', 'pending');
+    return;
+  }
+
   // MSG 1 — T+10 minutes
   await scheduleSMS({
     orderId,

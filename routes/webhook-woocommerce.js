@@ -8,7 +8,7 @@ const { searchContactByEmail } = require('../ghl');
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
 const { handleOrderOnHold }                       = require('../flows/hold');
 const { handleOrderConfirmed }                    = require('../flows/confirmed');
-const { cancelScheduled }                         = require('../flows/utils');
+const { cancelScheduled, cancelScheduledForCustomer } = require('../flows/utils');
 
 // Resolve a phone number for an order using multiple fallbacks:
 // 1. WooCommerce billing.phone
@@ -179,12 +179,17 @@ module.exports = (broadcastSSE) => {
           break;
 
         case 'processing':
-        case 'completed':
-          // Cancel any failed/hold sequences (order recovered)
+        case 'completed': {
+          // Cancel by order ID (legacy — covers the current order's own scheduled rows)
           await handleOrderRecovered(orderId);
+          // Also cancel by phone — clears failed/hold flows from prior order IDs
+          // (the Harriet fix: prior failed orders 4214/4216 cancelled when 4233 processes)
+          const resolvedPhone = await resolvePhone(order);
+          if (resolvedPhone) await cancelScheduledForCustomer(resolvedPhone);
           // Send confirmed SMS (deduped — fires once per order)
           await handleOrderConfirmed(order);
           break;
+        }
 
         case 'cancelled':
         case 'refunded':
