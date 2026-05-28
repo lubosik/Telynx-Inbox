@@ -730,6 +730,452 @@ function ConvRow({ contact: c, active, onClick }) {
   );
 }
 
+// ─── Activity Tab Components ──────────────────────────────────────────────────
+
+function flowBadgeStyle(flowType) {
+  if (!flowType) return { bg: '#1a1a1a', color: '#9ca3af' };
+  if (flowType.startsWith('failed'))    return { bg: '#450a0a', color: '#fca5a5' };
+  if (flowType.startsWith('hold'))      return { bg: '#451a03', color: '#fcd34d' };
+  if (flowType.startsWith('confirmed')) return { bg: '#052e16', color: '#86efac' };
+  if (flowType.startsWith('shipped') || flowType.startsWith('delivered')) return { bg: '#14532d', color: '#4ade80' };
+  return { bg: '#1a1a1a', color: '#9ca3af' };
+}
+
+function FlowBadge({ flowType }) {
+  const { bg, color } = flowBadgeStyle(flowType);
+  return (
+    <span style={{
+      background: bg, color, fontSize: '0.625rem', fontFamily: 'var(--mono)',
+      padding: '2px 6px', borderRadius: 3, whiteSpace: 'nowrap', letterSpacing: '0.03em'
+    }}>
+      {flowType || 'unknown'}
+    </span>
+  );
+}
+
+function useCountdown(sendAt) {
+  const [remaining, setRemaining] = useState('');
+  useEffect(() => {
+    const tick = () => {
+      const diff = new Date(sendAt) - new Date();
+      if (diff <= 0) { setRemaining('firing...'); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      if (h > 0) setRemaining(`${h}h ${m}m`);
+      else if (m > 0) setRemaining(`${m}m ${s}s`);
+      else setRemaining(`${s}s`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [sendAt]);
+  return remaining;
+}
+
+function QueueRow({ item, onCancel }) {
+  const countdown = useCountdown(item.send_at);
+  const displayName = item.contact_name || ('...' + (item.phone?.slice(-4) || ''));
+  const preview = item.message_body
+    ? (item.message_body.length > 60 ? item.message_body.slice(0, 60) + '...' : item.message_body)
+    : '';
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
+      background: 'var(--surface)'
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text)', fontSize: '0.875rem', fontWeight: 500 }}>{displayName}</span>
+          <FlowBadge flowType={item.flow_type} />
+          {item.order_id && (
+            <span style={{ color: 'var(--text2)', fontSize: '0.7rem', fontFamily: 'var(--mono)' }}>#{item.order_id}</span>
+          )}
+        </div>
+        <div style={{ color: 'var(--text2)', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>{preview}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.375rem', flexShrink: 0 }}>
+        <span style={{ color: '#f59e0b', fontSize: '0.75rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{countdown}</span>
+        <button
+          onClick={() => onCancel(item)}
+          style={{
+            background: 'transparent', border: '1px solid #ef4444', color: '#ef4444',
+            padding: '2px 8px', borderRadius: 4, fontSize: '0.65rem', cursor: 'pointer',
+            fontFamily: 'var(--mono)'
+          }}
+        >
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CancelModal({ target, onConfirm, onDismiss, cancelling }) {
+  if (!target) return null;
+  const displayName = target.contact_name || ('...' + (target.phone?.slice(-4) || ''));
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem'
+    }} onClick={(e) => { if (e.target === e.currentTarget) onDismiss(); }}>
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
+        padding: '1.5rem', maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto'
+      }}>
+        <div style={{ color: 'var(--text)', fontSize: '1rem', fontWeight: 600, marginBottom: '1rem' }}>
+          Cancel this message?
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text)', fontWeight: 500 }}>{displayName}</span>
+          <FlowBadge flowType={target.flow_type} />
+          {target.order_id && <span style={{ color: 'var(--text2)', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>#{target.order_id}</span>}
+        </div>
+        <div style={{
+          background: '#0f0f0f', border: '1px solid var(--border)', borderRadius: 4,
+          padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text2)',
+          fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', marginBottom: '0.75rem', lineHeight: 1.6
+        }}>
+          {target.message_body}
+        </div>
+        <div style={{ color: 'var(--text2)', fontSize: '0.75rem', marginBottom: '1.25rem' }}>
+          Would send: {target.send_at ? new Date(target.send_at).toLocaleString('en-US', { timeZone: TZ }) : ''}
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button
+            onClick={onConfirm}
+            disabled={cancelling}
+            style={{
+              flex: 1, background: '#ef4444', color: '#fff', border: 'none',
+              padding: '0.625rem', borderRadius: 6, fontSize: '0.875rem', cursor: 'pointer', fontWeight: 500
+            }}
+          >
+            {cancelling ? <span className="spinner" style={{ borderTopColor: '#fff' }} /> : 'Yes, cancel it'}
+          </button>
+          <button
+            onClick={onDismiss}
+            style={{
+              flex: 1, background: 'var(--border)', color: 'var(--text2)', border: 'none',
+              padding: '0.625rem', borderRadius: 6, fontSize: '0.875rem', cursor: 'pointer'
+            }}
+          >
+            Keep it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecentRow({ item }) {
+  const [expanded, setExpanded] = useState(false);
+  const displayName = item.contact_name || ('...' + (item.phone?.slice(-4) || ''));
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.625rem 1rem', cursor: 'pointer' }}
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--text)', fontSize: '0.8125rem', fontWeight: 500 }}>{displayName}</span>
+            <FlowBadge flowType={item.flow_type} />
+            {item.order_id && (
+              <span style={{ color: 'var(--text2)', fontSize: '0.7rem', fontFamily: 'var(--mono)' }}>#{item.order_id}</span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+          <span style={{ color: 'var(--text2)', fontSize: '0.7rem', fontFamily: 'var(--mono)' }}>{relativeTime(item.sent_at)}</span>
+          <span style={{ color: 'var(--text2)', fontSize: '0.75rem' }}>{expanded ? '▲' : '▼'}</span>
+        </div>
+      </div>
+      {expanded && (
+        <div style={{ padding: '0 1rem 0.75rem', borderTop: '1px solid var(--border)' }}>
+          <div style={{
+            background: '#0f0f0f', border: '1px solid var(--border)', borderRadius: 4,
+            padding: '0.625rem', fontSize: '0.75rem', color: 'var(--text2)',
+            fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', lineHeight: 1.6, marginBottom: '0.375rem'
+          }}>
+            {item.message_body}
+          </div>
+          {item.telnyx_message_id && (
+            <div style={{ color: 'var(--text2)', fontSize: '0.65rem', fontFamily: 'var(--mono)' }}>
+              ID: {item.telnyx_message_id}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveFeed({ events }) {
+  return (
+    <div>
+      {events.length === 0 ? (
+        <div style={{ padding: '1.25rem', color: 'var(--text2)', fontSize: '0.75rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>
+          // waiting for events
+        </div>
+      ) : events.map((ev, i) => {
+        const dotColor = ev.type === 'message_sent'   ? '#4ade80'
+          : ev.type === 'queue_cancelled' ? '#ef4444'
+          : ev.type === 'new_message'     ? '#60a5fa'
+          : '#f59e0b';
+        const name = ev.contact_name || (ev.phone ? '...' + ev.phone.slice(-4) : '');
+        const label = ev.type === 'queue_added'     ? `queued ${ev.flow_type || ''} for ${name}`
+          : ev.type === 'message_sent'   ? `sent ${ev.flow_type || ''} to ${name}`
+          : ev.type === 'queue_cancelled' ? `cancelled ${ev.flow_type || ''} for ${name}`
+          : ev.type === 'new_message'    ? `inbound SMS from ${name}`
+          : ev.type;
+        return (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.5rem 1rem', borderBottom: '1px solid var(--border)',
+            borderLeft: `3px solid ${dotColor}`
+          }}>
+            <span style={{ color: 'var(--text)', fontSize: '0.75rem', fontFamily: 'var(--mono)', flex: 1 }}>{label}</span>
+            <span style={{ color: 'var(--text2)', fontSize: '0.65rem', fontFamily: 'var(--mono)', flexShrink: 0 }}>
+              {relativeTime(ev.ts)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }) {
+  return (
+    <div style={{
+      flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '1rem', textAlign: 'center'
+    }}>
+      <div style={{ fontSize: '1.75rem', fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: '0.65rem', color: 'var(--text2)', marginTop: '0.375rem', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</div>
+    </div>
+  );
+}
+
+const FLOW_FILTERS = [
+  { value: 'all',                label: 'All' },
+  { value: 'failed-msg1',        label: 'Failed 1' },
+  { value: 'failed-msg2',        label: 'Failed 2' },
+  { value: 'failed-msg3',        label: 'Failed 3' },
+  { value: 'hold-msg1',          label: 'Hold 1' },
+  { value: 'hold-msg2',          label: 'Hold 2' },
+  { value: 'hold-msg3',          label: 'Hold 3' },
+  { value: 'hold-failed-nudge',  label: 'Nudge' },
+  { value: 'confirmed-new',      label: 'New' },
+  { value: 'confirmed-returning',label: 'Return' },
+  { value: 'shipped-msg1',       label: 'Shipped' },
+  { value: 'delivered-msg1',     label: 'Delivered' },
+];
+
+function ActivityTab({ sseStatus }) {
+  const [stats, setStats]           = useState({ pending: 0, sentToday: 0, failedToday: 0, cancelledToday: 0 });
+  const [queue, setQueue]           = useState([]);
+  const [recent, setRecent]         = useState([]);
+  const [flowFilter, setFlowFilter] = useState('all');
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [liveEvents, setLiveEvents] = useState([]);
+  const [queuePage, setQueuePage]   = useState(1);
+  const [queueHasMore, setQueueHasMore] = useState(false);
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentHasMore, setRecentHasMore] = useState(false);
+  const isMobile = useIsMobile();
+
+  const currentFilter = useRef(flowFilter);
+  currentFilter.current = flowFilter;
+
+  async function loadAll(filter, qPage, rPage) {
+    const f  = filter ?? flowFilter;
+    const qp = qPage  ?? 1;
+    const rp = rPage  ?? 1;
+    try {
+      const [s, q, r] = await Promise.all([
+        api('GET', '/api/activity/stats'),
+        api('GET', `/api/activity/queue?flow=${f}&page=${qp}`),
+        api('GET', `/api/activity/recent?flow=${f}&page=${rp}`),
+      ]);
+      setStats(s);
+      if (qp === 1) setQueue(q.items || []);
+      else setQueue(prev => [...prev, ...(q.items || [])]);
+      setQueueHasMore(q.hasMore || false);
+      if (rp === 1) setRecent(r.items || []);
+      else setRecent(prev => [...prev, ...(r.items || [])]);
+      setRecentHasMore(r.hasMore || false);
+    } catch (err) {
+      console.error('[Activity] load error:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setLoading(true);
+    setQueuePage(1);
+    setRecentPage(1);
+    loadAll(flowFilter, 1, 1);
+  }, [flowFilter]);
+
+  useEffect(() => {
+    function handleSSE(e) {
+      const event = { ...e.detail, ts: new Date().toISOString() };
+      const activityTypes = ['queue_added', 'queue_cancelled', 'message_sent', 'new_message'];
+      if (activityTypes.includes(event.type)) {
+        setLiveEvents(prev => [event, ...prev].slice(0, 20));
+      }
+      switch (event.type) {
+        case 'queue_added':
+          setQueue(prev => {
+            if (prev.some(m => m.id === event.id)) return prev;
+            const newItem = { id: event.id, order_id: event.order_id, phone: event.phone, flow_type: event.flow_type, send_at: event.send_at, message_body: '', contact_name: null };
+            return [...prev, newItem].sort((a, b) => new Date(a.send_at) - new Date(b.send_at));
+          });
+          setStats(prev => ({ ...prev, pending: prev.pending + 1 }));
+          break;
+        case 'queue_cancelled':
+          setQueue(prev => prev.filter(m => m.id !== event.id));
+          setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1), cancelledToday: prev.cancelledToday + 1 }));
+          break;
+        case 'message_sent':
+          setQueue(prev => prev.filter(m => m.id !== event.id));
+          setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1), sentToday: prev.sentToday + 1 }));
+          api('GET', `/api/activity/recent?flow=${currentFilter.current}&page=1`).then(r => setRecent(r.items || [])).catch(() => {});
+          break;
+        case 'stats_update':
+          api('GET', '/api/activity/stats').then(setStats).catch(() => {});
+          break;
+      }
+    }
+    window.addEventListener('vici-sse', handleSSE);
+    return () => window.removeEventListener('vici-sse', handleSSE);
+  }, []);
+
+  async function handleCancelConfirm() {
+    if (!cancelTarget || cancelling) return;
+    setCancelling(true);
+    try {
+      await api('DELETE', `/api/activity/queue/${cancelTarget.id}`);
+      setQueue(prev => prev.filter(m => m.id !== cancelTarget.id));
+      setStats(prev => ({ ...prev, pending: Math.max(0, prev.pending - 1), cancelledToday: prev.cancelledToday + 1 }));
+    } catch (err) {
+      console.error('[Activity] cancel error:', err.message);
+    } finally {
+      setCancelling(false);
+      setCancelTarget(null);
+    }
+  }
+
+  const sectionStyle = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' };
+  const sectionHdr   = {
+    padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
+    fontSize: '0.7rem', fontFamily: 'var(--mono)', color: 'var(--text2)',
+    letterSpacing: '0.08em', textTransform: 'uppercase',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+  };
+
+  return (
+    <div style={{ padding: isMobile ? '0.75rem' : '1.25rem', maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '0.75rem' }}>
+        <StatCard label="Pending"        value={stats.pending}        color="#f59e0b" />
+        <StatCard label="Sent today"     value={stats.sentToday}      color="#4ade80" />
+        <StatCard label="Failed today"   value={stats.failedToday}    color="#ef4444" />
+        <StatCard label="Cancelled today"value={stats.cancelledToday} color="var(--text2)" />
+      </div>
+
+      {/* Flow filter pills */}
+      <div style={{ overflowX: 'auto', paddingBottom: '0.25rem' }}>
+        <div style={{ display: 'flex', gap: '0.375rem', minWidth: 'max-content' }}>
+          {FLOW_FILTERS.map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFlowFilter(f.value)}
+              style={{
+                padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                fontSize: '0.7rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap',
+                background: flowFilter === f.value ? '#16a34a' : 'var(--border)',
+                color:      flowFilter === f.value ? '#fff'    : 'var(--text2)',
+                fontWeight: flowFilter === f.value ? 600       : 400
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Queue */}
+      <div style={sectionStyle}>
+        <div style={sectionHdr}>
+          <span>// queue ({queue.length}{queueHasMore ? '+' : ''})</span>
+          <span style={{ color: sseStatus === 'connected' ? '#4ade80' : '#f59e0b', fontSize: '0.65rem' }}>
+            {sseStatus === 'connected' ? '● live' : '○ ' + sseStatus}
+          </span>
+        </div>
+        {loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
+        ) : queue.length === 0 ? (
+          <div style={{ padding: '1.5rem', color: 'var(--text2)', fontSize: '0.8rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>// queue is empty</div>
+        ) : (
+          <>
+            {queue.map(item => <QueueRow key={item.id} item={item} onCancel={setCancelTarget} />)}
+            {queueHasMore && (
+              <div style={{ padding: '0.75rem', textAlign: 'center' }}>
+                <button onClick={() => { const n = queuePage + 1; setQueuePage(n); loadAll(flowFilter, n, recentPage); }}
+                  style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', padding: '6px 16px', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>
+                  load more
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Recent sends */}
+      <div style={sectionStyle}>
+        <div style={sectionHdr}><span>// recent sends</span></div>
+        {loading ? (
+          <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
+        ) : recent.length === 0 ? (
+          <div style={{ padding: '1.5rem', color: 'var(--text2)', fontSize: '0.8rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>// no messages sent yet</div>
+        ) : (
+          <>
+            {recent.map(item => <RecentRow key={item.id} item={item} />)}
+            {recentHasMore && (
+              <div style={{ padding: '0.75rem', textAlign: 'center' }}>
+                <button onClick={() => { const n = recentPage + 1; setRecentPage(n); loadAll(flowFilter, queuePage, n); }}
+                  style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', padding: '6px 16px', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>
+                  load more
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Live feed */}
+      <div style={sectionStyle}>
+        <div style={sectionHdr}>
+          <span>// live feed</span>
+          <span style={{ color: 'var(--text2)', fontSize: '0.65rem' }}>last {liveEvents.length} events</span>
+        </div>
+        <LiveFeed events={liveEvents} />
+      </div>
+
+      <CancelModal target={cancelTarget} onConfirm={handleCancelConfirm} onDismiss={() => setCancelTarget(null)} cancelling={cancelling} />
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -743,7 +1189,7 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [syncing, setSyncing] = useState(false);
   const [catchingUp, setCatchingUp] = useState(false);
-  const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages'
+  const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
 
   const messagesEndRef = useRef(null);
@@ -811,6 +1257,9 @@ function App() {
           });
           return;
         }
+
+        // Dispatch to Activity tab SSE listener
+        window.dispatchEvent(new CustomEvent('vici-sse', { detail: evt }));
 
         if (evt.type === 'new_message') {
           const { phone, body, direction } = evt;
@@ -1057,6 +1506,12 @@ function App() {
           >
             MESSAGES {totalUnread > 0 && `(${totalUnread})`}
           </button>
+          <button
+            className={`header-tab${mainTab === 'activity' ? ' active' : ''}`}
+            onClick={() => setMainTab('activity')}
+          >
+            ACTIVITY
+          </button>
         </div>
 
         <div className="header-spacer" />
@@ -1112,6 +1567,9 @@ function App() {
             setMobileSub={setMobileSub}
           />
         )}
+        {mainTab === 'activity' && (
+          <ActivityTab sseStatus={sseStatus} />
+        )}
       </div>
 
       {/* ── Mobile bottom nav ── */}
@@ -1132,6 +1590,13 @@ function App() {
               <span className="bnav-icon">✉</span>
               Messages
               {totalUnread > 0 && <span className="bnav-badge">{totalUnread}</span>}
+            </button>
+            <button
+              className={`bnav-btn${mainTab === 'activity' ? ' active' : ''}`}
+              onClick={() => setMainTab('activity')}
+            >
+              <span className="bnav-icon">⚡</span>
+              Activity
             </button>
           </div>
         </nav>

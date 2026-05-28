@@ -19,6 +19,7 @@ function broadcastSSE(event) {
     try { client.write(data); } catch { sseClients.delete(client); }
   });
 }
+require('./lib/broadcaster').setBroadcast(broadcastSSE);
 
 app.use(helmet({ contentSecurityPolicy: false }));
 
@@ -88,6 +89,7 @@ app.use('/api/sync',          requireAuth, require('./routes/sync'));
 app.use('/api/contacts',      requireAuth, require('./routes/contacts'));
 app.use('/api/catchup',       requireAuth, require('./routes/catchup'));
 app.use('/api/push',          requireAuth, require('./routes/push')());
+app.use('/api/activity',      requireAuth, require('./routes/activity'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });

@@ -5,6 +5,7 @@
 
 const { supabase } = require('../db');
 const { sendSMS }  = require('../telnyx');
+const { broadcast } = require('../lib/broadcaster');
 
 // ---------------------------------------------------------------------------
 // Phone formatting
@@ -116,14 +117,15 @@ async function scheduleSMS({ orderId, phone, flowType, message, sendAt }) {
     return;
   }
 
-  await supabase.from('sms_scheduled').insert({
+  const { data: inserted } = await supabase.from('sms_scheduled').insert({
     order_id:     String(orderId),
     phone,
     flow_type:    flowType,
     message_body: message,
     send_at:      sendAt
-  });
+  }).select('id').maybeSingle();
 
+  broadcast({ type: 'queue_added', id: inserted?.id, order_id: String(orderId), flow_type: flowType, send_at: sendAt, phone });
   console.log(`[SCHEDULE] Queued | order=${orderId} flow=${flowType} at=${sendAt}`);
 }
 
@@ -191,6 +193,7 @@ async function processScheduledQueue() {
           .update({ status: 'cancelled' })
           .eq('id', job.id);
         console.log(`[SCHEDULE] Order ${job.order_id} recovered — cancelling ${job.flow_type}`);
+        broadcast({ type: 'queue_cancelled', id: job.id, order_id: job.order_id, flow_type: job.flow_type, phone: job.phone });
         continue;
       }
     }
@@ -208,6 +211,11 @@ async function processScheduledQueue() {
         attempts: (job.attempts || 0) + 1
       })
       .eq('id', job.id);
+
+    if (sent) {
+      broadcast({ type: 'message_sent', id: job.id, order_id: job.order_id, flow_type: job.flow_type, phone: job.phone, sent_at: new Date().toISOString() });
+      broadcast({ type: 'stats_update' });
+    }
   }
 }
 
