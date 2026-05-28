@@ -17,7 +17,7 @@ const { supabase } = require('../db');
 // ---------------------------------------------------------------------------
 
 function buildMsg1(firstName, orderNumber, checkoutUrl) {
-  return `Hey ${firstName}! It's DP from Vici. Looks like your payment didn't go through on order #${orderNumber} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}`;
+  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like your payment didn't go through on order #${orderNumber} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
 }
 
 function buildMsg2(firstName, orderNumber) {
@@ -25,7 +25,7 @@ function buildMsg2(firstName, orderNumber) {
 }
 
 function buildMsg3(firstName, checkoutUrl) {
-  return `Hey ${firstName}, your cart's still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nDP. Reply STOP to opt out.`;
+  return `Hey ${firstName}, your cart's still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nDP`;
 }
 
 function buildCheckoutUrl(order, utmContent = 'msg1') {

@@ -178,7 +178,8 @@ async function processScheduledQueue() {
 
   const cancellableFlows = [
     'failed-msg1','failed-msg2','failed-msg3',
-    'hold-msg1','hold-msg2','hold-msg3'
+    'hold-msg1','hold-msg2','hold-msg3',
+    'hold-failed-nudge'
   ];
 
   for (const job of due) {

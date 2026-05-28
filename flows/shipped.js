@@ -154,7 +154,7 @@ Return ONLY the modified message. Nothing else.`;
 
 function buildShippedMessage(firstName, orderNumber, trackingNumber) {
   const trackingUrl = `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
-  return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nDP. Reply STOP to opt out.`;
+  return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nDP`;
 }
 
 function buildDeliveryMessage(firstName) {

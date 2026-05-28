@@ -214,11 +214,11 @@ Return ONLY the modified message text. Nothing else.`;
 // ---------------------------------------------------------------------------
 
 function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm literally right here.\n\nDP`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
 }
 
 function buildMsg1B(firstName, orderNumber) {
-  return `${firstName}! Back again - you're the best. Order #${orderNumber} is confirmed and going straight to the front of the queue.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nAnything you want, just reply.`;
+  return `${firstName}! Back again - you're the best. Order #${orderNumber} is confirmed and going straight to the front of the queue.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nAnything you need or want to try next, just text me directly.\n\nDP`;
 }
 
 // ---------------------------------------------------------------------------
