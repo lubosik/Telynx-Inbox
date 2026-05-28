@@ -733,12 +733,13 @@ function ConvRow({ contact: c, active, onClick }) {
 // ─── Activity Tab Components ──────────────────────────────────────────────────
 
 function flowBadgeStyle(flowType) {
-  if (!flowType) return { bg: '#1a1a1a', color: '#9ca3af' };
-  if (flowType.startsWith('failed'))    return { bg: '#450a0a', color: '#fca5a5' };
-  if (flowType.startsWith('hold'))      return { bg: '#451a03', color: '#fcd34d' };
-  if (flowType.startsWith('confirmed')) return { bg: '#052e16', color: '#86efac' };
-  if (flowType.startsWith('shipped') || flowType.startsWith('delivered')) return { bg: '#14532d', color: '#4ade80' };
-  return { bg: '#1a1a1a', color: '#9ca3af' };
+  if (!flowType) return { bg: 'var(--surface2)', color: 'var(--text3)' };
+  if (flowType.startsWith('failed'))    return { bg: 'rgba(248,113,113,0.12)', color: 'var(--red)' };
+  if (flowType.startsWith('hold'))      return { bg: 'rgba(251,191,36,0.12)',   color: 'var(--yellow)' };
+  if (flowType.startsWith('confirmed')) return { bg: 'rgba(0,245,160,0.08)',    color: 'var(--accent)' };
+  if (flowType.startsWith('shipped') || flowType.startsWith('delivered'))
+    return { bg: 'rgba(0,245,160,0.12)', color: 'var(--accent)' };
+  return { bg: 'var(--surface2)', color: 'var(--text3)' };
 }
 
 function FlowBadge({ flowType }) {
@@ -777,33 +778,33 @@ function QueueRow({ item, onCancel }) {
   const countdown = useCountdown(item.send_at);
   const displayName = item.contact_name || ('...' + (item.phone?.slice(-4) || ''));
   const preview = item.message_body
-    ? (item.message_body.length > 60 ? item.message_body.slice(0, 60) + '...' : item.message_body)
+    ? (item.message_body.length > 70 ? item.message_body.slice(0, 70) + '...' : item.message_body)
     : '';
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: '0.75rem',
+      display: 'flex', alignItems: 'flex-start', gap: '0.625rem',
       padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
-      background: 'var(--surface)'
+      minHeight: 56
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
-          <span style={{ color: 'var(--text)', fontSize: '0.875rem', fontWeight: 500 }}>{displayName}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text)', fontSize: '0.8125rem', fontWeight: 600 }}>{displayName}</span>
           <FlowBadge flowType={item.flow_type} />
           {item.order_id && (
-            <span style={{ color: 'var(--text2)', fontSize: '0.7rem', fontFamily: 'var(--mono)' }}>#{item.order_id}</span>
+            <span style={{ color: 'var(--text3)', fontSize: '0.65rem', fontFamily: 'var(--mono)' }}>#{item.order_id}</span>
           )}
         </div>
-        <div style={{ color: 'var(--text2)', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>{preview}</div>
+        <div style={{ color: 'var(--text3)', fontSize: '0.7rem', fontFamily: 'var(--mono)', lineHeight: 1.4 }}>{preview}</div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.375rem', flexShrink: 0 }}>
-        <span style={{ color: '#f59e0b', fontSize: '0.75rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{countdown}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.375rem', flexShrink: 0, paddingTop: 2 }}>
+        <span style={{ color: 'var(--yellow)', fontSize: '0.7rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{countdown}</span>
         <button
           onClick={() => onCancel(item)}
           style={{
-            background: 'transparent', border: '1px solid #ef4444', color: '#ef4444',
-            padding: '2px 8px', borderRadius: 4, fontSize: '0.65rem', cursor: 'pointer',
-            fontFamily: 'var(--mono)'
+            background: 'transparent', border: '1px solid rgba(248,113,113,0.4)', color: 'var(--red)',
+            padding: '3px 9px', borderRadius: 5, fontSize: '0.65rem', cursor: 'pointer',
+            fontFamily: 'var(--mono)', whiteSpace: 'nowrap'
           }}
         >
           cancel
@@ -834,7 +835,7 @@ function CancelModal({ target, onConfirm, onDismiss, cancelling }) {
           {target.order_id && <span style={{ color: 'var(--text2)', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>#{target.order_id}</span>}
         </div>
         <div style={{
-          background: '#0f0f0f', border: '1px solid var(--border)', borderRadius: 4,
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
           padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text2)',
           fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', marginBottom: '0.75rem', lineHeight: 1.6
         }}>
@@ -896,7 +897,7 @@ function RecentRow({ item }) {
       {expanded && (
         <div style={{ padding: '0 1rem 0.75rem', borderTop: '1px solid var(--border)' }}>
           <div style={{
-            background: '#0f0f0f', border: '1px solid var(--border)', borderRadius: 4,
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
             padding: '0.625rem', fontSize: '0.75rem', color: 'var(--text2)',
             fontFamily: 'var(--mono)', whiteSpace: 'pre-wrap', lineHeight: 1.6, marginBottom: '0.375rem'
           }}>
@@ -921,10 +922,10 @@ function LiveFeed({ events }) {
           // waiting for events
         </div>
       ) : events.map((ev, i) => {
-        const dotColor = ev.type === 'message_sent'   ? '#4ade80'
-          : ev.type === 'queue_cancelled' ? '#ef4444'
-          : ev.type === 'new_message'     ? '#60a5fa'
-          : '#f59e0b';
+        const dotColor = ev.type === 'message_sent'    ? 'var(--accent)'
+          : ev.type === 'queue_cancelled' ? 'var(--red)'
+          : ev.type === 'new_message'     ? 'var(--blue)'
+          : 'var(--yellow)';
         const name = ev.contact_name || (ev.phone ? '...' + ev.phone.slice(-4) : '');
         const label = ev.type === 'queue_added'     ? `queued ${ev.flow_type || ''} for ${name}`
           : ev.type === 'message_sent'   ? `sent ${ev.flow_type || ''} to ${name}`
@@ -951,11 +952,11 @@ function LiveFeed({ events }) {
 function StatCard({ label, value, color }) {
   return (
     <div style={{
-      flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 8, padding: '1rem', textAlign: 'center'
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 10, padding: '0.75rem 0.5rem', textAlign: 'center'
     }}>
-      <div style={{ fontSize: '1.75rem', fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: '0.65rem', color: 'var(--text2)', marginTop: '0.375rem', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: '1.5rem', fontWeight: 700, color, fontFamily: 'var(--mono)', lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: '0.6rem', color: 'var(--text3)', marginTop: '0.3rem', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</div>
     </div>
   );
 }
@@ -1073,105 +1074,147 @@ function ActivityTab({ sseStatus }) {
     }
   }
 
-  const sectionStyle = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' };
-  const sectionHdr   = {
-    padding: '0.75rem 1rem', borderBottom: '1px solid var(--border)',
-    fontSize: '0.7rem', fontFamily: 'var(--mono)', color: 'var(--text2)',
-    letterSpacing: '0.08em', textTransform: 'uppercase',
+  const sectionStyle = {
+    background: 'var(--surface)', border: '1px solid var(--border)',
+    borderRadius: 10, overflow: 'hidden'
+  };
+  const sectionHdr = {
+    padding: '0.625rem 1rem', borderBottom: '1px solid var(--border)',
+    fontSize: '0.65rem', fontFamily: 'var(--mono)', color: 'var(--text3)',
+    letterSpacing: '0.1em', textTransform: 'uppercase',
     display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+  };
+  const loadMoreBtn = {
+    background: 'none', border: '1px solid var(--border)', color: 'var(--text3)',
+    padding: '5px 16px', borderRadius: 5, cursor: 'pointer',
+    fontSize: '0.7rem', fontFamily: 'var(--mono)'
   };
 
   return (
-    <div style={{ padding: isMobile ? '0.75rem' : '1.25rem', maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem', overflowY: 'auto', height: '100%', boxSizing: 'border-box' }}>
+    // Outer shell — fills .main-content, clips to viewport bounds
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
 
-      {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '0.75rem' }}>
-        <StatCard label="Pending"        value={stats.pending}        color="#f59e0b" />
-        <StatCard label="Sent today"     value={stats.sentToday}      color="#4ade80" />
-        <StatCard label="Failed today"   value={stats.failedToday}    color="#ef4444" />
-        <StatCard label="Cancelled today"value={stats.cancelledToday} color="var(--text2)" />
-      </div>
+      {/* Scrollable content — the only scrolling layer */}
+      <div style={{
+        flex: 1, overflowY: 'auto', overflowX: 'hidden',
+        WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain'
+      }}>
+        <div style={{
+          padding: isMobile ? '0.75rem' : '1.25rem 1.5rem',
+          maxWidth: 900, margin: '0 auto',
+          display: 'flex', flexDirection: 'column', gap: '0.875rem',
+          paddingBottom: isMobile ? '1.5rem' : '2rem'
+        }}>
 
-      {/* Flow filter pills */}
-      <div style={{ overflowX: 'auto', paddingBottom: '0.25rem' }}>
-        <div style={{ display: 'flex', gap: '0.375rem', minWidth: 'max-content' }}>
-          {FLOW_FILTERS.map(f => (
-            <button
-              key={f.value}
-              onClick={() => setFlowFilter(f.value)}
-              style={{
-                padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                fontSize: '0.7rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap',
-                background: flowFilter === f.value ? '#16a34a' : 'var(--border)',
-                color:      flowFilter === f.value ? '#fff'    : 'var(--text2)',
-                fontWeight: flowFilter === f.value ? 600       : 400
-              }}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
+          {/* Stats — always 2×2 on mobile, 4-across on desktop */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
+            gap: '0.5rem'
+          }}>
+            <StatCard label="Pending"         value={stats.pending}        color="var(--yellow)" />
+            <StatCard label="Sent today"       value={stats.sentToday}      color="var(--accent)" />
+            <StatCard label="Failed today"     value={stats.failedToday}    color="var(--red)" />
+            <StatCard label="Cancelled today"  value={stats.cancelledToday} color="var(--text2)" />
+          </div>
 
-      {/* Queue */}
-      <div style={sectionStyle}>
-        <div style={sectionHdr}>
-          <span>// queue ({queue.length}{queueHasMore ? '+' : ''})</span>
-          <span style={{ color: sseStatus === 'connected' ? '#4ade80' : '#f59e0b', fontSize: '0.65rem' }}>
-            {sseStatus === 'connected' ? '● live' : '○ ' + sseStatus}
-          </span>
-        </div>
-        {loading ? (
-          <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
-        ) : queue.length === 0 ? (
-          <div style={{ padding: '1.5rem', color: 'var(--text2)', fontSize: '0.8rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>// queue is empty</div>
-        ) : (
-          <>
-            {queue.map(item => <QueueRow key={item.id} item={item} onCancel={setCancelTarget} />)}
-            {queueHasMore && (
-              <div style={{ padding: '0.75rem', textAlign: 'center' }}>
-                <button onClick={() => { const n = queuePage + 1; setQueuePage(n); loadAll(flowFilter, n, recentPage); }}
-                  style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', padding: '6px 16px', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>
-                  load more
+          {/* Flow filter pills */}
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '4px', marginBottom: '-4px' }}>
+            <div style={{ display: 'flex', gap: '0.375rem', minWidth: 'max-content', paddingBottom: '2px' }}>
+              {FLOW_FILTERS.map(f => (
+                <button
+                  key={f.value}
+                  onClick={() => setFlowFilter(f.value)}
+                  style={{
+                    padding: '5px 11px', borderRadius: 20, cursor: 'pointer',
+                    fontSize: '0.675rem', fontFamily: 'var(--mono)', whiteSpace: 'nowrap',
+                    fontWeight: 600, letterSpacing: '0.03em',
+                    border: flowFilter === f.value ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: flowFilter === f.value ? 'var(--accent-dim)' : 'transparent',
+                    color:      flowFilter === f.value ? 'var(--accent)'      : 'var(--text3)',
+                  }}
+                >
+                  {f.label}
                 </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+              ))}
+            </div>
+          </div>
 
-      {/* Recent sends */}
-      <div style={sectionStyle}>
-        <div style={sectionHdr}><span>// recent sends</span></div>
-        {loading ? (
-          <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
-        ) : recent.length === 0 ? (
-          <div style={{ padding: '1.5rem', color: 'var(--text2)', fontSize: '0.8rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>// no messages sent yet</div>
-        ) : (
-          <>
-            {recent.map(item => <RecentRow key={item.id} item={item} />)}
-            {recentHasMore && (
-              <div style={{ padding: '0.75rem', textAlign: 'center' }}>
-                <button onClick={() => { const n = recentPage + 1; setRecentPage(n); loadAll(flowFilter, queuePage, n); }}
-                  style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', padding: '6px 16px', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontFamily: 'var(--mono)' }}>
-                  load more
-                </button>
+          {/* Queue */}
+          <div style={sectionStyle}>
+            <div style={sectionHdr}>
+              <span>// queue ({queue.length}{queueHasMore ? '+' : ''})</span>
+              <span style={{
+                color: sseStatus === 'connected' ? 'var(--accent)' : 'var(--yellow)',
+                fontSize: '0.6rem', fontFamily: 'var(--mono)'
+              }}>
+                {sseStatus === 'connected' ? '● live' : '○ ' + sseStatus}
+              </span>
+            </div>
+            {loading ? (
+              <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
+            ) : queue.length === 0 ? (
+              <div style={{ padding: '1.5rem', color: 'var(--text3)', fontSize: '0.75rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>
+                // queue is empty
               </div>
+            ) : (
+              <>
+                {queue.map(item => <QueueRow key={item.id} item={item} onCancel={setCancelTarget} />)}
+                {queueHasMore && (
+                  <div style={{ padding: '0.625rem', textAlign: 'center' }}>
+                    <button style={loadMoreBtn} onClick={() => { const n = queuePage + 1; setQueuePage(n); loadAll(flowFilter, n, recentPage); }}>
+                      load more
+                    </button>
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
-      </div>
+          </div>
 
-      {/* Live feed */}
-      <div style={sectionStyle}>
-        <div style={sectionHdr}>
-          <span>// live feed</span>
-          <span style={{ color: 'var(--text2)', fontSize: '0.65rem' }}>last {liveEvents.length} events</span>
+          {/* Recent sends */}
+          <div style={sectionStyle}>
+            <div style={sectionHdr}><span>// recent sends</span></div>
+            {loading ? (
+              <div style={{ padding: '2rem', textAlign: 'center' }}><span className="spinner" /></div>
+            ) : recent.length === 0 ? (
+              <div style={{ padding: '1.5rem', color: 'var(--text3)', fontSize: '0.75rem', fontFamily: 'var(--mono)', textAlign: 'center' }}>
+                // no messages sent yet
+              </div>
+            ) : (
+              <>
+                {recent.map(item => <RecentRow key={item.id} item={item} />)}
+                {recentHasMore && (
+                  <div style={{ padding: '0.625rem', textAlign: 'center' }}>
+                    <button style={loadMoreBtn} onClick={() => { const n = recentPage + 1; setRecentPage(n); loadAll(flowFilter, queuePage, n); }}>
+                      load more
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Live feed */}
+          <div style={sectionStyle}>
+            <div style={sectionHdr}>
+              <span>// live feed</span>
+              <span style={{ color: 'var(--text3)', fontSize: '0.6rem', fontFamily: 'var(--mono)' }}>
+                {liveEvents.length} events
+              </span>
+            </div>
+            <LiveFeed events={liveEvents} />
+          </div>
+
         </div>
-        <LiveFeed events={liveEvents} />
       </div>
 
-      <CancelModal target={cancelTarget} onConfirm={handleCancelConfirm} onDismiss={() => setCancelTarget(null)} cancelling={cancelling} />
+      {/* Cancel modal renders outside the scroll area so it always covers full screen */}
+      <CancelModal
+        target={cancelTarget}
+        onConfirm={handleCancelConfirm}
+        onDismiss={() => setCancelTarget(null)}
+        cancelling={cancelling}
+      />
     </div>
   );
 }

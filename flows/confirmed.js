@@ -247,6 +247,22 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
+  // Cross-type dedup: block if ANY confirmed message (new or returning) was already
+  // sent for this order. The per-flow dedup in sendAndLog only blocks the same
+  // flow_type — without this check a webhook retry could send a second confirmed
+  // message of a different type (the Tadesse scenario).
+  const { data: alreadyConfirmed } = await supabase
+    .from('sms_sent_log')
+    .select('id, flow_type')
+    .eq('order_id', orderId)
+    .in('flow_type', ['confirmed-new', 'confirmed-returning'])
+    .maybeSingle();
+
+  if (alreadyConfirmed) {
+    console.log(`[CONFIRMED] Already sent ${alreadyConfirmed.flow_type} | order=${orderId} — skipping`);
+    return;
+  }
+
   // Cancel ALL pending scheduled messages for this customer by phone number.
   // This fixes the Harriet scenario: failed/hold flows from prior order IDs
   // (which cancelScheduled(orderId) would never touch) are now cleared.
