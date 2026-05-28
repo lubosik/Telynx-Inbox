@@ -13,32 +13,52 @@ const { formatPhone, sendAndLog, scheduleSMS, cancelScheduled, alreadySent } = r
 const { supabase } = require('../db');
 
 // ---------------------------------------------------------------------------
-// Message builders — verbatim from Dom's approved copy
+// Message builders
 // ---------------------------------------------------------------------------
 
-function buildMsg1(firstName, orderNumber, checkoutUrl) {
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like your payment didn't go through on order #${orderNumber} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
+function buildMsg1(firstName, productPhrase, checkoutUrl) {
+  const ref = productPhrase ? `your ${productPhrase} order` : 'your order';
+  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
 }
 
-function buildMsg2(firstName, orderNumber) {
-  return `Still having trouble with order #${orderNumber}, ${firstName}? Happens a lot actually - your bank might just need you to call and confirm it was you.\n\nI'm here if you need anything!\n\nDP`;
+function buildMsg2(firstName) {
+  return `Still having trouble, ${firstName}? Happens a lot actually - your bank might just need you to call and confirm it was you.\n\nI'm here if you need anything!\n\nDP`;
 }
 
-function buildMsg3(firstName, checkoutUrl) {
-  return `Hey ${firstName}, your cart's still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nDP`;
+function buildMsg3(firstName, productPhrase, checkoutUrl) {
+  const ref = productPhrase ? `your ${productPhrase}` : 'your cart';
+  return `Hey ${firstName}, ${ref} is still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nDP`;
 }
 
 function buildCheckoutUrl(order, utmContent = 'msg1') {
   const orderId  = order.id;
   const orderKey = order.order_key || '';
-
-  if (!orderKey) {
-    console.warn(`[FAILED] order=${orderId} has no order_key — retry URL may not work`);
-  }
-
-  const base = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
+  if (!orderKey) console.warn(`[FAILED] order=${orderId} has no order_key — retry URL may not work`);
+  const base      = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
   const utmParams = `utm_source=sms&utm_medium=text&utm_campaign=failed_recovery&utm_content=${utmContent}`;
   return `${base}/checkout/order-pay/${orderId}/?pay_for_order=true&key=${orderKey}&${utmParams}`;
+}
+
+// Format a list of product names into a natural short phrase
+// 1 item: "BPC-157" | 2: "BPC-157 and TB-500" | 3: "BPC-157, TB-500 and GHK-Cu" | 4+: "BPC-157 and 3 more"
+function formatProductPhrase(items) {
+  const names = (items || []).map(i => i.name).filter(Boolean);
+  if (!names.length) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]} and ${names.length - 1} more`;
+}
+
+// Merge two product arrays, deduplicating by name (preserves different dosages of same product)
+function mergeProducts(itemsA, itemsB) {
+  const seen = new Set();
+  const merged = [];
+  for (const item of [...(itemsA || []), ...(itemsB || [])]) {
+    const key = item.name || item.product_id;
+    if (key && !seen.has(key)) { seen.add(key); merged.push(item); }
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,43 +68,83 @@ function buildCheckoutUrl(order, utmContent = 'msg1') {
 async function handleOrderFailed(order) {
   const phone       = formatPhone(order.billing?.phone || order.shipping?.phone);
   const firstName   = order.billing?.first_name || 'there';
-  const orderNumber = order.number || order.id;
   const orderId     = String(order.id);
   const checkoutUrl1 = buildCheckoutUrl(order, 'msg1');
   const checkoutUrl3 = buildCheckoutUrl(order, 'msg3');
+
+  // Products from the current (new) failed order — available in webhook payload
+  const newItems = (order.line_items || []).map(i => ({ product_id: i.product_id, name: i.name }));
 
   if (!phone) {
     console.log(`[FAILED] No phone | order=${orderId} — skipping`);
     return;
   }
 
-  // PHONE-LEVEL DEDUP: one failed flow per customer at a time regardless of how many orders fail.
-  // If the customer is already in an active failed flow, update the order_id to the latest
-  // failed order (so recovery via processing/completed cancels correctly) and bail out.
+  // PHONE-LEVEL DEDUP: if customer already has a pending failed flow, merge both
+  // orders into one by updating the message bodies to reference combined products,
+  // and point the order_id at the new order (so recovery detection works correctly).
+  // This prevents parallel flows and avoids bombarding the customer.
   const { data: existingFlow } = await supabase
     .from('sms_scheduled')
-    .select('id, order_id')
+    .select('id, order_id, flow_type')
     .eq('phone', phone)
     .in('flow_type', ['failed-msg1', 'failed-msg2', 'failed-msg3'])
-    .eq('status', 'pending')
-    .limit(1);
+    .eq('status', 'pending');
 
   if (existingFlow && existingFlow.length > 0) {
-    console.log(`[FAILED] Customer ...${phone.slice(-4)} already in failed flow (order=${existingFlow[0].order_id}) — updating to order=${orderId}`);
-    await supabase.from('sms_scheduled')
-      .update({ order_id: orderId })
-      .eq('phone', phone)
-      .in('flow_type', ['failed-msg1', 'failed-msg2', 'failed-msg3'])
-      .eq('status', 'pending');
+    const existingOrderId = existingFlow[0].order_id;
+    console.log(`[FAILED] Customer ...${phone.slice(-4)} already in failed flow (order=${existingOrderId}) — merging with order=${orderId}`);
+
+    // Fetch the existing order's products so we can combine them with the new order's
+    let existingItems = [];
+    try {
+      const authHeader = 'Basic ' + Buffer.from(
+        `${process.env.WC_CONSUMER_KEY}:${process.env.WC_CONSUMER_SECRET}`
+      ).toString('base64');
+      const baseUrl = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${baseUrl}/wp-json/wc/v3/orders/${existingOrderId}`, {
+        headers: { Authorization: authHeader }, signal: controller.signal
+      });
+      clearTimeout(timer);
+      const existingOrder = await res.json();
+      existingItems = (existingOrder.line_items || []).map(i => ({ product_id: i.product_id, name: i.name }));
+    } catch {
+      // If WC fetch fails, fall back to new order's products only
+    }
+
+    const combined   = mergeProducts(existingItems, newItems);
+    const phrase     = formatProductPhrase(combined);
+
+    // Rebuild each pending message with combined product context + new checkout URL
+    const msgMap = {
+      'failed-msg1': buildMsg1(firstName, phrase, checkoutUrl1),
+      'failed-msg2': buildMsg2(firstName),
+      'failed-msg3': buildMsg3(firstName, phrase, checkoutUrl3),
+    };
+
+    for (const row of existingFlow) {
+      const newBody = msgMap[row.flow_type];
+      if (newBody) {
+        await supabase.from('sms_scheduled')
+          .update({ order_id: orderId, message_body: newBody })
+          .eq('id', row.id);
+      }
+    }
+
+    console.log(`[FAILED] Merged | order=${orderId} products="${phrase}" phone=...${phone.slice(-4)}`);
     return;
   }
+
+  const productPhrase = formatProductPhrase(newItems);
 
   // MSG 1 — T+10 minutes
   await scheduleSMS({
     orderId,
     phone,
     flowType: 'failed-msg1',
-    message:  buildMsg1(firstName, orderNumber, checkoutUrl1),
+    message:  buildMsg1(firstName, productPhrase, checkoutUrl1),
     sendAt:   new Date(Date.now() + 10 * 60 * 1000).toISOString()
   });
 
@@ -93,7 +153,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg2',
-    message:  buildMsg2(firstName, orderNumber),
+    message:  buildMsg2(firstName),
     sendAt:   new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
   });
 
@@ -102,7 +162,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg3',
-    message:  buildMsg3(firstName, checkoutUrl3),
+    message:  buildMsg3(firstName, productPhrase, checkoutUrl3),
     sendAt:   new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   });
 
@@ -183,7 +243,7 @@ async function backfillFailedOrders({ dryRun = false } = {}) {
 
       const firstName   = order.billing?.first_name || 'there';
       const checkoutUrl = buildCheckoutUrl(order, 'backfill');
-      const msg3        = buildMsg3(firstName, checkoutUrl);
+      const msg3        = buildMsg3(firstName, '', checkoutUrl);
 
       console.log(`[BACKFILL-FAILED] ${dryRun ? 'DRY RUN' : 'SENDING'} | order=${orderId} phone=...${phone.slice(-4)}`);
 
