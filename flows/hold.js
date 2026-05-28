@@ -40,7 +40,6 @@ function paymentInstructions(method, handle, orderNumber) {
   if (method === 'Zelle') {
     return `Zelle to ${handle}. Please use your order number #${orderNumber} as the payment reference.`;
   }
-  // Venmo
   return `Pay via Venmo to ${handle}. Just include your name in the notes so I can match it.`;
 }
 
@@ -54,6 +53,25 @@ function buildMsg2(firstName, orderNumber, total, handle, method) {
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
   return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} via ${method} to ${handle}${method === 'Zelle' ? ` - use #${orderNumber} as your reference` : ''}.\n\nJust reply if anything's up. DP`;
+}
+
+// ---------------------------------------------------------------------------
+// Combined builders — two on-hold orders, one merged message
+// ---------------------------------------------------------------------------
+
+function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
+  const notes = method === 'Zelle'
+    ? `Just include your name as the reference so I can match both.`
+    : `Just pop your name in the notes so I can match both.`;
+  return `Hey ${firstName}! It's DP from Vici Peptides. Looks like you've got two orders waiting - ${orderRef}. Let's lock them both in!\n\nSend $${combinedTotal} via ${method} to ${handle}. ${notes}\n\nOnce I see it I'll pack up both straight away!`;
+}
+
+function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method) {
+  return `Hey ${firstName}, checking in on orders ${orderRef}. I'm holding the stock for both!\n\nWhen you get a chance, send $${combinedTotal} via ${method} to ${handle}.\n\nAny issues, just reply here. DP`;
+}
+
+function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method) {
+  return `${firstName}, last check-in on orders ${orderRef}. Holding stock for both but need to release it by end of today.\n\nSend $${combinedTotal} via ${method} to ${handle}.\n\nJust reply if anything's up. DP`;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,25 +91,55 @@ async function handleOrderOnHold(order) {
     return;
   }
 
-  // PHONE-LEVEL DEDUP: one hold flow per customer at a time.
-  // If they already have pending hold messages (e.g. two on-hold orders in a row),
-  // update the order_id to the latest and bail — no duplicate flows.
-  const { supabase } = require('../db');
+  // PHONE-LEVEL DEDUP: if customer already has a pending hold flow, merge both
+  // orders into a single combined message (updated in-place) rather than sending
+  // a second parallel flow. They still get chased — just for both orders at once.
   const { data: existingFlow } = await supabase
     .from('sms_scheduled')
-    .select('id, order_id')
+    .select('id, order_id, flow_type')
     .eq('phone', phone)
     .in('flow_type', ['hold-msg1', 'hold-msg2', 'hold-msg3'])
-    .eq('status', 'pending')
-    .limit(1);
+    .eq('status', 'pending');
 
   if (existingFlow && existingFlow.length > 0) {
-    console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingFlow[0].order_id}) — updating to order=${orderId}`);
-    await supabase.from('sms_scheduled')
-      .update({ order_id: orderId })
-      .eq('phone', phone)
-      .in('flow_type', ['hold-msg1', 'hold-msg2', 'hold-msg3'])
-      .eq('status', 'pending');
+    const existingOrderId = existingFlow[0].order_id;
+    console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingOrderId}) — merging with order=${orderId}`);
+
+    // Fetch the existing order to get its number and total for the combined message
+    let combinedTotal = total;
+    let orderRef = `#${orderNumber}`;
+    try {
+      const authHeader = 'Basic ' + Buffer.from(
+        `${process.env.WC_CONSUMER_KEY}:${process.env.WC_CONSUMER_SECRET}`
+      ).toString('base64');
+      const baseUrl = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
+      const res = await fetch(`${baseUrl}/wp-json/wc/v3/orders/${existingOrderId}`, { headers: { Authorization: authHeader } });
+      const existingOrder = await res.json();
+      const existingOrderNumber = existingOrder.number || existingOrderId;
+      const sum = (parseFloat(existingOrder.total || 0) + parseFloat(total)).toFixed(2);
+      combinedTotal = sum;
+      orderRef = `#${existingOrderNumber} and #${orderNumber}`;
+    } catch {
+      orderRef = `#${existingOrderId} and #${orderNumber}`;
+    }
+
+    // Rebuild each pending message to reference both orders
+    const msgMap = {
+      'hold-msg1': buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method),
+      'hold-msg2': buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method),
+      'hold-msg3': buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method)
+    };
+
+    for (const row of existingFlow) {
+      const newBody = msgMap[row.flow_type];
+      if (newBody) {
+        await supabase.from('sms_scheduled')
+          .update({ order_id: orderId, message_body: newBody })
+          .eq('id', row.id);
+      }
+    }
+
+    console.log(`[HOLD] Merged hold flow | orders=${orderRef} total=$${combinedTotal} phone=...${phone.slice(-4)}`);
     return;
   }
 
