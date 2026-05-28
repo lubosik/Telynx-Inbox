@@ -12,6 +12,142 @@
 const { supabase }              = require('../db');
 const { sendAndLog, scheduleSMS } = require('./utils');
 
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+// ---------------------------------------------------------------------------
+// Shared context builder — city from sms_contacts, products from WooCommerce
+// ---------------------------------------------------------------------------
+
+async function buildShipmentContext(phone, wooOrderId) {
+  let city = '';
+  let products = [];
+
+  try {
+    const { data: contact } = await supabase
+      .from('sms_contacts')
+      .select('city, state')
+      .eq('phone', phone)
+      .maybeSingle();
+    if (contact?.city) city = contact.city + (contact.state ? ', ' + contact.state : '');
+  } catch {}
+
+  if (wooOrderId) {
+    try {
+      const authHeader = 'Basic ' + Buffer.from(
+        `${process.env.WC_CONSUMER_KEY}:${process.env.WC_CONSUMER_SECRET}`
+      ).toString('base64');
+      const baseUrl = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
+      const res = await fetch(`${baseUrl}/wp-json/wc/v3/orders/${wooOrderId}`, { headers: { Authorization: authHeader } });
+      const order = await res.json();
+      products = (order.line_items || []).map(item => `${item.quantity}x ${item.name}`).filter(Boolean);
+    } catch {}
+  }
+
+  return { city, products };
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter personalisation helpers — both fall back silently on any failure
+// ---------------------------------------------------------------------------
+
+async function generatePersonalisedShipped(baseMessage, context, orderId) {
+  if (!process.env.OPENROUTER_API_KEY) return null;
+  const { city, products } = context;
+  if (!city && products.length === 0) return null;
+
+  const contextParts = [];
+  if (products.length) contextParts.push(`Products shipped: ${products.join(', ')}`);
+  if (city)            contextParts.push(`Destination: ${city}`);
+
+  const system = `You are DP, founder of Vici Peptides. You send personal SMS to customers. Warm, excited, direct. No em dashes. No hashtags. No asterisks. Max 400 characters total for the final message.`;
+  const user   = `Base SMS to modify:
+"${baseMessage}"
+
+Customer context:
+${contextParts.map(p => `- ${p}`).join('\n')}
+
+Task: Add ONE natural sentence after the first sentence. Mention what they ordered and that it's heading to their city.
+Example: "Your BPC-157 and TB-500 are on their way to London!"
+Keep everything else exactly the same, including the FedEx tracking line and the opt-out line.
+Return ONLY the modified message. Nothing else.`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
+        'X-Title': 'Vici SMS'
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        max_tokens: 175,
+        temperature: 0.4
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    const data = await response.json();
+    const msg = data.choices?.[0]?.message?.content?.trim();
+    if (!msg || msg.length > 420 || msg.includes('—') || msg.includes('–')) {
+      console.log(`[PERSONALISE] Shipped: invalid — fallback | order=${orderId}`);
+      return null;
+    }
+    console.log(`[PERSONALISE] Shipped generated | order=${orderId} chars=${msg.length}`);
+    return msg;
+  } catch (err) {
+    console.error(`[PERSONALISE] Shipped failed: ${err.message} — fallback | order=${orderId}`);
+    return null;
+  }
+}
+
+async function generatePersonalisedDelivery(baseMessage, city, identifier) {
+  if (!process.env.OPENROUTER_API_KEY || !city) return null;
+
+  const system = `You are DP, founder of Vici Peptides. You send personal SMS to customers. Warm, caring, direct. No em dashes. No hashtags. No asterisks. Max 320 characters total.`;
+  const user   = `Base SMS to modify:
+"${baseMessage}"
+
+Customer location: ${city}
+
+Task: Naturally mention their city in the check-in — for example change "everything arrived safe and sound" to "everything arrived safe and sound to ${city}". Keep the rest of the message exactly the same.
+Return ONLY the modified message. Nothing else.`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
+        'X-Title': 'Vici SMS'
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        max_tokens: 100,
+        temperature: 0.4
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    const data = await response.json();
+    const msg = data.choices?.[0]?.message?.content?.trim();
+    if (!msg || msg.length > 320 || msg.includes('—') || msg.includes('–')) return null;
+    console.log(`[PERSONALISE] Delivery generated | id=${identifier} chars=${msg.length}`);
+    return msg;
+  } catch (err) {
+    console.error(`[PERSONALISE] Delivery failed: ${err.message} — fallback`);
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Message builders — verbatim from Dom's approved copy
 // ---------------------------------------------------------------------------
@@ -187,10 +323,16 @@ async function pollForCarrierScans() {
           }
         }
 
-        const orderId = record.woo_order_id || record.shipstation_shipment_id;
-        const sent    = await sendAndLog(
+        const orderId    = record.woo_order_id || record.shipstation_shipment_id;
+        const baseShipped = buildShippedMessage(firstName, record.woo_order_number || record.woo_order_id, record.tracking_number);
+
+        // Build context once — shared for shipped + delivery personalisation
+        const shipContext = await buildShipmentContext(phone, record.woo_order_id);
+        const personalisedShipped = await generatePersonalisedShipped(baseShipped, shipContext, orderId);
+
+        const sent = await sendAndLog(
           phone,
-          buildShippedMessage(firstName, record.woo_order_number || record.woo_order_id, record.tracking_number),
+          personalisedShipped || baseShipped,
           orderId,
           'shipped-msg1'
         );
@@ -212,12 +354,14 @@ async function pollForCarrierScans() {
             }
           }
 
-          // Schedule delivery check-in 3 days later
+          // Schedule personalised delivery check-in 3 days later
+          const baseDelivery = buildDeliveryMessage(firstName);
+          const personalisedDelivery = await generatePersonalisedDelivery(baseDelivery, shipContext.city, orderId);
           await scheduleSMS({
             orderId,
             phone,
             flowType: 'delivered-msg1',
-            message:  buildDeliveryMessage(firstName),
+            message:  personalisedDelivery || baseDelivery,
             sendAt:   new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
           });
         }
@@ -315,8 +459,13 @@ async function checkAndSendDeliverySMS() {
       .eq('phone', order.contact_phone)
       .maybeSingle();
 
-    const firstName = contact?.name?.split(' ')?.[0] || 'there';
-    const msg       = buildDeliveryMessage(firstName);
+    const firstName  = contact?.name?.split(' ')?.[0] || 'there';
+    const baseMsg    = buildDeliveryMessage(firstName);
+
+    // Fetch city for personalisation (products not needed for delivery check-in)
+    const { city: deliveryCity } = await buildShipmentContext(order.contact_phone, null);
+    const personalisedMsg = await generatePersonalisedDelivery(baseMsg, deliveryCity, String(order.woo_order_id));
+    const msg = personalisedMsg || baseMsg;
 
     // Atomic claim on sms_orders
     const { data: claimed } = await supabase

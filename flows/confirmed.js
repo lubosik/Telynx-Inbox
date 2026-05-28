@@ -21,15 +21,18 @@ const { supabase } = require('../db');
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // ---------------------------------------------------------------------------
-// Customer order count (WooCommerce completed orders)
+// Count prior SUCCESSFUL orders for this customer, excluding the current one.
 //
-// NOTE: WooCommerce's ?email= filter is unreliable on this store — it ignores
-// the param and returns recent orders from anyone. Fix:
-//   1. Prefer ?customer=<id> when we have a registered customer_id (works reliably).
-//   2. Fall back to fetching by email with per_page=100 and filtering client-side.
+// "Successful" = processing or completed. Failed and on-hold do NOT count —
+// those haven't actually gone through. This determines new vs returning.
+//
+// NOTE: WooCommerce's ?email= filter is unreliable — ignores the param and
+// returns recent orders from anyone. Fix:
+//   1. Prefer ?customer=<id> when registered (filter works correctly).
+//   2. Fall back to per_page=100 + client-side email filter for guests.
 // ---------------------------------------------------------------------------
 
-async function getCompletedOrderCount(email, customerId) {
+async function getPriorSuccessfulOrderCount(email, customerId, currentOrderId) {
   try {
     const baseUrl    = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
     const authHeader = 'Basic ' + Buffer.from(
@@ -37,8 +40,9 @@ async function getCompletedOrderCount(email, customerId) {
     ).toString('base64');
 
     if (customerId && customerId > 0) {
-      const res    = await fetch(
-        `${baseUrl}/wp-json/wc/v3/orders?customer=${customerId}&status=completed&per_page=10`,
+      // exclude= keeps the current order out of the count even if it's already completed
+      const res = await fetch(
+        `${baseUrl}/wp-json/wc/v3/orders?customer=${customerId}&status=completed,processing&per_page=20&exclude=${currentOrderId}`,
         { headers: { Authorization: authHeader } }
       );
       const orders = await res.json();
@@ -47,15 +51,18 @@ async function getCompletedOrderCount(email, customerId) {
 
     if (!email) return 0;
 
-    const res    = await fetch(
-      `${baseUrl}/wp-json/wc/v3/orders?status=completed&per_page=100`,
+    const res = await fetch(
+      `${baseUrl}/wp-json/wc/v3/orders?status=completed,processing&per_page=100`,
       { headers: { Authorization: authHeader } }
     );
     const orders = await res.json();
     if (!Array.isArray(orders)) return 0;
 
     const normalised = email.toLowerCase().trim();
-    return orders.filter(o => (o.billing?.email || '').toLowerCase().trim() === normalised).length;
+    return orders.filter(o =>
+      (o.billing?.email || '').toLowerCase().trim() === normalised &&
+      String(o.id) !== String(currentOrderId)
+    ).length;
   } catch {
     return 0;
   }
@@ -245,15 +252,17 @@ async function handleOrderConfirmed(order) {
   // (which cancelScheduled(orderId) would never touch) are now cleared.
   await cancelScheduledForCustomer(phone);
 
-  // Determine new vs returning
-  const completedOrders = await getCompletedOrderCount(email, customerId);
-  const isNew      = completedOrders === 0;
+  // Determine new vs returning based on prior SUCCESSFUL orders only.
+  // Failed and on-hold orders are excluded — they don't count.
+  // The current order itself is excluded so a direct completed webhook doesn't self-count.
+  const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId);
+  const isNew      = priorSuccessful === 0;
   const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
   const baseMessage = isNew
     ? buildMsg1A(firstName, orderNumber)
     : buildMsg1B(firstName, orderNumber);
 
-  console.log(`[CONFIRMED] order=${orderId} type=${flowType} completedOrders=${completedOrders}`);
+  console.log(`[CONFIRMED] order=${orderId} type=${flowType} priorSuccessful=${priorSuccessful}`);
 
   // Build customer context and attempt OpenRouter personalisation
   let finalMessage = baseMessage;
