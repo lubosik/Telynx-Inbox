@@ -256,19 +256,25 @@ async function handleOrderOnHold(order) {
     console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingOrderId}) — merging with order=${orderId}`);
 
     let combinedTotal = total;
-    let orderRef = `#${orderNumber}`;
+    let orderRef = `#${orderId}`;
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(
         `${wcBaseUrl()}/wp-json/wc/v3/orders/${existingOrderId}`,
-        { headers: { Authorization: wcAuthHeader() } }
+        { headers: { Authorization: wcAuthHeader() }, signal: controller.signal }
       );
+      clearTimeout(timer);
       const existingOrder = await res.json();
       const existingOrderNumber = existingOrder.number || existingOrderId;
       const sum = (parseFloat(existingOrder.total || 0) + parseFloat(total)).toFixed(2);
       combinedTotal = sum;
+      // Use display numbers from WC (order.number) — these are what customers see on invoices
       orderRef = `#${existingOrderNumber} and #${orderNumber}`;
     } catch {
-      orderRef = `#${existingOrderId} and #${orderNumber}`;
+      // WC fetch failed — fall back to raw post IDs (unique by definition, never duplicates)
+      orderRef = `#${existingOrderId} and #${orderId}`;
+      console.warn(`[HOLD] WC fetch failed for order ${existingOrderId} — using post IDs as fallback`);
     }
 
     const msgMap = {
