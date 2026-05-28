@@ -167,6 +167,31 @@ async function handleOrderFailed(order) {
   });
 
   console.log(`[FAILED] Flow scheduled | order=${orderId} phone=...${phone.slice(-4)}`);
+
+  // Race-condition guard: if two webhooks arrived simultaneously, both may have
+  // passed the pending check before either committed. Cancel any older duplicate
+  // rows that now exist for the same phone, keeping only the newest order's flow.
+  await deduplicateFailedFlow(phone, orderId);
+}
+
+// After scheduling, cancel any older pending failed rows for the same phone
+// that belong to a different order — keeps only the most recently scheduled flow.
+async function deduplicateFailedFlow(phone, currentOrderId) {
+  const { data: others } = await supabase
+    .from('sms_scheduled')
+    .select('id, order_id, flow_type')
+    .eq('phone', phone)
+    .in('flow_type', ['failed-msg1', 'failed-msg2', 'failed-msg3'])
+    .eq('status', 'pending')
+    .neq('order_id', currentOrderId);
+
+  if (!others?.length) return;
+
+  console.log(`[FAILED] Race dedup: cancelling ${others.length} stale rows for phone=...${phone.slice(-4)}`);
+  const ids = others.map(r => r.id);
+  await supabase.from('sms_scheduled')
+    .update({ status: 'cancelled' })
+    .in('id', ids);
 }
 
 // ---------------------------------------------------------------------------
