@@ -3,7 +3,7 @@ const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
-const { cancelScheduledForCustomer } = require('../flows/utils');
+const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -70,6 +70,25 @@ module.exports = (broadcastSSE) => {
         .eq('telnyx_message_id', messageId)
         .maybeSingle();
       if (existing) { console.log('Duplicate message, skipping:', messageId); return; }
+
+      // STOP / opt-out detection — check before anything else
+      const stopPattern = /^(stop|stopall|stop all|unsubscribe|cancel|end|quit|opt[\s-]?out|stop the messages|stop texting|stop messaging|no more texts|no more messages|these emails|stop these emails)$/i;
+      if (stopPattern.test(text.trim())) {
+        console.log(`[OPT-OUT] Received STOP from ...${fromPhone.slice(-4)}`);
+        await markOptedOut(fromPhone);
+        await cancelScheduledForCustomer(fromPhone).catch(() => {});
+        // Log the inbound stop message but do not send any auto-reply
+        await supabase.from('sms_messages').insert({
+          telnyx_message_id: messageId,
+          contact_phone: fromPhone,
+          direction: 'inbound',
+          body: text,
+          status: 'delivered',
+          created_at: payload.received_at || new Date().toISOString()
+        }).catch(() => {});
+        broadcastSSE({ type: 'opt_out', phone: fromPhone });
+        return;
+      }
 
       await supabase.from('sms_contacts').upsert({
         phone: fromPhone,

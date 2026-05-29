@@ -112,38 +112,27 @@ function detectPaymentMethod(order) {
 // Message builders
 // ---------------------------------------------------------------------------
 
-function paymentInstructions(method, handle, orderNumber) {
-  if (method === 'Zelle') {
-    return `Zelle to ${handle}. Please use your order number #${orderNumber} as the payment reference.`;
-  }
-  return `Pay via Venmo to ${handle}. Just include your name in the notes so I can match it.`;
-}
-
 function buildMsg1(firstName, orderNumber, total, handle, method, products, city) {
   const productPhrase = products && products.length
     ? ` for your ${formatProductList(products)}`
     : '';
-  const cityPhrase = city ? ` and get it straight to ${city}` : '';
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Just got your order #${orderNumber}${productPhrase} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll pack it up${cityPhrase} straight away!\n\nDP`;
+  const cityPhrase = city ? ` to ${city}` : '';
+  return `Hey ${firstName}! It's DP from Vici Peptides. Just got your order #${orderNumber}${productPhrase}!\n\nSend $${total} to ${handle} via ${method} to lock it in. Once I see it I'll ship it${cityPhrase} straight away!\n\nDP`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, checking in on order #${orderNumber}. I'm holding the stock for you!\n\nWhen you get a chance, just send $${total} to ${handle} via ${method}${method === 'Zelle' ? ` (ref: #${orderNumber})` : ''}.\n\nAny issues at all, just reply here.\nDP`;
+  return `Hey ${firstName}, checking in on order #${orderNumber}. Holding your stock!\n\nSend $${total} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nDP`;
 }
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
-  return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} to ${handle} via ${method}${method === 'Zelle' ? ` - use #${orderNumber} as your reference` : ''} to secure it.\n\nJust reply if anything's up. DP`;
+  return `${firstName}, last call on order #${orderNumber}. Need to release the stock by end of today.\n\nSend $${total} to ${handle} via ${method} to secure it. Just reply if you need anything.\n\nDP`;
 }
 
-/**
- * Nudge sent when an on-hold order fires but the customer ALSO had a different
- * failed order. Sent ~2 hours after the on-hold message so they're not bombarded.
- */
 function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, checkoutUrl) {
   const productPhrase = failedProducts && failedProducts.length
     ? ` for your ${formatProductList(failedProducts)}`
     : '';
-  return `Hey ${firstName}, one more thing - I also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still looking to grab it? Here's the link: ${checkoutUrl}\n\nDP`;
+  return `Hey ${firstName}, also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still want it? ${checkoutUrl}\n\nDP`;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,18 +140,15 @@ function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, check
 // ---------------------------------------------------------------------------
 
 function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
-  const notes = method === 'Zelle'
-    ? `Just include your name as the reference so I can match both.`
-    : `Just pop your name in the notes so I can match both.`;
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like you've got two orders waiting - ${orderRef}. Let's lock them both in!\n\nSend $${combinedTotal} via ${method} to ${handle}. ${notes}\n\nOnce I see it I'll pack up both straight away!\n\nDP`;
+  return `Hey ${firstName}! It's DP from Vici Peptides. You've got two orders waiting - ${orderRef}.\n\nSend $${combinedTotal} to ${handle} via ${method} to lock them both in. I'll ship them straight away!\n\nDP`;
 }
 
 function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, checking in on orders ${orderRef}. I'm holding the stock for both!\n\nWhen you get a chance, send $${combinedTotal} via ${method} to ${handle}.\n\nAny issues, just reply here. DP`;
+  return `Hey ${firstName}, checking in on orders ${orderRef}. Holding stock for both!\n\nSend $${combinedTotal} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nDP`;
 }
 
 function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method) {
-  return `${firstName}, last check-in on orders ${orderRef}. Holding stock for both but need to release it by end of today.\n\nSend $${combinedTotal} via ${method} to ${handle}.\n\nJust reply if anything's up. DP`;
+  return `${firstName}, last call on orders ${orderRef}. Need to release the stock by end of today.\n\nSend $${combinedTotal} to ${handle} via ${method} to secure them.\n\nDP`;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,37 @@ function formatPhone(raw) {
 }
 
 // ---------------------------------------------------------------------------
+// Opt-out — stored as a sentinel row in sms_sent_log so no schema change needed
+// order_id = 'OPTOUT_<digits>', flow_type = 'opted-out'
+// ---------------------------------------------------------------------------
+
+async function isOptedOut(phone) {
+  if (!phone) return false;
+  try {
+    const { data } = await supabase
+      .from('sms_sent_log')
+      .select('id')
+      .eq('phone', phone)
+      .eq('flow_type', 'opted-out')
+      .maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
+async function markOptedOut(phone) {
+  if (!phone) return;
+  const orderId = 'OPTOUT_' + phone.replace(/\D/g, '');
+  await supabase.from('sms_sent_log').upsert({
+    order_id: orderId,
+    flow_type: 'opted-out',
+    phone,
+    message_body: 'OPT_OUT'
+  }, { onConflict: 'order_id,flow_type', ignoreDuplicates: true }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Deduplication
 // ---------------------------------------------------------------------------
 
@@ -41,6 +72,12 @@ async function alreadySent(orderId, flowType) {
 async function sendAndLog(phone, message, orderId, flowType) {
   if (!phone || !phone.startsWith('+')) {
     console.log(`[SMS] SKIP invalid phone | order=${orderId} flow=${flowType}`);
+    return false;
+  }
+
+  // Opt-out check — never send to someone who said STOP
+  if (await isOptedOut(phone)) {
+    console.log(`[SMS] SKIP opted out | order=${orderId} flow=${flowType} phone=...${phone.slice(-4)}`);
     return false;
   }
 
@@ -247,6 +284,8 @@ async function checkOrderRecovered(orderId) {
 module.exports = {
   formatPhone,
   alreadySent,
+  isOptedOut,
+  markOptedOut,
   sendAndLog,
   scheduleSMS,
   cancelScheduled,
