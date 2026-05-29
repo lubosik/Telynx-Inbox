@@ -119,11 +119,12 @@ function paymentInstructions(method, handle, orderNumber) {
   return `Pay via Venmo to ${handle}. Just include your name in the notes so I can match it.`;
 }
 
-function buildMsg1(firstName, orderNumber, total, handle, method, products) {
+function buildMsg1(firstName, orderNumber, total, handle, method, products, city) {
   const productPhrase = products && products.length
     ? ` for your ${formatProductList(products)}`
     : '';
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Just got your order #${orderNumber}${productPhrase} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll get it packed up straight away!\n\nDP`;
+  const cityPhrase = city ? ` and get it straight to ${city}` : '';
+  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Just got your order #${orderNumber}${productPhrase} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll pack it up${cityPhrase} straight away!\n\nDP`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
@@ -174,6 +175,7 @@ async function handleOrderOnHold(order) {
   const orderNumber = order.number || order.id;
   const orderId     = String(order.id);
   const total       = order.total || '0.00';
+  const city        = order.billing?.city || order.shipping?.city || '';
   const { label: method, handle } = detectPaymentMethod(order);
 
   if (!phone) {
@@ -340,7 +342,7 @@ async function handleOrderOnHold(order) {
     orderId,
     phone,
     flowType: 'hold-msg1',
-    message:  buildMsg1(firstName, orderNumber, total, handle, method, currentProducts),
+    message:  buildMsg1(firstName, orderNumber, total, handle, method, currentProducts, city),
     sendAt:   new Date(Date.now() + 30 * 1000).toISOString()
   });
 

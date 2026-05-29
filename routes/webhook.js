@@ -3,6 +3,7 @@ const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
+const { cancelScheduledForCustomer } = require('../flows/utils');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -100,6 +101,15 @@ module.exports = (broadcastSSE) => {
       }).eq('phone', fromPhone);
 
       await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }).catch(() => {});
+
+      // Customer replied — remove them from all pending automated sequences immediately
+      const cancelled = await cancelScheduledForCustomer(fromPhone).catch(err => {
+        console.error('[INBOUND] Sequence cancel error:', err.message);
+        return 0;
+      });
+      if (cancelled > 0) {
+        console.log(`[INBOUND] Cancelled ${cancelled} pending messages for ...${fromPhone.slice(-4)} (customer replied)`);
+      }
 
       broadcastSSE({ type: 'new_message', phone: fromPhone, body: text, direction: 'inbound' });
 

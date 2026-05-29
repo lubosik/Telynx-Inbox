@@ -315,15 +315,26 @@ Return ONLY the modified message text. Nothing else.`;
 }
 
 // ---------------------------------------------------------------------------
-// Message builders — verbatim from Dom's approved copy
+// Message builders
+// products = array of item names, city = billing city string (both optional)
 // ---------------------------------------------------------------------------
 
-function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} is confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
+function buildMsg1A(firstName, orderNumber, products, city) {
+  const productList = (products || []).filter(Boolean);
+  const productPhrase = productList.length
+    ? `Your ${productList.length === 1 ? productList[0] : productList.slice(0, -1).join(', ') + ' and ' + productList[productList.length - 1]}`
+    : `Order #${orderNumber}`;
+  const cityPhrase = city ? ` on its way to ${city}` : '';
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\n${productPhrase} is confirmed${cityPhrase} - order #${orderNumber} and we are on it. I will text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
 }
 
-function buildMsg1B(firstName, orderNumber) {
-  return `${firstName}! Back again - you're the best. Order #${orderNumber} is confirmed and going straight to the front of the queue.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nAnything you need or want to try next, just text me directly.\n\nDP`;
+function buildMsg1B(firstName, orderNumber, products, city) {
+  const productList = (products || []).filter(Boolean);
+  const productPhrase = productList.length
+    ? `Your ${productList.length === 1 ? productList[0] : productList.slice(0, -1).join(', ') + ' and ' + productList[productList.length - 1]}`
+    : `Order #${orderNumber}`;
+  const cityPhrase = city ? ` heading to ${city}` : '';
+  return `${firstName}! Back again - you're the best. ${productPhrase} is${cityPhrase} going straight to the front of the queue - order #${orderNumber} confirmed.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nAnything you need or want to try next, just text me directly.\n\nDP`;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,9 +389,14 @@ async function handleOrderConfirmed(order) {
   const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId);
   const isNew      = priorSuccessful === 0;
   const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
+
+  // Extract products and city for direct template personalization
+  const products = (order.line_items || []).map(i => i.name).filter(Boolean);
+  const city     = order.billing?.city || order.shipping?.city || '';
+
   const baseMessage = isNew
-    ? buildMsg1A(firstName, orderNumber)
-    : buildMsg1B(firstName, orderNumber);
+    ? buildMsg1A(firstName, orderNumber, products, city)
+    : buildMsg1B(firstName, orderNumber, products, city);
 
   console.log(`[CONFIRMED] order=${orderId} type=${flowType} priorSuccessful=${priorSuccessful}`);
 
