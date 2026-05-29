@@ -325,7 +325,7 @@ function buildMsg1A(firstName, orderNumber, products, city) {
     ? `Your ${productList.length === 1 ? productList[0] : productList.slice(0, -1).join(', ') + ' and ' + productList[productList.length - 1]}`
     : `Order #${orderNumber}`;
   const cityPhrase = city ? ` on its way to ${city}` : '';
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\n${productPhrase} is confirmed${cityPhrase} - order #${orderNumber} and we are on it. I will text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\n${productPhrase} is confirmed${cityPhrase} - order #${orderNumber} and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
 }
 
 function buildMsg1B(firstName, orderNumber, products, city) {

@@ -18,7 +18,7 @@ const { supabase } = require('../db');
 
 function buildMsg1(firstName, productPhrase, checkoutUrl) {
   const ref = productPhrase ? `your ${productPhrase} order` : 'your order';
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
+  return `Hey ${firstName}! It's DP from Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
 }
 
 function buildMsg2(firstName) {
