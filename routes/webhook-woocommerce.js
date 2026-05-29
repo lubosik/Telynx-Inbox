@@ -7,7 +7,7 @@ const { searchContactByEmail } = require('../ghl');
 // SMS flows
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
 const { handleOrderOnHold }                       = require('../flows/hold');
-const { handleOrderConfirmed }                    = require('../flows/confirmed');
+const { handleOrderConfirmed, handleOrderShipped } = require('../flows/confirmed');
 const { cancelScheduled, cancelScheduledForCustomer } = require('../flows/utils');
 
 // Resolve a phone number for an order using multiple fallbacks:
@@ -178,16 +178,21 @@ module.exports = (broadcastSSE) => {
           await handleOrderOnHold(order);
           break;
 
-        case 'processing':
-        case 'completed': {
-          // Cancel by order ID (legacy — covers the current order's own scheduled rows)
+        case 'processing': {
+          // Payment received — cancel any pending failed/hold flows, send confirmation
           await handleOrderRecovered(orderId);
-          // Also cancel by phone — clears failed/hold flows from prior order IDs
-          // (the Harriet fix: prior failed orders 4214/4216 cancelled when 4233 processes)
           const resolvedPhone = await resolvePhone(order);
           if (resolvedPhone) await cancelScheduledForCustomer(resolvedPhone);
-          // Send confirmed SMS (deduped — fires once per order)
           await handleOrderConfirmed(order);
+          break;
+        }
+
+        case 'completed': {
+          // Order shipped — cancel any remaining failed/hold flows, send tracking SMS
+          await handleOrderRecovered(orderId);
+          const resolvedPhoneC = await resolvePhone(order);
+          if (resolvedPhoneC) await cancelScheduledForCustomer(resolvedPhoneC);
+          await handleOrderShipped(order);
           break;
         }
 

@@ -179,17 +179,20 @@ async function cancelScheduled(orderId) {
   }
 }
 
-// Cancel ALL pending scheduled messages for a customer by phone number.
-// Used when a customer successfully pays — clears failed/hold flows from
-// any prior order IDs that cancelScheduled(orderId) would miss.
-async function cancelScheduledForCustomer(phone) {
+// Cancel pending scheduled messages for a customer by phone number.
+// Pass flowTypes array to restrict which flow types are cancelled.
+// Omit flowTypes (or pass null) to cancel all pending messages.
+async function cancelScheduledForCustomer(phone, flowTypes = null) {
   if (!phone) return 0;
-  const { data } = await supabase
+  let query = supabase
     .from('sms_scheduled')
     .update({ status: 'cancelled' })
     .eq('phone', phone)
-    .eq('status', 'pending')
-    .select('id');
+    .eq('status', 'pending');
+  if (flowTypes && flowTypes.length > 0) {
+    query = query.in('flow_type', flowTypes);
+  }
+  const { data } = await query.select('id');
   const count = data?.length || 0;
   if (count > 0) {
     console.log(`[SCHEDULE] Cancelled ${count} pending messages | phone=...${phone.slice(-4)}`);

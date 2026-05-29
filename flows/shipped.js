@@ -343,7 +343,7 @@ async function pollForCarrierScans() {
             .update({ shipped_sms_sent: true, shipped_at: now, updated_at: now })
             .eq('id', record.id);
 
-          // Keep sms_orders in sync for delivery cron compatibility
+          // Keep sms_orders in sync
           if (record.woo_order_id) {
             const wooId = parseInt(record.woo_order_id, 10);
             if (!isNaN(wooId)) {
@@ -353,17 +353,7 @@ async function pollForCarrierScans() {
                 .eq('shipped_sms_sent', false);
             }
           }
-
-          // Schedule personalised delivery check-in 3 days later
-          const baseDelivery = buildDeliveryMessage(firstName);
-          const personalisedDelivery = await generatePersonalisedDelivery(baseDelivery, shipContext.city, orderId);
-          await scheduleSMS({
-            orderId,
-            phone,
-            flowType: 'delivered-msg1',
-            message:  personalisedDelivery || baseDelivery,
-            sendAt:   new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
-          });
+          // Delivery check-in disabled — holding until FedEx tracking is wired
         }
       } else {
         console.log(`[POLL] Shipment ${record.shipstation_shipment_id} status=${currentStatus} — not yet with carrier`);
@@ -434,53 +424,9 @@ function sleep(ms) {
 // (new orders use sms_scheduled queue instead)
 // ---------------------------------------------------------------------------
 
+// Delivery check-in disabled — holding until FedEx/AfterShip tracking is wired up
 async function checkAndSendDeliverySMS() {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: shippedOrders } = await supabase
-    .from('sms_orders')
-    .select('id, contact_phone, woo_order_id, shipped_at')
-    .eq('shipped_sms_sent', true)
-    .eq('delivery_sms_sent', false)
-    .eq('order_sms_sent', true)
-    .gte('shipped_at', thirtyDaysAgo);
-
-  if (!shippedOrders?.length) return 0;
-
-  let sent = 0;
-  const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
-
-  for (const order of shippedOrders) {
-    const isDelivered = order.shipped_at && new Date(order.shipped_at) < fiveDaysAgo;
-    if (!isDelivered) continue;
-
-    const { data: contact } = await supabase
-      .from('sms_contacts')
-      .select('name')
-      .eq('phone', order.contact_phone)
-      .maybeSingle();
-
-    const firstName  = contact?.name?.split(' ')?.[0] || 'there';
-    const baseMsg    = buildDeliveryMessage(firstName);
-
-    // Fetch city for personalisation (products not needed for delivery check-in)
-    const { city: deliveryCity } = await buildShipmentContext(order.contact_phone, null);
-    const personalisedMsg = await generatePersonalisedDelivery(baseMsg, deliveryCity, String(order.woo_order_id));
-    const msg = personalisedMsg || baseMsg;
-
-    // Atomic claim on sms_orders
-    const { data: claimed } = await supabase
-      .from('sms_orders')
-      .update({ delivery_sms_sent: true, delivered_at: new Date().toISOString(), status: 'delivered' })
-      .eq('id', order.id)
-      .eq('delivery_sms_sent', false)
-      .select('id');
-
-    if (!claimed?.length) continue;
-
-    const sent_ = await sendAndLog(order.contact_phone, msg, String(order.woo_order_id), 'delivered-msg1');
-    if (sent_) sent++;
-  }
-  return sent;
+  return 0;
 }
 
 // ---------------------------------------------------------------------------

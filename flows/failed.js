@@ -18,11 +18,13 @@ const { supabase } = require('../db');
 
 function buildMsg1(firstName, productPhrase, checkoutUrl) {
   const ref = productPhrase ? `your ${productPhrase} order` : 'your order';
-  return `Hey ${firstName}! It's DP from Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged to your card.\n\nSometimes banks flag these. Give it 5 mins and try again here: ${checkoutUrl}\n\nDP`;
+  return `Hey ${firstName}! It's DP from Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged.\n\nGive it 5 mins and try again here: ${checkoutUrl}\n\nIf your bank is flagging it, give them a quick call to let them know about the transaction and try again.\n\nDP`;
 }
 
 function buildMsg2(firstName) {
-  return `Still having trouble, ${firstName}? Happens a lot actually - your bank might just need you to call and confirm it was you.\n\nI'm here if you need anything!\n\nDP`;
+  const venmo = process.env.VENMO_HANDLE || '@ViciPeptides';
+  const zelle = process.env.ZELLE_HANDLE || 'support@vicipeptides.com';
+  return `Did you call your bank and try again, ${firstName}?\n\nIf it still didn't work no worries - we also accept Venmo (${venmo}) or Zelle (${zelle}). Just reply here and I'll sort it.\n\nDP`;
 }
 
 function buildMsg3(firstName, productPhrase, checkoutUrl) {

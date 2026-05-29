@@ -1,21 +1,12 @@
 'use strict';
 /**
- * flows/confirmed.js — Order Confirmed / Processing
+ * flows/confirmed.js
  *
- * Single message fired on order.processing.
- * Branches: new customer (1A) vs returning customer (1B).
- * New       = 0 prior completed orders (first order ever).
- * Returning = 1+ prior completed orders (every subsequent order).
- * Deduped via sms_sent_log — fires exactly once per order.
- *
- * On fire: cancels ALL pending scheduled messages for the customer by phone
- * (fixes Harriet scenario: failed flows from prior order IDs get cleared).
- *
- * OpenRouter personalisation: adds a natural one-liner about what they ordered,
- * where they're from, and prior history. Falls back to base template on any failure.
+ * processing  → handleOrderConfirmed  (payment received, label not yet printed)
+ * completed   → handleOrderShipped    (order shipped, tracking from WC meta)
  */
 
-const { formatPhone, sendAndLog } = require('./utils');
+const { formatPhone, sendAndLog, alreadySent } = require('./utils');
 const { supabase } = require('../db');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -315,30 +306,59 @@ Return ONLY the modified message text. Nothing else.`;
 }
 
 // ---------------------------------------------------------------------------
-// Message builders
-// products = array of item names, city = billing city string (both optional)
+// Message builders — exact copy approved by partner
 // ---------------------------------------------------------------------------
 
-function buildMsg1A(firstName, orderNumber, products, city) {
-  const productList = (products || []).filter(Boolean);
-  const productPhrase = productList.length
-    ? `Your ${productList.length === 1 ? productList[0] : productList.slice(0, -1).join(', ') + ' and ' + productList[productList.length - 1]}`
-    : `Order #${orderNumber}`;
-  const cityPhrase = city ? ` on its way to ${city}` : '';
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\n${productPhrase} is confirmed${cityPhrase} - order #${orderNumber} and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions about your order, I'm literally right here.\n\nDP`;
+function buildMsg1A(firstName, orderNumber) {
+  return `${firstName}! Just saw your first order come through and had to text you personally. Order #${orderNumber} confirmed.\n\nWelcome to the Vici family!\n\nWill send you your tracking information as soon as we print your label.\n\nDP`;
 }
 
-function buildMsg1B(firstName, orderNumber, products, city) {
-  const productList = (products || []).filter(Boolean);
-  const productPhrase = productList.length
-    ? `Your ${productList.length === 1 ? productList[0] : productList.slice(0, -1).join(', ') + ' and ' + productList[productList.length - 1]}`
-    : `Order #${orderNumber}`;
-  const cityPhrase = city ? ` heading to ${city}` : '';
-  return `${firstName}! Back again - you're the best. ${productPhrase} is${cityPhrase} going straight to the front of the queue - order #${orderNumber} confirmed.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nAnything you need or want to try next, just text me directly.\n\nDP`;
+function buildMsg1B(firstName, orderNumber) {
+  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nDP`;
+}
+
+function buildShippedMessage(firstName, orderNumber, trackingNumber) {
+  if (trackingNumber) {
+    const trackingUrl = `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
+    return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nDP`;
+  }
+  return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} is with FedEx and heading to you. I'll send the tracking link as soon as it's available!\n\nDP`;
 }
 
 // ---------------------------------------------------------------------------
-// Live handler — called by WooCommerce order.processing webhook
+// Extract tracking number from WooCommerce order meta
+// Supports WC Shipment Tracking plugin + ShipStation WC integration
+// ---------------------------------------------------------------------------
+
+function extractTrackingNumber(order) {
+  const meta = order.meta_data || [];
+
+  // WC Shipment Tracking plugin — stores an array under _wc_shipment_tracking_items
+  const trackingItems = meta.find(m => m.key === '_wc_shipment_tracking_items');
+  if (trackingItems?.value) {
+    try {
+      const items = Array.isArray(trackingItems.value)
+        ? trackingItems.value
+        : JSON.parse(trackingItems.value);
+      const num = items?.[0]?.tracking_number;
+      if (num) return String(num).trim();
+    } catch {}
+  }
+
+  // ShipStation WC integration and other common fields
+  for (const key of ['_tracking_number', 'tracking_number', '_shipstation_tracking_number', 'ss_tracking_number', '_wc_ss_tracking_number']) {
+    const field = meta.find(m => m.key === key);
+    if (field?.value && typeof field.value === 'string' && field.value.trim()) {
+      return field.value.trim();
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// handleOrderConfirmed — fires on WooCommerce status: processing
+// Payment received, label not yet printed. No tracking yet.
 // ---------------------------------------------------------------------------
 
 async function handleOrderConfirmed(order) {
@@ -354,7 +374,6 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
-  // Staleness guard: skip if order is more than 48 hours old
   const orderAgeMs = order.date_created
     ? Date.now() - new Date(order.date_created).getTime()
     : Infinity;
@@ -363,10 +382,7 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
-  // Cross-type dedup: block if ANY confirmed message (new or returning) was already
-  // sent for this order. The per-flow dedup in sendAndLog only blocks the same
-  // flow_type — without this check a webhook retry could send a second confirmed
-  // message of a different type (the Tadesse scenario).
+  // Cross-type dedup
   const { data: alreadyConfirmed } = await supabase
     .from('sms_sent_log')
     .select('id, flow_type')
@@ -379,45 +395,54 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
-  // cancelScheduledForCustomer is called by the webhook router before invoking
-  // handleOrderConfirmed, using the fully resolved phone (billing + GHL fallback).
-  // No need to call it again here — that would be a redundant DB round-trip.
-
-  // Determine new vs returning based on prior SUCCESSFUL orders only.
-  // Failed and on-hold orders are excluded — they don't count.
-  // The current order itself is excluded so a direct completed webhook doesn't self-count.
   const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId);
-  const isNew      = priorSuccessful === 0;
-  const flowType   = isNew ? 'confirmed-new' : 'confirmed-returning';
-
-  // Extract products and city for direct template personalization
-  const products = (order.line_items || []).map(i => i.name).filter(Boolean);
-  const city     = order.billing?.city || order.shipping?.city || '';
-
+  const isNew     = priorSuccessful === 0;
+  const flowType  = isNew ? 'confirmed-new' : 'confirmed-returning';
   const baseMessage = isNew
-    ? buildMsg1A(firstName, orderNumber, products, city)
-    : buildMsg1B(firstName, orderNumber, products, city);
+    ? buildMsg1A(firstName, orderNumber)
+    : buildMsg1B(firstName, orderNumber);
 
   console.log(`[CONFIRMED] order=${orderId} type=${flowType} priorSuccessful=${priorSuccessful}`);
 
-  // Priority 1: context-aware continuation (if customer texted in last 2 hrs)
-  // Priority 2: personalised one-liner (products/location/history)
-  // Priority 3: base template
+  // If customer texted in the last 2 hours, use AI context-aware continuation
+  // instead of the base template — feels like a natural reply, not a cold message
   let finalMessage = baseMessage;
   try {
     const contextMsg = await generateContextAwareConfirmed(order, phone, firstName);
-    if (contextMsg) {
-      finalMessage = contextMsg;
-    } else {
-      const customerCtx = await buildCustomerContext(order);
-      const personalised = await generatePersonalisedConfirmed(baseMessage, customerCtx, firstName, orderId);
-      if (personalised) finalMessage = personalised;
-    }
+    if (contextMsg) finalMessage = contextMsg;
   } catch (err) {
-    console.error(`[CONFIRMED] Message generation failed | order=${orderId}: ${err.message} — using base`);
+    console.error(`[CONFIRMED] Context generation failed | order=${orderId}: ${err.message} — using base`);
   }
 
   await sendAndLog(phone, finalMessage, orderId, flowType);
 }
 
-module.exports = { handleOrderConfirmed };
+// ---------------------------------------------------------------------------
+// handleOrderShipped — fires on WooCommerce status: completed
+// Order has been shipped. Reads tracking from WC order meta and texts the link.
+// ---------------------------------------------------------------------------
+
+async function handleOrderShipped(order) {
+  const phone       = formatPhone(order.billing?.phone || order.shipping?.phone);
+  const firstName   = order.billing?.first_name || 'there';
+  const orderNumber = order.number || order.id;
+  const orderId     = String(order.id);
+
+  if (!phone) {
+    console.log(`[SHIPPED] No phone | order=${orderId} — skipping`);
+    return;
+  }
+
+  if (await alreadySent(orderId, 'shipped-msg1')) {
+    console.log(`[SHIPPED] Already sent | order=${orderId} — skipping`);
+    return;
+  }
+
+  const tracking = extractTrackingNumber(order);
+  const message  = buildShippedMessage(firstName, orderNumber, tracking);
+
+  console.log(`[SHIPPED] order=${orderId} tracking=${tracking ? '***' + tracking.slice(-4) : 'none'} phone=...${phone.slice(-4)}`);
+  await sendAndLog(phone, message, orderId, 'shipped-msg1');
+}
+
+module.exports = { handleOrderConfirmed, handleOrderShipped };

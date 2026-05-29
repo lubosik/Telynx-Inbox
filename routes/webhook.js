@@ -121,13 +121,18 @@ module.exports = (broadcastSSE) => {
 
       await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }).catch(() => {});
 
-      // Customer replied — remove them from all pending automated sequences immediately
-      const cancelled = await cancelScheduledForCustomer(fromPhone).catch(err => {
+      // Customer replied — cancel hold/failed sequences only.
+      // Confirmed and shipped flows are NOT cancelled on reply (customer stays in that flow).
+      const HOLD_FAILED_FLOWS = [
+        'failed-msg1', 'failed-msg2', 'failed-msg3',
+        'hold-msg1', 'hold-msg2', 'hold-msg3', 'hold-failed-nudge'
+      ];
+      const cancelled = await cancelScheduledForCustomer(fromPhone, HOLD_FAILED_FLOWS).catch(err => {
         console.error('[INBOUND] Sequence cancel error:', err.message);
         return 0;
       });
       if (cancelled > 0) {
-        console.log(`[INBOUND] Cancelled ${cancelled} pending messages for ...${fromPhone.slice(-4)} (customer replied)`);
+        console.log(`[INBOUND] Cancelled ${cancelled} hold/failed messages for ...${fromPhone.slice(-4)} (customer replied)`);
       }
 
       broadcastSSE({ type: 'new_message', phone: fromPhone, body: text, direction: 'inbound' });
