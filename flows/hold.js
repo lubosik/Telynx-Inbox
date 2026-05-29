@@ -253,6 +253,13 @@ async function handleOrderOnHold(order) {
 
   if (existingFlow && existingFlow.length > 0) {
     const existingOrderId = existingFlow[0].order_id;
+
+    // Same-order guard: duplicate or retried webhook for the same order — skip silently.
+    if (existingOrderId === orderId) {
+      console.log(`[HOLD] Duplicate webhook | order=${orderId} already scheduled | phone=...${phone.slice(-4)}`);
+      return;
+    }
+
     console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingOrderId}) — merging with order=${orderId}`);
 
     let combinedTotal = total;
@@ -272,9 +279,9 @@ async function handleOrderOnHold(order) {
       // Use display numbers from WC (order.number) — these are what customers see on invoices
       orderRef = `#${existingOrderNumber} and #${orderNumber}`;
     } catch {
-      // WC fetch failed — fall back to raw post IDs (unique by definition, never duplicates)
-      orderRef = `#${existingOrderId} and #${orderId}`;
-      console.warn(`[HOLD] WC fetch failed for order ${existingOrderId} — using post IDs as fallback`);
+      // WC fetch failed — fall back to display numbers (order.number preferred, id as fallback)
+      orderRef = `#${existingOrderId} and #${orderNumber}`;
+      console.warn(`[HOLD] WC fetch failed for order ${existingOrderId} — using fallback numbers`);
     }
 
     const msgMap = {

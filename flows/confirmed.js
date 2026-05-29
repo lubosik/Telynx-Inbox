@@ -126,6 +126,111 @@ async function buildCustomerContext(order) {
 }
 
 // ---------------------------------------------------------------------------
+// Conversation context — look for inbound messages in the last 2 hours.
+// Returns a formatted string if an active conversation exists, else null.
+// ---------------------------------------------------------------------------
+
+async function getRecentConversationContext(phone) {
+  if (!phone) return null;
+  try {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const { data: recentMessages } = await supabase
+      .from('sms_messages')
+      .select('direction, body, created_at')
+      .eq('contact_phone', phone)
+      .gte('created_at', twoHoursAgo)
+      .order('created_at', { ascending: true })
+      .limit(10);
+
+    if (!recentMessages || recentMessages.length === 0) return null;
+
+    // Only treat as active if at least one message is inbound (customer spoke)
+    const hasInbound = recentMessages.some(m => m.direction === 'inbound');
+    if (!hasInbound) return null;
+
+    return recentMessages
+      .map(m => `${m.direction === 'inbound' ? 'Customer' : 'Vici'}: ${m.body}`)
+      .join('\n');
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OpenRouter context-aware confirmed — generates a natural continuation of
+// an active conversation. Falls back to null on any failure.
+// ---------------------------------------------------------------------------
+
+async function generateContextAwareConfirmed(order, phone, firstName) {
+  if (!process.env.OPENROUTER_API_KEY) return null;
+
+  const context = await getRecentConversationContext(phone);
+  if (!context) return null;
+
+  const orderId  = String(order.id);
+  const products = (order.line_items || []).map(i => `${i.quantity}x ${i.name}`).join(', ');
+  const orderNumber = order.number || order.id;
+
+  const systemPrompt = `You are DP, founder of Vici Peptides, texting customers personally. You already have an ongoing conversation with this customer. Your response must feel like a natural continuation, not a new automated message. Voice: warm, excited, personal. Like a friend texting. Rules: No em dashes. No corporate language. No hashtags. No asterisks. Max 320 characters. Never mention specific compound names in a medical context. Do not repeat information already said. Acknowledge what the customer said if relevant. Still confirm the order is confirmed and being packed.`;
+
+  const userPrompt = `Recent conversation:
+${context}
+
+The order is now confirmed (status: processing).
+Order #${orderNumber}
+Products: ${products}
+Customer first name: ${firstName}
+
+Write a short SMS that continues this conversation naturally. Start from where the conversation left off. Confirm the order is confirmed and being prepared. Return ONLY the SMS text. No quotes. No explanation.`;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
+        'X-Title': 'Vici SMS Context'
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user',   content: userPrompt }
+        ],
+        max_tokens: 150,
+        temperature: 0.5
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timer);
+
+    const data = await response.json();
+    const generated = data.choices?.[0]?.message?.content?.trim();
+
+    if (!generated || generated.length > 400) {
+      console.log(`[CONTEXT] Invalid response | order=${orderId} — fallback`);
+      return null;
+    }
+    if (generated.includes('—') || generated.includes('–')) {
+      console.log(`[CONTEXT] Em dash detected | order=${orderId} — fallback`);
+      return null;
+    }
+
+    console.log(`[CONTEXT] Generated context-aware message | order=${orderId} chars=${generated.length}`);
+    return generated;
+
+  } catch (err) {
+    console.error(`[CONTEXT] OpenRouter failed | order=${orderId}: ${err.message} — fallback`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // OpenRouter personalisation — generates a naturally-worded one-liner to insert
 // into the base template. Returns null on any failure so caller falls back.
 // ---------------------------------------------------------------------------
@@ -280,14 +385,21 @@ async function handleOrderConfirmed(order) {
 
   console.log(`[CONFIRMED] order=${orderId} type=${flowType} priorSuccessful=${priorSuccessful}`);
 
-  // Build customer context and attempt OpenRouter personalisation
+  // Priority 1: context-aware continuation (if customer texted in last 2 hrs)
+  // Priority 2: personalised one-liner (products/location/history)
+  // Priority 3: base template
   let finalMessage = baseMessage;
   try {
-    const context = await buildCustomerContext(order);
-    const personalised = await generatePersonalisedConfirmed(baseMessage, context, firstName, orderId);
-    if (personalised) finalMessage = personalised;
+    const contextMsg = await generateContextAwareConfirmed(order, phone, firstName);
+    if (contextMsg) {
+      finalMessage = contextMsg;
+    } else {
+      const customerCtx = await buildCustomerContext(order);
+      const personalised = await generatePersonalisedConfirmed(baseMessage, customerCtx, firstName, orderId);
+      if (personalised) finalMessage = personalised;
+    }
   } catch (err) {
-    console.error(`[CONFIRMED] Context build failed | order=${orderId}: ${err.message} — using base`);
+    console.error(`[CONFIRMED] Message generation failed | order=${orderId}: ${err.message} — using base`);
   }
 
   await sendAndLog(phone, finalMessage, orderId, flowType);
