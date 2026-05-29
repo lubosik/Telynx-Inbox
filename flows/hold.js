@@ -260,10 +260,20 @@ async function handleOrderOnHold(order) {
       return;
     }
 
+    // Defensive: log if somehow multiple different prior order IDs have pending hold rows.
+    // Should never occur given dedup logic, but surfaces anomalies in production.
+    const uniquePriorIds = [...new Set(existingFlow.map(r => r.order_id))];
+    if (uniquePriorIds.length > 1) {
+      console.warn(`[HOLD] Multiple prior order IDs in hold flow for phone=...${phone.slice(-4)}: ${uniquePriorIds.join(',')} — using first`);
+    }
+
     console.log(`[HOLD] Customer ...${phone.slice(-4)} already in hold flow (order=${existingOrderId}) — merging with order=${orderId}`);
 
     let combinedTotal = total;
-    let orderRef = `#${orderId}`;
+    // Hoist existingOrderNumber so the fallback catch block can use the best available value.
+    // Defaults to existingOrderId until the WC fetch succeeds and provides the display number.
+    let existingOrderNumber = existingOrderId;
+    let orderRef = `#${existingOrderId} and #${orderNumber}`;
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 6000);
@@ -273,14 +283,13 @@ async function handleOrderOnHold(order) {
       );
       clearTimeout(timer);
       const existingOrder = await res.json();
-      const existingOrderNumber = existingOrder.number || existingOrderId;
+      existingOrderNumber = existingOrder.number || existingOrderId;
       const sum = (parseFloat(existingOrder.total || 0) + parseFloat(total)).toFixed(2);
       combinedTotal = sum;
       // Use display numbers from WC (order.number) — these are what customers see on invoices
       orderRef = `#${existingOrderNumber} and #${orderNumber}`;
     } catch {
-      // WC fetch failed — fall back to display numbers (order.number preferred, id as fallback)
-      orderRef = `#${existingOrderId} and #${orderNumber}`;
+      // WC fetch failed — orderRef already set to best available (existingOrderId + orderNumber)
       console.warn(`[HOLD] WC fetch failed for order ${existingOrderId} — using fallback numbers`);
     }
 

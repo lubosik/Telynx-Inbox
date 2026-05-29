@@ -15,7 +15,7 @@
  * where they're from, and prior history. Falls back to base template on any failure.
  */
 
-const { formatPhone, sendAndLog, cancelScheduledForCustomer } = require('./utils');
+const { formatPhone, sendAndLog } = require('./utils');
 const { supabase } = require('../db');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -368,10 +368,9 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
-  // Cancel ALL pending scheduled messages for this customer by phone number.
-  // This fixes the Harriet scenario: failed/hold flows from prior order IDs
-  // (which cancelScheduled(orderId) would never touch) are now cleared.
-  await cancelScheduledForCustomer(phone);
+  // cancelScheduledForCustomer is called by the webhook router before invoking
+  // handleOrderConfirmed, using the fully resolved phone (billing + GHL fallback).
+  // No need to call it again here — that would be a redundant DB round-trip.
 
   // Determine new vs returning based on prior SUCCESSFUL orders only.
   // Failed and on-hold orders are excluded — they don't count.
