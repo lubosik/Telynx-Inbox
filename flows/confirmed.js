@@ -310,11 +310,11 @@ Return ONLY the modified message text. Nothing else.`;
 // ---------------------------------------------------------------------------
 
 function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Order #${orderNumber} confirmed.\n\nWelcome to the Vici family!\n\nWill send you your tracking information as soon as we print your label.\n\nDP`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm right here.\n\nDP`;
 }
 
 function buildMsg1B(firstName, orderNumber) {
-  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed.\n\nI'll text you as soon as it's on the way. Appreciate you more than you know.\n\nDP`;
+  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed and going straight to the front of the queue.\n\nI'll text you the tracking the moment it ships. Appreciate you more than you know.\n\nDP`;
 }
 
 function buildShippedMessage(firstName, orderNumber, trackingNumber) {
