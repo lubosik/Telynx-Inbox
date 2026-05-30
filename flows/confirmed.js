@@ -309,12 +309,16 @@ Return ONLY the modified message text. Nothing else.`;
 // Message builders — exact copy approved by partner
 // ---------------------------------------------------------------------------
 
-function buildMsg1A(firstName, orderNumber) {
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} confirmed and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm right here.\n\nDP`;
+function buildMsg1A(firstName, orderNumber, products, city) {
+  const productLine = products?.length ? `Your ${products.join(' and ')} is` : `Order #${orderNumber} is`;
+  const cityPhrase  = city ? ` heading to ${city}` : '';
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} confirmed - ${productLine}${cityPhrase} and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm right here.\n\nDP`;
 }
 
-function buildMsg1B(firstName, orderNumber) {
-  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed and going straight to the front of the queue.\n\nI'll text you the tracking the moment it ships. Appreciate you more than you know.\n\nDP`;
+function buildMsg1B(firstName, orderNumber, products, city) {
+  const productLine = products?.length ? `your ${products.join(' and ')}` : `order #${orderNumber}`;
+  const cityPhrase  = city ? ` to ${city}` : '';
+  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed - ${productLine} is heading${cityPhrase} and going straight to the front of the queue.\n\nI'll text you the tracking the moment it ships. Appreciate you more than you know.\n\nDP`;
 }
 
 function buildShippedMessage(firstName, orderNumber, trackingNumber) {
@@ -398,9 +402,13 @@ async function handleOrderConfirmed(order) {
   const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId);
   const isNew     = priorSuccessful === 0;
   const flowType  = isNew ? 'confirmed-new' : 'confirmed-returning';
+
+  const products = (order.line_items || []).map(i => i.name).filter(Boolean);
+  const city     = order.billing?.city || order.shipping?.city || '';
+
   const baseMessage = isNew
-    ? buildMsg1A(firstName, orderNumber)
-    : buildMsg1B(firstName, orderNumber);
+    ? buildMsg1A(firstName, orderNumber, products, city)
+    : buildMsg1B(firstName, orderNumber, products, city);
 
   console.log(`[CONFIRMED] order=${orderId} type=${flowType} priorSuccessful=${priorSuccessful}`);
 
