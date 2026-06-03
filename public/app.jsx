@@ -393,11 +393,69 @@ function ContactModal({ phone, onClose, onGoToMessages, addToast }) {
   );
 }
 
+// ─── Vici Pinned Card ─────────────────────────────────────────────────────────
+
+function ViciModal({ onClose }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal-card" style={{ maxWidth: 380 }}>
+        <div className="modal-header">
+          <span style={{
+            fontSize: '0.6rem', fontFamily: 'var(--mono)', color: 'var(--accent)',
+            letterSpacing: '0.1em', padding: '0.15rem 0.5rem',
+            background: 'var(--accent-dim)', border: '1px solid rgba(0,245,160,0.2)', borderRadius: 4
+          }}>PINNED · OUR NUMBER</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-identity">
+          <div className="modal-avatar" style={{ background: 'var(--accent-dim)', fontSize: '1.25rem' }}>V</div>
+          <div className="modal-info">
+            <div className="modal-name">Vici Peptides</div>
+            <div className="modal-phone" style={{ fontSize: '1rem', letterSpacing: '0.04em' }}>+1 (305) 404-3184</div>
+            <a
+              href="https://vicipeptides.com" target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: '0.75rem', color: 'var(--blue)', fontFamily: 'var(--mono)', textDecoration: 'none', display: 'block', marginTop: 4 }}
+            >
+              vicipeptides.com ↗
+            </a>
+          </div>
+        </div>
+        <div style={{
+          padding: '0.875rem 1.25rem', borderTop: '1px solid var(--border)',
+          color: 'var(--text3)', fontSize: '0.6875rem', fontFamily: 'var(--mono)'
+        }}>
+          // this is the number your customers text
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ViciPinnedCard({ onClick }) {
+  return (
+    <div className="contact-card vici-card" onClick={onClick}>
+      <div className="card-avatar vici-avatar">V</div>
+      <div className="card-name">Vici Peptides</div>
+      <div className="card-phone">(305) 404-3184</div>
+      <div className="card-meta">
+        <span className="vici-pin-badge">📌 OUR NUMBER</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Contacts View ────────────────────────────────────────────────────────────
 
 function ContactsView({ contacts, onGoToMessages, addToast }) {
   const [search, setSearch] = useState('');
   const [modalPhone, setModalPhone] = useState(null);
+  const [showVici, setShowVici] = useState(false);
 
   // Contacts with orders first (newest order date → oldest), then no-order contacts below
   const sorted = [...contacts].sort((a, b) => {
@@ -445,6 +503,7 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
               {totalUnread > 0 && ` · ${totalUnread} unread`}
             </div>
             <div className="contacts-grid">
+              <ViciPinnedCard onClick={() => setShowVici(true)} />
               {filtered.map(c => (
                 <ContactCard
                   key={c.phone}
@@ -460,6 +519,7 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
         )}
       </div>
 
+      {showVici && <ViciModal onClose={() => setShowVici(false)} />}
       {modalPhone && (
         <ContactModal
           phone={modalPhone}
@@ -1554,10 +1614,7 @@ function App() {
 
       {/* ── Header ── */}
       <div className="header">
-        <div className="header-logo">
-          <span>VICI<small>// SMS</small></span>
-          <span className="header-phone">+1 (305) 404-3184</span>
-        </div>
+        <div className="header-logo">VICI<small>// SMS</small></div>
 
         {/* Desktop tab navigation */}
         <div className="header-tabs">
