@@ -119,7 +119,7 @@ module.exports = (broadcastSSE) => {
         ghl_contact_id: ghlContactId
       }).eq('phone', fromPhone);
 
-      await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }).catch(() => {});
+      try { await supabase.rpc('increment_contact_messages', { p_phone: fromPhone }); } catch {}
 
       // Customer replied — cancel hold/failed sequences only.
       // Confirmed and shipped flows are NOT cancelled on reply (customer stays in that flow).
