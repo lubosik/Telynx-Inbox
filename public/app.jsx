@@ -1415,10 +1415,17 @@ function App() {
     }
   }
 
-  function fireNotification(title, body) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/icons/icon-192.png' });
+  async function fireNotification(title, body) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    // Use service worker showNotification — required on iOS (new Notification() is unsupported).
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.showNotification(title, { body, icon: '/icons/icon-192.png' });
+        return;
+      } catch {}
     }
+    new Notification(title, { body, icon: '/icons/icon-192.png' });
   }
 
   useEffect(() => {
@@ -1516,17 +1523,45 @@ function App() {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(async reg => {
       const existing = await reg.pushManager.getSubscription();
       if (existing) {
-        // Re-POST on every load so the DB always has the current subscription.
-        // Handles the case where Railway restarted, DB was cleared, or a 410 pruned it.
-        fetch('/api/push/subscribe', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(existing.toJSON())
-        }).catch(() => {});
-        setPushState('subscribed');
+        // Re-POST on every load to restore the row if it was pruned server-side.
+        try {
+          const saveResp = await fetch('/api/push/subscribe', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(existing.toJSON())
+          });
+          if (!saveResp.ok) throw new Error('subscribe POST failed: ' + saveResp.status);
+
+          // Verify the endpoint is genuinely active in the DB.
+          // If a prior 410 caused the server to delete it, the re-POST above would have
+          // re-inserted it — but the endpoint itself may be permanently expired at APNs.
+          // Ask the server to confirm, then force a fresh subscription if stale.
+          const checkResp = await fetch('/api/push/check', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: existing.endpoint })
+          });
+          const checkData = checkResp.ok ? await checkResp.json() : { active: false };
+
+          if (!checkData.active) {
+            // The DB row doesn't exist even after re-POST — subscription endpoint is
+            // permanently dead (APNs rejected it). Unsubscribe the browser and get fresh.
+            await existing.unsubscribe();
+            const { publicKey } = await api('GET', '/api/push/vapid-key');
+            const fresh = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(publicKey)
+            });
+            await api('POST', '/api/push/subscribe', fresh.toJSON());
+          }
+
+          setPushState('subscribed');
+        } catch (err) {
+          console.error('Push init error:', err.message);
+          setPushState('prompt');
+        }
       } else if (Notification.permission === 'granted') {
-        // Permission was granted before but subscription is gone — auto-resubscribe.
-        // This silently recovers without requiring a manual bell-tap.
+        // Permission was granted before but browser subscription is gone — auto-resubscribe.
         try {
           const { publicKey } = await api('GET', '/api/push/vapid-key');
           const sub = await reg.pushManager.subscribe({

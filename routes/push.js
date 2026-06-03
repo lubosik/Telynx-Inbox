@@ -37,5 +37,40 @@ module.exports = () => {
     res.json({ ok: true });
   });
 
+  // Check if a specific endpoint is still active in the DB.
+  // Client calls this on load to detect if a 410 pruned the subscription server-side,
+  // so it can force a fresh browser subscribe rather than re-saving a dead endpoint.
+  router.post('/check', async (req, res) => {
+    const { endpoint } = req.body;
+    if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
+    const { data } = await supabase
+      .from('push_subscriptions')
+      .select('id')
+      .eq('endpoint', endpoint)
+      .maybeSingle();
+    res.json({ active: !!data });
+  });
+
+  // Debug endpoint — returns subscription count and config status
+  router.get('/status', (req, res) => {
+    supabase
+      .from('push_subscriptions')
+      .select('id, endpoint, user_agent, updated_at')
+      .then(({ data, error }) => {
+        res.json({
+          vapid_configured: !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+          vapid_subject: process.env.VAPID_SUBJECT || '(not set)',
+          subscription_count: data?.length ?? 0,
+          subscriptions: (data || []).map(s => ({
+            id: s.id,
+            endpoint_tail: s.endpoint?.slice(-40),
+            user_agent: s.user_agent,
+            updated_at: s.updated_at
+          })),
+          error: error?.message || null
+        });
+      });
+  });
+
   return router;
 };
