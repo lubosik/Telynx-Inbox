@@ -57,6 +57,10 @@ async function analyseConversation(phone) {
       })
     });
     const data = await response.json();
+    if (!data.choices?.[0]?.message?.content) {
+      console.error('OpenRouter analysis bad response:', JSON.stringify(data).slice(0, 200));
+      return null;
+    }
     const raw = data.choices[0].message.content;
     const clean = raw.replace(/```json|```/g, '').trim();
     parsed = JSON.parse(clean);
@@ -157,7 +161,11 @@ campaigns would perform best right now. Be specific and actionable.\n\n${summari
       })
     });
     const data = await response.json();
-    overallInsight = data.choices[0].message.content;
+    if (!data.choices?.[0]?.message?.content) {
+      console.error('Campaign brief OpenRouter bad response:', JSON.stringify(data).slice(0, 200));
+    } else {
+      overallInsight = data.choices[0].message.content;
+    }
   } catch (err) {
     console.error('Campaign brief OpenRouter call failed:', err.message);
   }
