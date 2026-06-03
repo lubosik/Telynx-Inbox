@@ -1299,6 +1299,9 @@ function App() {
   const inputRef = useRef(null);
   const sseRef = useRef(null);
   const reconnectTimer = useRef(null);
+  // Capture deep-link phone from URL on mount (?thread=+1xxx) — applied after conversations load
+  const deepLinkPhone = useRef(new URLSearchParams(window.location.search).get('thread'));
+  const deepLinkApplied = useRef(false);
   const reconnectDelay = useRef(1000);
   const pollTimer = useRef(null);
 
@@ -1340,6 +1343,14 @@ function App() {
       clearTimeout(reconnectTimer.current);
     };
   }, [auth.ok]);
+
+  // Apply notification deep-link once conversations are available
+  useEffect(() => {
+    if (!auth.ok || conversations.length === 0 || deepLinkApplied.current || !deepLinkPhone.current) return;
+    deepLinkApplied.current = true;
+    goToMessages(deepLinkPhone.current);
+    window.history.replaceState({}, '', '/');
+  }, [auth.ok, conversations]);
 
   function connectSSE() {
     if (sseRef.current) sseRef.current.close();

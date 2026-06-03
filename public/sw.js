@@ -36,9 +36,11 @@ self.addEventListener('notificationclick', event => {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
-      for (const w of wins) {
-        if ('focus' in w) { w.focus(); return; }
+      if (wins.length > 0) {
+        // App is already open — navigate it to the thread URL then focus
+        return wins[0].navigate(targetUrl).then(client => client.focus());
       }
+      // App is closed — open it at the thread URL
       return clients.openWindow(targetUrl);
     })
   );

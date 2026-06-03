@@ -147,7 +147,7 @@ module.exports = (broadcastSSE) => {
       sendPushToAll({
         title: `New message from ${senderName}`,
         body: text.length > 100 ? text.slice(0, 97) + '…' : text,
-        url: process.env.APP_URL || '/',
+        url: `/?thread=${encodeURIComponent(fromPhone)}`,
         icon: '/icons/icon-192.png'
       }).catch(err => console.error('Push notify error:', err.message));
 
