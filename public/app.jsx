@@ -1690,6 +1690,22 @@ function App() {
           >
             {pushIcon}
           </button>
+          {pushState === 'subscribed' && (
+            <button
+              className="hdr-btn"
+              title="Send a test push notification to this device"
+              onClick={async () => {
+                try {
+                  await api('POST', '/api/push/test', {});
+                  addToast('Test push sent — should arrive in 1-2s');
+                } catch (e) {
+                  addToast('Test push failed: ' + e.message);
+                }
+              }}
+            >
+              ✉︎ TEST
+            </button>
+          )}
           <button className="hdr-btn" disabled={syncing} onClick={syncWoo} title="Sync WooCommerce orders + contacts">
             {syncing ? '…' : '↻ WOO'}
           </button>

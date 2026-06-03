@@ -51,6 +51,22 @@ module.exports = () => {
     res.json({ active: !!data });
   });
 
+  // Fire a real test push to all subscriptions — confirms server→APNs→device path
+  router.post('/test', async (req, res) => {
+    const { sendPushToAll } = require('../push-notify');
+    try {
+      await sendPushToAll({
+        title: '🔔 Test notification',
+        body: 'Push is working! You will receive real SMS alerts.',
+        url: '/',
+        icon: '/icons/icon-192.png'
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Debug endpoint — returns subscription count and config status
   router.get('/status', (req, res) => {
     supabase
