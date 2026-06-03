@@ -1,6 +1,7 @@
 {
   "name": "Vici SMS Inbox",
   "short_name": "Vici SMS",
+  "id": "/",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f0f0f",

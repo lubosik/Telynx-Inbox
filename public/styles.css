@@ -100,8 +100,13 @@ body::before {
   font-family: var(--mono); font-size: 0.9375rem; font-weight: 700;
   color: var(--accent); letter-spacing: 0.2em;
   text-shadow: 0 0 14px var(--accent-glow);
+  display: flex; flex-direction: column; gap: 2px;
 }
 .header-logo small { color: var(--text3); font-size: 0.625rem; letter-spacing: 0.1em; margin-left: 0.375rem; }
+.header-phone {
+  font-size: 0.5625rem; color: var(--text3); letter-spacing: 0.08em;
+  font-weight: 400; text-shadow: none; line-height: 1;
+}
 
 /* Main tabs in header */
 .header-tabs { display: flex; gap: 2px; margin-left: 0.5rem; }

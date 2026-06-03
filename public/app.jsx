@@ -1456,9 +1456,30 @@ function App() {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(async reg => {
       const existing = await reg.pushManager.getSubscription();
       if (existing) {
+        // Re-POST on every load so the DB always has the current subscription.
+        // Handles the case where Railway restarted, DB was cleared, or a 410 pruned it.
+        fetch('/api/push/subscribe', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(existing.toJSON())
+        }).catch(() => {});
         setPushState('subscribed');
+      } else if (Notification.permission === 'granted') {
+        // Permission was granted before but subscription is gone — auto-resubscribe.
+        // This silently recovers without requiring a manual bell-tap.
+        try {
+          const { publicKey } = await api('GET', '/api/push/vapid-key');
+          const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+          });
+          await api('POST', '/api/push/subscribe', sub.toJSON());
+          setPushState('subscribed');
+        } catch {
+          setPushState('prompt');
+        }
       } else {
-        setPushState(Notification.permission === 'granted' ? 'prompt' : 'prompt');
+        setPushState('prompt');
       }
     }).catch(() => setPushState('unsupported'));
   }, [auth.ok]);
@@ -1533,7 +1554,10 @@ function App() {
 
       {/* ── Header ── */}
       <div className="header">
-        <div className="header-logo">VICI<small>// SMS</small></div>
+        <div className="header-logo">
+          <span>VICI<small>// SMS</small></span>
+          <span className="header-phone">+1 (305) 404-3184</span>
+        </div>
 
         {/* Desktop tab navigation */}
         <div className="header-tabs">
