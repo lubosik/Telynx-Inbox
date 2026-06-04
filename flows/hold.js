@@ -161,7 +161,7 @@ async function handleOrderOnHold(order) {
   const orderNumber = order.number || order.id;
   const orderId     = String(order.id);
   const total       = order.total || '0.00';
-  const city        = order.billing?.city || order.shipping?.city || '';
+  const city        = order.shipping?.city || order.billing?.city || '';
   const { label: method, handle } = detectPaymentMethod(order);
 
   if (!phone) {
@@ -386,7 +386,7 @@ async function backfillOnHoldOrders({ dryRun = false } = {}) {
 
       if (!phone) { skipped++; continue; }
 
-      if (await alreadySent(orderId, 'hold-msg3')) {
+      if (await alreadySent(orderId, 'hold-msg3', phone)) {
         console.log(`[BACKFILL-HOLD] Already sent | order=${orderId} — skip`);
         skipped++; continue;
       }
@@ -421,4 +421,4 @@ async function backfillOnHoldOrders({ dryRun = false } = {}) {
   return { processed, skipped };
 }
 
-module.exports = { handleOrderOnHold, backfillOnHoldOrders, detectPaymentMethod, buildMsg3 };
+module.exports = { handleOrderOnHold, backfillOnHoldOrders, detectPaymentMethod, buildMsg1, buildMsg2, buildMsg3 };

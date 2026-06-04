@@ -67,8 +67,8 @@ async function buildCustomerContext(order) {
   const email      = order.billing?.email || '';
   const customerId = order.customer_id || 0;
   const phone      = formatPhone(order.billing?.phone || order.shipping?.phone);
-  const city       = order.billing?.city || order.shipping?.city || '';
-  const state      = order.billing?.state || order.shipping?.state || '';
+  const city       = order.shipping?.city || order.billing?.city || '';
+  const state      = order.shipping?.state || order.billing?.state || '';
 
   const baseUrl    = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
   const authHeader = 'Basic ' + Buffer.from(
@@ -404,7 +404,7 @@ async function handleOrderConfirmed(order) {
   const flowType  = isNew ? 'confirmed-new' : 'confirmed-returning';
 
   const products = (order.line_items || []).map(i => i.name).filter(Boolean);
-  const city     = order.billing?.city || order.shipping?.city || '';
+  const city     = order.shipping?.city || order.billing?.city || '';
 
   const baseMessage = isNew
     ? buildMsg1A(firstName, orderNumber, products, city)
@@ -447,10 +447,32 @@ async function handleOrderShipped(order) {
   }
 
   const tracking = extractTrackingNumber(order);
-  const message  = buildShippedMessage(firstName, orderNumber, tracking);
 
-  console.log(`[SHIPPED] order=${orderId} tracking=${tracking ? '***' + tracking.slice(-4) : 'none'} phone=...${phone.slice(-4)}`);
-  await sendAndLog(phone, message, orderId, 'shipped-msg1');
+  // If no tracking number yet, do NOT send a "tracking coming soon" message.
+  // That premature message blocks the ShipStation poll from sending the real
+  // tracking link later (dedup prevents it). Let ShipStation handle delivery
+  // notification once the carrier actually scans the package.
+  if (!tracking) {
+    console.log(`[SHIPPED] No tracking in WC metadata | order=${orderId} — ShipStation poll will send when carrier scans`);
+    return;
+  }
+
+  const message = buildShippedMessage(firstName, orderNumber, tracking);
+
+  console.log(`[SHIPPED] order=${orderId} tracking=***${tracking.slice(-4)} phone=...${phone.slice(-4)}`);
+  const sent = await sendAndLog(phone, message, orderId, 'shipped-msg1');
+
+  // Mark shipped in sms_orders so the ShipStation poll's early-exit dedup works.
+  // Without this, the poll doesn't know the WooCommerce path already sent tracking.
+  if (sent) {
+    const wooId = parseInt(orderId, 10);
+    if (!isNaN(wooId)) {
+      await supabase.from('sms_orders')
+        .update({ shipped_sms_sent: true, tracking_number: tracking, status: 'shipped' })
+        .eq('woo_order_id', wooId)
+        .eq('shipped_sms_sent', false);
+    }
+  }
 }
 
 module.exports = { handleOrderConfirmed, handleOrderShipped };
