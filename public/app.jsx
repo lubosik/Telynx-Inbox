@@ -1297,6 +1297,7 @@ function App() {
   const [sending, setSending] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [statusSyncing, setStatusSyncing] = useState(false);
   const [catchingUp, setCatchingUp] = useState(false);
   const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
@@ -1534,6 +1535,18 @@ function App() {
     }
   }
 
+  async function syncStatuses() {
+    setStatusSyncing(true);
+    try {
+      await api('POST', '/api/sync/statuses');
+      addToast('Status sync started — contacts updating in real-time…');
+      setTimeout(() => { loadConversations(); setStatusSyncing(false); }, 8000);
+    } catch (e) {
+      addToast('Status sync: ' + e.message);
+      setStatusSyncing(false);
+    }
+  }
+
   const totalUnread = conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0);
   const isMobile = useIsMobile();
 
@@ -1734,6 +1747,9 @@ function App() {
               ✉︎ TEST
             </button>
           )}
+          <button className="hdr-btn" disabled={statusSyncing} onClick={syncStatuses} title="Update all order statuses from WooCommerce — no messages sent">
+            {statusSyncing ? '…' : '↻ STATUS'}
+          </button>
           <button className="hdr-btn" disabled={syncing} onClick={syncWoo} title="Sync WooCommerce orders + contacts">
             {syncing ? '…' : '↻ WOO'}
           </button>

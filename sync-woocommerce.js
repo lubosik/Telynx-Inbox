@@ -146,4 +146,70 @@ async function runWooSync() {
   return { total_orders: totalOrders, synced_contacts: syncedContacts };
 }
 
-module.exports = { syncOrder, runWooSync };
+// ---------------------------------------------------------------------------
+// syncOrderStatuses — status-only sync, NO SMS sent, NO flow handlers called.
+// Fetches current WooCommerce order statuses, updates sms_orders.status for any
+// order that has changed and is not already in a protected internal state.
+// Maps WC 'completed' → 'shipped' (at Vici, completed = physically shipped).
+// Updates sms_contacts.last_seen and broadcasts SSE for each changed contact
+// so they immediately bubble to the top of the contact list.
+// ---------------------------------------------------------------------------
+async function syncOrderStatuses() {
+  const { broadcast } = require('./lib/broadcaster');
+
+  const PROTECTED = new Set(['shipped', 'delivered']);
+  // WooCommerce status → our internal status
+  const WC_MAP = { completed: 'shipped' };
+
+  let fixed = 0, skipped = 0;
+  const changes = [];
+
+  const { orders: firstPage, totalPages, total } = await fetchOrders(1, 100, 'any');
+  console.log(`[STATUS-SYNC] ${total} WC orders across ${totalPages} pages`);
+
+  const allWcOrders = [...firstPage];
+  for (let page = 2; page <= totalPages; page++) {
+    await new Promise(r => setTimeout(r, 300));
+    const { orders } = await fetchOrders(page, 100, 'any');
+    allWcOrders.push(...orders);
+  }
+
+  const { data: dbOrders } = await supabase
+    .from('sms_orders')
+    .select('woo_order_id, status, contact_phone');
+
+  const dbMap = new Map();
+  for (const o of (dbOrders || [])) dbMap.set(String(o.woo_order_id), o);
+
+  for (const wc of allWcOrders) {
+    const orderId = String(wc.id);
+    const db = dbMap.get(orderId);
+
+    if (!db) { skipped++; continue; }
+    if (PROTECTED.has(db.status)) { skipped++; continue; }
+
+    const newStatus = WC_MAP[wc.status] || wc.status;
+    if (newStatus === db.status) { skipped++; continue; }
+
+    await supabase.from('sms_orders')
+      .update({ status: newStatus })
+      .eq('woo_order_id', wc.id);
+
+    if (db.contact_phone) {
+      const now = new Date().toISOString();
+      await supabase.from('sms_contacts')
+        .update({ last_seen: now })
+        .eq('phone', db.contact_phone);
+      broadcast({ type: 'order_status_updated', phone: db.contact_phone, status: newStatus, order_id: orderId });
+    }
+
+    console.log(`[STATUS-SYNC] Order ${orderId}: ${db.status} → ${newStatus} (${db.contact_phone || 'no-phone'})`);
+    changes.push({ order_id: orderId, phone: db.contact_phone, from: db.status, to: newStatus });
+    fixed++;
+  }
+
+  console.log(`[STATUS-SYNC] Done — fixed=${fixed} skipped=${skipped}`);
+  return { fixed, skipped, changes };
+}
+
+module.exports = { syncOrder, runWooSync, syncOrderStatuses };
