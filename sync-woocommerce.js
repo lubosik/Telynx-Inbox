@@ -28,7 +28,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     }
   }
 
-  if (!phone) return false;
+  if (!phone) return null;
 
   const firstName = order.billing?.first_name || '';
   const lastName = order.billing?.last_name || '';
@@ -42,7 +42,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     state: order.billing?.state || null,
     country: order.billing?.country || null,
     woo_customer_id: order.customer_id || null,
-    last_seen: order.date_modified || order.date_created || new Date().toISOString()
+    last_seen: fromWebhook ? new Date().toISOString() : (order.date_modified || order.date_created || new Date().toISOString())
   }, { onConflict: 'phone' });
 
   const items = (order.line_items || []).map(i => ({
@@ -68,6 +68,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     .eq('woo_order_id', order.id)
     .maybeSingle();
 
+  let writtenStatus;
   if (existing) {
     // Order already in DB — only update mutable fields, never overwrite SMS sent flags.
     // Don't downgrade our internal shipped/delivered status with a WooCommerce status.
@@ -87,6 +88,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
       if (tracking.shippedDate) updateFields.shipped_at = tracking.shippedDate;
     }
 
+    writtenStatus = keepStatus ? existing.status : (updateFields.status || existing.status);
     await supabase.from('sms_orders').update(updateFields).eq('woo_order_id', order.id);
   } else {
     // New order — set SMS flags appropriately.
@@ -99,10 +101,11 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     // constraint on woo_order_id enforces exactly one row per order.
     const historical = !fromWebhook;
     const hasTracking = !!tracking?.trackingNumber;
+    writtenStatus = hasTracking ? 'shipped' : (order.status || 'pending');
     await supabase.from('sms_orders').upsert({
       contact_phone: phone,
       woo_order_id: order.id,
-      status: (hasTracking ? 'shipped' : order.status) || 'pending',
+      status: writtenStatus,
       items,
       total: parseFloat(order.total) || 0,
       tracking_number: tracking?.trackingNumber || null,
@@ -115,7 +118,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     }, { onConflict: 'woo_order_id', ignoreDuplicates: true });
   }
 
-  return true;
+  return { phone, status: writtenStatus };
 }
 
 async function runWooSync() {
@@ -126,7 +129,7 @@ async function runWooSync() {
   console.log(`WooCommerce sync: ${total} orders across ${totalPages} pages`);
 
   for (const o of firstPage) {
-    if (await syncOrder(o)) syncedContacts++;
+    if ((await syncOrder(o))?.phone) syncedContacts++;
   }
   totalOrders += firstPage.length;
 
@@ -134,7 +137,7 @@ async function runWooSync() {
     await new Promise(r => setTimeout(r, 250));
     const { orders } = await fetchOrders(page, 100, 'any');
     for (const o of orders) {
-      if (await syncOrder(o)) syncedContacts++;
+      if ((await syncOrder(o))?.phone) syncedContacts++;
     }
     totalOrders += orders.length;
     console.log(`WooCommerce sync: page ${page}/${totalPages} done`);

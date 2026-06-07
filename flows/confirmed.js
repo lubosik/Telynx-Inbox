@@ -472,6 +472,17 @@ async function handleOrderShipped(order) {
         .eq('woo_order_id', wooId)
         .eq('shipped_sms_sent', false);
     }
+    // Bubble contact to top in the UI
+    const now = new Date().toISOString();
+    await supabase.from('sms_contacts')
+      .update({ last_seen: now })
+      .eq('phone', phone);
+    require('../lib/broadcaster').broadcast({
+      type: 'order_status_updated',
+      phone,
+      status: 'shipped',
+      order_id: orderId
+    });
   }
 }
 

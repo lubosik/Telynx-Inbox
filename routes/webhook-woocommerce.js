@@ -167,7 +167,13 @@ module.exports = (broadcastSSE) => {
       console.log(`[WEBHOOK] WooCommerce | topic=${topic} order=${orderId} status=${status}`);
 
       // Sync contact + order record (preserves existing SMS flags)
-      await syncOrder(order, { fromWebhook: true });
+      const sync = await syncOrder(order, { fromWebhook: true });
+      const phone = sync?.phone;
+
+      // Broadcast real-time status update to connected UI clients
+      if (phone && status !== 'pending') {
+        broadcastSSE({ type: 'order_status_updated', phone, status, order_id: orderId });
+      }
 
       switch (status) {
         case 'failed':
@@ -181,8 +187,7 @@ module.exports = (broadcastSSE) => {
         case 'processing': {
           // Payment received — cancel any pending failed/hold flows, send confirmation
           await handleOrderRecovered(orderId);
-          const resolvedPhone = await resolvePhone(order);
-          if (resolvedPhone) await cancelScheduledForCustomer(resolvedPhone);
+          if (phone) await cancelScheduledForCustomer(phone);
           await handleOrderConfirmed(order);
           break;
         }
@@ -190,8 +195,7 @@ module.exports = (broadcastSSE) => {
         case 'completed': {
           // Order shipped — cancel any remaining failed/hold flows, send tracking SMS
           await handleOrderRecovered(orderId);
-          const resolvedPhoneC = await resolvePhone(order);
-          if (resolvedPhoneC) await cancelScheduledForCustomer(resolvedPhoneC);
+          if (phone) await cancelScheduledForCustomer(phone);
           await handleOrderShipped(order);
           break;
         }

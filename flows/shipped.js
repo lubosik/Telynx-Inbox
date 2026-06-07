@@ -353,6 +353,17 @@ async function pollForCarrierScans() {
                 .eq('shipped_sms_sent', false);
             }
           }
+
+          // Bubble contact to top in the UI
+          await supabase.from('sms_contacts')
+            .update({ last_seen: now })
+            .eq('phone', phone);
+          require('../lib/broadcaster').broadcast({
+            type: 'order_status_updated',
+            phone,
+            status: 'shipped',
+            order_id: String(orderId)
+          });
           // Delivery check-in disabled — holding until FedEx tracking is wired
         }
       } else {

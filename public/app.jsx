@@ -457,15 +457,18 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
   const [modalPhone, setModalPhone] = useState(null);
   const [showVici, setShowVici] = useState(false);
 
-  // Contacts with orders first (newest order date → oldest), then no-order contacts below
+  // Sort by most recent activity: max(last_seen, latest_order_date)
+  // last_seen updates on every live webhook, latest_order_date covers new orders from manual sync
   const sorted = [...contacts].sort((a, b) => {
-    const aHasOrder = !!a.latest_order_date;
-    const bHasOrder = !!b.latest_order_date;
-    if (aHasOrder && !bHasOrder) return -1;
-    if (!aHasOrder && bHasOrder) return 1;
-    if (aHasOrder && bHasOrder) return b.latest_order_date.localeCompare(a.latest_order_date);
-    // Both have no orders — sort by last_seen
-    return (b.last_seen || '0').localeCompare(a.last_seen || '0');
+    const aKey = Math.max(
+      a.last_seen ? new Date(a.last_seen).getTime() : 0,
+      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0
+    );
+    const bKey = Math.max(
+      b.last_seen ? new Date(b.last_seen).getTime() : 0,
+      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0
+    );
+    return bKey - aKey;
   });
 
   const filtered = sorted.filter(c => {
@@ -582,13 +585,16 @@ function MessagesView({
     if (aMsg && bMsg) return bMsg.localeCompare(aMsg);
     if (aMsg && !bMsg) return -1;
     if (!aMsg && bMsg) return 1;
-    // Both have no messages — contacts with orders before contacts without
-    const aHasOrder = !!a.latest_order_date;
-    const bHasOrder = !!b.latest_order_date;
-    if (aHasOrder && !bHasOrder) return -1;
-    if (!aHasOrder && bHasOrder) return 1;
-    if (aHasOrder && bHasOrder) return b.latest_order_date.localeCompare(a.latest_order_date);
-    return (b.last_seen || '0').localeCompare(a.last_seen || '0');
+    // Both have no messages — sort by most recent activity
+    const aKey = Math.max(
+      a.last_seen ? new Date(a.last_seen).getTime() : 0,
+      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0
+    );
+    const bKey = Math.max(
+      b.last_seen ? new Date(b.last_seen).getTime() : 0,
+      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0
+    );
+    return bKey - aKey;
   });
 
   const filtered = sorted.filter(c => {
@@ -1374,6 +1380,17 @@ function App() {
 
         // Dispatch to Activity tab SSE listener
         window.dispatchEvent(new CustomEvent('vici-sse', { detail: evt }));
+
+        if (evt.type === 'order_status_updated') {
+          const { phone: updatedPhone, status: updatedStatus } = evt;
+          const now = new Date().toISOString();
+          setConversations(prev => prev.map(c =>
+            c.phone === updatedPhone
+              ? { ...c, latest_order_status: updatedStatus, last_seen: now }
+              : c
+          ));
+          return;
+        }
 
         if (evt.type === 'new_message') {
           const { phone, body, direction } = evt;
