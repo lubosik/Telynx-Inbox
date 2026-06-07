@@ -157,9 +157,10 @@ async function runWooSync() {
 async function syncOrderStatuses() {
   const { broadcast } = require('./lib/broadcaster');
 
-  const PROTECTED = new Set(['shipped', 'delivered']);
-  // WooCommerce status → our internal status
-  const WC_MAP = { completed: 'shipped' };
+  // 'delivered' is the only terminal state — never downgrade it.
+  // 'shipped' is NOT protected here so old shipped orders can graduate to delivered.
+  const PROTECTED = new Set(['delivered']);
+  const DELIVERED_THRESHOLD_MS = 21 * 24 * 60 * 60 * 1000;
 
   let fixed = 0, skipped = 0;
   const changes = [];
@@ -188,17 +189,28 @@ async function syncOrderStatuses() {
     if (!db) { skipped++; continue; }
     if (PROTECTED.has(db.status)) { skipped++; continue; }
 
-    const newStatus = WC_MAP[wc.status] || wc.status;
+    // Age-based status: WC 'completed' orders are either shipped (recent) or delivered (old)
+    let newStatus;
+    if (wc.status === 'completed') {
+      const wcDate = new Date(wc.date_modified || wc.date_created);
+      const ageMs = Date.now() - wcDate.getTime();
+      newStatus = ageMs > DELIVERED_THRESHOLD_MS ? 'delivered' : 'shipped';
+    } else {
+      newStatus = wc.status;
+    }
+
     if (newStatus === db.status) { skipped++; continue; }
+
+    // Use WC modification date as last_seen — not NOW() — so old orders don't float to top
+    const lastSeen = wc.date_modified || wc.date_created || new Date().toISOString();
 
     await supabase.from('sms_orders')
       .update({ status: newStatus })
       .eq('woo_order_id', wc.id);
 
     if (db.contact_phone) {
-      const now = new Date().toISOString();
       await supabase.from('sms_contacts')
-        .update({ last_seen: now })
+        .update({ last_seen: lastSeen })
         .eq('phone', db.contact_phone);
       broadcast({ type: 'order_status_updated', phone: db.contact_phone, status: newStatus, order_id: orderId });
     }
