@@ -457,16 +457,18 @@ function ContactsView({ contacts, onGoToMessages, addToast }) {
   const [modalPhone, setModalPhone] = useState(null);
   const [showVici, setShowVici] = useState(false);
 
-  // Sort by most recent activity: max(last_seen, latest_order_date)
-  // last_seen updates on every live webhook, latest_order_date covers new orders from manual sync
+  // Sort by most recent activity: max(last_seen, latest_order_date, lastMessage.created_at)
+  // lastMessage covers manual outbound sends; last_seen covers live webhooks; latest_order_date covers new orders
   const sorted = [...contacts].sort((a, b) => {
     const aKey = Math.max(
       a.last_seen ? new Date(a.last_seen).getTime() : 0,
-      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0
+      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0,
+      a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0
     );
     const bKey = Math.max(
       b.last_seen ? new Date(b.last_seen).getTime() : 0,
-      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0
+      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0,
+      b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0
     );
     return bKey - aKey;
   });
