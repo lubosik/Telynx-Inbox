@@ -1446,9 +1446,9 @@ function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
           }}>
           📞
         </button>
-        <button onClick={() => setDialNumber('')} disabled={!dialNumber}
-          style={{ width: 48, height: 48, borderRadius: '50%', background: 'none', border: 'none', color: '#9ca3af', fontSize: 14, cursor: 'pointer' }}>
-          ✕
+        <button onClick={() => setDialNumber(prev => prev + '+')}
+          style={{ width: 48, height: 48, borderRadius: '50%', background: 'none', border: '1px solid #2a2a2a', color: '#9ca3af', fontSize: 18, cursor: 'pointer', fontWeight: 700 }}>
+          +
         </button>
       </div>
     </div>
