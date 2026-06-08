@@ -1736,6 +1736,7 @@ function App() {
   function showNotification(title, body, phoneTag) {
     if (!('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
+    if (!document.hidden && document.hasFocus()) return;
 
     const n = new Notification(title, {
       body,
@@ -1763,18 +1764,15 @@ function App() {
 
   useEffect(() => {
     function handleVisibilityChange() {
-      if (!document.hidden && Notification.permission === 'granted') {
-        conversations.forEach(conv => {
-          try {
-            const p = new Notification('', { tag: encodeURIComponent(conv.phone), silent: true });
-            p.close();
-          } catch (_) {}
-        });
-      }
+      if (document.hidden || !('serviceWorker' in navigator)) return;
+      navigator.serviceWorker.ready
+        .then(reg => reg.getNotifications())
+        .then(notifications => notifications.forEach(n => n.close()))
+        .catch(() => {});
     }
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [conversations]);
+  }, []);
 
   useEffect(() => {
     if (activePhone) loadThread(activePhone);

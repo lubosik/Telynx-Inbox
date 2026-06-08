@@ -29,7 +29,13 @@ self.addEventListener('push', event => {
     vibrate: [200, 100, 200]
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
+      const appVisible = wins.some(w => w.visibilityState === 'visible');
+      if (appVisible) return Promise.resolve();
+      return self.registration.showNotification(title, options);
+    })
+  );
 });
 
 self.addEventListener('notificationclick', event => {

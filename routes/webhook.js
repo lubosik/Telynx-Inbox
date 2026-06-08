@@ -149,7 +149,8 @@ module.exports = (broadcastSSE) => {
         title: `New message from ${senderName}`,
         body: text.length > 100 ? text.slice(0, 97) + '…' : text,
         url: `/?thread=${encodeURIComponent(fromPhone)}`,
-        icon: '/icons/icon-192.png'
+        icon: '/icons/icon-192.png',
+        tag: `sms-${fromPhone}`
       }).catch(err => console.error('Push notify error:', err.message));
 
       setTimeout(() => analyseConversation(fromPhone).catch(console.error), 5000);
