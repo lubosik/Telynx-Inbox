@@ -1683,7 +1683,7 @@ function App() {
                 ...updated[idx],
                 last_seen: now,
                 lastMessage: { body, direction, created_at: now },
-                unread_count: direction === 'inbound' ? (updated[idx].unread_count || 0) + 1 : updated[idx].unread_count
+                unread_count: (direction === 'inbound' && phone !== activePhone) ? (updated[idx].unread_count || 0) + 1 : updated[idx].unread_count
               };
               return [updated[idx], ...updated.filter((_, i) => i !== idx)];
             } else {
@@ -1868,6 +1868,7 @@ function App() {
   }
 
   function initiateCall(phone, name) {
+    if (callState.status !== 'idle') { addToast('A call is already active'); return; }
     setConfirmCall({ phone, name: name || phone });
   }
 
