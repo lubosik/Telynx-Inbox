@@ -1843,7 +1843,7 @@ function App() {
         setCallState(prev => ({ ...prev, status: 'ended' }));
         setIsSpeaker(false);
         // Reset audio output to default when call ends
-        try { const a = document.getElementById('telnyx-audio'); if (a?.setSinkId) await a.setSinkId('default'); } catch {}
+        try { const a = document.getElementById('telnyx-audio'); if (a?.setSinkId) a.setSinkId('default').catch(() => {}); } catch {}
         setTimeout(() => {
           setCallState({ status: 'idle', direction: null, contactPhone: null, contactName: null, callControlId: null, duration: 0, isMuted: false, isRecording: false });
           activeCallRef.current = null;
