@@ -1354,7 +1354,7 @@ function CallConfirmModal({ target, onConfirm, onCancel }) {
   );
 }
 
-function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, formatDuration }) {
+function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, onSpeaker, isSpeaker, formatDuration }) {
   if (callState.status === 'idle') return null;
   const isInbound = callState.direction === 'inbound';
   const isRinging = callState.status === 'ringing';
@@ -1396,6 +1396,9 @@ function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, form
           <>
             <button onClick={onMute} style={{ background: callState.isMuted ? '#ef4444' : '#2a2a2a', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 18, cursor: 'pointer' }} title={callState.isMuted ? 'Unmute' : 'Mute'}>
               {callState.isMuted ? '🔇' : '🎤'}
+            </button>
+            <button onClick={onSpeaker} style={{ background: isSpeaker ? '#2563eb' : '#2a2a2a', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 18, cursor: 'pointer' }} title={isSpeaker ? 'Speaker on' : 'Speaker off'}>
+              🔊
             </button>
             <button onClick={onRecord} style={{ background: callState.isRecording ? '#ef4444' : '#2a2a2a', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 18, cursor: 'pointer' }} title={callState.isRecording ? 'Stop recording' : 'Start recording'}>
               {callState.isRecording ? '⏹' : '⏺'}
@@ -1564,6 +1567,7 @@ function App() {
   const [callLogs, setCallLogs] = useState([]);
   const [dialNumber, setDialNumber] = useState('');
   const [confirmCall, setConfirmCall] = useState(null);
+  const [isSpeaker, setIsSpeaker] = useState(false);
   const telnyxClientRef = useRef(null);
   const activeCallRef = useRef(null);
   const durationTimerRef = useRef(null);
@@ -1837,6 +1841,9 @@ function App() {
       case 'purge':
         stopDurationTimer();
         setCallState(prev => ({ ...prev, status: 'ended' }));
+        setIsSpeaker(false);
+        // Reset audio output to default when call ends
+        try { const a = document.getElementById('telnyx-audio'); if (a?.setSinkId) await a.setSinkId('default'); } catch {}
         setTimeout(() => {
           setCallState({ status: 'idle', direction: null, contactPhone: null, contactName: null, callControlId: null, duration: 0, isMuted: false, isRecording: false });
           activeCallRef.current = null;
@@ -1912,6 +1919,29 @@ function App() {
       body: JSON.stringify({ call_control_id: callState.callControlId })
     });
     setCallState(prev => ({ ...prev, isRecording: !prev.isRecording }));
+  }
+
+  async function toggleSpeaker() {
+    const audio = document.getElementById('telnyx-audio');
+    if (!audio || typeof audio.setSinkId !== 'function') {
+      addToast('Speaker toggle not supported in this browser');
+      return;
+    }
+    try {
+      if (isSpeaker) {
+        await audio.setSinkId('default');
+        setIsSpeaker(false);
+      } else {
+        // Enumerate output devices to find a non-default speaker
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const outputs = devices.filter(d => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== '');
+        const target = outputs.length > 0 ? outputs[0].deviceId : 'communications';
+        await audio.setSinkId(target);
+        setIsSpeaker(true);
+      }
+    } catch (err) {
+      addToast('Speaker switch failed: ' + err.message);
+    }
   }
 
   async function loadCallLogs(phone) {
@@ -2277,6 +2307,8 @@ function App() {
         onHangup={hangupCall}
         onMute={toggleMute}
         onRecord={toggleRecording}
+        onSpeaker={toggleSpeaker}
+        isSpeaker={isSpeaker}
         formatDuration={formatDuration}
       />
 
