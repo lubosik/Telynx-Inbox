@@ -90,6 +90,10 @@ app.use('/api/contacts',      requireAuth, require('./routes/contacts'));
 app.use('/api/catchup',       requireAuth, require('./routes/catchup'));
 app.use('/api/push',          requireAuth, require('./routes/push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
+app.use('/api/voice',         requireAuth, require('./routes/voice'));
+
+// Voice webhooks (public — Telnyx calls this directly)
+app.use('/webhooks/voice', express.raw({ type: '*/*' }), require('./routes/voice-webhook'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });

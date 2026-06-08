@@ -573,7 +573,7 @@ function ContactCard({ contact, onClick }) {
 function MessagesView({
   conversations, activePhone, messages, onSelectContact,
   input, setInput, onSend, onKeyDown, sending, inputRef, messagesEndRef,
-  mobileSub, setMobileSub
+  mobileSub, setMobileSub, callState, voiceReady, onInitiateCall
 }) {
   const [search, setSearch] = useState('');
   const isMobile = useIsMobile();
@@ -675,6 +675,24 @@ function MessagesView({
                 <div className="thread-name">{activeContact?.name || activePhone}</div>
                 {activeContact?.name && <div className="thread-phone">{activePhone}</div>}
               </div>
+              {activePhone && (
+                <button
+                  onClick={() => onInitiateCall(activePhone, activeContact?.name || null)}
+                  disabled={callState.status !== 'idle' || !voiceReady}
+                  style={{
+                    background: 'none',
+                    border: `1px solid ${callState.status !== 'idle' || !voiceReady ? '#2a2a2a' : '#16a34a'}`,
+                    borderRadius: 6, padding: '6px 12px',
+                    color: callState.status !== 'idle' || !voiceReady ? '#9ca3af' : '#16a34a',
+                    cursor: callState.status !== 'idle' || !voiceReady ? 'default' : 'pointer',
+                    fontSize: 13, display: 'flex', alignItems: 'center', gap: 6,
+                    marginLeft: 8, flexShrink: 0
+                  }}
+                  title="Call this customer"
+                >
+                  📞 Call
+                </button>
+              )}
             </div>
 
             <div className="messages-area">
@@ -779,20 +797,31 @@ function ConvRow({ contact: c, active, onClick }) {
     : 'No messages yet';
   const orderStatus = c.latest_order_status || 'none';
   const timestamp = smartTime(c.lastMessage?.created_at || c.latest_order_date || c.last_seen);
+  const isUnread = (c.unread_count || 0) > 0;
 
   return (
     <div className={`conv-row${active ? ' active' : ''}`} onClick={onClick}>
-      <div className="conv-avatar">
+      <div className="conv-avatar" style={{ position: 'relative' }}>
         {getInitials(c)}
         <span className={`order-dot ${orderStatus}`} />
+        {isUnread && (
+          <span style={{
+            position: 'absolute', top: -2, right: -2,
+            width: 10, height: 10, borderRadius: '50%',
+            background: '#3b82f6', border: '2px solid var(--bg)',
+            display: 'block'
+          }} />
+        )}
       </div>
       <div className="conv-body">
-        <div className="conv-name">{c.name || c.phone}</div>
+        <div className="conv-name" style={{ fontWeight: isUnread ? 700 : undefined, color: isUnread ? 'var(--text)' : undefined }}>
+          {c.name || c.phone}
+        </div>
         <div className="conv-preview">{preview}</div>
       </div>
       <div className="conv-side">
         <span className="conv-time">{timestamp}</span>
-        {c.unread_count > 0 && <span className="unread-pill">{c.unread_count}</span>}
+        {isUnread && <span className="unread-pill">{c.unread_count > 99 ? '99+' : c.unread_count}</span>}
       </div>
     </div>
   );
@@ -1287,6 +1316,227 @@ function ActivityTab({ sseStatus }) {
   );
 }
 
+// ─── Voice Components ─────────────────────────────────────────────────────────
+
+function CallConfirmModal({ target, onConfirm, onCancel }) {
+  if (!target) return null;
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000
+    }}>
+      <div style={{
+        background: '#1a1a1a', border: '1px solid #2a2a2a',
+        borderRadius: 12, padding: 28, minWidth: 280, textAlign: 'center'
+      }}>
+        <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+          Calling
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 600, color: '#fff', marginBottom: 4 }}>
+          {target.name !== target.phone ? target.name : target.phone}
+        </div>
+        {target.name !== target.phone && (
+          <div style={{ fontSize: 14, color: '#9ca3af', marginBottom: 24 }}>{target.phone}</div>
+        )}
+        {target.name === target.phone && <div style={{ marginBottom: 24 }} />}
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+          <button onClick={onConfirm} style={{
+            background: '#16a34a', border: 'none', borderRadius: 8,
+            padding: '12px 24px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer'
+          }}>Call</button>
+          <button onClick={onCancel} style={{
+            background: 'none', border: '1px solid #2a2a2a', borderRadius: 8,
+            padding: '12px 24px', color: '#9ca3af', fontSize: 14, cursor: 'pointer'
+          }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, formatDuration }) {
+  if (callState.status === 'idle') return null;
+  const isInbound = callState.direction === 'inbound';
+  const isRinging = callState.status === 'ringing';
+  const isActive = callState.status === 'active';
+  const isEnded = callState.status === 'ended';
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+      background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 16,
+      padding: '20px 28px', minWidth: 290, zIndex: 1500,
+      boxShadow: '0 8px 32px rgba(0,0,0,0.6)', textAlign: 'center'
+    }}>
+      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+        {isRinging && isInbound ? 'Incoming call'
+          : isRinging && !isInbound ? 'Calling...'
+          : isActive ? 'On call'
+          : 'Call ended'}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: '#fff', marginBottom: 2 }}>
+        {callState.contactName || callState.contactPhone}
+      </div>
+      {callState.contactName && (
+        <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>{callState.contactPhone}</div>
+      )}
+      {isActive && (
+        <div style={{ fontSize: 22, fontWeight: 700, color: '#16a34a', marginBottom: 16 }}>
+          {formatDuration(callState.duration)}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        {isRinging && isInbound && (
+          <>
+            <button onClick={onAnswer} style={{ background: '#16a34a', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📞</button>
+            <button onClick={onHangup} style={{ background: '#ef4444', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📵</button>
+          </>
+        )}
+        {isActive && (
+          <>
+            <button onClick={onMute} style={{ background: callState.isMuted ? '#ef4444' : '#2a2a2a', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 18, cursor: 'pointer' }} title={callState.isMuted ? 'Unmute' : 'Mute'}>
+              {callState.isMuted ? '🔇' : '🎤'}
+            </button>
+            <button onClick={onRecord} style={{ background: callState.isRecording ? '#ef4444' : '#2a2a2a', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 18, cursor: 'pointer' }} title={callState.isRecording ? 'Stop recording' : 'Start recording'}>
+              {callState.isRecording ? '⏹' : '⏺'}
+            </button>
+            <button onClick={onHangup} style={{ background: '#ef4444', border: 'none', borderRadius: '50%', width: 48, height: 48, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📵</button>
+          </>
+        )}
+        {isRinging && !isInbound && (
+          <button onClick={onHangup} style={{ background: '#ef4444', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📵</button>
+        )}
+        {isEnded && (
+          <div style={{ color: '#9ca3af', fontSize: 14, padding: '8px 0' }}>Call ended</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
+  const KEYPAD = [['1','2','3'],['4','5','6'],['7','8','9'],['*','0','#']];
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 24 }}>
+      <div style={{ fontSize: 28, fontWeight: 300, color: '#fff', minHeight: 44, marginBottom: 24, letterSpacing: '0.08em', textAlign: 'center' }}>
+        {dialNumber || <span style={{ color: '#9ca3af', fontSize: 16 }}>Enter a number</span>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 72px)', gap: 12, marginBottom: 24 }}>
+        {KEYPAD.flat().map(key => (
+          <button key={key} onClick={() => setDialNumber(prev => prev + key)} style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: '#1a1a1a', border: '1px solid #2a2a2a',
+            color: '#fff', fontSize: 20, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>{key}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <button onClick={() => setDialNumber(prev => prev.slice(0, -1))} disabled={!dialNumber}
+          style={{ width: 48, height: 48, borderRadius: '50%', background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer' }}>
+          ⌫
+        </button>
+        <button onClick={() => dialNumber && onCall(dialNumber, null)} disabled={!dialNumber || !voiceReady}
+          style={{
+            width: 72, height: 72, borderRadius: '50%',
+            background: (!dialNumber || !voiceReady) ? '#1a1a1a' : '#16a34a',
+            border: 'none', color: '#fff', fontSize: 28,
+            cursor: (!dialNumber || !voiceReady) ? 'default' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+          📞
+        </button>
+        <button onClick={() => setDialNumber('')} disabled={!dialNumber}
+          style={{ width: 48, height: 48, borderRadius: '50%', background: 'none', border: 'none', color: '#9ca3af', fontSize: 14, cursor: 'pointer' }}>
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CallLogsSection({ logs, onCall }) {
+  const statusIcon = {
+    completed: { icon: '↗', color: '#16a34a' },
+    missed: { icon: '↙', color: '#ef4444' },
+    initiated: { icon: '↗', color: '#9ca3af' },
+    failed: { icon: '✕', color: '#ef4444' },
+    declined: { icon: '✕', color: '#ef4444' },
+    answered: { icon: '↔', color: '#3b82f6' }
+  };
+
+  if (!logs.length) return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 14 }}>
+      No calls yet
+    </div>
+  );
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      {logs.map(log => {
+        const icon = statusIcon[log.status] || { icon: '?', color: '#9ca3af' };
+        const phone = log.contact_phone;
+        const durStr = log.duration_seconds > 0
+          ? `${Math.floor(log.duration_seconds/60).toString().padStart(2,'0')}:${(log.duration_seconds%60).toString().padStart(2,'0')}`
+          : null;
+        return (
+          <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #1a1a1a' }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: icon.color }}>
+              {icon.icon}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: '#fff', marginBottom: 2 }}>{phone}</div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => onCall(phone, null)} style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#16a34a', cursor: 'pointer', fontSize: 14 }} title="Call back">📞</button>
+              {log.recording_url_mp3 && (
+                <a href={log.recording_url_mp3} target="_blank" rel="noreferrer"
+                  style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#3b82f6', cursor: 'pointer', fontSize: 14, textDecoration: 'none', display: 'flex', alignItems: 'center' }}
+                  title="Play recording">
+                  ▶
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady }) {
+  const [activeSection, setActiveSection] = useState('dialer');
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid #2a2a2a', padding: '0 16px' }}>
+        {['dialer', 'logs'].map(s => (
+          <button key={s} onClick={() => setActiveSection(s)} style={{
+            background: 'none', border: 'none', padding: '14px 16px',
+            color: activeSection === s ? '#16a34a' : '#9ca3af',
+            borderBottom: activeSection === s ? '2px solid #16a34a' : '2px solid transparent',
+            cursor: 'pointer', fontSize: 13, textTransform: 'capitalize', letterSpacing: '0.06em'
+          }}>
+            {s === 'dialer' ? 'Dialer' : 'Call Log'}
+          </button>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9ca3af' }}>
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: voiceReady ? '#16a34a' : '#ef4444' }} />
+          {voiceReady ? 'Connected' : 'Connecting...'}
+        </div>
+      </div>
+      {activeSection === 'dialer' && (
+        <DialerSection dialNumber={dialNumber} setDialNumber={setDialNumber} onCall={onCall} voiceReady={voiceReady} />
+      )}
+      {activeSection === 'logs' && (
+        <CallLogsSection logs={callLogs} onCall={onCall} />
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -1301,8 +1551,23 @@ function App() {
   const [syncing, setSyncing] = useState(false);
   const [statusSyncing, setStatusSyncing] = useState(false);
   const [catchingUp, setCatchingUp] = useState(false);
-  const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity'
+  const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity' | 'voice'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
+
+  // ── Voice state ──────────────────────────────────────────────────────────────
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [callState, setCallState] = useState({
+    status: 'idle', direction: null, contactPhone: null,
+    contactName: null, callControlId: null, duration: 0,
+    isMuted: false, isRecording: false
+  });
+  const [callLogs, setCallLogs] = useState([]);
+  const [dialNumber, setDialNumber] = useState('');
+  const [confirmCall, setConfirmCall] = useState(null);
+  const telnyxClientRef = useRef(null);
+  const activeCallRef = useRef(null);
+  const durationTimerRef = useRef(null);
+  const callerNumberRef = useRef('+13054043184');
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -1345,6 +1610,8 @@ function App() {
     loadConversations();
     requestNotificationPermission();
     connectSSE();
+    initVoiceClient();
+    loadCallLogs();
     pollTimer.current = setInterval(loadConversations, 30000);
     return () => {
       clearInterval(pollTimer.current);
@@ -1395,6 +1662,16 @@ function App() {
           return;
         }
 
+        if (evt.type === 'call_update') {
+          if (evt.event === 'hangup') loadCallLogs();
+          return;
+        }
+
+        if (evt.type === 'call_recording_saved') {
+          loadCallLogs();
+          return;
+        }
+
         if (evt.type === 'new_message') {
           const { phone, body, direction } = evt;
           setConversations(prev => {
@@ -1423,9 +1700,9 @@ function App() {
             }
             return ap;
           });
-          if (direction === 'inbound' && document.hidden) {
+          if (direction === 'inbound' && isAppInBackground()) {
             const contact = conversations.find(c => c.phone === phone);
-            fireNotification(contact?.name || phone, body);
+            showNotification(`New message from ${contact?.name || phone}`, body.slice(0, 80), phone);
           }
         }
       } catch {}
@@ -1446,22 +1723,52 @@ function App() {
     }
   }
 
-  async function fireNotification(title, body) {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    // Use service worker showNotification — required on iOS (new Notification() is unsupported).
-    if ('serviceWorker' in navigator) {
-      try {
-        const reg = await navigator.serviceWorker.ready;
-        await reg.showNotification(title, { body, icon: '/icons/icon-192.png' });
-        return;
-      } catch {}
-    }
-    new Notification(title, { body, icon: '/icons/icon-192.png' });
+  function isAppInBackground() {
+    return document.hidden || !document.hasFocus();
+  }
+
+  function showNotification(title, body, phoneTag) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    const n = new Notification(title, {
+      body,
+      tag: phoneTag ? encodeURIComponent(phoneTag) : 'vici-sms',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      requireInteraction: false
+    });
+
+    setTimeout(() => { try { n.close(); } catch (_) {} }, 4000);
+
+    n.onclick = () => {
+      window.focus();
+      if (phoneTag && phoneTag !== 'incoming-call') {
+        setActivePhone(phoneTag);
+        setMobileSub('thread');
+      }
+      n.close();
+    };
   }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activePhone]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (!document.hidden && Notification.permission === 'granted') {
+        conversations.forEach(conv => {
+          try {
+            const p = new Notification('', { tag: encodeURIComponent(conv.phone), silent: true });
+            p.close();
+          } catch (_) {}
+        });
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [conversations]);
 
   useEffect(() => {
     if (activePhone) loadThread(activePhone);
@@ -1471,6 +1778,147 @@ function App() {
     setActivePhone(phone);
     setConversations(prev => prev.map(c => c.phone === phone ? { ...c, unread_count: 0 } : c));
     setTimeout(() => inputRef.current?.focus(), 150);
+  }
+
+  // ── Voice functions ──────────────────────────────────────────────────────────
+
+  async function initVoiceClient() {
+    if (telnyxClientRef.current) return;
+    try {
+      const res = await fetch('/api/voice/token', { credentials: 'include' });
+      if (!res.ok) throw new Error('Token fetch failed');
+      const { login, password, callerNumber } = await res.json();
+      if (callerNumber) callerNumberRef.current = callerNumber;
+
+      const TelnyxRTC = window.TelnyxWebRTC?.TelnyxRTC || window.TelnyxRTC;
+      if (!TelnyxRTC) throw new Error('Telnyx WebRTC SDK not loaded');
+
+      const client = new TelnyxRTC({ login, password });
+      client.remoteElement = 'telnyx-audio';
+
+      client.on('telnyx.ready', () => { console.log('[VOICE] Client ready'); setVoiceReady(true); });
+      client.on('telnyx.error', (err) => { console.error('[VOICE] Client error:', err); setVoiceReady(false); });
+      client.on('telnyx.notification', (notification) => {
+        if (notification.type !== 'callUpdate') return;
+        handleCallStateChange(notification.call);
+      });
+
+      await client.connect();
+      telnyxClientRef.current = client;
+    } catch (err) {
+      console.error('[VOICE] Init failed:', err.message);
+    }
+  }
+
+  function handleCallStateChange(call) {
+    activeCallRef.current = call;
+    const state = call.state;
+    const phone = call.options?.remoteCallerNumber || call.options?.destinationNumber || 'Unknown';
+
+    console.log('[VOICE] Call state:', state, 'phone: ...'+phone.slice(-4));
+
+    switch (state) {
+      case 'ringing':
+        setCallState({
+          status: 'ringing', direction: 'inbound',
+          contactPhone: phone, contactName: getContactName(phone),
+          callControlId: call.id, duration: 0, isMuted: false, isRecording: false
+        });
+        if (isAppInBackground()) {
+          showNotification('Incoming call', `${getContactName(phone) || phone} is calling`, 'incoming-call');
+        }
+        break;
+      case 'active':
+        setCallState(prev => ({ ...prev, status: 'active' }));
+        startDurationTimer();
+        break;
+      case 'hangup':
+      case 'destroy':
+      case 'purge':
+        stopDurationTimer();
+        setCallState(prev => ({ ...prev, status: 'ended' }));
+        setTimeout(() => {
+          setCallState({ status: 'idle', direction: null, contactPhone: null, contactName: null, callControlId: null, duration: 0, isMuted: false, isRecording: false });
+          activeCallRef.current = null;
+          loadCallLogs();
+        }, 3000);
+        break;
+    }
+  }
+
+  function startDurationTimer() {
+    if (durationTimerRef.current) clearInterval(durationTimerRef.current);
+    durationTimerRef.current = setInterval(() => {
+      setCallState(prev => ({ ...prev, duration: prev.duration + 1 }));
+    }, 1000);
+  }
+
+  function stopDurationTimer() {
+    if (durationTimerRef.current) { clearInterval(durationTimerRef.current); durationTimerRef.current = null; }
+  }
+
+  function formatDuration(secs) {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function getContactName(phone) {
+    return conversations.find(c => c.phone === phone)?.name || null;
+  }
+
+  function initiateCall(phone, name) {
+    setConfirmCall({ phone, name: name || phone });
+  }
+
+  function confirmAndCall() {
+    if (!confirmCall || !telnyxClientRef.current) return;
+    const { phone } = confirmCall;
+    setConfirmCall(null);
+    try {
+      const call = telnyxClientRef.current.newCall({
+        destinationNumber: phone,
+        callerNumber: callerNumberRef.current
+      });
+      activeCallRef.current = call;
+      setCallState({
+        status: 'ringing', direction: 'outbound',
+        contactPhone: phone, contactName: getContactName(phone),
+        callControlId: null, duration: 0, isMuted: false, isRecording: false
+      });
+    } catch (err) {
+      console.error('[VOICE] newCall failed:', err.message);
+      addToast('Call failed. Please try again.');
+    }
+  }
+
+  function answerCall() { activeCallRef.current?.answer(); }
+  function hangupCall() { activeCallRef.current?.hangup(); }
+
+  function toggleMute() {
+    const call = activeCallRef.current;
+    if (!call) return;
+    if (callState.isMuted) { call.unmuteAudio(); } else { call.muteAudio(); }
+    setCallState(prev => ({ ...prev, isMuted: !prev.isMuted }));
+  }
+
+  async function toggleRecording() {
+    if (!callState.callControlId) return;
+    const endpoint = callState.isRecording ? 'stop' : 'start';
+    await fetch(`/api/voice/recording/${endpoint}`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_control_id: callState.callControlId })
+    });
+    setCallState(prev => ({ ...prev, isRecording: !prev.isRecording }));
+  }
+
+  async function loadCallLogs(phone) {
+    try {
+      const url = phone ? `/api/voice/logs?phone=${encodeURIComponent(phone)}` : '/api/voice/logs';
+      const data = await fetch(url, { credentials: 'include' }).then(r => r.json());
+      setCallLogs(Array.isArray(data) ? data : []);
+    } catch {}
   }
 
   // Called from ContactModal "Open Message Thread" button
@@ -1714,6 +2162,17 @@ function App() {
           >
             ACTIVITY
           </button>
+          <button
+            className={`header-tab${mainTab === 'voice' ? ' active' : ''}`}
+            onClick={() => setMainTab('voice')}
+          >
+            VOICE
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: voiceReady ? '#16a34a' : '#9ca3af',
+              display: 'inline-block', marginLeft: 5, verticalAlign: 'middle'
+            }} />
+          </button>
         </div>
 
         <div className="header-spacer" />
@@ -1786,12 +2245,39 @@ function App() {
             messagesEndRef={messagesEndRef}
             mobileSub={mobileSub}
             setMobileSub={setMobileSub}
+            callState={callState}
+            voiceReady={voiceReady}
+            onInitiateCall={initiateCall}
           />
         )}
         {mainTab === 'activity' && (
           <ActivityTab sseStatus={sseStatus} />
         )}
+        {mainTab === 'voice' && (
+          <VoiceTab
+            callLogs={callLogs}
+            dialNumber={dialNumber}
+            setDialNumber={setDialNumber}
+            onCall={initiateCall}
+            voiceReady={voiceReady}
+          />
+        )}
       </div>
+
+      <CallConfirmModal
+        target={confirmCall}
+        onConfirm={confirmAndCall}
+        onCancel={() => setConfirmCall(null)}
+      />
+
+      <ActiveCallPanel
+        callState={callState}
+        onAnswer={answerCall}
+        onHangup={hangupCall}
+        onMute={toggleMute}
+        onRecord={toggleRecording}
+        formatDuration={formatDuration}
+      />
 
       {/* ── Mobile bottom nav ── */}
       {isMobile && (
@@ -1818,6 +2304,14 @@ function App() {
             >
               <span className="bnav-icon">⚡</span>
               Activity
+            </button>
+            <button
+              className={`bnav-btn${mainTab === 'voice' ? ' active' : ''}`}
+              onClick={() => setMainTab('voice')}
+            >
+              <span className="bnav-icon">📞</span>
+              Voice
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: voiceReady ? '#16a34a' : '#9ca3af', display: 'inline-block', marginLeft: 4 }} />
             </button>
           </div>
         </nav>
