@@ -45,6 +45,33 @@ router.get('/logs/:id', async (req, res) => {
   res.json(data || null);
 });
 
+// POST /api/voice/logs — client-side fallback when Telnyx webhook doesn't fire
+router.post('/logs', async (req, res) => {
+  const { call_control_id, direction, contact_phone, from_number, to_number,
+          duration_seconds, status, started_at, ended_at } = req.body;
+
+  if (!contact_phone) return res.status(400).json({ error: 'contact_phone required' });
+
+  const { error } = await supabase.from('call_logs').upsert({
+    call_control_id: call_control_id || `client-${Date.now()}`,
+    direction: direction || 'outbound',
+    contact_phone,
+    from_number: from_number || null,
+    to_number: to_number || null,
+    duration_seconds: duration_seconds || 0,
+    status: status || 'completed',
+    started_at: started_at || new Date().toISOString(),
+    ended_at: ended_at || new Date().toISOString(),
+    answered_at: duration_seconds > 0 ? (ended_at || new Date().toISOString()) : null
+  }, { onConflict: 'call_control_id' });
+
+  if (error) {
+    console.error('[VOICE] Log save error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ ok: true });
+});
+
 // POST /api/voice/recording/start
 router.post('/recording/start', async (req, res) => {
   const { call_control_id } = req.body;

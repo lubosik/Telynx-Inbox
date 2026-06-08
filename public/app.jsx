@@ -1572,6 +1572,8 @@ function App() {
   const activeCallRef = useRef(null);
   const durationTimerRef = useRef(null);
   const callerNumberRef = useRef('+13054043184');
+  const callStartRef = useRef(null);
+  const callDirectionRef = useRef('outbound');
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -1823,6 +1825,8 @@ function App() {
 
     switch (state) {
       case 'ringing':
+        callDirectionRef.current = 'inbound';
+        callStartRef.current = Date.now();
         setCallState({
           status: 'ringing', direction: 'inbound',
           contactPhone: phone, contactName: getContactName(phone),
@@ -1833,13 +1837,38 @@ function App() {
         }
         break;
       case 'active':
+        if (!callStartRef.current) callStartRef.current = Date.now();
         setCallState(prev => ({ ...prev, status: 'active' }));
         startDurationTimer();
         break;
       case 'hangup':
       case 'destroy':
-      case 'purge':
+      case 'purge': {
         stopDurationTimer();
+        const endedAt = new Date().toISOString();
+        const startedAt = callStartRef.current
+          ? new Date(callStartRef.current).toISOString()
+          : endedAt;
+        const durationSecs = callStartRef.current
+          ? Math.floor((Date.now() - callStartRef.current) / 1000)
+          : 0;
+        callStartRef.current = null;
+
+        // Save call log client-side — fallback if Telnyx webhook didn't fire
+        const direction = callDirectionRef.current || 'outbound';
+        const myNumber = callerNumberRef.current;
+        api('POST', '/api/voice/logs', {
+          call_control_id: call.id || `client-${Date.now()}`,
+          direction,
+          contact_phone: phone,
+          from_number: direction === 'outbound' ? myNumber : phone,
+          to_number: direction === 'outbound' ? phone : myNumber,
+          duration_seconds: durationSecs,
+          status: durationSecs > 0 ? 'completed' : (direction === 'inbound' ? 'missed' : 'failed'),
+          started_at: startedAt,
+          ended_at: endedAt
+        }).catch(() => {});
+
         setCallState(prev => ({ ...prev, status: 'ended' }));
         setIsSpeaker(false);
         // Reset audio output to default when call ends
@@ -1850,6 +1879,7 @@ function App() {
           loadCallLogs();
         }, 3000);
         break;
+      }
     }
   }
 
@@ -1883,6 +1913,8 @@ function App() {
     if (!confirmCall || !telnyxClientRef.current) return;
     const { phone } = confirmCall;
     setConfirmCall(null);
+    callDirectionRef.current = 'outbound';
+    callStartRef.current = Date.now();
     try {
       const call = telnyxClientRef.current.newCall({
         destinationNumber: phone,

@@ -10,9 +10,13 @@ webpush.setVapidDetails(
 // Send a push notification to every stored subscription.
 // Payload: { title, body, url, icon }
 async function sendPushToAll(payload) {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data: subs, error: dbErr } = await supabase
     .from('push_subscriptions')
-    .select('id, endpoint, subscription');
+    .select('id, endpoint, subscription')
+    .gte('updated_at', thirtyDaysAgo)
+    .order('updated_at', { ascending: false })
+    .limit(5);
 
   if (dbErr) {
     console.error('Push: failed to fetch subscriptions from DB:', dbErr.message);

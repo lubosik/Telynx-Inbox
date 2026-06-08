@@ -22,8 +22,10 @@ self.addEventListener('push', event => {
     body: data.body || '',
     icon: data.icon || '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
+    tag: data.tag || 'vici-sms',
+    renotify: true,
     data: { url: data.url || '/' },
-    requireInteraction: true,
+    requireInteraction: false,
     vibrate: [200, 100, 200]
   };
 
