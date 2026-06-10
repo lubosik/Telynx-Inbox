@@ -1420,7 +1420,7 @@ function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, onSp
 function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
   const KEYPAD = [['1','2','3'],['4','5','6'],['7','8','9'],['*','0','#']];
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 24 }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 24, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ fontSize: 28, fontWeight: 300, color: '#fff', minHeight: 44, marginBottom: 24, letterSpacing: '0.08em', textAlign: 'center' }}>
         {dialNumber || <span style={{ color: '#9ca3af', fontSize: 16 }}>Enter a number</span>}
       </div>
@@ -1510,7 +1510,7 @@ function CallLogsSection({ logs, onCall }) {
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1525,9 +1525,17 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady }) {
             {s === 'dialer' ? 'Dialer' : 'Call Log'}
           </button>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9ca3af' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: voiceReady ? '#16a34a' : '#ef4444' }} />
-          {voiceReady ? 'Connected' : 'Connecting...'}
+          {voiceReady ? 'Connected' : 'Not connected'}
+          {!voiceReady && (
+            <button onClick={onRetryConnect} style={{
+              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
+              color: '#9ca3af', fontSize: 11, padding: '3px 8px', cursor: 'pointer'
+            }}>
+              Reconnect
+            </button>
+          )}
         </div>
       </div>
       {activeSection === 'dialer' && (
@@ -1812,6 +1820,20 @@ function App() {
     } catch (err) {
       console.error('[VOICE] Init failed:', err.message);
     }
+  }
+
+  // Tear down existing client (if any) and reconnect — called manually from Voice tab
+  // and on tab open when not connected. This handles mobile where the initial
+  // auto-init may have failed silently (iOS Safari WebRTC needs a user gesture).
+  async function retryVoiceConnect() {
+    try {
+      if (telnyxClientRef.current) {
+        try { telnyxClientRef.current.disconnect(); } catch {}
+        telnyxClientRef.current = null;
+      }
+      setVoiceReady(false);
+    } catch {}
+    await initVoiceClient();
   }
 
   function handleCallStateChange(call) {
@@ -2225,7 +2247,7 @@ function App() {
           </button>
           <button
             className={`header-tab${mainTab === 'voice' ? ' active' : ''}`}
-            onClick={() => setMainTab('voice')}
+            onClick={() => { setMainTab('voice'); if (!voiceReady) initVoiceClient(); }}
           >
             VOICE
             <span style={{
@@ -2321,6 +2343,7 @@ function App() {
             setDialNumber={setDialNumber}
             onCall={initiateCall}
             voiceReady={voiceReady}
+            onRetryConnect={retryVoiceConnect}
           />
         )}
       </div>
@@ -2370,7 +2393,7 @@ function App() {
             </button>
             <button
               className={`bnav-btn${mainTab === 'voice' ? ' active' : ''}`}
-              onClick={() => setMainTab('voice')}
+              onClick={() => { setMainTab('voice'); if (!voiceReady) initVoiceClient(); }}
             >
               <span className="bnav-icon">📞</span>
               Voice
