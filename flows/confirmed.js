@@ -14,16 +14,48 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // ---------------------------------------------------------------------------
 // Count prior SUCCESSFUL orders for this customer, excluding the current one.
 //
-// "Successful" = processing or completed. Failed and on-hold do NOT count —
-// those haven't actually gone through. This determines new vs returning.
+// "Successful" = processing, completed, shipped, or delivered. Failed / on-hold
+// do NOT count. This determines new vs returning customer messaging.
 //
-// NOTE: WooCommerce's ?email= filter is unreliable — ignores the param and
-// returns recent orders from anyone. Fix:
-//   1. Prefer ?customer=<id> when registered (filter works correctly).
-//   2. Fall back to per_page=100 + client-side email filter for guests.
+// Strategy (in priority order):
+//   1. Query sms_orders by phone — our own table, always synced before this runs.
+//   2. Check sms_sent_log — if we've confirmed an order for this phone, they're returning.
+//   3. WooCommerce API — last resort: guest path is limited to 100 recent store orders
+//      which misses older orders from active stores.
 // ---------------------------------------------------------------------------
 
-async function getPriorSuccessfulOrderCount(email, customerId, currentOrderId) {
+async function getPriorSuccessfulOrderCount(email, customerId, currentOrderId, phone) {
+  // PRIMARY: query our own sms_orders table by phone — always up-to-date (syncOrder runs
+  // before handleOrderConfirmed on every webhook) and not limited by WC API pagination.
+  if (phone) {
+    try {
+      const wooId = parseInt(currentOrderId, 10);
+      let query = supabase
+        .from('sms_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('contact_phone', phone)
+        .in('status', ['processing', 'completed', 'shipped', 'delivered']);
+      if (!isNaN(wooId)) query = query.neq('woo_order_id', wooId);
+      const { count } = await query;
+      if (count && count > 0) return count;
+    } catch {}
+
+    // FALLBACK: if sms_orders is missing entries, check sms_sent_log — if we've ever sent
+    // a confirmed SMS to this phone it's definitive proof they're a returning customer.
+    try {
+      const { data: priorSent } = await supabase
+        .from('sms_sent_log')
+        .select('id')
+        .eq('phone', phone)
+        .in('flow_type', ['confirmed-new', 'confirmed-returning'])
+        .neq('order_id', String(currentOrderId))
+        .limit(1);
+      if (priorSent && priorSent.length > 0) return 1;
+    } catch {}
+  }
+
+  // LAST RESORT: WooCommerce API — unreliable for guests when store has >100 recent orders
+  // (guest path fetches a fixed window and can miss older orders). Kept as final fallback.
   try {
     const baseUrl    = process.env.WC_URL?.replace('/wp-json/wc/v3', '') || 'https://vicipeptides.com';
     const authHeader = 'Basic ' + Buffer.from(
@@ -31,9 +63,8 @@ async function getPriorSuccessfulOrderCount(email, customerId, currentOrderId) {
     ).toString('base64');
 
     if (customerId && customerId > 0) {
-      // exclude= keeps the current order out of the count even if it's already completed
       const res = await fetch(
-        `${baseUrl}/wp-json/wc/v3/orders?customer=${customerId}&status=completed,processing&per_page=20&exclude=${currentOrderId}`,
+        `${baseUrl}/wp-json/wc/v3/orders?customer=${customerId}&status[]=completed&status[]=processing&per_page=20&exclude[]=${currentOrderId}`,
         { headers: { Authorization: authHeader } }
       );
       const orders = await res.json();
@@ -43,7 +74,7 @@ async function getPriorSuccessfulOrderCount(email, customerId, currentOrderId) {
     if (!email) return 0;
 
     const res = await fetch(
-      `${baseUrl}/wp-json/wc/v3/orders?status=completed,processing&per_page=100`,
+      `${baseUrl}/wp-json/wc/v3/orders?status[]=completed&status[]=processing&per_page=100`,
       { headers: { Authorization: authHeader } }
     );
     const orders = await res.json();
@@ -399,7 +430,7 @@ async function handleOrderConfirmed(order) {
     return;
   }
 
-  const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId);
+  const priorSuccessful = await getPriorSuccessfulOrderCount(email, customerId, orderId, phone);
   const isNew     = priorSuccessful === 0;
   const flowType  = isNew ? 'confirmed-new' : 'confirmed-returning';
 
