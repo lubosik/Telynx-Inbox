@@ -452,34 +452,51 @@ function ViciPinnedCard({ onClick }) {
 
 // ─── Contacts View ────────────────────────────────────────────────────────────
 
-function ContactsView({ onGoToMessages, onCall, addToast }) {
+function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefresh, prefillPhone, onClearPrefill }) {
   const isMobile = useIsMobile();
-  const [contacts, setContacts] = useState([]);
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [selectedContact, setSelectedContact] = useState(null); // { contact, orders }
+  const [selectedContact, setSelectedContact] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newContact, setNewContact] = useState({ first_name: '', last_name: '', phone: '', email: '', notes: '' });
   const [createError, setCreateError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  async function loadContacts(q, pg) {
-    try {
-      const params = new URLSearchParams({ page: pg, sort: 'name' });
-      if (q) params.set('search', q);
-      const data = await api('GET', `/api/contacts?${params}`);
-      if (pg === 1) {
-        setContacts(data.contacts || []);
-      } else {
-        setContacts(prev => [...prev, ...(data.contacts || [])]);
-      }
-      setHasMore(data.hasMore || false);
-    } catch (err) {
-      addToast('Failed to load contacts: ' + err.message);
+  // Pre-fill from call log "Create Contact" button
+  useEffect(() => {
+    if (prefillPhone) {
+      setNewContact({ first_name: '', last_name: '', phone: prefillPhone, email: '', notes: '' });
+      setIsCreating(true);
+      setCreateError('');
+      if (onClearPrefill) onClearPrefill();
     }
-  }
+  }, [prefillPhone]);
+
+  // Sort by most recent activity: latest order date > last_seen > last message
+  const sorted = [...conversations].sort((a, b) => {
+    const aKey = Math.max(
+      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0,
+      a.last_seen ? new Date(a.last_seen).getTime() : 0,
+      a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0
+    );
+    const bKey = Math.max(
+      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0,
+      b.last_seen ? new Date(b.last_seen).getTime() : 0,
+      b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0
+    );
+    return bKey - aKey;
+  });
+
+  // Client-side search
+  const filtered = sorted.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return c.phone.includes(q) ||
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.first_name || '').toLowerCase().includes(q) ||
+      (c.last_name || '').toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q);
+  });
 
   async function loadContactDetail(phone) {
     setLoadingDetail(true);
@@ -499,8 +516,7 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
     if (!newContact.phone) { setCreateError('Phone number is required'); return; }
     try {
       const res = await fetch('/api/contacts', {
-        method: 'POST',
-        credentials: 'include',
+        method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newContact)
       });
@@ -508,8 +524,7 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
       if (!res.ok) { setCreateError(data.error || 'Failed to create contact'); return; }
       setIsCreating(false);
       setNewContact({ first_name: '', last_name: '', phone: '', email: '', notes: '' });
-      await loadContacts(search, 1);
-      setPage(1);
+      if (onRefresh) await onRefresh();
       setSelectedContact({ contact: data.contact, orders: [] });
     } catch (err) {
       setCreateError(err.message);
@@ -518,85 +533,59 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
 
   async function updateContact(phone, updates) {
     try {
-      await api('PATCH', `/api/contacts/${encodeURIComponent(phone)}`, updates);
-      await loadContactDetail(phone);
-      await loadContacts(search, 1);
-      setPage(1);
+      const data = await api('PATCH', `/api/contacts/${encodeURIComponent(phone)}`, updates);
+      // If phone was changed, reload detail with the new phone
+      const reloadPhone = updates.new_phone || phone;
+      await loadContactDetail(reloadPhone);
+      if (onRefresh) await onRefresh();
       setIsEditing(false);
     } catch (err) {
       addToast('Failed to update contact: ' + err.message);
     }
   }
 
-  // Initial load
-  useEffect(() => { loadContacts('', 1); }, []);
-
-  // Debounced search
-  useEffect(() => {
-    const t = setTimeout(() => { setPage(1); loadContacts(search, 1); }, 300);
-    return () => clearTimeout(t);
-  }, [search]);
-
-  const showDetail = selectedContact && (!isMobile || true);
   const showList = !isMobile || !selectedContact;
 
   return (
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
-      {/* Left panel — contact list */}
+      {/* Left panel */}
       {showList && (
         <div style={{
           width: selectedContact && !isMobile ? '320px' : '100%',
           borderRight: selectedContact && !isMobile ? '1px solid #2a2a2a' : 'none',
-          display: 'flex', flexDirection: 'column', flexShrink: 0,
-          overflow: 'hidden'
+          display: 'flex', flexDirection: 'column', flexShrink: 0, overflow: 'hidden'
         }}>
-          {/* Header */}
-          <div style={{
-            padding: '14px 16px', borderBottom: '1px solid #2a2a2a',
-            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
-          }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             <div style={{ flex: 1, fontSize: 15, fontWeight: 600, color: '#fff' }}>
               Contacts
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>
-                {contacts.length}
-              </span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>{conversations.length}</span>
             </div>
             <button
               onClick={() => { setIsCreating(true); setCreateError(''); }}
-              style={{
-                background: '#16a34a', border: 'none', borderRadius: 6,
-                padding: '7px 14px', color: '#fff', fontSize: 13,
-                fontWeight: 600, cursor: 'pointer'
-              }}
+              style={{ background: '#16a34a', border: 'none', borderRadius: 6, padding: '7px 14px', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
             >
               + New
             </button>
           </div>
 
-          {/* Search */}
           <div style={{ padding: '10px 16px', borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
             <input
               type="text"
               placeholder="Search by name or number..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              style={{
-                width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a',
-                borderRadius: 6, padding: '8px 12px', color: '#fff',
-                fontSize: 13, outline: 'none', boxSizing: 'border-box'
-              }}
+              style={{ width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
 
-          {/* Contact list */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {contacts.length === 0 && (
+            {filtered.length === 0 && (
               <div style={{ padding: 32, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                {search ? 'No contacts match your search' : 'No contacts yet — click + New or sync WooCommerce'}
+                {search ? `No contacts match "${search}"` : 'No contacts yet'}
               </div>
             )}
-            {contacts.map(c => (
+            {filtered.map(c => (
               <ContactRow
                 key={c.phone}
                 contact={c}
@@ -604,23 +593,11 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
                 onClick={() => loadContactDetail(c.phone)}
               />
             ))}
-            {hasMore && (
-              <button
-                onClick={() => { const next = page + 1; setPage(next); loadContacts(search, next); }}
-                style={{
-                  width: '100%', padding: 14, background: 'none',
-                  border: 'none', color: '#9ca3af', fontSize: 13,
-                  cursor: 'pointer', borderTop: '1px solid #1a1a1a'
-                }}
-              >
-                Load more
-              </button>
-            )}
           </div>
         </div>
       )}
 
-      {/* Right panel — contact detail */}
+      {/* Right panel — detail */}
       {selectedContact && !isMobile && (
         <ContactDetail
           data={selectedContact}
@@ -634,14 +611,11 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
         />
       )}
 
-      {/* Mobile: full-screen detail view */}
+      {/* Mobile full-screen detail */}
       {selectedContact && isMobile && (
         <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', zIndex: 100, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-            <button
-              onClick={() => setSelectedContact(null)}
-              style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}
-            >
+            <button onClick={() => setSelectedContact(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}>
               ←
             </button>
             <span style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>
@@ -663,7 +637,6 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
         </div>
       )}
 
-      {/* Create contact modal */}
       {isCreating && (
         <CreateContactModal
           data={newContact}
@@ -689,6 +662,14 @@ function ContactRow({ contact, isSelected, onClick }) {
     return displayName.slice(0, 2).toUpperCase();
   })();
 
+  const statusColour = {
+    completed: '#16a34a', processing: '#3b82f6', 'on-hold': '#f59e0b',
+    shipped: '#a855f7', delivered: '#16a34a', failed: '#ef4444',
+    cancelled: '#9ca3af', refunded: '#9ca3af', pending: '#6b7280'
+  };
+  const latestStatus = contact.latest_order_status;
+  const statusColor = latestStatus ? (statusColour[latestStatus] || '#9ca3af') : null;
+
   return (
     <div
       onClick={onClick}
@@ -700,21 +681,37 @@ function ContactRow({ contact, isSelected, onClick }) {
         borderBottom: '1px solid #111'
       }}
     >
+      {/* Avatar */}
       <div style={{
-        width: 38, height: 38, borderRadius: '50%', background: '#222',
+        width: 38, height: 38, borderRadius: '50%',
+        background: contact.avatar_url ? 'transparent' : '#222',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 13, fontWeight: 600, color: '#9ca3af', flexShrink: 0
+        fontSize: 13, fontWeight: 600, color: '#9ca3af', flexShrink: 0,
+        overflow: 'hidden'
       }}>
-        {initials}
+        {contact.avatar_url
+          ? <img src={contact.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+          : initials}
       </div>
+
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, color: '#fff', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {displayName}
         </div>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>
-          {contact.phone}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>{contact.phone}</span>
+          {latestStatus && (
+            <span style={{
+              fontSize: 10, padding: '1px 6px', borderRadius: 4,
+              background: `${statusColor}22`, color: statusColor,
+              textTransform: 'capitalize', fontWeight: 600
+            }}>
+              {latestStatus}
+            </span>
+          )}
         </div>
       </div>
+
       {(contact.unread_count || 0) > 0 && (
         <div style={{
           minWidth: 18, height: 18, borderRadius: 9, background: '#3b82f6',
@@ -736,8 +733,10 @@ function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen
   const [editData, setEditData] = useState({
     first_name: contact.first_name || '',
     last_name: contact.last_name || '',
+    phone: contact.phone || '',
     email: contact.email || '',
-    notes: contact.notes || ''
+    notes: contact.notes || '',
+    avatar_url: contact.avatar_url || ''
   });
 
   // Reset edit form when contact changes
@@ -745,10 +744,20 @@ function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen
     setEditData({
       first_name: contact.first_name || '',
       last_name: contact.last_name || '',
+      phone: contact.phone || '',
       email: contact.email || '',
-      notes: contact.notes || ''
+      notes: contact.notes || '',
+      avatar_url: contact.avatar_url || ''
     });
   }, [contact.phone]);
+
+  function handleAvatarUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setEditData(p => ({ ...p, avatar_url: ev.target.result }));
+    reader.readAsDataURL(file);
+  }
 
   const displayName = contact.display_name ||
     [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
@@ -784,64 +793,44 @@ function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen
     <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
       {/* Contact header */}
       <div style={{ padding: '24px 24px 16px', borderBottom: '1px solid #2a2a2a' }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: '50%', background: '#222',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 20, fontWeight: 600, color: '#9ca3af', marginBottom: 12
-        }}>
-          {initials}
+        {/* Avatar */}
+        <div style={{ position: 'relative', width: 56, marginBottom: 12, display: 'inline-block' }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: (isEditing ? editData.avatar_url : contact.avatar_url) ? 'transparent' : '#222',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20, fontWeight: 600, color: '#9ca3af', overflow: 'hidden'
+          }}>
+            {(isEditing ? editData.avatar_url : contact.avatar_url)
+              ? <img src={isEditing ? editData.avatar_url : contact.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              : initials}
+          </div>
+          {isEditing && (
+            <label style={{ position: 'absolute', bottom: -2, right: -2, width: 20, height: 20, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10 }}>
+              +
+              <input type="file" accept="image/*" onChange={handleAvatarUpload} style={{ display: 'none' }} />
+            </label>
+          )}
         </div>
 
         {!isEditing && (
           <>
-            <div style={{ fontSize: 20, fontWeight: 600, color: '#fff', marginBottom: 2 }}>
-              {displayName}
-            </div>
-            <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: contact.email ? 2 : 12 }}>
-              {contact.phone}
-            </div>
-            {contact.email && (
-              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
-                {contact.email}
-              </div>
-            )}
+            <div style={{ fontSize: 20, fontWeight: 600, color: '#fff', marginBottom: 2 }}>{displayName}</div>
+            <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: contact.email ? 2 : 12 }}>{contact.phone}</div>
+            {contact.email && <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>{contact.email}</div>}
             {contact.notes && (
-              <div style={{
-                fontSize: 13, color: '#9ca3af', background: '#1a1a1a',
-                borderRadius: 6, padding: '8px 12px', marginBottom: 12
-              }}>
+              <div style={{ fontSize: 13, color: '#9ca3af', background: '#1a1a1a', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
                 {contact.notes}
               </div>
             )}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => onMessage(contact.phone)}
-                style={{
-                  flex: 1, padding: '10px', background: '#1a1a1a',
-                  border: '1px solid #2a2a2a', borderRadius: 8,
-                  color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500
-                }}
-              >
+              <button onClick={() => onMessage(contact.phone)} style={{ flex: 1, padding: '10px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>
                 Message
               </button>
-              <button
-                onClick={() => onCall(contact.phone, displayName)}
-                style={{
-                  flex: 1, padding: '10px', background: '#16a34a',
-                  border: 'none', borderRadius: 8,
-                  color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500
-                }}
-              >
+              <button onClick={() => onCall(contact.phone, displayName)} style={{ flex: 1, padding: '10px', background: '#16a34a', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>
                 Call
               </button>
-              <button
-                onClick={onEditOpen}
-                style={{
-                  padding: '10px 14px', background: '#1a1a1a',
-                  border: '1px solid #2a2a2a', borderRadius: 8,
-                  color: '#9ca3af', fontSize: 13, cursor: 'pointer'
-                }}
-              >
+              <button onClick={onEditOpen} style={{ padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>
                 Edit
               </button>
             </div>
@@ -854,19 +843,22 @@ function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen
               <input value={editData.first_name} onChange={e => setEditData(p => ({ ...p, first_name: e.target.value }))} placeholder="First name" style={detailInput} />
               <input value={editData.last_name} onChange={e => setEditData(p => ({ ...p, last_name: e.target.value }))} placeholder="Last name" style={detailInput} />
             </div>
+            <input value={editData.phone} onChange={e => setEditData(p => ({ ...p, phone: e.target.value }))} placeholder="Phone number" style={detailInput} />
             <input value={editData.email} onChange={e => setEditData(p => ({ ...p, email: e.target.value }))} placeholder="Email (optional)" style={detailInput} />
             <textarea value={editData.notes} onChange={e => setEditData(p => ({ ...p, notes: e.target.value }))} placeholder="Notes..." rows={3} style={{ ...detailInput, resize: 'vertical' }} />
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                onClick={() => onEditSave(contact.phone, editData)}
+                onClick={() => {
+                  const updates = { ...editData };
+                  if (editData.phone !== contact.phone) updates.new_phone = editData.phone;
+                  delete updates.phone;
+                  onEditSave(contact.phone, updates);
+                }}
                 style={{ flex: 1, padding: '10px', background: '#16a34a', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
               >
                 Save
               </button>
-              <button
-                onClick={onEditCancel}
-                style={{ padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}
-              >
+              <button onClick={onEditCancel} style={{ padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>
                 Cancel
               </button>
             </div>
@@ -1855,7 +1847,7 @@ function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
   );
 }
 
-function CallLogsSection({ logs, onCall }) {
+function CallLogsSection({ logs, onCall, conversations, onCreateContact }) {
   const statusIcon = {
     completed: { icon: '↗', color: '#16a34a' },
     missed: { icon: '↙', color: '#ef4444' },
@@ -1864,6 +1856,12 @@ function CallLogsSection({ logs, onCall }) {
     declined: { icon: '✕', color: '#ef4444' },
     answered: { icon: '↔', color: '#3b82f6' }
   };
+
+  // Build a quick phone -> contact name lookup from loaded conversations
+  const contactMap = {};
+  for (const c of (conversations || [])) {
+    contactMap[c.phone] = c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+  }
 
   if (!logs.length) return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 14 }}>
@@ -1876,22 +1874,36 @@ function CallLogsSection({ logs, onCall }) {
       {logs.map(log => {
         const icon = statusIcon[log.status] || { icon: '?', color: '#9ca3af' };
         const phone = log.contact_phone;
+        const knownName = contactMap[phone];
+        const isUnknown = !knownName;
         const durStr = log.duration_seconds > 0
           ? `${Math.floor(log.duration_seconds/60).toString().padStart(2,'0')}:${(log.duration_seconds%60).toString().padStart(2,'0')}`
           : null;
         return (
           <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #1a1a1a' }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: icon.color }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: icon.color, flexShrink: 0 }}>
               {icon.icon}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, color: '#fff', marginBottom: 2 }}>{phone}</div>
-              <div style={{ fontSize: 12, color: '#9ca3af' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, color: isUnknown ? '#9ca3af' : '#fff', marginBottom: 2 }}>
+                {knownName || phone}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                {knownName && <span style={{ marginRight: 6 }}>{phone}</span>}
                 {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => onCall(phone, null)} style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#16a34a', cursor: 'pointer', fontSize: 14 }} title="Call back">📞</button>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {isUnknown && onCreateContact && (
+                <button
+                  onClick={() => onCreateContact(phone)}
+                  style={{ background: 'none', border: '1px solid #16a34a', borderRadius: 6, padding: '5px 9px', color: '#16a34a', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+                  title="Save as contact"
+                >
+                  + Contact
+                </button>
+              )}
+              <button onClick={() => onCall(phone, knownName || null)} style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#16a34a', cursor: 'pointer', fontSize: 14 }} title="Call back">📞</button>
               {log.recording_url_mp3 && (
                 <a href={log.recording_url_mp3} target="_blank" rel="noreferrer"
                   style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#3b82f6', cursor: 'pointer', fontSize: 14, textDecoration: 'none', display: 'flex', alignItems: 'center' }}
@@ -1907,7 +1919,7 @@ function CallLogsSection({ logs, onCall }) {
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1939,7 +1951,7 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onR
         <DialerSection dialNumber={dialNumber} setDialNumber={setDialNumber} onCall={onCall} voiceReady={voiceReady} />
       )}
       {activeSection === 'logs' && (
-        <CallLogsSection logs={callLogs} onCall={onCall} />
+        <CallLogsSection logs={callLogs} onCall={onCall} conversations={conversations} onCreateContact={onCreateContact} />
       )}
     </div>
   );
@@ -1961,6 +1973,7 @@ function App() {
   const [catchingUp, setCatchingUp] = useState(false);
   const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity' | 'voice'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
+  const [contactPrefill, setContactPrefill] = useState(null);
 
   // ── Voice state ──────────────────────────────────────────────────────────────
   const [voiceReady, setVoiceReady] = useState(false);
@@ -2705,9 +2718,13 @@ function App() {
       <div className="main-content">
         {mainTab === 'contacts' && (
           <ContactsView
+            conversations={conversations}
             onGoToMessages={goToMessages}
             onCall={initiateCall}
             addToast={addToast}
+            onRefresh={loadConversations}
+            prefillPhone={contactPrefill}
+            onClearPrefill={() => setContactPrefill(null)}
           />
         )}
         {mainTab === 'messages' && (
@@ -2741,6 +2758,8 @@ function App() {
             onCall={initiateCall}
             voiceReady={voiceReady}
             onRetryConnect={retryVoiceConnect}
+            conversations={conversations}
+            onCreateContact={(phone) => { setContactPrefill(phone); setMainTab('contacts'); }}
           />
         )}
       </div>

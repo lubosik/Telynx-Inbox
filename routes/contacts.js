@@ -133,13 +133,14 @@ router.post('/', async (req, res) => {
 router.patch('/:phone', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    const { first_name, last_name, name, email, notes } = req.body;
+    const { first_name, last_name, name, email, notes, avatar_url, new_phone } = req.body;
 
     const updates = {};
     if (first_name !== undefined) updates.first_name = first_name;
     if (last_name !== undefined) updates.last_name = last_name;
     if (email !== undefined) updates.email = email;
     if (notes !== undefined) updates.notes = notes;
+    if (avatar_url !== undefined) updates.avatar_url = avatar_url;
     if (name !== undefined) updates.name = name;
 
     if ((first_name !== undefined || last_name !== undefined) && name === undefined) {
@@ -149,6 +150,13 @@ router.patch('/:phone', async (req, res) => {
         first_name ?? current?.first_name,
         last_name ?? current?.last_name
       );
+    }
+
+    // Phone change: update only sms_contacts (message/order history stays on old number)
+    if (new_phone) {
+      const formatted = formatPhone(new_phone);
+      if (!formatted) return res.status(400).json({ error: 'Invalid phone number format' });
+      updates.phone = formatted;
     }
 
     const { data, error } = await supabase
