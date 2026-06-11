@@ -78,7 +78,6 @@ router.post('/', async (req, res) => {
     const { first_name, last_name, phone, email, notes } = req.body;
 
     if (!phone) return res.status(400).json({ error: 'Phone number is required' });
-    if (!first_name && !last_name) return res.status(400).json({ error: 'At least a first or last name is required' });
 
     const formattedPhone = formatPhone(phone);
     if (!formattedPhone) return res.status(400).json({ error: 'Invalid phone number format' });

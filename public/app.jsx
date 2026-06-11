@@ -497,7 +497,6 @@ function ContactsView({ onGoToMessages, onCall, addToast }) {
   async function createContact() {
     setCreateError('');
     if (!newContact.phone) { setCreateError('Phone number is required'); return; }
-    if (!newContact.first_name && !newContact.last_name) { setCreateError('Name is required'); return; }
     try {
       const res = await fetch('/api/contacts', {
         method: 'POST',
@@ -945,10 +944,10 @@ function CreateContactModal({ data, onChange, onSubmit, onCancel, error }) {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', gap: 10 }}>
-            <input value={data.first_name} onChange={e => onChange(p => ({ ...p, first_name: e.target.value }))} placeholder="First name" style={modalInput} />
-            <input value={data.last_name} onChange={e => onChange(p => ({ ...p, last_name: e.target.value }))} placeholder="Last name" style={modalInput} />
+            <input value={data.first_name} onChange={e => onChange(p => ({ ...p, first_name: e.target.value }))} placeholder="First name (optional)" style={modalInput} />
+            <input value={data.last_name} onChange={e => onChange(p => ({ ...p, last_name: e.target.value }))} placeholder="Last name (optional)" style={modalInput} />
           </div>
-          <input value={data.phone} onChange={e => onChange(p => ({ ...p, phone: e.target.value }))} placeholder="Phone (e.g. 3055551234)" style={modalInput} />
+          <input value={data.phone} onChange={e => onChange(p => ({ ...p, phone: e.target.value }))} placeholder="Phone (e.g. 3055551234) *" style={modalInput} />
           <input value={data.email} onChange={e => onChange(p => ({ ...p, email: e.target.value }))} placeholder="Email (optional)" style={modalInput} />
           <textarea value={data.notes} onChange={e => onChange(p => ({ ...p, notes: e.target.value }))} placeholder="Notes (optional)" rows={3} style={{ ...modalInput, resize: 'vertical' }} />
           {error && <div style={{ fontSize: 13, color: '#ef4444' }}>{error}</div>}
