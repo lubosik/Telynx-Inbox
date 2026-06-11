@@ -1859,10 +1859,21 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
     answered: { icon: '↔', color: '#3b82f6' }
   };
 
-  // Build a quick phone -> contact name lookup from loaded conversations
-  const contactMap = {};
+  // Normalize to digits-only for reliable matching across E.164 variants
+  function normPhone(p) {
+    if (!p) return '';
+    const d = p.replace(/\D/g, '');
+    return d.length === 10 ? '1' + d : d;
+  }
+
+  // Separate existence set from name map — a contact with no name is still a contact
+  const contactPhones = new Set();
+  const contactNames = {};
   for (const c of (conversations || [])) {
-    contactMap[c.phone] = c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || null;
+    const key = normPhone(c.phone);
+    contactPhones.add(key);
+    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.name || '';
+    if (name) contactNames[key] = name;
   }
 
   if (!logs.length) return (
@@ -1876,8 +1887,9 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
       {logs.map(log => {
         const icon = statusIcon[log.status] || { icon: '?', color: '#9ca3af' };
         const phone = log.contact_phone;
-        const knownName = contactMap[phone];
-        const isUnknown = !knownName;
+        const nk = normPhone(phone);
+        const isUnknown = !contactPhones.has(nk);
+        const knownName = contactNames[nk] || null;
         const durStr = log.duration_seconds > 0
           ? `${Math.floor(log.duration_seconds/60).toString().padStart(2,'0')}:${(log.duration_seconds%60).toString().padStart(2,'0')}`
           : null;
@@ -1891,7 +1903,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
                 {knownName || phone}
               </div>
               <div style={{ fontSize: 12, color: '#6b7280' }}>
-                {knownName && <span style={{ marginRight: 6 }}>{phone}</span>}
+                {(!isUnknown && knownName) && <span style={{ marginRight: 6 }}>{phone}</span>}
                 {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
               </div>
             </div>
