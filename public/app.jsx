@@ -452,118 +452,516 @@ function ViciPinnedCard({ onClick }) {
 
 // ─── Contacts View ────────────────────────────────────────────────────────────
 
-function ContactsView({ contacts, onGoToMessages, addToast }) {
+function ContactsView({ onGoToMessages, onCall, addToast }) {
+  const isMobile = useIsMobile();
+  const [contacts, setContacts] = useState([]);
   const [search, setSearch] = useState('');
-  const [modalPhone, setModalPhone] = useState(null);
-  const [showVici, setShowVici] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [selectedContact, setSelectedContact] = useState(null); // { contact, orders }
+  const [isCreating, setIsCreating] = useState(false);
+  const [newContact, setNewContact] = useState({ first_name: '', last_name: '', phone: '', email: '', notes: '' });
+  const [createError, setCreateError] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // Sort by most recent activity: max(last_seen, latest_order_date, lastMessage.created_at)
-  // lastMessage covers manual outbound sends; last_seen covers live webhooks; latest_order_date covers new orders
-  const sorted = [...contacts].sort((a, b) => {
-    const aKey = Math.max(
-      a.last_seen ? new Date(a.last_seen).getTime() : 0,
-      a.latest_order_date ? new Date(a.latest_order_date).getTime() : 0,
-      a.lastMessage?.created_at ? new Date(a.lastMessage.created_at).getTime() : 0
-    );
-    const bKey = Math.max(
-      b.last_seen ? new Date(b.last_seen).getTime() : 0,
-      b.latest_order_date ? new Date(b.latest_order_date).getTime() : 0,
-      b.lastMessage?.created_at ? new Date(b.lastMessage.created_at).getTime() : 0
-    );
-    return bKey - aKey;
-  });
+  async function loadContacts(q, pg) {
+    try {
+      const params = new URLSearchParams({ page: pg, sort: 'name' });
+      if (q) params.set('search', q);
+      const data = await api('GET', `/api/contacts?${params}`);
+      if (pg === 1) {
+        setContacts(data.contacts || []);
+      } else {
+        setContacts(prev => [...prev, ...(data.contacts || [])]);
+      }
+      setHasMore(data.hasMore || false);
+    } catch (err) {
+      addToast('Failed to load contacts: ' + err.message);
+    }
+  }
 
-  const filtered = sorted.filter(c => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return c.phone.includes(q) || (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q);
-  });
+  async function loadContactDetail(phone) {
+    setLoadingDetail(true);
+    setIsEditing(false);
+    try {
+      const data = await api('GET', `/api/contacts/${encodeURIComponent(phone)}`);
+      setSelectedContact(data);
+    } catch (err) {
+      addToast('Failed to load contact: ' + err.message);
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
 
-  const totalUnread = contacts.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+  async function createContact() {
+    setCreateError('');
+    if (!newContact.phone) { setCreateError('Phone number is required'); return; }
+    if (!newContact.first_name && !newContact.last_name) { setCreateError('Name is required'); return; }
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newContact)
+      });
+      const data = await res.json();
+      if (!res.ok) { setCreateError(data.error || 'Failed to create contact'); return; }
+      setIsCreating(false);
+      setNewContact({ first_name: '', last_name: '', phone: '', email: '', notes: '' });
+      await loadContacts(search, 1);
+      setPage(1);
+      setSelectedContact({ contact: data.contact, orders: [] });
+    } catch (err) {
+      setCreateError(err.message);
+    }
+  }
+
+  async function updateContact(phone, updates) {
+    try {
+      await api('PATCH', `/api/contacts/${encodeURIComponent(phone)}`, updates);
+      await loadContactDetail(phone);
+      await loadContacts(search, 1);
+      setPage(1);
+      setIsEditing(false);
+    } catch (err) {
+      addToast('Failed to update contact: ' + err.message);
+    }
+  }
+
+  // Initial load
+  useEffect(() => { loadContacts('', 1); }, []);
+
+  // Debounced search
+  useEffect(() => {
+    const t = setTimeout(() => { setPage(1); loadContacts(search, 1); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const showDetail = selectedContact && (!isMobile || true);
+  const showList = !isMobile || !selectedContact;
 
   return (
-    <div className="contacts-view">
-      <div className="contacts-toolbar">
-        <div className="contacts-search-wrap">
-          <span className="contacts-search-icon">⌕</span>
-          <input
-            className="contacts-search"
-            placeholder={`Search ${contacts.length} contacts…`}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
-      <div className="contacts-grid-wrap">
-        {contacts.length === 0 ? (
-          <div className="contacts-empty">
-            // NO CONTACTS YET<br />
-            Click ↻ WOO in the header to sync your WooCommerce customers.
+      {/* Left panel — contact list */}
+      {showList && (
+        <div style={{
+          width: selectedContact && !isMobile ? '320px' : '100%',
+          borderRight: selectedContact && !isMobile ? '1px solid #2a2a2a' : 'none',
+          display: 'flex', flexDirection: 'column', flexShrink: 0,
+          overflow: 'hidden'
+        }}>
+          {/* Header */}
+          <div style={{
+            padding: '14px 16px', borderBottom: '1px solid #2a2a2a',
+            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
+          }}>
+            <div style={{ flex: 1, fontSize: 15, fontWeight: 600, color: '#fff' }}>
+              Contacts
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#9ca3af', fontWeight: 400 }}>
+                {contacts.length}
+              </span>
+            </div>
+            <button
+              onClick={() => { setIsCreating(true); setCreateError(''); }}
+              style={{
+                background: '#16a34a', border: 'none', borderRadius: 6,
+                padding: '7px 14px', color: '#fff', fontSize: 13,
+                fontWeight: 600, cursor: 'pointer'
+              }}
+            >
+              + New
+            </button>
           </div>
-        ) : (
-          <>
-            <div className="contacts-count">
-              {filtered.length} of {contacts.length} contacts
-              {totalUnread > 0 && ` · ${totalUnread} unread`}
-            </div>
-            <div className="contacts-grid">
-              <ViciPinnedCard onClick={() => setShowVici(true)} />
-              {filtered.map(c => (
-                <ContactCard
-                  key={c.phone}
-                  contact={c}
-                  onClick={() => setModalPhone(c.phone)}
-                />
-              ))}
-            </div>
-            {filtered.length === 0 && search && (
-              <div className="contacts-empty">// NO MATCHES FOR "{search}"</div>
-            )}
-          </>
-        )}
-      </div>
 
-      {showVici && <ViciModal onClose={() => setShowVici(false)} />}
-      {modalPhone && (
-        <ContactModal
-          phone={modalPhone}
-          onClose={() => setModalPhone(null)}
-          onGoToMessages={(phone) => { onGoToMessages(phone); }}
-          addToast={addToast}
+          {/* Search */}
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid #2a2a2a', flexShrink: 0 }}>
+            <input
+              type="text"
+              placeholder="Search by name or number..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a',
+                borderRadius: 6, padding: '8px 12px', color: '#fff',
+                fontSize: 13, outline: 'none', boxSizing: 'border-box'
+              }}
+            />
+          </div>
+
+          {/* Contact list */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {contacts.length === 0 && (
+              <div style={{ padding: 32, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                {search ? 'No contacts match your search' : 'No contacts yet — click + New or sync WooCommerce'}
+              </div>
+            )}
+            {contacts.map(c => (
+              <ContactRow
+                key={c.phone}
+                contact={c}
+                isSelected={selectedContact?.contact?.phone === c.phone}
+                onClick={() => loadContactDetail(c.phone)}
+              />
+            ))}
+            {hasMore && (
+              <button
+                onClick={() => { const next = page + 1; setPage(next); loadContacts(search, next); }}
+                style={{
+                  width: '100%', padding: 14, background: 'none',
+                  border: 'none', color: '#9ca3af', fontSize: 13,
+                  cursor: 'pointer', borderTop: '1px solid #1a1a1a'
+                }}
+              >
+                Load more
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Right panel — contact detail */}
+      {selectedContact && !isMobile && (
+        <ContactDetail
+          data={selectedContact}
+          loading={loadingDetail}
+          onCall={onCall}
+          onMessage={(phone) => { onGoToMessages(phone); }}
+          isEditing={isEditing}
+          onEditOpen={() => setIsEditing(true)}
+          onEditCancel={() => setIsEditing(false)}
+          onEditSave={updateContact}
+        />
+      )}
+
+      {/* Mobile: full-screen detail view */}
+      {selectedContact && isMobile && (
+        <div style={{ position: 'fixed', inset: 0, background: '#0a0a0a', zIndex: 100, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <button
+              onClick={() => setSelectedContact(null)}
+              style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 20, cursor: 'pointer', padding: '4px 8px' }}
+            >
+              ←
+            </button>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#fff' }}>
+              {selectedContact.contact?.display_name || selectedContact.contact?.phone}
+            </span>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <ContactDetail
+              data={selectedContact}
+              loading={loadingDetail}
+              onCall={onCall}
+              onMessage={(phone) => { onGoToMessages(phone); }}
+              isEditing={isEditing}
+              onEditOpen={() => setIsEditing(true)}
+              onEditCancel={() => setIsEditing(false)}
+              onEditSave={updateContact}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Create contact modal */}
+      {isCreating && (
+        <CreateContactModal
+          data={newContact}
+          onChange={setNewContact}
+          onSubmit={createContact}
+          onCancel={() => { setIsCreating(false); setCreateError(''); }}
+          error={createError}
         />
       )}
     </div>
   );
 }
 
-// ─── Contact Card (in grid) ───────────────────────────────────────────────────
+// ─── Contact Row ──────────────────────────────────────────────────────────────
 
-function ContactCard({ contact, onClick }) {
-  const latestStatus = contact.latest_order_status || 'none';
-  const preview = contact.lastMessage
-    ? (contact.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(contact.lastMessage.body, 48)
-    : null;
+function ContactRow({ contact, isSelected, onClick }) {
+  const displayName = contact.display_name ||
+    [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
+    contact.name || contact.phone;
+  const initials = (() => {
+    const parts = displayName.split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return displayName.slice(0, 2).toUpperCase();
+  })();
 
   return (
-    <div className="contact-card" onClick={onClick}>
-      <div className="card-avatar">
-        {getInitials(contact)}
-        <span className={`card-status-dot ${latestStatus}`} />
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '11px 16px', cursor: 'pointer',
+        background: isSelected ? '#1a2a1a' : 'transparent',
+        borderLeft: isSelected ? '2px solid #16a34a' : '2px solid transparent',
+        borderBottom: '1px solid #111'
+      }}
+    >
+      <div style={{
+        width: 38, height: 38, borderRadius: '50%', background: '#222',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 13, fontWeight: 600, color: '#9ca3af', flexShrink: 0
+      }}>
+        {initials}
       </div>
-      <div className="card-name">{contact.name || 'Unknown'}</div>
-      <div className="card-phone">{contact.phone?.replace('+1', '')}</div>
-      <div className="card-meta">
-        {latestStatus !== 'none' && (
-          <span className={`card-order-badge ${latestStatus}`} title="Most recent order status">
-            Latest: {latestStatus}
-          </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, color: '#fff', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayName}
+        </div>
+        <div style={{ fontSize: 12, color: '#6b7280' }}>
+          {contact.phone}
+        </div>
+      </div>
+      {(contact.unread_count || 0) > 0 && (
+        <div style={{
+          minWidth: 18, height: 18, borderRadius: 9, background: '#3b82f6',
+          color: '#fff', fontSize: 10, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '0 5px', flexShrink: 0
+        }}>
+          {contact.unread_count}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Contact Detail ───────────────────────────────────────────────────────────
+
+function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen, onEditCancel, onEditSave }) {
+  const { contact, orders } = data;
+  const [editData, setEditData] = useState({
+    first_name: contact.first_name || '',
+    last_name: contact.last_name || '',
+    email: contact.email || '',
+    notes: contact.notes || ''
+  });
+
+  // Reset edit form when contact changes
+  useEffect(() => {
+    setEditData({
+      first_name: contact.first_name || '',
+      last_name: contact.last_name || '',
+      email: contact.email || '',
+      notes: contact.notes || ''
+    });
+  }, [contact.phone]);
+
+  const displayName = contact.display_name ||
+    [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
+    contact.name || contact.phone;
+
+  const initials = (() => {
+    const parts = displayName.split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return displayName.slice(0, 2).toUpperCase();
+  })();
+
+  const statusColour = {
+    completed: '#16a34a', processing: '#3b82f6', 'on-hold': '#f59e0b',
+    failed: '#ef4444', cancelled: '#9ca3af', refunded: '#9ca3af',
+    shipped: '#a855f7', delivered: '#16a34a'
+  };
+
+  const detailInput = {
+    width: '100%', background: '#111', border: '1px solid #2a2a2a',
+    borderRadius: 6, padding: '9px 12px', color: '#fff',
+    fontSize: 13, outline: 'none', boxSizing: 'border-box'
+  };
+
+  if (loading) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span className="spinner" style={{ width: 24, height: 24 }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      {/* Contact header */}
+      <div style={{ padding: '24px 24px 16px', borderBottom: '1px solid #2a2a2a' }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%', background: '#222',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 20, fontWeight: 600, color: '#9ca3af', marginBottom: 12
+        }}>
+          {initials}
+        </div>
+
+        {!isEditing && (
+          <>
+            <div style={{ fontSize: 20, fontWeight: 600, color: '#fff', marginBottom: 2 }}>
+              {displayName}
+            </div>
+            <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: contact.email ? 2 : 12 }}>
+              {contact.phone}
+            </div>
+            {contact.email && (
+              <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>
+                {contact.email}
+              </div>
+            )}
+            {contact.notes && (
+              <div style={{
+                fontSize: 13, color: '#9ca3af', background: '#1a1a1a',
+                borderRadius: 6, padding: '8px 12px', marginBottom: 12
+              }}>
+                {contact.notes}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => onMessage(contact.phone)}
+                style={{
+                  flex: 1, padding: '10px', background: '#1a1a1a',
+                  border: '1px solid #2a2a2a', borderRadius: 8,
+                  color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500
+                }}
+              >
+                Message
+              </button>
+              <button
+                onClick={() => onCall(contact.phone, displayName)}
+                style={{
+                  flex: 1, padding: '10px', background: '#16a34a',
+                  border: 'none', borderRadius: 8,
+                  color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 500
+                }}
+              >
+                Call
+              </button>
+              <button
+                onClick={onEditOpen}
+                style={{
+                  padding: '10px 14px', background: '#1a1a1a',
+                  border: '1px solid #2a2a2a', borderRadius: 8,
+                  color: '#9ca3af', fontSize: 13, cursor: 'pointer'
+                }}
+              >
+                Edit
+              </button>
+            </div>
+          </>
         )}
-        {contact.unread_count > 0 && (
-          <span className="card-unread">{contact.unread_count}</span>
+
+        {isEditing && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input value={editData.first_name} onChange={e => setEditData(p => ({ ...p, first_name: e.target.value }))} placeholder="First name" style={detailInput} />
+              <input value={editData.last_name} onChange={e => setEditData(p => ({ ...p, last_name: e.target.value }))} placeholder="Last name" style={detailInput} />
+            </div>
+            <input value={editData.email} onChange={e => setEditData(p => ({ ...p, email: e.target.value }))} placeholder="Email (optional)" style={detailInput} />
+            <textarea value={editData.notes} onChange={e => setEditData(p => ({ ...p, notes: e.target.value }))} placeholder="Notes..." rows={3} style={{ ...detailInput, resize: 'vertical' }} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => onEditSave(contact.phone, editData)}
+                style={{ flex: 1, padding: '10px', background: '#16a34a', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+              >
+                Save
+              </button>
+              <button
+                onClick={onEditCancel}
+                style={{ padding: '10px 14px', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         )}
       </div>
-      {preview && <div className="card-preview">{preview}</div>}
+
+      {/* Order history */}
+      <div style={{ padding: '16px 24px' }}>
+        <div style={{ fontSize: 11, color: '#9ca3af', letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 12 }}>
+          Order History
+        </div>
+        {!orders || orders.length === 0 ? (
+          <div style={{ padding: '16px', background: '#1a1a1a', borderRadius: 8, fontSize: 13, color: '#9ca3af', textAlign: 'center' }}>
+            No orders yet
+          </div>
+        ) : (
+          orders.map((order, i) => (
+            <div key={order.woo_order_id || order.id || i} style={{ background: '#1a1a1a', borderRadius: 8, padding: '12px 14px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>
+                  Order #{order.woo_order_id}
+                </div>
+                <span style={{
+                  fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                  background: `${statusColour[order.status] || '#9ca3af'}22`,
+                  color: statusColour[order.status] || '#9ca3af',
+                  textTransform: 'capitalize'
+                }}>
+                  {order.status}
+                </span>
+              </div>
+              <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 4 }}>
+                ${parseFloat(order.total || 0).toFixed(2)} · {formatDate(order.created_at)}
+              </div>
+              {Array.isArray(order.items) && order.items.length > 0 && (
+                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  {order.items.map(it => `${it.quantity}x ${it.name}`).join(', ')}
+                </div>
+              )}
+              {order.tracking_number && (
+                <div style={{ fontSize: 12, color: '#3b82f6', marginTop: 4 }}>
+                  Tracking: {order.tracking_number} {order.carrier ? `(${order.carrier.toUpperCase()})` : ''}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Create Contact Modal ─────────────────────────────────────────────────────
+
+function CreateContactModal({ data, onChange, onSubmit, onCancel, error }) {
+  const modalInput = {
+    width: '100%', background: '#111', border: '1px solid #2a2a2a',
+    borderRadius: 6, padding: '9px 12px', color: '#fff',
+    fontSize: 13, outline: 'none', boxSizing: 'border-box'
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 2000
+    }}>
+      <div style={{
+        background: '#1a1a1a', border: '1px solid #2a2a2a',
+        borderRadius: 12, padding: 28, width: '90%', maxWidth: 400
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: '#fff', marginBottom: 20 }}>
+          New Contact
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input value={data.first_name} onChange={e => onChange(p => ({ ...p, first_name: e.target.value }))} placeholder="First name" style={modalInput} />
+            <input value={data.last_name} onChange={e => onChange(p => ({ ...p, last_name: e.target.value }))} placeholder="Last name" style={modalInput} />
+          </div>
+          <input value={data.phone} onChange={e => onChange(p => ({ ...p, phone: e.target.value }))} placeholder="Phone (e.g. 3055551234)" style={modalInput} />
+          <input value={data.email} onChange={e => onChange(p => ({ ...p, email: e.target.value }))} placeholder="Email (optional)" style={modalInput} />
+          <textarea value={data.notes} onChange={e => onChange(p => ({ ...p, notes: e.target.value }))} placeholder="Notes (optional)" rows={3} style={{ ...modalInput, resize: 'vertical' }} />
+          {error && <div style={{ fontSize: 13, color: '#ef4444' }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+            <button onClick={onSubmit} style={{ flex: 1, padding: '12px', background: '#16a34a', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+              Create Contact
+            </button>
+            <button onClick={onCancel} style={{ padding: '12px 16px', background: 'none', border: '1px solid #2a2a2a', borderRadius: 8, color: '#9ca3af', fontSize: 14, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2308,8 +2706,8 @@ function App() {
       <div className="main-content">
         {mainTab === 'contacts' && (
           <ContactsView
-            contacts={conversations}
             onGoToMessages={goToMessages}
+            onCall={initiateCall}
             addToast={addToast}
           />
         )}
