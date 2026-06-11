@@ -547,7 +547,7 @@ function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefre
   const showList = !isMobile || !selectedContact;
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
       {/* Left panel */}
       {showList && (
@@ -597,18 +597,20 @@ function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefre
         </div>
       )}
 
-      {/* Right panel — detail */}
+      {/* Right panel — detail (bounded wrapper so ContactDetail can scroll) */}
       {selectedContact && !isMobile && (
-        <ContactDetail
-          data={selectedContact}
-          loading={loadingDetail}
-          onCall={onCall}
-          onMessage={(phone) => { onGoToMessages(phone); }}
-          isEditing={isEditing}
-          onEditOpen={() => setIsEditing(true)}
-          onEditCancel={() => setIsEditing(false)}
-          onEditSave={updateContact}
-        />
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <ContactDetail
+            data={selectedContact}
+            loading={loadingDetail}
+            onCall={onCall}
+            onMessage={(phone) => { onGoToMessages(phone); }}
+            isEditing={isEditing}
+            onEditOpen={() => setIsEditing(true)}
+            onEditCancel={() => setIsEditing(false)}
+            onEditSave={updateContact}
+          />
+        </div>
       )}
 
       {/* Mobile full-screen detail */}
@@ -790,7 +792,7 @@ function ContactDetail({ data, loading, onCall, onMessage, isEditing, onEditOpen
   }
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
       {/* Contact header */}
       <div style={{ padding: '24px 24px 16px', borderBottom: '1px solid #2a2a2a' }}>
         {/* Avatar */}
@@ -1847,7 +1849,7 @@ function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
   );
 }
 
-function CallLogsSection({ logs, onCall, conversations, onCreateContact }) {
+function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToMessages }) {
   const statusIcon = {
     completed: { icon: '↗', color: '#16a34a' },
     missed: { icon: '↙', color: '#ef4444' },
@@ -1894,6 +1896,15 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact }) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {!isUnknown && onGoToMessages && (
+                <button
+                  onClick={() => onGoToMessages(phone)}
+                  style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '5px 9px', color: '#9ca3af', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+                  title="Open message thread"
+                >
+                  Message
+                </button>
+              )}
               {isUnknown && onCreateContact && (
                 <button
                   onClick={() => onCreateContact(phone)}
@@ -1919,7 +1930,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact }) {
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact, onGoToMessages }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -1951,7 +1962,7 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onR
         <DialerSection dialNumber={dialNumber} setDialNumber={setDialNumber} onCall={onCall} voiceReady={voiceReady} />
       )}
       {activeSection === 'logs' && (
-        <CallLogsSection logs={callLogs} onCall={onCall} conversations={conversations} onCreateContact={onCreateContact} />
+        <CallLogsSection logs={callLogs} onCall={onCall} conversations={conversations} onCreateContact={onCreateContact} onGoToMessages={onGoToMessages} />
       )}
     </div>
   );
@@ -2760,6 +2771,7 @@ function App() {
             onRetryConnect={retryVoiceConnect}
             conversations={conversations}
             onCreateContact={(phone) => { setContactPrefill(phone); setMainTab('contacts'); }}
+            onGoToMessages={goToMessages}
           />
         )}
       </div>
