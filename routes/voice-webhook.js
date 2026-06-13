@@ -93,24 +93,27 @@ router.post('/', async (req, res) => {
         });
 
         if (finalStatus === 'missed') {
+          // Prefer the DB-stored phone (normalised at initiation) over webhook payload
+          const missedPhone = log?.contact_phone || contactPhone;
+
           const { data: contact } = await supabase
             .from('sms_contacts')
             .select('first_name, last_name, name')
-            .eq('phone', contactPhone)
+            .eq('phone', missedPhone)
             .maybeSingle();
 
           const callerName = contact
             ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name
             : null;
 
-          const callerDisplay = callerName || contactPhone || from;
+          const callerDisplay = callerName || missedPhone || from;
 
           await sendPushToAll({
             type: 'missed_call',
             title: 'Missed Call',
             body: `You missed a call from ${callerDisplay}`,
             url: '/?tab=voice',
-            caller_phone: contactPhone,
+            caller_phone: missedPhone,
             caller_name: callerName || null
           });
 

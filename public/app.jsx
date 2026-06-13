@@ -2028,6 +2028,9 @@ function App() {
   const callStartRef = useRef(null);
   const callDirectionRef = useRef('outbound');
 
+  const mainTabRef = useRef(mainTab);
+  mainTabRef.current = mainTab;
+
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const sseRef = useRef(null);
@@ -2125,7 +2128,7 @@ function App() {
         if (evt.type === 'call_update') {
           if (evt.event === 'hangup') {
             loadCallLogs();
-            if (evt.status === 'missed' && mainTab !== 'voice') {
+            if (evt.status === 'missed' && mainTabRef.current !== 'voice') {
               addToast(`Missed call from ...${evt.contact_phone?.slice(-4)}`);
             }
           }
@@ -2304,7 +2307,7 @@ function App() {
           contactPhone: phone, contactName: getContactName(phone),
           callControlId: call.id, duration: 0, isMuted: false, isRecording: false
         });
-        startRingVibration();
+        if (callDirectionRef.current === 'inbound') startRingVibration();
         if (isAppInBackground()) {
           showNotification('Incoming call', `${getContactName(phone) || phone} is calling`, 'incoming-call');
         }
@@ -2473,7 +2476,7 @@ function App() {
       const url = phone ? `/api/voice/logs?phone=${encodeURIComponent(phone)}` : '/api/voice/logs';
       const data = await fetch(url, { credentials: 'include' }).then(r => r.json());
       setCallLogs(Array.isArray(data) ? data : []);
-    } catch {}
+    } catch (err) { console.error('[VOICE] loadCallLogs failed:', err.message); }
   }
 
   // Called from ContactModal "Open Message Thread" button
