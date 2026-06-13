@@ -2091,6 +2091,17 @@ function App() {
     window.history.replaceState({}, '', '/');
   }, [auth.ok, conversations]);
 
+  // If opened via push notification for an incoming call (?call=incoming), switch to Voice tab
+  useEffect(() => {
+    if (!auth.ok) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('call') === 'incoming') {
+      setMainTab('voice');
+      if (!voiceReady) initVoiceClient();
+      window.history.replaceState({}, '', '/');
+    }
+  }, [auth.ok]);
+
   function connectSSE() {
     if (sseRef.current) sseRef.current.close();
     setSseStatus('connecting');

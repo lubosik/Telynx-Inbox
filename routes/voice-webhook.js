@@ -3,10 +3,15 @@ const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { sendPushToAll } = require('../push-notify');
+const { answerCall, speakOnCall, transferCall } = require('../lib/telnyx-api');
 
-// POST /webhooks/voice
-// Receives Telnyx call control webhook events.
-// Always responds 200 immediately — Telnyx retries on non-200.
+// In-memory store for inbound calls in the hold/speak phase.
+// Structure: callControlId -> { contactPhone, sipTarget, stage, transferTimer }
+// stage 1 = first speak playing
+// stage 2 = second speak playing
+// stage 3 = waiting 8s before transfer
+const pendingCalls = new Map();
+
 router.post('/', async (req, res) => {
   res.sendStatus(200);
 
@@ -21,14 +26,16 @@ router.post('/', async (req, res) => {
     const to = payload?.to;
     const direction = payload?.direction;
 
-    // Contact phone is the customer side, not our number — always E.164
-    const contactPhone = normalisePhone(direction === 'inbound' ? from : to) || (direction === 'inbound' ? from : to);
+    const contactPhone = normalisePhone(direction === 'inbound' ? from : to)
+      || (direction === 'inbound' ? from : to);
 
     console.log(`[VOICE-WEBHOOK] ${event_type} | call=${callControlId?.slice(-8)} | phone=...${contactPhone?.slice(-4)}`);
 
     switch (event_type) {
 
-      case 'call.initiated':
+      // ── Inbound call arrives ─────────────────────────────────────────────
+      case 'call.initiated': {
+        // Always log to Supabase
         await supabase.from('call_logs').upsert({
           call_control_id: callControlId,
           call_leg_id: payload?.call_leg_id,
@@ -48,8 +55,78 @@ router.post('/', async (req, res) => {
           direction,
           contact_phone: contactPhone
         });
-        break;
 
+        // Only apply hold flow for inbound calls
+        if (direction !== 'inbound') break;
+
+        // 1. Answer immediately — prevents Telnyx dropping the call
+        await answerCall(callControlId);
+
+        // 2. Look up contact name for the push body
+        const { data: contact } = await supabase
+          .from('sms_contacts')
+          .select('first_name, last_name, name')
+          .eq('phone', contactPhone)
+          .maybeSingle();
+
+        const callerName = contact
+          ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name
+          : null;
+        const callerDisplay = callerName || contactPhone;
+
+        // 3. Register this call as pending (stage 1 = first speak in progress)
+        const sipTarget = `sip:${process.env.TELNYX_SIP_USERNAME}@sip.telnyx.com`;
+        pendingCalls.set(callControlId, {
+          contactPhone,
+          sipTarget,
+          stage: 1,
+          transferTimer: null
+        });
+
+        // 4. Send incoming_call push + start first hold speak in parallel
+        await Promise.all([
+          sendPushToAll({
+            type: 'incoming_call',
+            title: 'Incoming Call',
+            body: `${callerDisplay} is calling`,
+            url: '/?call=incoming',
+            caller_phone: contactPhone,
+            caller_name: callerName || null
+          }),
+          speakOnCall(callControlId, "Please hold, we're connecting your call.")
+        ]);
+
+        console.log(`[VOICE-WEBHOOK] Inbound answered + push sent for ...${contactPhone?.slice(-4)}`);
+        break;
+      }
+
+      // ── Hold speak finished — chain second speak, then schedule transfer ─
+      case 'call.speak.ended': {
+        const pending = pendingCalls.get(callControlId);
+        if (!pending) break; // Caller hung up during speak
+
+        if (pending.stage === 1) {
+          pending.stage = 2;
+          // Second speak buys ~4 more seconds while Dom's WebRTC connects
+          await speakOnCall(callControlId, 'One moment please, almost there.')
+            .catch(err => console.error('[VOICE-WEBHOOK] Speak 2 failed:', err.message));
+
+        } else if (pending.stage === 2) {
+          pending.stage = 3;
+          // Wait 8 more seconds (total ~15s from call start), then transfer to Dom's SIP
+          pending.transferTimer = setTimeout(async () => {
+            const p = pendingCalls.get(callControlId);
+            if (!p) return; // Already cleaned up (caller hung up)
+            pendingCalls.delete(callControlId);
+            console.log(`[VOICE-WEBHOOK] Transferring call to SIP for ...${p.contactPhone?.slice(-4)}`);
+            await transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
+              .catch(err => console.error('[VOICE-WEBHOOK] Transfer failed:', err.message));
+          }, 8000);
+        }
+        break;
+      }
+
+      // ── Call answered ────────────────────────────────────────────────────
       case 'call.answered':
         await supabase.from('call_logs')
           .update({ status: 'answered', answered_at: new Date().toISOString() })
@@ -63,7 +140,13 @@ router.post('/', async (req, res) => {
         });
         break;
 
+      // ── Call ended ───────────────────────────────────────────────────────
       case 'call.hangup': {
+        // Cancel transfer timer if caller hung up during the hold phase
+        const pending = pendingCalls.get(callControlId);
+        if (pending?.transferTimer) clearTimeout(pending.transferTimer);
+        pendingCalls.delete(callControlId);
+
         const { data: log } = await supabase
           .from('call_logs')
           .select('answered_at, direction, contact_phone')
@@ -93,7 +176,6 @@ router.post('/', async (req, res) => {
         });
 
         if (finalStatus === 'missed') {
-          // Prefer the DB-stored phone (normalised at initiation) over webhook payload
           const missedPhone = log?.contact_phone || contactPhone;
 
           const { data: contact } = await supabase
@@ -106,12 +188,10 @@ router.post('/', async (req, res) => {
             ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name
             : null;
 
-          const callerDisplay = callerName || missedPhone || from;
-
           await sendPushToAll({
             type: 'missed_call',
             title: 'Missed Call',
-            body: `You missed a call from ${callerDisplay}`,
+            body: `You missed a call from ${callerName || missedPhone || from}`,
             url: '/?tab=voice',
             caller_phone: missedPhone,
             caller_name: callerName || null
@@ -119,10 +199,10 @@ router.post('/', async (req, res) => {
 
           console.log(`[VOICE-WEBHOOK] Missed call from ...${contactPhone?.slice(-4)} — push sent`);
         }
-
         break;
       }
 
+      // ── Recording saved ──────────────────────────────────────────────────
       case 'call.recording.saved':
         await supabase.from('call_logs')
           .update({
@@ -139,6 +219,7 @@ router.post('/', async (req, res) => {
         });
         break;
     }
+
   } catch (err) {
     console.error('[VOICE-WEBHOOK] Error:', err.message);
   }
