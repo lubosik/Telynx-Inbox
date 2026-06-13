@@ -17,22 +17,28 @@ self.addEventListener('push', event => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch {}
 
+  const isCall = data.type === 'incoming_call';
+
   const title = data.title || 'Vici SMS';
   const options = {
     body: data.body || '',
     icon: data.icon || '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    tag: data.tag || 'vici-sms',
+    tag: data.type || 'vici-sms',
     renotify: true,
     data: { url: data.url || '/' },
-    requireInteraction: false,
-    vibrate: [200, 100, 200]
+    requireInteraction: isCall,
+    // Android: long ringing pulse for calls, short buzz for everything else
+    // iOS: Vibration API not supported — visual pulse shown in-app instead
+    vibrate: isCall
+      ? [800, 400, 800, 400, 800, 400, 800, 400, 800]
+      : [200, 100, 200]
   };
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
       const appVisible = wins.some(w => w.visibilityState === 'visible');
-      if (appVisible) return Promise.resolve();
+      if (appVisible && !isCall) return Promise.resolve();
       return self.registration.showNotification(title, options);
     })
   );

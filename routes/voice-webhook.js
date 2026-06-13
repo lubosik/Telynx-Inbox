@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
+const { normalisePhone } = require('../lib/phone');
+const { sendPushToAll } = require('../push-notify');
 
 // POST /webhooks/voice
 // Receives Telnyx call control webhook events.
@@ -19,8 +21,8 @@ router.post('/', async (req, res) => {
     const to = payload?.to;
     const direction = payload?.direction;
 
-    // Contact phone is the customer side, not our number
-    const contactPhone = direction === 'inbound' ? from : to;
+    // Contact phone is the customer side, not our number — always E.164
+    const contactPhone = normalisePhone(direction === 'inbound' ? from : to) || (direction === 'inbound' ? from : to);
 
     console.log(`[VOICE-WEBHOOK] ${event_type} | call=${callControlId?.slice(-8)} | phone=...${contactPhone?.slice(-4)}`);
 
@@ -64,17 +66,18 @@ router.post('/', async (req, res) => {
       case 'call.hangup': {
         const { data: log } = await supabase
           .from('call_logs')
-          .select('answered_at, status')
+          .select('answered_at, direction, contact_phone')
           .eq('call_control_id', callControlId)
           .maybeSingle();
 
-        const wasAnswered = log?.answered_at !== null;
+        const wasAnswered = !!(log?.answered_at);
+        const wasInbound = (log?.direction || direction) === 'inbound';
+
         const duration = wasAnswered
           ? Math.floor((Date.now() - new Date(log.answered_at).getTime()) / 1000)
           : 0;
 
-        const finalStatus = wasAnswered ? 'completed' :
-          (direction === 'inbound' ? 'missed' : 'failed');
+        const finalStatus = wasAnswered ? 'completed' : wasInbound ? 'missed' : 'failed';
 
         await supabase.from('call_logs')
           .update({ status: finalStatus, duration_seconds: duration, ended_at: new Date().toISOString() })
@@ -88,6 +91,32 @@ router.post('/', async (req, res) => {
           status: finalStatus,
           duration
         });
+
+        if (finalStatus === 'missed') {
+          const { data: contact } = await supabase
+            .from('sms_contacts')
+            .select('first_name, last_name, name')
+            .eq('phone', contactPhone)
+            .maybeSingle();
+
+          const callerName = contact
+            ? `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name
+            : null;
+
+          const callerDisplay = callerName || contactPhone || from;
+
+          await sendPushToAll({
+            type: 'missed_call',
+            title: 'Missed Call',
+            body: `You missed a call from ${callerDisplay}`,
+            url: '/?tab=voice',
+            caller_phone: contactPhone,
+            caller_name: callerName || null
+          });
+
+          console.log(`[VOICE-WEBHOOK] Missed call from ...${contactPhone?.slice(-4)} — push sent`);
+        }
+
         break;
       }
 

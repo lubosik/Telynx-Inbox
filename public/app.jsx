@@ -63,6 +63,16 @@ function truncate(str, n) {
   return str.length > n ? str.slice(0, n) + '…' : str;
 }
 
+function normalisePhoneFrontend(raw) {
+  if (!raw) return null;
+  if (raw.startsWith('+')) return raw.replace(/[^\d+]/g, '');
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return '+1' + digits;
+  if (digits.length === 11 && digits[0] === '1') return '+' + digits;
+  if (digits.length >= 11) return '+' + digits;
+  return null;
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function api(method, path, body) {
@@ -1779,7 +1789,7 @@ function ActiveCallPanel({ callState, onAnswer, onHangup, onMute, onRecord, onSp
       <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
         {isRinging && isInbound && (
           <>
-            <button onClick={onAnswer} style={{ background: '#16a34a', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📞</button>
+            <button onClick={onAnswer} style={{ background: '#16a34a', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer', animation: 'callPulse 1.2s infinite' }}>📞</button>
             <button onClick={onHangup} style={{ background: '#ef4444', border: 'none', borderRadius: '50%', width: 56, height: 56, color: '#fff', fontSize: 22, cursor: 'pointer' }}>📵</button>
           </>
         )}
@@ -1886,7 +1896,8 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
     <div style={{ flex: 1, overflowY: 'auto' }}>
       {logs.map(log => {
         const icon = statusIcon[log.status] || { icon: '?', color: '#9ca3af' };
-        const phone = log.contact_phone;
+        const rawPhone = log.contact_phone;
+        const phone = normalisePhoneFrontend(rawPhone) || rawPhone;
         const nk = normPhone(phone);
         const isUnknown = !contactPhones.has(nk);
         const knownName = contactNames[nk] || null;
@@ -1902,7 +1913,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
               <div style={{ fontSize: 14, color: isUnknown ? '#9ca3af' : '#fff', marginBottom: 2 }}>
                 {knownName || phone}
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
+              <div style={{ fontSize: 12, color: log.status === 'missed' ? '#ef4444' : '#6b7280', fontWeight: log.status === 'missed' ? 600 : 400 }}>
                 {(!isUnknown && knownName) && <span style={{ marginRight: 6 }}>{phone}</span>}
                 {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
               </div>
@@ -2012,6 +2023,7 @@ function App() {
   const telnyxClientRef = useRef(null);
   const activeCallRef = useRef(null);
   const durationTimerRef = useRef(null);
+  const vibrationIntervalRef = useRef(null);
   const callerNumberRef = useRef('+13054043184');
   const callStartRef = useRef(null);
   const callDirectionRef = useRef('outbound');
@@ -2064,6 +2076,7 @@ function App() {
       clearInterval(pollTimer.current);
       if (sseRef.current) sseRef.current.close();
       clearTimeout(reconnectTimer.current);
+      stopRingVibration();
     };
   }, [auth.ok]);
 
@@ -2110,7 +2123,12 @@ function App() {
         }
 
         if (evt.type === 'call_update') {
-          if (evt.event === 'hangup') loadCallLogs();
+          if (evt.event === 'hangup') {
+            loadCallLogs();
+            if (evt.status === 'missed' && mainTab !== 'voice') {
+              addToast(`Missed call from ...${evt.contact_phone?.slice(-4)}`);
+            }
+          }
           return;
         }
 
@@ -2272,7 +2290,8 @@ function App() {
   function handleCallStateChange(call) {
     activeCallRef.current = call;
     const state = call.state;
-    const phone = call.options?.remoteCallerNumber || call.options?.destinationNumber || 'Unknown';
+    const rawPhone = call.options?.remoteCallerNumber || call.options?.destinationNumber || 'Unknown';
+    const phone = normalisePhoneFrontend(rawPhone) || rawPhone;
 
     console.log('[VOICE] Call state:', state, 'phone: ...'+phone.slice(-4));
 
@@ -2285,11 +2304,13 @@ function App() {
           contactPhone: phone, contactName: getContactName(phone),
           callControlId: call.id, duration: 0, isMuted: false, isRecording: false
         });
+        startRingVibration();
         if (isAppInBackground()) {
           showNotification('Incoming call', `${getContactName(phone) || phone} is calling`, 'incoming-call');
         }
         break;
       case 'active':
+        stopRingVibration();
         if (!callStartRef.current) callStartRef.current = Date.now();
         setCallState(prev => ({ ...prev, status: 'active' }));
         startDurationTimer();
@@ -2297,6 +2318,7 @@ function App() {
       case 'hangup':
       case 'destroy':
       case 'purge': {
+        stopRingVibration();
         stopDurationTimer();
         const endedAt = new Date().toISOString();
         const startedAt = callStartRef.current
@@ -2345,6 +2367,23 @@ function App() {
 
   function stopDurationTimer() {
     if (durationTimerRef.current) { clearInterval(durationTimerRef.current); durationTimerRef.current = null; }
+  }
+
+  function startRingVibration() {
+    if (!('vibrate' in navigator)) return;
+    stopRingVibration();
+    const ringPattern = [600, 400, 600, 800];
+    const doVibrate = () => { try { navigator.vibrate(ringPattern); } catch (_) {} };
+    doVibrate();
+    vibrationIntervalRef.current = setInterval(doVibrate, 2400);
+  }
+
+  function stopRingVibration() {
+    if (vibrationIntervalRef.current) {
+      clearInterval(vibrationIntervalRef.current);
+      vibrationIntervalRef.current = null;
+    }
+    try { navigator.vibrate(0); } catch (_) {}
   }
 
   function formatDuration(secs) {
@@ -2782,7 +2821,7 @@ function App() {
             voiceReady={voiceReady}
             onRetryConnect={retryVoiceConnect}
             conversations={conversations}
-            onCreateContact={(phone) => { setContactPrefill(phone); setMainTab('contacts'); }}
+            onCreateContact={(phone) => { setContactPrefill(normalisePhoneFrontend(phone) || phone); setMainTab('contacts'); }}
             onGoToMessages={goToMessages}
           />
         )}
