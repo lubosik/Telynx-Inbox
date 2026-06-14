@@ -3,7 +3,10 @@ const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { sendPushToAll } = require('../push-notify');
-const { answerCall, speakOnCall, transferCall } = require('../lib/telnyx-api');
+const { answerCall, speakOnCall, transferCall, playAudioOnCall, stopAudioOnCall } = require('../lib/telnyx-api');
+
+// Warm jazz hold music — CC-BY Jason Shaw (audionautix.com), public Cloudflare CDN
+const HOLD_MUSIC_URL = 'https://audionautix.com/Music/CloserToJazz.mp3';
 
 // In-memory store for inbound calls in the hold/speak phase.
 // Structure: callControlId -> { contactPhone, sipTarget, stage, transferTimer }
@@ -126,12 +129,16 @@ router.post('/', async (req, res) => {
 
         } else if (pending.stage === 3) {
           pending.stage = 4;
-          // Wait 18 seconds — gives the PWA time to fully load and SIP to register
+          // Start looping hold music — caller hears warm jazz while Dom's app loads + SIP registers
+          await playAudioOnCall(callControlId, HOLD_MUSIC_URL)
+            .catch(err => console.error('[VOICE-WEBHOOK] Hold music failed:', err.message));
+          // After 18s, stop music and transfer to Dom's SIP
           pending.transferTimer = setTimeout(async () => {
             const p = pendingCalls.get(callControlId);
             if (!p) return;
             pendingCalls.delete(callControlId);
-            console.log(`[VOICE-WEBHOOK] Transferring call to SIP for ...${p.contactPhone?.slice(-4)}`);
+            console.log(`[VOICE-WEBHOOK] Stopping music + transferring to SIP for ...${p.contactPhone?.slice(-4)}`);
+            await stopAudioOnCall(callControlId).catch(() => {});
             await transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
               .catch(err => console.error('[VOICE-WEBHOOK] Transfer failed:', err.message));
           }, 18000);
@@ -155,9 +162,10 @@ router.post('/', async (req, res) => {
 
       // ── Call ended ───────────────────────────────────────────────────────
       case 'call.hangup': {
-        // Cancel transfer timer if caller hung up during the hold phase
+        // Cancel any pending timer and clean up (don't await — call is already dead)
         const pending = pendingCalls.get(callControlId);
         if (pending?.transferTimer) clearTimeout(pending.transferTimer);
+        if (pending?.stage === 4) stopAudioOnCall(callControlId).catch(() => {});
         pendingCalls.delete(callControlId);
 
         const { data: log } = await supabase
