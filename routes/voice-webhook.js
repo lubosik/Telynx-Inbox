@@ -61,7 +61,7 @@ router.post('/', async (req, res) => {
         console.log(`[VOICE-WEBHOOK] Answered inbound call from ...${contactPhone?.slice(-4)}`);
 
         const sipTarget = `sip:${process.env.TELNYX_SIP_USERNAME}@sip.telnyx.com`;
-        pendingCalls.set(callControlId, { contactPhone, sipTarget, stage: 1, transferTimer: null });
+        pendingCalls.set(callControlId, { contactPhone, sipTarget, stage: 1, transferTimer: null, clientReady: false });
 
         // Speak greeting, then music starts on call.speak.ended
         await speakOnCall(callControlId, "Please hold, we're connecting your call.")
@@ -117,20 +117,28 @@ router.post('/', async (req, res) => {
 
         pending.stage = 2;
 
-        // Start warm hold music on loop
+        // If app already signalled ready during the speak, transfer now — no music needed
+        if (pending.clientReady) {
+          pendingCalls.delete(callControlId);
+          console.log(`[VOICE-WEBHOOK] Client was ready during speak — transferring immediately for ...${pending.contactPhone?.slice(-4)}`);
+          await transferCall(callControlId, pending.sipTarget, process.env.TELNYX_PHONE_NUMBER)
+            .catch(err => console.error('[VOICE-WEBHOOK] Immediate transfer failed:', err.message));
+          break;
+        }
+
+        // Otherwise start hold music and wait up to 15s for sip-ready or fallback timer
         await playAudioOnCall(callControlId, HOLD_MUSIC_URL)
           .catch(err => console.error('[VOICE-WEBHOOK] Hold music failed:', err.message));
 
-        // Give Dom 20s with the music to open PWA and get SIP registered
         pending.transferTimer = setTimeout(async () => {
           const p = pendingCalls.get(callControlId);
           if (!p) return;
           pendingCalls.delete(callControlId);
-          console.log(`[VOICE-WEBHOOK] Stopping music + transferring to SIP for ...${p.contactPhone?.slice(-4)}`);
+          console.log(`[VOICE-WEBHOOK] Fallback timer — stopping music + transferring for ...${p.contactPhone?.slice(-4)}`);
           await stopAudioOnCall(callControlId).catch(() => {});
           await transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
-            .catch(err => console.error('[VOICE-WEBHOOK] Transfer failed:', err.message));
-        }, 20000);
+            .catch(err => console.error('[VOICE-WEBHOOK] Fallback transfer failed:', err.message));
+        }, 15000);
         break;
       }
 

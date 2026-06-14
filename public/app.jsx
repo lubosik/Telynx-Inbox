@@ -2093,14 +2093,25 @@ function App() {
     window.history.replaceState({}, '', '/');
   }, [auth.ok, conversations]);
 
-  // If opened via push notification for an incoming call (?call=incoming), switch to Voice tab
+  // If opened via push notification for an incoming call (?call=incoming), switch to Voice tab.
+  // If SIP was already connected (app was open), send sip-ready immediately.
+  // If not, initVoiceClient() will connect and telnyx.ready will send sip-ready.
   useEffect(() => {
     if (!auth.ok) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('call') === 'incoming') {
       setMainTab('voice');
-      if (!voiceReady) initVoiceClient();
       window.history.replaceState({}, '', '/');
+      if (voiceReady) {
+        // SIP already registered — ping immediately without waiting for telnyx.ready
+        openedForCall.current = false;
+        api('POST', '/api/voice/sip-ready')
+          .then(d => console.log('[VOICE] Already-connected sip-ready ping:', d.status))
+          .catch(() => {});
+      } else {
+        initVoiceClient();
+        // openedForCall.current stays true — telnyx.ready handler will send the ping
+      }
     }
   }, [auth.ok]);
 
@@ -2278,13 +2289,15 @@ function App() {
       client.on('telnyx.ready', () => {
         console.log('[VOICE] Client ready');
         setVoiceReady(true);
-        // If we were opened from an incoming-call push, tell the server to transfer now
-        // instead of waiting the full fallback timer
+        // If opened from an incoming-call push, ping server to transfer immediately.
+        // 1.5s delay lets the SIP registration propagate before the INVITE arrives.
         if (openedForCall.current) {
           openedForCall.current = false;
-          api('POST', '/api/voice/sip-ready')
-            .then(d => console.log('[VOICE] SIP-ready ping:', d.transferred ? 'transfer triggered' : 'no pending call'))
-            .catch(() => {});
+          setTimeout(() => {
+            api('POST', '/api/voice/sip-ready')
+              .then(d => console.log('[VOICE] SIP-ready ping:', d.status))
+              .catch(() => {});
+          }, 1500);
         }
       });
       client.on('telnyx.error', (err) => { console.error('[VOICE] Client error:', err); setVoiceReady(false); });

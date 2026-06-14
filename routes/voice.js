@@ -75,26 +75,39 @@ router.post('/logs', async (req, res) => {
 });
 
 // POST /api/voice/sip-ready — app fires this when TelnyxRTC registers (telnyx.ready event).
-// Immediately cancels the fallback timer, stops hold music, and transfers the call to SIP
-// instead of waiting the full 20 second fallback window.
+// Transfers immediately if music is already playing; if speak is still in progress (stage 1),
+// sets a flag so the webhook transfers as soon as the speak ends instead of starting music.
 router.post('/sip-ready', async (req, res) => {
-  // Find the current pending inbound call (there can only be one at a time)
-  let transferred = false;
+  let status = 'no_pending_call';
+
   for (const [callControlId, p] of pendingCalls.entries()) {
-    if (p.stage !== 2) continue; // Only act when music is already playing (stage 2)
-    clearTimeout(p.transferTimer);
-    pendingCalls.delete(callControlId);
-    console.log(`[VOICE] SIP ready signal received — transferring ...${p.contactPhone?.slice(-4)} immediately`);
-    // Stop music and transfer in parallel
-    await Promise.all([
-      stopAudioOnCall(callControlId).catch(() => {}),
-      transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
-        .catch(err => console.error('[VOICE] sip-ready transfer failed:', err.message))
-    ]);
-    transferred = true;
+    if (p.stage === 1) {
+      // Speak still playing — flag it so speak.ended transfers immediately instead of music
+      p.clientReady = true;
+      console.log(`[VOICE] SIP ready during speak (stage 1) — flagged for immediate transfer on speak.ended`);
+      status = 'queued';
+      break;
+    }
+
+    if (p.stage === 2) {
+      // Music playing — cancel timer, stop music, transfer now
+      clearTimeout(p.transferTimer);
+      pendingCalls.delete(callControlId);
+      console.log(`[VOICE] SIP ready (stage 2) — transferring ...${p.contactPhone?.slice(-4)} immediately`);
+      res.json({ status: 'transferring' });
+      // Small delay for SIP registration to propagate before the INVITE arrives
+      await new Promise(r => setTimeout(r, 1500));
+      await Promise.all([
+        stopAudioOnCall(callControlId).catch(() => {}),
+        transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
+          .catch(err => console.error('[VOICE] sip-ready transfer failed:', err.message))
+      ]);
+      return; // response already sent above
+    }
     break;
   }
-  res.json({ transferred });
+
+  res.json({ status });
 });
 
 // POST /api/voice/recording/start
