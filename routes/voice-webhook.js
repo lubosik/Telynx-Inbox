@@ -107,28 +107,34 @@ router.post('/', async (req, res) => {
         break;
       }
 
-      // ── Hold speak finished — chain second speak, then schedule transfer ─
+      // ── Hold speak finished — chain messages, then schedule transfer ────
+      // Stage 1 → 2 → 3: three TTS messages totalling ~9s, then 18s wait
+      // Total before transfer: ~27s — enough for Dom's PWA to load + SIP to register
       case 'call.speak.ended': {
         const pending = pendingCalls.get(callControlId);
         if (!pending) break; // Caller hung up during speak
 
         if (pending.stage === 1) {
           pending.stage = 2;
-          // Second speak buys ~4 more seconds while Dom's WebRTC connects
           await speakOnCall(callControlId, 'One moment please, almost there.')
             .catch(err => console.error('[VOICE-WEBHOOK] Speak 2 failed:', err.message));
 
         } else if (pending.stage === 2) {
           pending.stage = 3;
-          // Wait 8 more seconds (total ~15s from call start), then transfer to Dom's SIP
+          await speakOnCall(callControlId, 'Thank you for your patience, connecting you now.')
+            .catch(err => console.error('[VOICE-WEBHOOK] Speak 3 failed:', err.message));
+
+        } else if (pending.stage === 3) {
+          pending.stage = 4;
+          // Wait 18 seconds — gives the PWA time to fully load and SIP to register
           pending.transferTimer = setTimeout(async () => {
             const p = pendingCalls.get(callControlId);
-            if (!p) return; // Already cleaned up (caller hung up)
+            if (!p) return;
             pendingCalls.delete(callControlId);
             console.log(`[VOICE-WEBHOOK] Transferring call to SIP for ...${p.contactPhone?.slice(-4)}`);
             await transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
               .catch(err => console.error('[VOICE-WEBHOOK] Transfer failed:', err.message));
-          }, 8000);
+          }, 18000);
         }
         break;
       }
