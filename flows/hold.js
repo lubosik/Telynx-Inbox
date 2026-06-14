@@ -117,22 +117,22 @@ function buildMsg1(firstName, orderNumber, total, handle, method, products, city
     ? ` for your ${formatProductList(products)}`
     : '';
   const cityPhrase = city ? ` to ${city}` : '';
-  return `Hey ${firstName}! It's DP from Vici Peptides. Just got your order #${orderNumber}${productPhrase}!\n\nSend $${total} to ${handle} via ${method} to lock it in. Once I see it I'll ship it${cityPhrase} straight away!\n\nDP`;
+  return `Hey ${firstName}! It's Vin from Vici Peptides. Just got your order #${orderNumber}${productPhrase}!\n\nSend $${total} to ${handle} via ${method} to lock it in. Once I see it I'll ship it${cityPhrase} straight away!\n\nVin`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, checking in on order #${orderNumber}. Holding your stock!\n\nSend $${total} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nDP`;
+  return `Hey ${firstName}, checking in on order #${orderNumber}. Holding your stock!\n\nSend $${total} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nVin`;
 }
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
-  return `${firstName}, last call on order #${orderNumber}. Need to release the stock by end of today.\n\nSend $${total} to ${handle} via ${method} to secure it. Just reply if you need anything.\n\nDP`;
+  return `${firstName}, last call on order #${orderNumber}. Need to release the stock by end of today.\n\nSend $${total} to ${handle} via ${method} to secure it. Just reply if you need anything.\n\nVin`;
 }
 
 function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, checkoutUrl) {
   const productPhrase = failedProducts && failedProducts.length
     ? ` for your ${formatProductList(failedProducts)}`
     : '';
-  return `Hey ${firstName}, also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still want it? ${checkoutUrl}\n\nDP`;
+  return `Hey ${firstName}, also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still want it? ${checkoutUrl}\n\nVin`;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,15 +140,15 @@ function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, check
 // ---------------------------------------------------------------------------
 
 function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}! It's DP from Vici Peptides. You've got two orders waiting - ${orderRef}.\n\nSend $${combinedTotal} to ${handle} via ${method} to lock them both in. I'll ship them straight away!\n\nDP`;
+  return `Hey ${firstName}! It's Vin from Vici Peptides. You've got two orders waiting - ${orderRef}.\n\nSend $${combinedTotal} to ${handle} via ${method} to lock them both in. I'll ship them straight away!\n\nVin`;
 }
 
 function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, checking in on orders ${orderRef}. Holding stock for both!\n\nSend $${combinedTotal} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nDP`;
+  return `Hey ${firstName}, checking in on orders ${orderRef}. Holding stock for both!\n\nSend $${combinedTotal} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nVin`;
 }
 
 function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method) {
-  return `${firstName}, last call on orders ${orderRef}. Need to release the stock by end of today.\n\nSend $${combinedTotal} to ${handle} via ${method} to secure them.\n\nDP`;
+  return `${firstName}, last call on orders ${orderRef}. Need to release the stock by end of today.\n\nSend $${combinedTotal} to ${handle} via ${method} to secure them.\n\nVin`;
 }
 
 // ---------------------------------------------------------------------------

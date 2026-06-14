@@ -471,6 +471,7 @@ function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefre
   const [createError, setCreateError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [showViciModal, setShowViciModal] = useState(false);
 
   // Pre-fill from call log "Create Contact" button
   useEffect(() => {
@@ -590,6 +591,7 @@ function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefre
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
+            <ViciPinnedCard onClick={() => setShowViciModal(true)} />
             {filtered.length === 0 && (
               <div style={{ padding: 32, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
                 {search ? `No contacts match "${search}"` : 'No contacts yet'}
@@ -658,6 +660,7 @@ function ContactsView({ conversations, onGoToMessages, onCall, addToast, onRefre
           error={createError}
         />
       )}
+      {showViciModal && <ViciModal onClose={() => setShowViciModal(false)} />}
     </div>
   );
 }

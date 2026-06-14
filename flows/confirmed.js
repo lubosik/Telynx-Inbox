@@ -193,7 +193,7 @@ async function generateContextAwareConfirmed(order, phone, firstName) {
   const products = (order.line_items || []).map(i => `${i.quantity}x ${i.name}`).join(', ');
   const orderNumber = order.number || order.id;
 
-  const systemPrompt = `You are DP, founder of Vici Peptides, texting customers personally. You already have an ongoing conversation with this customer. Your response must feel like a natural continuation, not a new automated message. Voice: warm, excited, personal. Like a friend texting. Rules: No em dashes. No corporate language. No hashtags. No asterisks. Max 320 characters. Never mention specific compound names in a medical context. Do not repeat information already said. Acknowledge what the customer said if relevant. Still confirm the order is confirmed and being packed.`;
+  const systemPrompt = `You are Vin, founder of Vici Peptides, texting customers personally. You already have an ongoing conversation with this customer. Your response must feel like a natural continuation, not a new automated message. Voice: warm, excited, personal. Like a friend texting. Rules: No em dashes. No corporate language. No hashtags. No asterisks. Max 320 characters. Never mention specific compound names in a medical context. Do not repeat information already said. Acknowledge what the customer said if relevant. Still confirm the order is confirmed and being packed.`;
 
   const userPrompt = `Recent conversation:
 ${context}
@@ -271,7 +271,7 @@ async function generatePersonalisedConfirmed(baseMessage, context, firstName, or
 
   if (contextParts.length === 0) return null;
 
-  const systemPrompt = `You are DP, founder of Vici Peptides. You send personal SMS to customers. Your voice is warm, excited, and direct — like a real person texting, not a business. No em dashes. No corporate language. No hashtags. No asterisks. Max 320 characters total for the final message.`;
+  const systemPrompt = `You are Vin, founder of Vici Peptides. You send personal SMS to customers. Your voice is warm, excited, and direct — like a real person texting, not a business. No em dashes. No corporate language. No hashtags. No asterisks. Max 320 characters total for the final message.`;
 
   const userPrompt = `Base SMS to modify:
 "${baseMessage}"
@@ -343,21 +343,21 @@ Return ONLY the modified message text. Nothing else.`;
 function buildMsg1A(firstName, orderNumber, products, city) {
   const productLine = products?.length ? `Your ${products.join(' and ')} is` : `Order #${orderNumber} is`;
   const cityPhrase  = city ? ` heading to ${city}` : '';
-  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} confirmed - ${productLine}${cityPhrase} and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm right here.\n\nDP`;
+  return `${firstName}! Just saw your first order come through and had to text you personally. Welcome to the Vici family!\n\nOrder #${orderNumber} confirmed - ${productLine}${cityPhrase} and we're on it. I'll text you the tracking the moment it leaves us.\n\nAny questions, I'm right here.\n\nVin`;
 }
 
 function buildMsg1B(firstName, orderNumber, products, city) {
   const productLine = products?.length ? `your ${products.join(' and ')}` : `order #${orderNumber}`;
   const cityPhrase  = city ? ` to ${city}` : '';
-  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed - ${productLine} is heading${cityPhrase} and going straight to the front of the queue.\n\nI'll text you the tracking the moment it ships. Appreciate you more than you know.\n\nDP`;
+  return `${firstName}! Back again - you're the best. Order #${orderNumber} confirmed - ${productLine} is heading${cityPhrase} and going straight to the front of the queue.\n\nI'll text you the tracking the moment it ships. Appreciate you more than you know.\n\nVin`;
 }
 
 function buildShippedMessage(firstName, orderNumber, trackingNumber) {
   if (trackingNumber) {
     const trackingUrl = `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
-    return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nDP`;
+    return `${firstName}! It's Vin - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nVin`;
   }
-  return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} is with FedEx and heading to you. I'll send the tracking link as soon as it's available!\n\nDP`;
+  return `${firstName}! It's Vin - your order is officially on its way to you!\n\nOrder #${orderNumber} is with FedEx and heading to you. I'll send the tracking link as soon as it's available!\n\nVin`;
 }
 
 // ---------------------------------------------------------------------------

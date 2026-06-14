@@ -59,7 +59,7 @@ async function generatePersonalisedShipped(baseMessage, context, orderId) {
   if (products.length) contextParts.push(`Products shipped: ${products.join(', ')}`);
   if (city)            contextParts.push(`Destination: ${city}`);
 
-  const system = `You are DP, founder of Vici Peptides. You send personal SMS to customers. Warm, excited, direct. No em dashes. No hashtags. No asterisks. Max 400 characters total for the final message.`;
+  const system = `You are Vin, founder of Vici Peptides. You send personal SMS to customers. Warm, excited, direct. No em dashes. No hashtags. No asterisks. Max 400 characters total for the final message.`;
   const user   = `Base SMS to modify:
 "${baseMessage}"
 
@@ -108,7 +108,7 @@ Return ONLY the modified message. Nothing else.`;
 async function generatePersonalisedDelivery(baseMessage, city, identifier) {
   if (!process.env.OPENROUTER_API_KEY || !city) return null;
 
-  const system = `You are DP, founder of Vici Peptides. You send personal SMS to customers. Warm, caring, direct. No em dashes. No hashtags. No asterisks. Max 320 characters total.`;
+  const system = `You are Vin, founder of Vici Peptides. You send personal SMS to customers. Warm, caring, direct. No em dashes. No hashtags. No asterisks. Max 320 characters total.`;
   const user   = `Base SMS to modify:
 "${baseMessage}"
 
@@ -154,11 +154,11 @@ Return ONLY the modified message. Nothing else.`;
 
 function buildShippedMessage(firstName, orderNumber, trackingNumber) {
   const trackingUrl = `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
-  return `${firstName}! It's DP - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nDP`;
+  return `${firstName}! It's Vin - your order is officially on its way to you!\n\nOrder #${orderNumber} · FedEx\nTrack it here: ${trackingUrl}\n\nSo excited for you to get it. Reach out anytime!\n\nVin`;
 }
 
 function buildDeliveryMessage(firstName) {
-  return `Hey ${firstName}! Just checking everything arrived safe and sound?\n\nHope you're happy with it. I'm here if you need anything at all.\n\nDP`;
+  return `Hey ${firstName}! Just checking everything arrived safe and sound?\n\nHope you're happy with it. I'm here if you need anything at all.\n\nVin`;
 }
 
 // ---------------------------------------------------------------------------

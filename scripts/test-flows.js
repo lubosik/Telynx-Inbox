@@ -112,20 +112,20 @@ function paymentInstructions(method, handle, orderNumber) {
 
 function buildMsg1(firstName, orderNumber, total, handle, method, products) {
   const productPhrase = products?.length ? ` for your ${formatProductList(products)}` : '';
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Just got your order #${orderNumber}${productPhrase} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll get it packed up straight away!\n\nDP`;
+  return `Hey ${firstName}! It's Vin, founder of Vici Peptides. Just got your order #${orderNumber}${productPhrase} - so excited to get this to you!\n\nTo lock it in, send $${total} via ${method}:\n${paymentInstructions(method, handle, orderNumber)}\n\nOnce I see it come through I'll get it packed up straight away!\n\nVin`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, checking in on order #${orderNumber}. I'm holding the stock for you!\n\nWhen you get a chance, just send $${total} to ${handle} via ${method}${method === 'Zelle' ? ` (ref: #${orderNumber})` : ''}.\n\nAny issues at all, just reply here.\nDP`;
+  return `Hey ${firstName}, checking in on order #${orderNumber}. I'm holding the stock for you!\n\nWhen you get a chance, just send $${total} to ${handle} via ${method}${method === 'Zelle' ? ` (ref: #${orderNumber})` : ''}.\n\nAny issues at all, just reply here.\nVin`;
 }
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
-  return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} to ${handle} via ${method}${method === 'Zelle' ? ` - use #${orderNumber} as your reference` : ''} to secure it.\n\nJust reply if anything's up. DP`;
+  return `${firstName}, last check-in on order #${orderNumber}. I've got the stock held for you but I'll need to release it by end of today.\n\nSend $${total} to ${handle} via ${method}${method === 'Zelle' ? ` - use #${orderNumber} as your reference` : ''} to secure it.\n\nJust reply if anything's up. Vin`;
 }
 
 function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, checkoutUrl) {
   const productPhrase = failedProducts?.length ? ` for your ${formatProductList(failedProducts)}` : '';
-  return `Hey ${firstName}, one more thing - I also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still looking to grab it? Here's the link: ${checkoutUrl}\n\nDP`;
+  return `Hey ${firstName}, one more thing - I also noticed your order #${failedOrderNumber}${productPhrase} didn't go through. Still looking to grab it? Here's the link: ${checkoutUrl}\n\nVin`;
 }
 
 function buildFailedCheckoutUrl(orderId, orderKey) {
@@ -134,7 +134,7 @@ function buildFailedCheckoutUrl(orderId, orderKey) {
 
 function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
   const notes = method === 'Zelle' ? `Just include your name as the reference so I can match both.` : `Just pop your name in the notes so I can match both.`;
-  return `Hey ${firstName}! It's DP, founder of Vici Peptides. Looks like you've got two orders waiting - ${orderRef}. Let's lock them both in!\n\nSend $${combinedTotal} via ${method} to ${handle}. ${notes}\n\nOnce I see it I'll pack up both straight away!\n\nDP`;
+  return `Hey ${firstName}! It's Vin, founder of Vici Peptides. Looks like you've got two orders waiting - ${orderRef}. Let's lock them both in!\n\nSend $${combinedTotal} via ${method} to ${handle}. ${notes}\n\nOnce I see it I'll pack up both straight away!\n\nVin`;
 }
 
 // Message quality checks
@@ -143,7 +143,7 @@ function checkMessage(label, msg) {
     [!msg.includes('—') && !msg.includes('–'), 'No em dashes'],
     [!msg.includes('**') && !msg.includes('*'), 'No asterisks'],
     [!msg.includes('#') || msg.match(/#\d+/), 'Hashtags only as order numbers'],
-    [msg.includes('DP'), 'Has DP sign-off'],
+    [msg.includes('Vin'), 'Has Vin sign-off'],
     [msg.length <= 400, `Under 400 chars (${msg.length})`],
     [msg.trim().length > 0, 'Not empty'],
   ];
@@ -585,7 +585,7 @@ async function testEdgeCases() {
   const items = (noItemsOrder.line_items || []).map(i => ({ product_id: i.product_id, name: i.name }));
   const msg = buildMsg1('Joe', '4100', '50.00', '@ViciPeptides', 'Venmo', items);
   assert(!msg.includes('for your'), 'No product phrase when line_items is null');
-  assert(msg.includes('DP'), 'Still has DP sign-off');
+  assert(msg.includes('Vin'), 'Still has Vin sign-off');
 
   console.log('\n  processScheduledQueue cancels hold-failed-nudge when order recovers:');
   // Verify the utils.js cancellableFlows array includes hold-failed-nudge
