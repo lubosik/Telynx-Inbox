@@ -11,14 +11,27 @@ const HOLD_MUSIC_URL = 'https://audionautix.com/Music/CloserToJazz.mp3';
 router.post('/', async (req, res) => {
   res.sendStatus(200);
 
+  // Log immediately so we can see in Railway that the webhook arrived at all
+  const bodyType = Buffer.isBuffer(req.body) ? `Buffer(${req.body.length})` : typeof req.body;
+  console.log(`[VOICE] Webhook hit — bodyType=${bodyType}`);
+
   try {
     const raw = req.body;
-    const body = Buffer.isBuffer(raw)
-      ? JSON.parse(raw.toString() || '{}')
-      : (raw || {});
+    let body;
+    try {
+      body = Buffer.isBuffer(raw)
+        ? JSON.parse(raw.toString() || '{}')
+        : (typeof raw === 'object' ? raw : JSON.parse(String(raw) || '{}'));
+    } catch (parseErr) {
+      console.error('[VOICE] Body parse error:', parseErr.message, '| raw snippet:', String(raw).slice(0, 100));
+      return;
+    }
 
     const event = body?.data;
-    if (!event) return;
+    if (!event) {
+      console.warn('[VOICE] No event.data in body:', JSON.stringify(body).slice(0, 200));
+      return;
+    }
 
     const { event_type, payload } = event;
     const callControlId = payload?.call_control_id;
