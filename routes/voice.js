@@ -1,7 +1,5 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
-const pendingCalls = require('../lib/pending-calls');
-const { stopAudioOnCall, transferCall } = require('../lib/telnyx-api');
 
 // GET /api/voice/token — returns SIP credentials for WebRTC SDK
 // Protected by requireAuth at mount point in server.js
@@ -76,40 +74,6 @@ router.post('/logs', async (req, res) => {
 
 // POST /api/voice/sip-ready — app fires this when TelnyxRTC registers (telnyx.ready event).
 // Transfers immediately if music is already playing; if speak is still in progress (stage 1),
-// sets a flag so the webhook transfers as soon as the speak ends instead of starting music.
-router.post('/sip-ready', async (req, res) => {
-  let status = 'no_pending_call';
-
-  for (const [callControlId, p] of pendingCalls.entries()) {
-    if (p.stage === 1) {
-      // Speak still playing — flag it so speak.ended transfers immediately instead of music
-      p.clientReady = true;
-      console.log(`[VOICE] SIP ready during speak (stage 1) — flagged for immediate transfer on speak.ended`);
-      status = 'queued';
-      break;
-    }
-
-    if (p.stage === 2) {
-      // Music playing — cancel timer, stop music, transfer now
-      clearTimeout(p.transferTimer);
-      pendingCalls.delete(callControlId);
-      console.log(`[VOICE] SIP ready (stage 2) — transferring ...${p.contactPhone?.slice(-4)} immediately`);
-      res.json({ status: 'transferring' });
-      // Small delay for SIP registration to propagate before the INVITE arrives
-      await new Promise(r => setTimeout(r, 1500));
-      await Promise.all([
-        stopAudioOnCall(callControlId).catch(() => {}),
-        transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
-          .catch(err => console.error('[VOICE] sip-ready transfer failed:', err.message))
-      ]);
-      return; // response already sent above
-    }
-    break;
-  }
-
-  res.json({ status });
-});
-
 // POST /api/voice/recording/start
 router.post('/recording/start', async (req, res) => {
   const { call_control_id } = req.body;
