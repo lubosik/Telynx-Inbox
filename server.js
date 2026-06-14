@@ -39,6 +39,8 @@ app.set('trust proxy', 1);
 app.use('/webhook/telnyx',              express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce',         express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce-customer', express.raw({ type: 'application/json' }));
+// Voice Call Control webhook — must be raw before the global express.json() runs
+app.use('/webhooks/voice',              express.raw({ type: 'application/json' }));
 
 // Parsed JSON for the rest
 app.use('/webhook/ghl',        express.json());
@@ -93,7 +95,7 @@ app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 
 // Voice webhooks (public — Telnyx calls this directly)
-app.use('/webhooks/voice', express.raw({ type: '*/*' }), require('./routes/voice-webhook'));
+app.use('/webhooks/voice', require('./routes/voice-webhook'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });

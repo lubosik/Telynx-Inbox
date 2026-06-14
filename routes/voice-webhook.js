@@ -16,7 +16,10 @@ router.post('/', async (req, res) => {
   res.sendStatus(200);
 
   try {
-    const body = JSON.parse(req.body?.toString() || '{}');
+    const raw = req.body;
+    const body = Buffer.isBuffer(raw)
+      ? JSON.parse(raw.toString() || '{}')
+      : (raw || {});
     const event = body?.data;
     if (!event) return;
 
@@ -24,7 +27,11 @@ router.post('/', async (req, res) => {
     const callControlId = payload?.call_control_id;
     const from = payload?.from;
     const to = payload?.to;
-    const direction = payload?.direction;
+    // Telnyx Call Control sends "incoming"/"outgoing"; normalise to "inbound"/"outbound"
+    const rawDir = payload?.direction;
+    const direction = rawDir === 'incoming' ? 'inbound'
+                    : rawDir === 'outgoing' ? 'outbound'
+                    : rawDir;
 
     const contactPhone = normalisePhone(direction === 'inbound' ? from : to)
       || (direction === 'inbound' ? from : to);
