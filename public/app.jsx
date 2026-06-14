@@ -2038,6 +2038,8 @@ function App() {
   // Capture deep-link phone from URL on mount (?thread=+1xxx) — applied after conversations load
   const deepLinkPhone = useRef(new URLSearchParams(window.location.search).get('thread'));
   const deepLinkApplied = useRef(false);
+  // True if this page load was triggered by an incoming-call push notification
+  const openedForCall = useRef(new URLSearchParams(window.location.search).get('call') === 'incoming');
   const reconnectDelay = useRef(1000);
   const pollTimer = useRef(null);
 
@@ -2273,7 +2275,18 @@ function App() {
       const client = new TelnyxRTC({ login, password });
       client.remoteElement = 'telnyx-audio';
 
-      client.on('telnyx.ready', () => { console.log('[VOICE] Client ready'); setVoiceReady(true); });
+      client.on('telnyx.ready', () => {
+        console.log('[VOICE] Client ready');
+        setVoiceReady(true);
+        // If we were opened from an incoming-call push, tell the server to transfer now
+        // instead of waiting the full fallback timer
+        if (openedForCall.current) {
+          openedForCall.current = false;
+          api('POST', '/api/voice/sip-ready')
+            .then(d => console.log('[VOICE] SIP-ready ping:', d.transferred ? 'transfer triggered' : 'no pending call'))
+            .catch(() => {});
+        }
+      });
       client.on('telnyx.error', (err) => { console.error('[VOICE] Client error:', err); setVoiceReady(false); });
       client.on('telnyx.notification', (notification) => {
         if (notification.type !== 'callUpdate') return;

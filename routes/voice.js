@@ -1,5 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
+const pendingCalls = require('../lib/pending-calls');
+const { stopAudioOnCall, transferCall } = require('../lib/telnyx-api');
 
 // GET /api/voice/token — returns SIP credentials for WebRTC SDK
 // Protected by requireAuth at mount point in server.js
@@ -70,6 +72,29 @@ router.post('/logs', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
   res.json({ ok: true });
+});
+
+// POST /api/voice/sip-ready — app fires this when TelnyxRTC registers (telnyx.ready event).
+// Immediately cancels the fallback timer, stops hold music, and transfers the call to SIP
+// instead of waiting the full 20 second fallback window.
+router.post('/sip-ready', async (req, res) => {
+  // Find the current pending inbound call (there can only be one at a time)
+  let transferred = false;
+  for (const [callControlId, p] of pendingCalls.entries()) {
+    if (p.stage !== 2) continue; // Only act when music is already playing (stage 2)
+    clearTimeout(p.transferTimer);
+    pendingCalls.delete(callControlId);
+    console.log(`[VOICE] SIP ready signal received — transferring ...${p.contactPhone?.slice(-4)} immediately`);
+    // Stop music and transfer in parallel
+    await Promise.all([
+      stopAudioOnCall(callControlId).catch(() => {}),
+      transferCall(callControlId, p.sipTarget, process.env.TELNYX_PHONE_NUMBER)
+        .catch(err => console.error('[VOICE] sip-ready transfer failed:', err.message))
+    ]);
+    transferred = true;
+    break;
+  }
+  res.json({ transferred });
 });
 
 // POST /api/voice/recording/start

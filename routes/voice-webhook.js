@@ -8,10 +8,7 @@ const { answerCall, speakOnCall, transferCall, playAudioOnCall, stopAudioOnCall 
 // Warm jazz hold music — CC-BY Jason Shaw (audionautix.com), public Cloudflare CDN
 const HOLD_MUSIC_URL = 'https://audionautix.com/Music/CloserToJazz.mp3';
 
-// In-memory store for inbound calls in the hold/speak phase.
-// stage 1 = greeting speak in progress
-// stage 2 = hold music playing, transfer timer running
-const pendingCalls = new Map();
+const pendingCalls = require('../lib/pending-calls');
 
 router.post('/', async (req, res) => {
   res.sendStatus(200);
