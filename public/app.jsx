@@ -2275,9 +2275,22 @@ function App() {
 
   // ── Voice functions ──────────────────────────────────────────────────────────
 
+  function loadTelnyxSDK() {
+    if (window.TelnyxWebRTC || window.TelnyxRTC) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/@telnyx/webrtc@2.27.1/lib/bundle.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load Telnyx WebRTC SDK'));
+      document.head.appendChild(s);
+    });
+  }
+
   async function initVoiceClient() {
     if (telnyxClientRef.current) return;
     try {
+      await loadTelnyxSDK();
+
       const res = await fetch('/api/voice/token', { credentials: 'include' });
       if (!res.ok) throw new Error('Token fetch failed');
       const { login, password, callerNumber } = await res.json();
