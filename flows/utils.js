@@ -55,13 +55,17 @@ async function markOptedOut(phone) {
 // Deduplication
 // ---------------------------------------------------------------------------
 
-async function alreadySent(orderId, flowType) {
-  const { data } = await supabase
+// phone is optional — pass it to scope the check to a specific customer.
+// Without phone, any sent record for (orderId, flowType) matches, which can
+// cause false positives when WooCommerce reuses internal order IDs.
+async function alreadySent(orderId, flowType, phone = null) {
+  let query = supabase
     .from('sms_sent_log')
     .select('id')
     .eq('order_id', String(orderId))
-    .eq('flow_type', flowType)
-    .maybeSingle();
+    .eq('flow_type', flowType);
+  if (phone) query = query.eq('phone', phone);
+  const { data } = await query.maybeSingle();
   return !!data;
 }
 
@@ -81,8 +85,8 @@ async function sendAndLog(phone, message, orderId, flowType) {
     return false;
   }
 
-  // Pre-send dedup check
-  if (await alreadySent(orderId, flowType)) {
+  // Pre-send dedup check — include phone so reused WC order IDs don't produce false positives
+  if (await alreadySent(orderId, flowType, phone)) {
     console.log(`[SMS] SKIP already sent | order=${orderId} flow=${flowType}`);
     return false;
   }
@@ -134,18 +138,19 @@ async function sendAndLog(phone, message, orderId, flowType) {
 // ---------------------------------------------------------------------------
 
 async function scheduleSMS({ orderId, phone, flowType, message, sendAt }) {
-  // Skip if already sent
-  if (await alreadySent(orderId, flowType)) {
+  // Skip if already sent — include phone so reused WC order IDs don't block new customers
+  if (await alreadySent(orderId, flowType, phone)) {
     console.log(`[SCHEDULE] Already sent, not scheduling | order=${orderId} flow=${flowType}`);
     return;
   }
 
-  // Skip if already scheduled
+  // Skip if already pending for this exact customer+order+flow combination
   const { data: existing } = await supabase
     .from('sms_scheduled')
     .select('id')
     .eq('order_id', String(orderId))
     .eq('flow_type', flowType)
+    .eq('phone', phone)
     .eq('status', 'pending')
     .maybeSingle();
 
@@ -154,13 +159,18 @@ async function scheduleSMS({ orderId, phone, flowType, message, sendAt }) {
     return;
   }
 
-  const { data: inserted } = await supabase.from('sms_scheduled').insert({
+  const { data: inserted, error: insertErr } = await supabase.from('sms_scheduled').insert({
     order_id:     String(orderId),
     phone,
     flow_type:    flowType,
     message_body: message,
     send_at:      sendAt
   }).select('id').maybeSingle();
+
+  if (insertErr) {
+    console.error(`[SCHEDULE] INSERT FAILED | order=${orderId} flow=${flowType} phone=...${phone.slice(-4)}: ${insertErr.message}`);
+    return;
+  }
 
   broadcast({ type: 'queue_added', id: inserted?.id, order_id: String(orderId), flow_type: flowType, send_at: sendAt, phone });
   console.log(`[SCHEDULE] Queued | order=${orderId} flow=${flowType} at=${sendAt}`);

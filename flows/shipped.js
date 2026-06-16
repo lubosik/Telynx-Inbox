@@ -303,27 +303,44 @@ async function pollForCarrierScans() {
           continue;
         }
 
-        // DEDUP: check sms_orders.shipped_sms_sent (WooCommerce tracking path may have already fired)
-        if (record.woo_order_id) {
-          const wooId = parseInt(record.woo_order_id, 10);
-          if (!isNaN(wooId)) {
-            const { data: wooOrder } = await supabase
-              .from('sms_orders')
-              .select('shipped_sms_sent')
-              .eq('woo_order_id', wooId)
-              .maybeSingle();
-            if (wooOrder?.shipped_sms_sent === true) {
-              console.log(`[POLL] Shipped SMS already sent via WooCommerce path for order=${record.woo_order_id} — marking and skipping`);
-              await supabase.from('shipstation_tracking')
-                .update({ shipped_sms_sent: true, updated_at: new Date().toISOString() })
-                .eq('id', record.id);
-              await sleep(1000);
-              continue;
-            }
+        // Safety: if woo_order_id is missing, we can't reliably confirm phone ownership
+        // and the sendAndLog dedup (which keys on woo_order_id) won't cross-check the
+        // WooCommerce path correctly. Skip rather than risk sending to the wrong person.
+        if (!record.woo_order_id) {
+          console.warn(`[POLL] woo_order_id missing for shipment=${record.shipstation_shipment_id} tracking=***${(record.tracking_number || '').slice(-4)} — skipping to avoid sending to wrong customer`);
+          await sleep(1000);
+          continue;
+        }
+
+        const wooIdNum = parseInt(record.woo_order_id, 10);
+
+        // Cross-check: confirm sms_orders agrees that this phone belongs to this order.
+        // Prevents wrong-tracking-to-wrong-person when ShipStation order numbers don't
+        // align with WooCommerce order IDs (e.g. custom order number plugins).
+        if (!isNaN(wooIdNum)) {
+          const { data: wooOrderCheck } = await supabase
+            .from('sms_orders')
+            .select('contact_phone, shipped_sms_sent')
+            .eq('woo_order_id', wooIdNum)
+            .maybeSingle();
+
+          if (wooOrderCheck?.shipped_sms_sent === true) {
+            console.log(`[POLL] Shipped SMS already sent via WooCommerce path for order=${record.woo_order_id} — marking and skipping`);
+            await supabase.from('shipstation_tracking')
+              .update({ shipped_sms_sent: true, updated_at: new Date().toISOString() })
+              .eq('id', record.id);
+            await sleep(1000);
+            continue;
+          }
+
+          if (wooOrderCheck?.contact_phone && wooOrderCheck.contact_phone !== phone) {
+            console.error(`[POLL] PHONE MISMATCH for shipment=${record.shipstation_shipment_id} | tracking_record.phone=...${phone.slice(-4)} but sms_orders.contact_phone=...${wooOrderCheck.contact_phone.slice(-4)} — skipping to avoid wrong-customer send`);
+            await sleep(1000);
+            continue;
           }
         }
 
-        const orderId    = record.woo_order_id || record.shipstation_shipment_id;
+        const orderId     = record.woo_order_id;
         const baseShipped = buildShippedMessage(firstName, record.woo_order_number || record.woo_order_id, record.tracking_number);
 
         // Build context once — shared for shipped + delivery personalisation

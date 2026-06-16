@@ -201,10 +201,22 @@ module.exports = (broadcastSSE) => {
         }
 
         case 'cancelled':
-        case 'refunded':
-          // Cancel any pending sequences for this order
+        case 'refunded': {
+          // Cancel by order_id (catches normal flows)
           await cancelScheduled(orderId);
+          // Also cancel by phone — hold/failed flows update their order_id when merged,
+          // so cancelScheduled alone misses them. Phone-based cancel is the safety net.
+          const cancelPhone = await resolvePhone(order);
+          if (cancelPhone) {
+            await cancelScheduledForCustomer(cancelPhone, [
+              'hold-msg1', 'hold-msg2', 'hold-msg3',
+              'failed-msg1', 'failed-msg2', 'failed-msg3',
+              'hold-failed-nudge'
+            ]);
+          }
+          console.log(`[WEBHOOK] Cancelled order=${orderId} — all pending flows cleared`);
           break;
+        }
 
         default:
           console.log(`[WEBHOOK] WooCommerce status=${status} | order=${orderId} — no SMS flow`);
