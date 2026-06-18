@@ -613,6 +613,7 @@ function ContactsView({
   const [createError, setCreateError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [showViciModal, setShowViciModal] = useState(false);
 
   // Pre-fill from call log "Create Contact" button
   useEffect(() => {
@@ -786,7 +787,9 @@ function ContactsView({
       flex: 1,
       overflowY: 'auto'
     }
-  }, filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(ViciPinnedCard, {
+    onClick: () => setShowViciModal(true)
+  }), filtered.length === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 32,
       textAlign: 'center',
@@ -877,6 +880,8 @@ function ContactsView({
       setCreateError('');
     },
     error: createError
+  }), showViciModal && /*#__PURE__*/React.createElement(ViciModal, {
+    onClose: () => setShowViciModal(false)
   }));
 }
 
@@ -2936,6 +2941,212 @@ function DialerSection({
     }
   }, "+")));
 }
+function CallLogRow({
+  log,
+  icon,
+  phone,
+  isUnknown,
+  knownName,
+  durStr,
+  onCall,
+  onCreateContact,
+  onGoToMessages
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderBottom: '1px solid #1a1a1a'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    onClick: () => setExpanded(e => !e),
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      padding: '12px 16px',
+      cursor: 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 36,
+      height: 36,
+      borderRadius: '50%',
+      background: '#1a1a1a',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 16,
+      color: icon.color,
+      flexShrink: 0
+    }
+  }, icon.icon), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: isUnknown ? '#9ca3af' : '#fff',
+      marginBottom: 2
+    }
+  }, knownName || phone), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: log.status === 'missed' ? '#ef4444' : '#6b7280',
+      fontWeight: log.status === 'missed' ? 600 : 400
+    }
+  }, !isUnknown && knownName && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginRight: 6
+    }
+  }, phone), log.status, durStr ? ` · ${durStr}` : '', " \xB7 ", relativeTime(log.started_at), log.recording_url_mp3 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 6,
+      color: '#3b82f6'
+    }
+  }, "\u25CF REC"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexShrink: 0
+    },
+    onClick: e => e.stopPropagation()
+  }, !isUnknown && onGoToMessages && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onGoToMessages(phone),
+    style: {
+      background: 'none',
+      border: '1px solid #2a2a2a',
+      borderRadius: 6,
+      padding: '5px 9px',
+      color: '#9ca3af',
+      cursor: 'pointer',
+      fontSize: 11,
+      fontWeight: 600
+    },
+    title: "Open message thread"
+  }, "Message"), isUnknown && onCreateContact && /*#__PURE__*/React.createElement("button", {
+    onClick: () => onCreateContact(phone),
+    style: {
+      background: 'none',
+      border: '1px solid #16a34a',
+      borderRadius: 6,
+      padding: '5px 9px',
+      color: '#16a34a',
+      cursor: 'pointer',
+      fontSize: 11,
+      fontWeight: 600
+    },
+    title: "Save as contact"
+  }, "+ Contact"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onCall(phone, knownName || null),
+    style: {
+      background: 'none',
+      border: '1px solid #2a2a2a',
+      borderRadius: 6,
+      padding: '6px 10px',
+      color: '#16a34a',
+      cursor: 'pointer',
+      fontSize: 14
+    },
+    title: "Call back"
+  }, "\uD83D\uDCDE")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280',
+      fontSize: 12,
+      flexShrink: 0
+    }
+  }, expanded ? '▲' : '▼')), expanded && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '0 16px 14px 64px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '6px 16px',
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "Direction:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, log.direction || '—')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "Status:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, log.status)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "From:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, log.from_number || '—')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "To:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, log.to_number || '—')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "Started:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, formatTime(log.started_at))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#6b7280'
+    }
+  }, "Duration:"), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#fff'
+    }
+  }, durStr || '0:00'))), log.recording_url_mp3 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: '#6b7280',
+      marginBottom: 6,
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase'
+    }
+  }, "Call Recording"), /*#__PURE__*/React.createElement("audio", {
+    controls: true,
+    preload: "none",
+    src: log.recording_url_mp3,
+    style: {
+      width: '100%',
+      height: 36,
+      borderRadius: 6
+    }
+  })), !log.recording_url_mp3 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: '#6b7280',
+      fontStyle: 'italic'
+    }
+  }, "No recording available")));
+}
 function CallLogsSection({
   logs,
   onCall,
@@ -2969,15 +3180,11 @@ function CallLogsSection({
       color: '#3b82f6'
     }
   };
-
-  // Normalize to digits-only for reliable matching across E.164 variants
   function normPhone(p) {
     if (!p) return '';
     const d = p.replace(/\D/g, '');
     return d.length === 10 ? '1' + d : d;
   }
-
-  // Separate existence set from name map — a contact with no name is still a contact
   const contactPhones = new Set();
   const contactNames = {};
   for (const c of conversations || []) {
@@ -3012,111 +3219,18 @@ function CallLogsSection({
     const isUnknown = !contactPhones.has(nk);
     const knownName = contactNames[nk] || null;
     const durStr = log.duration_seconds > 0 ? `${Math.floor(log.duration_seconds / 60).toString().padStart(2, '0')}:${(log.duration_seconds % 60).toString().padStart(2, '0')}` : null;
-    return /*#__PURE__*/React.createElement("div", {
+    return /*#__PURE__*/React.createElement(CallLogRow, {
       key: log.id,
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        padding: '12px 16px',
-        borderBottom: '1px solid #1a1a1a'
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: 36,
-        height: 36,
-        borderRadius: '50%',
-        background: '#1a1a1a',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 16,
-        color: icon.color,
-        flexShrink: 0
-      }
-    }, icon.icon), /*#__PURE__*/React.createElement("div", {
-      style: {
-        flex: 1,
-        minWidth: 0
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 14,
-        color: isUnknown ? '#9ca3af' : '#fff',
-        marginBottom: 2
-      }
-    }, knownName || phone), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 12,
-        color: log.status === 'missed' ? '#ef4444' : '#6b7280',
-        fontWeight: log.status === 'missed' ? 600 : 400
-      }
-    }, !isUnknown && knownName && /*#__PURE__*/React.createElement("span", {
-      style: {
-        marginRight: 6
-      }
-    }, phone), log.status, durStr ? ` · ${durStr}` : '', " \xB7 ", relativeTime(log.started_at))), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: 'flex',
-        gap: 8,
-        flexShrink: 0
-      }
-    }, !isUnknown && onGoToMessages && /*#__PURE__*/React.createElement("button", {
-      onClick: () => onGoToMessages(phone),
-      style: {
-        background: 'none',
-        border: '1px solid #2a2a2a',
-        borderRadius: 6,
-        padding: '5px 9px',
-        color: '#9ca3af',
-        cursor: 'pointer',
-        fontSize: 11,
-        fontWeight: 600
-      },
-      title: "Open message thread"
-    }, "Message"), isUnknown && onCreateContact && /*#__PURE__*/React.createElement("button", {
-      onClick: () => onCreateContact(phone),
-      style: {
-        background: 'none',
-        border: '1px solid #16a34a',
-        borderRadius: 6,
-        padding: '5px 9px',
-        color: '#16a34a',
-        cursor: 'pointer',
-        fontSize: 11,
-        fontWeight: 600
-      },
-      title: "Save as contact"
-    }, "+ Contact"), /*#__PURE__*/React.createElement("button", {
-      onClick: () => onCall(phone, knownName || null),
-      style: {
-        background: 'none',
-        border: '1px solid #2a2a2a',
-        borderRadius: 6,
-        padding: '6px 10px',
-        color: '#16a34a',
-        cursor: 'pointer',
-        fontSize: 14
-      },
-      title: "Call back"
-    }, "\uD83D\uDCDE"), log.recording_url_mp3 && /*#__PURE__*/React.createElement("a", {
-      href: log.recording_url_mp3,
-      target: "_blank",
-      rel: "noreferrer",
-      style: {
-        background: 'none',
-        border: '1px solid #2a2a2a',
-        borderRadius: 6,
-        padding: '6px 10px',
-        color: '#3b82f6',
-        cursor: 'pointer',
-        fontSize: 14,
-        textDecoration: 'none',
-        display: 'flex',
-        alignItems: 'center'
-      },
-      title: "Play recording"
-    }, "\u25B6")));
+      log: log,
+      icon: icon,
+      phone: phone,
+      isUnknown: isUnknown,
+      knownName: knownName,
+      durStr: durStr,
+      onCall: onCall,
+      onCreateContact: onCreateContact,
+      onGoToMessages: onGoToMessages
+    });
   }));
 }
 function VoiceTab({
@@ -3513,9 +3627,20 @@ function App() {
 
   // ── Voice functions ──────────────────────────────────────────────────────────
 
+  function loadTelnyxSDK() {
+    if (window.TelnyxWebRTC || window.TelnyxRTC) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/@telnyx/webrtc@2.27.1/lib/bundle.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Failed to load Telnyx WebRTC SDK'));
+      document.head.appendChild(s);
+    });
+  }
   async function initVoiceClient() {
     if (telnyxClientRef.current) return;
     try {
+      await loadTelnyxSDK();
       const res = await fetch('/api/voice/token', {
         credentials: 'include'
       });
@@ -3608,6 +3733,27 @@ function App() {
           status: 'active'
         }));
         startDurationTimer();
+        // Auto-start recording for outbound calls
+        if (callDirectionRef.current === 'outbound' && call.id) {
+          fetch('/api/voice/recording/start', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              call_control_id: call.id
+            })
+          }).then(r => {
+            if (r.ok) {
+              console.log('[VOICE] Outbound auto-record started');
+              setCallState(prev => ({
+                ...prev,
+                isRecording: true
+              }));
+            }
+          }).catch(() => {});
+        }
         break;
       case 'hangup':
       case 'destroy':

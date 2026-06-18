@@ -3,7 +3,7 @@ const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { sendPushToAll } = require('../push-notify');
-const { answerCall, speakOnCall, transferCall } = require('../lib/telnyx-api');
+const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/telnyx-api');
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
 async function dbUpsert(values, options = {}) {
@@ -114,9 +114,15 @@ router.post('/', async (req, res) => {
         break;
       }
 
-      // When greeting finishes, transfer to Dom's SIP
+      // When greeting finishes, start recording then transfer to SIP
       case 'call.speak.ended': {
-        console.log('[VOICE] Greeting ended — transferring to SIP');
+        console.log('[VOICE] Greeting ended — starting recording + transferring to SIP');
+
+        // Auto-record every call — non-blocking so transfer isn't delayed
+        recordCall(cid)
+          .then(() => console.log('[VOICE] Recording started'))
+          .catch(e => console.error('[VOICE] Auto-record failed (non-fatal):', e.message));
+
         const sipTarget = `sip:${process.env.TELNYX_SIP_USERNAME}@sip.telnyx.com`;
         try {
           await transferCall(cid, sipTarget, process.env.TELNYX_PHONE_NUMBER);
@@ -164,11 +170,13 @@ router.post('/', async (req, res) => {
       }
 
       case 'call.recording.saved':
+        console.log('[VOICE] Recording saved for cid=...'+cid?.slice(-6));
         await dbUpdate({
           recording_id: payload?.recording_id,
           recording_url_mp3: payload?.recording_urls?.mp3,
           recording_url_wav: payload?.recording_urls?.wav
         }, cid);
+        broadcast({ type: 'call_recording_saved', call_control_id: cid });
         break;
     }
 

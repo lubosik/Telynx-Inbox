@@ -1862,6 +1862,84 @@ function DialerSection({ dialNumber, setDialNumber, onCall, voiceReady }) {
   );
 }
 
+function CallLogRow({ log, icon, phone, isUnknown, knownName, durStr, onCall, onCreateContact, onGoToMessages }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div style={{ borderBottom: '1px solid #1a1a1a' }}>
+      <div
+        onClick={() => setExpanded(e => !e)}
+        style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer' }}
+      >
+        <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: icon.color, flexShrink: 0 }}>
+          {icon.icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, color: isUnknown ? '#9ca3af' : '#fff', marginBottom: 2 }}>
+            {knownName || phone}
+          </div>
+          <div style={{ fontSize: 12, color: log.status === 'missed' ? '#ef4444' : '#6b7280', fontWeight: log.status === 'missed' ? 600 : 400 }}>
+            {(!isUnknown && knownName) && <span style={{ marginRight: 6 }}>{phone}</span>}
+            {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
+            {log.recording_url_mp3 && <span style={{ marginLeft: 6, color: '#3b82f6' }}>● REC</span>}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+          {!isUnknown && onGoToMessages && (
+            <button
+              onClick={() => onGoToMessages(phone)}
+              style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '5px 9px', color: '#9ca3af', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+              title="Open message thread"
+            >
+              Message
+            </button>
+          )}
+          {isUnknown && onCreateContact && (
+            <button
+              onClick={() => onCreateContact(phone)}
+              style={{ background: 'none', border: '1px solid #16a34a', borderRadius: 6, padding: '5px 9px', color: '#16a34a', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+              title="Save as contact"
+            >
+              + Contact
+            </button>
+          )}
+          <button onClick={() => onCall(phone, knownName || null)} style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#16a34a', cursor: 'pointer', fontSize: 14 }} title="Call back">📞</button>
+        </div>
+        <span style={{ color: '#6b7280', fontSize: 12, flexShrink: 0 }}>{expanded ? '▲' : '▼'}</span>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: '0 16px 14px 64px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: 12 }}>
+            <div><span style={{ color: '#6b7280' }}>Direction:</span> <span style={{ color: '#fff' }}>{log.direction || '—'}</span></div>
+            <div><span style={{ color: '#6b7280' }}>Status:</span> <span style={{ color: '#fff' }}>{log.status}</span></div>
+            <div><span style={{ color: '#6b7280' }}>From:</span> <span style={{ color: '#fff' }}>{log.from_number || '—'}</span></div>
+            <div><span style={{ color: '#6b7280' }}>To:</span> <span style={{ color: '#fff' }}>{log.to_number || '—'}</span></div>
+            <div><span style={{ color: '#6b7280' }}>Started:</span> <span style={{ color: '#fff' }}>{formatTime(log.started_at)}</span></div>
+            <div><span style={{ color: '#6b7280' }}>Duration:</span> <span style={{ color: '#fff' }}>{durStr || '0:00'}</span></div>
+          </div>
+
+          {log.recording_url_mp3 && (
+            <div style={{ marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Call Recording</div>
+              <audio
+                controls
+                preload="none"
+                src={log.recording_url_mp3}
+                style={{ width: '100%', height: 36, borderRadius: 6 }}
+              />
+            </div>
+          )}
+
+          {!log.recording_url_mp3 && (
+            <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>No recording available</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToMessages }) {
   const statusIcon = {
     completed: { icon: '↗', color: '#16a34a' },
@@ -1872,14 +1950,12 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
     answered: { icon: '↔', color: '#3b82f6' }
   };
 
-  // Normalize to digits-only for reliable matching across E.164 variants
   function normPhone(p) {
     if (!p) return '';
     const d = p.replace(/\D/g, '');
     return d.length === 10 ? '1' + d : d;
   }
 
-  // Separate existence set from name map — a contact with no name is still a contact
   const contactPhones = new Set();
   const contactNames = {};
   for (const c of (conversations || [])) {
@@ -1908,48 +1984,12 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
           ? `${Math.floor(log.duration_seconds/60).toString().padStart(2,'0')}:${(log.duration_seconds%60).toString().padStart(2,'0')}`
           : null;
         return (
-          <div key={log.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #1a1a1a' }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#1a1a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: icon.color, flexShrink: 0 }}>
-              {icon.icon}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, color: isUnknown ? '#9ca3af' : '#fff', marginBottom: 2 }}>
-                {knownName || phone}
-              </div>
-              <div style={{ fontSize: 12, color: log.status === 'missed' ? '#ef4444' : '#6b7280', fontWeight: log.status === 'missed' ? 600 : 400 }}>
-                {(!isUnknown && knownName) && <span style={{ marginRight: 6 }}>{phone}</span>}
-                {log.status}{durStr ? ` · ${durStr}` : ''} · {relativeTime(log.started_at)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              {!isUnknown && onGoToMessages && (
-                <button
-                  onClick={() => onGoToMessages(phone)}
-                  style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '5px 9px', color: '#9ca3af', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-                  title="Open message thread"
-                >
-                  Message
-                </button>
-              )}
-              {isUnknown && onCreateContact && (
-                <button
-                  onClick={() => onCreateContact(phone)}
-                  style={{ background: 'none', border: '1px solid #16a34a', borderRadius: 6, padding: '5px 9px', color: '#16a34a', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
-                  title="Save as contact"
-                >
-                  + Contact
-                </button>
-              )}
-              <button onClick={() => onCall(phone, knownName || null)} style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#16a34a', cursor: 'pointer', fontSize: 14 }} title="Call back">📞</button>
-              {log.recording_url_mp3 && (
-                <a href={log.recording_url_mp3} target="_blank" rel="noreferrer"
-                  style={{ background: 'none', border: '1px solid #2a2a2a', borderRadius: 6, padding: '6px 10px', color: '#3b82f6', cursor: 'pointer', fontSize: 14, textDecoration: 'none', display: 'flex', alignItems: 'center' }}
-                  title="Play recording">
-                  ▶
-                </a>
-              )}
-            </div>
-          </div>
+          <CallLogRow
+            key={log.id}
+            log={log} icon={icon} phone={phone}
+            isUnknown={isUnknown} knownName={knownName} durStr={durStr}
+            onCall={onCall} onCreateContact={onCreateContact} onGoToMessages={onGoToMessages}
+          />
         );
       })}
     </div>
@@ -2370,6 +2410,16 @@ function App() {
         if (!callStartRef.current) callStartRef.current = Date.now();
         setCallState(prev => ({ ...prev, status: 'active' }));
         startDurationTimer();
+        // Auto-start recording for outbound calls
+        if (callDirectionRef.current === 'outbound' && call.id) {
+          fetch('/api/voice/recording/start', {
+            method: 'POST', credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ call_control_id: call.id })
+          })
+            .then(r => { if (r.ok) { console.log('[VOICE] Outbound auto-record started'); setCallState(prev => ({ ...prev, isRecording: true })); } })
+            .catch(() => {});
+        }
         break;
       case 'hangup':
       case 'destroy':
