@@ -3242,7 +3242,8 @@ function VoiceTab({
   onRetryConnect,
   conversations,
   onCreateContact,
-  onGoToMessages
+  onGoToMessages,
+  onBackfillRecordings
 }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return /*#__PURE__*/React.createElement("div", {
@@ -3303,13 +3304,33 @@ function VoiceTab({
     setDialNumber: setDialNumber,
     onCall: onCall,
     voiceReady: voiceReady
-  }), activeSection === 'logs' && /*#__PURE__*/React.createElement(CallLogsSection, {
+  }), activeSection === 'logs' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '8px 16px',
+      borderBottom: '1px solid #1a1a1a',
+      display: 'flex',
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: onBackfillRecordings,
+    style: {
+      background: '#1a1a1a',
+      border: '1px solid #2a2a2a',
+      borderRadius: 6,
+      padding: '5px 12px',
+      color: '#3b82f6',
+      cursor: 'pointer',
+      fontSize: 11,
+      fontWeight: 600
+    },
+    title: "Pull all recordings from Telnyx and match to call logs"
+  }, "Sync Recordings")), /*#__PURE__*/React.createElement(CallLogsSection, {
     logs: callLogs,
     onCall: onCall,
     conversations: conversations,
     onCreateContact: onCreateContact,
     onGoToMessages: onGoToMessages
-  }));
+  })));
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
@@ -4338,7 +4359,17 @@ function App() {
       setContactPrefill(normalisePhoneFrontend(phone) || phone);
       setMainTab('contacts');
     },
-    onGoToMessages: goToMessages
+    onGoToMessages: goToMessages,
+    onBackfillRecordings: async () => {
+      addToast('Syncing recordings from Telnyx...');
+      try {
+        const r = await api('POST', '/api/voice/backfill-recordings');
+        addToast(`Recordings synced: ${r.matched} matched, ${r.updated} updated`);
+        loadCallLogs();
+      } catch (e) {
+        addToast('Recording sync failed: ' + e.message);
+      }
+    }
   })), /*#__PURE__*/React.createElement(CallConfirmModal, {
     target: confirmCall,
     onConfirm: confirmAndCall,

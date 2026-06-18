@@ -1996,7 +1996,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact, onGoToMessages }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact, onGoToMessages, onBackfillRecordings }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -2028,7 +2028,18 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onR
         <DialerSection dialNumber={dialNumber} setDialNumber={setDialNumber} onCall={onCall} voiceReady={voiceReady} />
       )}
       {activeSection === 'logs' && (
-        <CallLogsSection logs={callLogs} onCall={onCall} conversations={conversations} onCreateContact={onCreateContact} onGoToMessages={onGoToMessages} />
+        <>
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid #1a1a1a', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              onClick={onBackfillRecordings}
+              style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '5px 12px', color: '#3b82f6', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}
+              title="Pull all recordings from Telnyx and match to call logs"
+            >
+              Sync Recordings
+            </button>
+          </div>
+          <CallLogsSection logs={callLogs} onCall={onCall} conversations={conversations} onCreateContact={onCreateContact} onGoToMessages={onGoToMessages} />
+        </>
       )}
     </div>
   );
@@ -2929,6 +2940,14 @@ function App() {
             conversations={conversations}
             onCreateContact={(phone) => { setContactPrefill(normalisePhoneFrontend(phone) || phone); setMainTab('contacts'); }}
             onGoToMessages={goToMessages}
+            onBackfillRecordings={async () => {
+              addToast('Syncing recordings from Telnyx...');
+              try {
+                const r = await api('POST', '/api/voice/backfill-recordings');
+                addToast(`Recordings synced: ${r.matched} matched, ${r.updated} updated`);
+                loadCallLogs();
+              } catch (e) { addToast('Recording sync failed: ' + e.message); }
+            }}
           />
         )}
       </div>

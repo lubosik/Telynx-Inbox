@@ -124,4 +124,16 @@ router.post('/recording/stop', async (req, res) => {
   }
 });
 
+// POST /api/voice/backfill-recordings — pull all recordings from Telnyx and match to call_logs
+router.post('/backfill-recordings', async (req, res) => {
+  try {
+    const { backfillRecordings } = require('../scripts/backfill-recordings');
+    const result = await backfillRecordings();
+    res.json(result);
+  } catch (err) {
+    console.error('[VOICE] Backfill recordings error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

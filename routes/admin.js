@@ -14,6 +14,7 @@
 
 const { backfillFailedOrders } = require('../flows/failed');
 const { backfillOnHoldOrders } = require('../flows/hold');
+const { backfillRecordings } = require('../scripts/backfill-recordings');
 const { supabase } = require('../db');
 
 function requireAdmin(req, res, next) {
@@ -120,6 +121,18 @@ module.exports = () => {
         console.error('[ADMIN] fix-old-statuses error:', err.message);
       }
     });
+  });
+
+  router.post('/backfill-recordings', requireAdmin, async (req, res) => {
+    console.log('[ADMIN] Starting recording backfill from Telnyx API');
+    try {
+      const result = await backfillRecordings();
+      console.log('[ADMIN] Recording backfill complete:', result);
+      res.json({ status: 'done', ...result });
+    } catch (err) {
+      console.error('[ADMIN] Recording backfill error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;
