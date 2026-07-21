@@ -11,11 +11,20 @@ router.get('/', async (req, res) => {
     if (!contacts?.length) return res.json([]);
 
     // Fetch latest message per contact in one batch
-    const { data: allMessages } = await supabase
+    let { data: allMessages, error: msgErr } = await supabase
       .from('sms_messages')
-      .select('contact_phone, body, direction, created_at')
+      .select('contact_phone, body, direction, created_at, media_urls')
       .in('contact_phone', contacts.map(c => c.phone))
       .order('created_at', { ascending: false });
+
+    // Fallback for a not-yet-migrated schema (media_urls column missing)
+    if (msgErr) {
+      ({ data: allMessages } = await supabase
+        .from('sms_messages')
+        .select('contact_phone, body, direction, created_at')
+        .in('contact_phone', contacts.map(c => c.phone))
+        .order('created_at', { ascending: false }));
+    }
 
     // Fetch latest order per contact in one batch
     const { data: allOrders } = await supabase

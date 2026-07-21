@@ -73,6 +73,69 @@ function normalisePhoneFrontend(raw) {
   return null;
 }
 
+// ─── MMS / reactions / replies ───────────────────────────────────────────────
+
+const TAPBACK_EMOJI = {
+  loved: '❤️', liked: '👍', disliked: '👎',
+  laughed: '😂', emphasized: '‼️', questioned: '❓'
+};
+
+// Raw tapback rows ("Loved \"...\"") are stored for audit but rendered as a
+// reaction badge on the target message, not as a bubble of their own.
+const TAPBACK_TEXT_RE = /^(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned|Removed a|Removed an) /;
+function isTapbackRow(m) {
+  return !!m.reply_to_message_id &&
+    TAPBACK_TEXT_RE.test((m.body || '').trim()) &&
+    !(Array.isArray(m.media_urls) && m.media_urls.length);
+}
+
+function messagePreviewText(m, n = 60) {
+  if (!m) return '';
+  const body = (m.body || '').trim();
+  if (body) return truncate(body, n);
+  if (Array.isArray(m.media_urls) && m.media_urls.length) {
+    return m.media_urls.length > 1 ? `📷 ${m.media_urls.length} Pictures` : '📷 Picture';
+  }
+  return '';
+}
+
+// Downscale + re-encode an image client-side so it fits carrier MMS limits
+// (~600KB safe max). HEIC from iPhone camera roll is converted to JPEG by the
+// browser at pick time; anything the browser can't decode rejects cleanly.
+// Small GIFs pass through untouched so animation survives.
+function downscaleImage(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('Could not read file'));
+    fr.onload = () => {
+      if (file.type === 'image/gif' && file.size <= 550 * 1024) {
+        const base64 = String(fr.result).split(',')[1];
+        return resolve({ base64, contentType: 'image/gif', previewUrl: fr.result, size: file.size });
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error('Unsupported image format'));
+      img.onload = () => {
+        const MAX = 1600;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        let quality = 0.82;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        while (dataUrl.length * 0.75 > 550 * 1024 && quality > 0.4) {
+          quality -= 0.12;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+        const base64 = dataUrl.split(',')[1];
+        resolve({ base64, contentType: 'image/jpeg', previewUrl: dataUrl, size: Math.round(base64.length * 0.75) });
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function api(method, path, body) {
@@ -977,10 +1040,22 @@ function CreateContactModal({ data, onChange, onSubmit, onCancel, error }) {
 function MessagesView({
   conversations, activePhone, messages, onSelectContact,
   input, setInput, onSend, onKeyDown, sending, inputRef, messagesEndRef,
-  mobileSub, setMobileSub, callState, voiceReady, onInitiateCall
+  mobileSub, setMobileSub, callState, voiceReady, onInitiateCall,
+  attachments, onPickFiles, onRemoveAttachment,
+  replyTarget, setReplyTarget, onReact
 }) {
   const [search, setSearch] = useState('');
+  const [actionTarget, setActionTarget] = useState(null); // message for the long-press sheet
+  const [lightbox, setLightbox] = useState(null);          // full-screen image URL
+  const fileInputRef = useRef(null);
+  const pressTimer = useRef(null);
   const isMobile = useIsMobile();
+
+  const startPress = (m) => {
+    clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => setActionTarget(m), 450);
+  };
+  const endPress = () => clearTimeout(pressTimer.current);
 
   // Sort: contacts with messages first (newest message → oldest),
   // then contacts with orders but no messages (newest order → oldest),
@@ -1010,8 +1085,13 @@ function MessagesView({
   });
 
   const activeMessages = activePhone ? (messages[activePhone] || []) : [];
+  // Tapback rows render as badges on their target message, not as bubbles
+  const visibleMessages = activeMessages.filter(m => !isTapbackRow(m));
   const activeContact = conversations.find(c => c.phone === activePhone);
   const cc = charCount(input);
+  const readyAttachments = (attachments || []).filter(a => a.status === 'ready');
+  const processingAttachments = (attachments || []).some(a => a.status === 'processing');
+  const canSend = (input.trim() || readyAttachments.length > 0) && !sending && !processingAttachments;
 
   return (
     <div className="messages-view">
@@ -1100,15 +1180,20 @@ function MessagesView({
             </div>
 
             <div className="messages-area">
-              {activeMessages.length === 0 ? (
+              {visibleMessages.length === 0 ? (
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontFamily: 'var(--mono)', fontSize: '0.8125rem' }}>
                   // no messages yet
                 </div>
               ) : (
-                activeMessages.map((m, idx) => {
-                  const prev = activeMessages[idx - 1];
+                visibleMessages.map((m, idx) => {
+                  const prev = visibleMessages[idx - 1];
                   const showDate = !prev ||
                     new Date(m.created_at).toDateString() !== new Date(prev.created_at).toDateString();
+                  const original = m.reply_to_message_id
+                    ? activeMessages.find(x => x.id === m.reply_to_message_id)
+                    : null;
+                  const media = Array.isArray(m.media_urls) ? m.media_urls : [];
+                  const reactions = Array.isArray(m.reactions) ? m.reactions : [];
                   return (
                     <React.Fragment key={m.id || idx}>
                       {showDate && (
@@ -1117,7 +1202,47 @@ function MessagesView({
                         </div>
                       )}
                       <div className="msg-group">
-                        <div className={`msg-bubble ${m.direction}`}>{m.body}</div>
+                        <div
+                          className={`msg-bubble ${m.direction}${reactions.length ? ' has-reactions' : ''}`}
+                          onContextMenu={e => { e.preventDefault(); setActionTarget(m); }}
+                          onTouchStart={() => startPress(m)}
+                          onTouchEnd={endPress}
+                          onTouchMove={endPress}
+                        >
+                          {m.reply_to_message_id && (
+                            <div className="msg-reply-quote">
+                              <span className="msg-reply-bar" />
+                              {original ? messagePreviewText(original, 80) : 'Original message'}
+                            </div>
+                          )}
+                          {media.map((med, i) => {
+                            const isImg = !med.content_type || med.content_type.startsWith('image/');
+                            return isImg ? (
+                              <img
+                                key={i}
+                                className="msg-img"
+                                src={med.url}
+                                alt="attachment"
+                                loading="lazy"
+                                onClick={e => { e.stopPropagation(); setLightbox(med.url); }}
+                              />
+                            ) : (
+                              <a key={i} href={med.url} target="_blank" rel="noreferrer" className="msg-file">
+                                📎 Attachment
+                              </a>
+                            );
+                          })}
+                          {m.body && <div className="msg-text">{m.body}</div>}
+                          {reactions.length > 0 && (
+                            <div className={`msg-reactions ${m.direction}`}>
+                              {reactions.map((r, i) => (
+                                <span key={i} title={`${r.source === 'customer' ? 'Customer' : 'You'}: ${r.type}`}>
+                                  {TAPBACK_EMOJI[r.type] || '❤️'}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <div className={`msg-meta ${m.direction}`}>
                           {formatTime(m.created_at)}
                           {m.direction === 'outbound' && m.status && (
@@ -1138,7 +1263,42 @@ function MessagesView({
             </div>
 
             <div className="compose-area">
+              {replyTarget && (
+                <div className="reply-bar">
+                  <div className="reply-bar-body">
+                    <span className="reply-bar-label">Replying to</span>
+                    <span className="reply-bar-text">{messagePreviewText(replyTarget, 70)}</span>
+                  </div>
+                  <button className="reply-bar-close" onClick={() => setReplyTarget(null)}>✕</button>
+                </div>
+              )}
+              {(attachments || []).length > 0 && (
+                <div className="attach-strip">
+                  {attachments.map(a => (
+                    <div key={a.id} className="attach-thumb">
+                      {a.status === 'processing'
+                        ? <span className="spinner" style={{ width: 16, height: 16 }} />
+                        : <img src={a.previewUrl} alt="attachment preview" />}
+                      <button className="attach-remove" onClick={() => onRemoveAttachment(a.id)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="compose-row">
+                <button
+                  className="attach-btn"
+                  title="Attach a picture"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={(attachments || []).length >= 4}
+                >＋</button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={e => { onPickFiles(e.target.files); e.target.value = ''; }}
+                />
                 <textarea
                   ref={inputRef}
                   className="compose-input"
@@ -1152,7 +1312,7 @@ function MessagesView({
                   onKeyDown={onKeyDown}
                   rows={1}
                 />
-                <button className="send-btn" onClick={onSend} disabled={!input.trim() || sending}>
+                <button className="send-btn" onClick={onSend} disabled={!canSend}>
                   {sending
                     ? <span className="spinner" style={{ width: '14px', height: '14px', borderTopColor: '#030712' }} />
                     : '↑'}
@@ -1162,12 +1322,58 @@ function MessagesView({
                 <span className={`char-counter${cc.isWarning ? ' warning' : ''}${cc.isDanger ? ' danger' : ''}`}>
                   {cc.chars}/160
                 </span>
-                <span>{cc.segments} SMS</span>
+                <span>
+                  {readyAttachments.length > 0
+                    ? `MMS · ${readyAttachments.length} image${readyAttachments.length > 1 ? 's' : ''}`
+                    : `${cc.segments} SMS`}
+                </span>
               </div>
             </div>
           </>
         )}
       </div>
+
+      {/* Long-press / right-click action sheet */}
+      {actionTarget && (
+        <div className="msg-action-overlay" onClick={() => setActionTarget(null)}>
+          <div className="msg-action-sheet" onClick={e => e.stopPropagation()}>
+            <div className="msg-action-preview">{messagePreviewText(actionTarget, 90)}</div>
+            {actionTarget.direction === 'inbound' && actionTarget.id && (
+              <div className="tapback-row">
+                {Object.entries(TAPBACK_EMOJI).map(([type, emoji]) => {
+                  const active = (actionTarget.reactions || []).some(r => r.type === type && r.source === 'operator');
+                  return (
+                    <button
+                      key={type}
+                      className={`tapback-btn${active ? ' active' : ''}`}
+                      onClick={() => { onReact(actionTarget, type); setActionTarget(null); }}
+                    >{emoji}</button>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              className="msg-action-btn"
+              onClick={() => { setReplyTarget(actionTarget); setActionTarget(null); setTimeout(() => inputRef.current?.focus(), 50); }}
+            >↩ &nbsp;Reply</button>
+            <button
+              className="msg-action-btn"
+              onClick={() => {
+                if (navigator.clipboard && actionTarget.body) navigator.clipboard.writeText(actionTarget.body).catch(() => {});
+                setActionTarget(null);
+              }}
+            >⧉ &nbsp;Copy</button>
+            <button className="msg-action-btn cancel" onClick={() => setActionTarget(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Full-screen image viewer */}
+      {lightbox && (
+        <div className="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="full size" />
+        </div>
+      )}
     </div>
   );
 }
@@ -1197,7 +1403,7 @@ function smartTime(ts) {
 
 function ConvRow({ contact: c, active, onClick }) {
   const preview = c.lastMessage
-    ? (c.lastMessage.direction === 'outbound' ? '↗ ' : '') + truncate(c.lastMessage.body, 40)
+    ? (c.lastMessage.direction === 'outbound' ? '↗ ' : '') + (messagePreviewText(c.lastMessage, 40) || truncate(c.lastMessage.body, 40))
     : 'No messages yet';
   const orderStatus = c.latest_order_status || 'none';
   const timestamp = smartTime(c.lastMessage?.created_at || c.latest_order_date || c.last_seen);
@@ -2062,6 +2268,8 @@ function App() {
   const [mainTab, setMainTab] = useState('contacts'); // 'contacts' | 'messages' | 'activity' | 'voice'
   const [mobileSub, setMobileSub] = useState('list'); // 'list' | 'thread'
   const [contactPrefill, setContactPrefill] = useState(null);
+  const [attachments, setAttachments] = useState([]); // pending composer images
+  const [replyTarget, setReplyTarget] = useState(null); // message being replied to
 
   // ── Voice state ──────────────────────────────────────────────────────────────
   const [voiceReady, setVoiceReady] = useState(false);
@@ -2189,6 +2397,15 @@ function App() {
           return;
         }
 
+        if (evt.type === 'reaction_update') {
+          const { phone, message_id, reactions } = evt;
+          setMessages(m => {
+            if (!m[phone]) return m;
+            return { ...m, [phone]: m[phone].map(msg => msg.id === message_id ? { ...msg, reactions } : msg) };
+          });
+          return;
+        }
+
         // Dispatch to Activity tab SSE listener
         window.dispatchEvent(new CustomEvent('vici-sse', { detail: evt }));
 
@@ -2220,6 +2437,7 @@ function App() {
 
         if (evt.type === 'new_message') {
           const { phone, body, direction } = evt;
+          const mediaUrls = Array.isArray(evt.media_urls) ? evt.media_urls : null;
           setConversations(prev => {
             const idx = prev.findIndex(c => c.phone === phone);
             const now = new Date().toISOString();
@@ -2228,7 +2446,7 @@ function App() {
               updated[idx] = {
                 ...updated[idx],
                 last_seen: now,
-                lastMessage: { body, direction, created_at: now },
+                lastMessage: { body, direction, created_at: now, media_urls: mediaUrls },
                 unread_count: (direction === 'inbound' && phone !== activePhone) ? (updated[idx].unread_count || 0) + 1 : updated[idx].unread_count
               };
               return [updated[idx], ...updated.filter((_, i) => i !== idx)];
@@ -2241,14 +2459,25 @@ function App() {
             if (ap === phone) {
               setMessages(m => ({
                 ...m,
-                [phone]: [...(m[phone] || []), { id: Date.now(), contact_phone: phone, direction, body, created_at: new Date().toISOString(), status: 'delivered' }]
+                [phone]: [...(m[phone] || []), {
+                  id: evt.id || Date.now(),
+                  telnyx_message_id: evt.telnyx_message_id || null,
+                  contact_phone: phone,
+                  direction,
+                  body,
+                  media_urls: mediaUrls,
+                  reply_to_message_id: evt.reply_to_message_id || null,
+                  created_at: new Date().toISOString(),
+                  status: direction === 'outbound' ? 'queued' : 'delivered'
+                }]
               }));
             }
             return ap;
           });
           if (direction === 'inbound' && isAppInBackground()) {
             const contact = conversations.find(c => c.phone === phone);
-            showNotification(`New message from ${contact?.name || phone}`, body.slice(0, 80), phone);
+            const previewBody = (body || '').slice(0, 80) || (mediaUrls?.length ? '📷 Picture' : '');
+            showNotification(`New message from ${contact?.name || phone}`, previewBody, phone);
           }
         }
       } catch {}
@@ -2321,6 +2550,8 @@ function App() {
   function selectContact(phone) {
     setActivePhone(phone);
     setConversations(prev => prev.map(c => c.phone === phone ? { ...c, unread_count: 0 } : c));
+    setReplyTarget(null);
+    setAttachments([]);
     setTimeout(() => inputRef.current?.focus(), 150);
   }
 
@@ -2600,16 +2831,70 @@ function App() {
     setMobileSub('thread');
   }
 
+  // Convert picked files to carrier-safe JPEGs and stage them in the composer
+  async function handlePickFiles(fileList) {
+    const room = 4 - attachments.length;
+    const files = Array.from(fileList || []).slice(0, Math.max(0, room));
+    if (Array.from(fileList || []).length > room) addToast('Max 4 pictures per message');
+    for (const f of files) {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setAttachments(a => [...a, { id, status: 'processing' }]);
+      try {
+        const img = await downscaleImage(f);
+        setAttachments(a => a.map(x => (x.id === id ? { id, status: 'ready', ...img } : x)));
+      } catch (err) {
+        setAttachments(a => a.filter(x => x.id !== id));
+        addToast(`Couldn't read ${f.name}: ${err.message}`);
+      }
+    }
+  }
+
+  function handleRemoveAttachment(id) {
+    setAttachments(a => a.filter(x => x.id !== id));
+  }
+
+  async function handleReact(message, type) {
+    try {
+      const r = await api('POST', '/api/react', { messageId: message.id, type });
+      const phone = message.contact_phone || activePhone;
+      setMessages(m => ({
+        ...m,
+        [phone]: (m[phone] || []).map(x => (x.id === message.id ? { ...x, reactions: r.reactions } : x))
+      }));
+    } catch (err) {
+      addToast('Reaction failed: ' + err.message);
+    }
+  }
+
   async function handleSend() {
-    if (!input.trim() || !activePhone || sending) return;
     const msg = input.trim();
+    const ready = attachments.filter(a => a.status === 'ready');
+    if ((!msg && ready.length === 0) || !activePhone || sending) return;
+    if (attachments.some(a => a.status === 'processing')) return;
+
+    const savedAttachments = attachments;
+    const savedReply = replyTarget;
     setInput('');
+    setAttachments([]);
+    setReplyTarget(null);
     setSending(true);
     try {
-      await api('POST', '/api/send', { to: activePhone, message: msg });
+      const mediaUrls = [];
+      for (const a of ready) {
+        const up = await api('POST', '/api/upload', { contentType: a.contentType, data: a.base64 });
+        mediaUrls.push(up.url);
+      }
+      await api('POST', '/api/send', {
+        to: activePhone,
+        message: msg,
+        mediaUrls,
+        replyToMessageId: savedReply?.id || null
+      });
     } catch (err) {
       addToast('Send failed: ' + err.message);
       setInput(msg);
+      setAttachments(savedAttachments);
+      setReplyTarget(savedReply);
     } finally { setSending(false); }
   }
 
@@ -2924,6 +3209,12 @@ function App() {
             callState={callState}
             voiceReady={voiceReady}
             onInitiateCall={initiateCall}
+            attachments={attachments}
+            onPickFiles={handlePickFiles}
+            onRemoveAttachment={handleRemoveAttachment}
+            replyTarget={replyTarget}
+            setReplyTarget={setReplyTarget}
+            onReact={handleReact}
           />
         )}
         {mainTab === 'activity' && (

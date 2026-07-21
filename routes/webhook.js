@@ -1,9 +1,11 @@
-const { supabase } = require('../db');
+const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
 const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
+const { rehostInboundMedia } = require('../lib/mms-media');
+const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -60,9 +62,11 @@ module.exports = (broadcastSSE) => {
 
       const messageId = payload?.id;
       const fromPhone = payload?.from?.phone_number;
-      const text = payload?.text;
+      const text = payload?.text || '';
+      const inboundMedia = Array.isArray(payload?.media) ? payload.media : [];
 
-      if (!messageId || !fromPhone || !text) return;
+      // Accept text-only, media-only (picture with no caption), or both
+      if (!messageId || !fromPhone || (!text && inboundMedia.length === 0)) return;
 
       const { data: existing } = await supabase
         .from('sms_messages')
@@ -95,24 +99,90 @@ module.exports = (broadcastSSE) => {
         last_seen: new Date().toISOString()
       }, { onConflict: 'phone' });
 
+      // ── iPhone tapback (reaction) detection ─────────────────────────────────
+      // "Loved \"...\"" / "Liked an image" etc. arrive as plain SMS text.
+      // Attach the reaction to the message it targets and hide the raw text row
+      // (the UI skips tapback rows that carry reply_to_message_id).
+      const tapback = inboundMedia.length === 0 ? parseTapback(text) : null;
+      if (tapback) {
+        try {
+          const target = await findTapbackTarget(supabase, fromPhone, tapback);
+          if (target) {
+            let reactions = Array.isArray(target.reactions) ? [...target.reactions] : [];
+            if (tapback.action === 'add') {
+              reactions = reactions.filter(r => !(r.type === tapback.type && r.source === 'customer'));
+              reactions.push({ type: tapback.type, source: 'customer', at: new Date().toISOString() });
+            } else {
+              reactions = reactions.filter(r => !(r.type === tapback.type && r.source === 'customer'));
+            }
+
+            await supabase.from('sms_messages')
+              .update({ reactions: reactions.length ? reactions : null })
+              .eq('id', target.id);
+
+            // Keep the raw row for audit + webhook-retry dedup, linked to its target
+            await insertSmsMessage({
+              telnyx_message_id: messageId,
+              contact_phone: fromPhone,
+              direction: 'inbound',
+              body: text,
+              status: 'delivered',
+              reply_to_message_id: target.id,
+              created_at: payload.received_at || new Date().toISOString()
+            }).catch(() => {});
+
+            broadcastSSE({ type: 'reaction_update', phone: fromPhone, message_id: target.id, reactions });
+
+            const { data: reactor } = await supabase
+              .from('sms_contacts').select('name').eq('phone', fromPhone).maybeSingle();
+            sendPushToAll({
+              title: reactor?.name || fromPhone,
+              body: text,
+              url: `/?thread=${encodeURIComponent(fromPhone)}`,
+              icon: '/icons/icon-192.png',
+              tag: `sms-${fromPhone}`
+            }).catch(() => {});
+
+            console.log(`[TAPBACK] ${tapback.action} ${tapback.type} on msg ${target.id} from ...${fromPhone.slice(-4)}`);
+            return;
+          }
+          // No matching target — fall through and store as a normal message
+        } catch (tapErr) {
+          console.error('[TAPBACK] Error:', tapErr.message);
+        }
+      }
+
+      // Re-host inbound pictures (Telnyx media URLs expire after 30 days)
+      let mediaRecord = null;
+      if (inboundMedia.length > 0) {
+        const hosted = await rehostInboundMedia(messageId, inboundMedia);
+        if (hosted.length > 0) mediaRecord = hosted;
+      }
+
       let ghlContactId = null;
       try {
         const { contactId } = await ghl.upsertContact(fromPhone);
         ghlContactId = contactId;
-        await ghl.addInboundMessage(contactId, text);
+        await ghl.addInboundMessage(contactId, text || '[Picture]');
       } catch (ghlErr) {
         console.error('GHL sync error:', ghlErr.message);
       }
 
-      await supabase.from('sms_messages').insert({
-        telnyx_message_id: messageId,
-        contact_phone: fromPhone,
-        direction: 'inbound',
-        body: text,
-        status: 'delivered',
-        ghl_contact_id: ghlContactId,
-        created_at: payload.received_at || new Date().toISOString()
-      });
+      let insertedRow = null;
+      try {
+        insertedRow = await insertSmsMessage({
+          telnyx_message_id: messageId,
+          contact_phone: fromPhone,
+          direction: 'inbound',
+          body: text,
+          status: 'delivered',
+          ghl_contact_id: ghlContactId,
+          media_urls: mediaRecord,
+          created_at: payload.received_at || new Date().toISOString()
+        });
+      } catch (dbErr) {
+        console.error('Inbound DB insert error:', dbErr.message);
+      }
 
       await supabase.from('sms_contacts').update({
         last_seen: new Date().toISOString(),
@@ -136,7 +206,14 @@ module.exports = (broadcastSSE) => {
         console.log(`[INBOUND] Cancelled ${cancelled} hold/failed messages for ...${fromPhone.slice(-4)} (customer replied)`);
       }
 
-      broadcastSSE({ type: 'new_message', phone: fromPhone, body: text, direction: 'inbound' });
+      broadcastSSE({
+        type: 'new_message',
+        phone: fromPhone,
+        body: text,
+        direction: 'inbound',
+        id: insertedRow?.id || null,
+        media_urls: mediaRecord
+      });
 
       // Push notification to all subscribed devices
       const { data: contactRow } = await supabase
@@ -145,9 +222,12 @@ module.exports = (broadcastSSE) => {
         .eq('phone', fromPhone)
         .maybeSingle();
       const senderName = contactRow?.name || fromPhone;
+      const pushBody = text
+        ? (text.length > 100 ? text.slice(0, 97) + '…' : text)
+        : `📷 Picture${mediaRecord && mediaRecord.length > 1 ? ` (${mediaRecord.length})` : ''}`;
       sendPushToAll({
         title: `New message from ${senderName}`,
-        body: text.length > 100 ? text.slice(0, 97) + '…' : text,
+        body: pushBody,
         url: `/?thread=${encodeURIComponent(fromPhone)}`,
         icon: '/icons/icon-192.png',
         tag: `sms-${fromPhone}`

@@ -45,6 +45,8 @@ app.use('/webhooks/voice',              express.raw({ type: 'application/json' }
 // Parsed JSON for the rest
 app.use('/webhook/ghl',        express.json());
 app.use('/webhook/shipstation', express.json());
+// Image uploads arrive as base64 JSON — needs a higher limit than the default 100kb
+app.use('/api/upload', express.json({ limit: '8mb' }));
 app.use(express.json());
 
 // Cookie-session: signed client-side cookie — survives Railway restarts/redeploys.
@@ -85,6 +87,8 @@ app.use('/admin', require('./routes/admin')());
 // ── Authenticated API routes ──────────────────────────────────────────────
 app.use('/api/sse',           requireAuth, require('./routes/sse')(sseClients));
 app.use('/api/send',          requireAuth, sendLimiter, require('./routes/send')(broadcastSSE));
+app.use('/api/upload',        requireAuth, require('./routes/upload'));
+app.use('/api/react',         requireAuth, sendLimiter, require('./routes/react')(broadcastSSE));
 app.use('/api/conversations', requireAuth, require('./routes/conversations'));
 app.use('/api/intelligence',  requireAuth, require('./routes/intelligence'));
 app.use('/api/sync',          requireAuth, require('./routes/sync'));
