@@ -50,6 +50,27 @@ socket, but no documentation explicitly covers the answer-then-transfer path.
   transfer is reaching a different registration (e.g. an open browser tab
   holding the same SIP credential). Close all browser tabs and retry.
 
+## Test 1b — Caller name on the lock screen
+
+Runs alongside Test 1; it is already deployed on the backend.
+
+The server resolves the caller against `sms_contacts` and passes the name as
+`from_display_name` on the SIP transfer. Telnyx documents the SIP side of this
+but **not** whether it reaches the push payload's `metadata.caller_name`, so
+this test is what settles it.
+
+1. Call from a number that **is** saved in the inbox → expect that contact's
+   name on the incoming call screen
+2. Call from a number that is **not** saved → expect the formatted number
+3. Either way the call should appear in the iPhone's Recents, and tapping it
+   should dial the **customer** back, not the Vici number
+
+If the name does not appear but the call rings correctly: the transfer worked
+and only the display-name propagation failed. Check the Railway logs for
+`Transfer initiated to ... as <name>` to confirm the server sent it. The
+fallback is client-side enrichment — the app can look the contact up and call
+`CallKitCoordinator.updateCall`, which is already wired.
+
 ## Test 2 — Incoming call, app backgrounded
 
 Same as Test 1 but with the app backgrounded rather than killed. Should behave
