@@ -80,7 +80,8 @@ payload is malformed.
 
 ```
 ios/
-├── project.yml                  XcodeGen spec — source of truth for the project
+├── project.yml                  XcodeGen spec (for Macs that can run Xcode)
+├── ViciInbox.xcodeproj/         committed — CI needs it; regenerate with scripts/
 ├── certs/
 │   ├── ViciInbox_VoIP.certSigningRequest   ← send THIS to the account holder
 │   └── voip_push_private_key.pem           ← NEVER leaves this machine (gitignored)
@@ -115,17 +116,23 @@ so a push-woken cold launch can connect without waiting on the network.
 
 ## Build
 
-This project has no committed `.xcodeproj` — `project.yml` generates it, which
-keeps the repo clean and merge-conflict free.
+No Mac here can compile this — see `BUILD-ENVIRONMENT.md`. Builds run on a
+GitHub Actions macOS runner and go straight to TestFlight: **`CI-TESTFLIGHT.md`**.
+
+`ViciInbox.xcodeproj` **is committed**, because CI needs a project and a shared
+scheme to build. It is generated, not hand-maintained — after adding or removing
+a Swift file:
 
 ```bash
-brew install xcodegen
-cd ios
-xcodegen generate
-open ViciInbox.xcodeproj
+python3 ios/scripts/generate-xcodeproj.py
 ```
 
-Then in Xcode: select the team, plug in a physical iPhone, run.
+IDs derive from file paths, so regenerating without changes produces no diff.
+Forgetting fails the CI build with the exact command to run.
+
+On a Mac that *can* run Xcode, `xcodegen generate` from `project.yml` produces
+the equivalent project and is the nicer route; the Python generator exists
+because XcodeGen cannot run on macOS 13.
 
 **CallKit does not work in the Simulator.** All testing must be on a real device.
 
@@ -134,7 +141,7 @@ Then in Xcode: select the team, plug in a physical iPhone, run.
 1. ✅ Code written (this repo)
 2. ✅ Account holder registered the App ID and created the VoIP certificate
 3. ✅ Certificate uploaded to Telnyx and attached to the `Vici` SIP connection
-4. ⬜ **Get a machine that can build** — see `BUILD-ENVIRONMENT.md`; this Mac
+4. ⬜ **Get a machine that can build** — see `BUILD-ENVIRONMENT.md` and `CI-TESTFLIGHT.md`; this Mac
    cannot (macOS 13 vs the Xcode 26 requirement)
 5. ⬜ Build to a physical iPhone, sign in once in the foreground
    (the push token only registers with Telnyx during a successful login)

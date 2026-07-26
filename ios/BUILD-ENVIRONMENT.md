@@ -45,22 +45,26 @@ Caveats: 8 GB RAM and a 1.4 GHz i5 make Xcode 26 slow but workable. This Mac
 cannot run macOS 26 Tahoe (not on the Intel list), so the next time Apple raises
 the SDK floor, this machine is stranded for good.
 
-### Option B — Xcode Cloud (recommended)
+### Option B — Xcode Cloud — RULED OUT
 
-Included with the $99/year membership: **25 compute hours per month free**.
-Builds on Apple's infrastructure with current Xcode and uploads straight to
-TestFlight. Workflows can be created and managed from the App Store Connect
-website, so **no local Xcode is required**.
+This was the original recommendation and it does not work without a Mac.
 
-Fits this situation well: the code lives in GitHub already, and nothing needs
-installing locally. The trade-off is a slower edit → test loop, since every
-change goes through a cloud build.
+Apple's docs state plainly: *"You need to configure your first Xcode Cloud
+workflow in Xcode."* The App Store Connect web UI only edits workflows for apps
+already onboarded, which is why its Xcode Cloud tab shows nothing but an
+"Open Xcode" button. The API is no help either — `POST /v1/ciWorkflows` requires
+an existing `ciProduct`, and `/v1/ciProducts` is read-only.
 
-### Option C — GitHub Actions `macos-26` runners
+Xcode Cloud can only be reached *through* Xcode, which needs macOS 15.6.
 
-The runner image ships current Xcode 26.x. Pair with Fastlane for signing and
-TestFlight upload. Roughly $0.08/minute for private repos. More setup than
-Xcode Cloud, more control, and no dependency on Apple's build queue.
+### Option C — GitHub Actions `macos-26` runners — CHOSEN
+
+The `macos-26` image ships Xcode 26.x, and `xcodebuild -allowProvisioningUpdates`
+with an App Store Connect API key does cloud-managed signing, so no certificate
+is ever created by hand. No local Xcode, no macOS upgrade, no bootstrap step.
+
+Set up in `CI-TESTFLIGHT.md`. Roughly 200 macOS minutes/month on the free tier,
+about 6-10 builds.
 
 ### Option D — Borrow or rent a Mac
 
@@ -70,14 +74,14 @@ roughly $99-139/month — hard to justify at this project's size.
 
 ## Recommendation
 
-**Option B (Xcode Cloud)** to get the spike done, because it needs no local
-install, no macOS upgrade, and no extra spend beyond the membership already
-being paid for.
+**Option C (GitHub Actions)**. It is the only route that needs neither a local
+Xcode nor a macOS upgrade, and unlike Xcode Cloud it has no Xcode-only
+bootstrap step.
 
 If iteration speed becomes painful — and for CallKit work it may, since every
 test needs a real device anyway — clearing 50 GB and doing Option A gives a
-proper local loop. The two are not exclusive: Xcode Cloud remains a good release
-pipeline afterwards.
+proper local loop. The two are not exclusive: CI remains the release pipeline
+either way.
 
 ## What is unaffected
 

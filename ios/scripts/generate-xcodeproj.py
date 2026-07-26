@@ -4,8 +4,8 @@ Generates ViciInbox.xcodeproj without needing Xcode or XcodeGen.
 
 Why this exists: the primary path is `xcodegen generate` from project.yml, but
 XcodeGen cannot be installed or built on macOS 13 (it requires Xcode 15.3+, and
-SwiftPM under Command Line Tools alone cannot resolve a platform path). Xcode
-Cloud needs a committed .xcodeproj to detect a scheme, so we emit one here.
+SwiftPM under Command Line Tools alone cannot resolve a platform path). CI needs
+a committed .xcodeproj and shared scheme to build, so we emit one here.
 
 project.yml remains the human-readable source of truth. Keep the two in sync:
 this script reads the same settings, declared once below.
@@ -440,7 +440,7 @@ def main():
     with open(os.path.join(proj_dir, "project.pbxproj"), "w") as f:
         f.write("\n".join(L) + "\n")
 
-    # Shared scheme — Xcode Cloud needs one to build.
+    # Shared scheme — CI needs one to select a build target.
     scheme = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion = "1600" version = "1.7">
    <BuildAction parallelizeBuildables = "YES" buildImplicitDependencies = "YES">

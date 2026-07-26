@@ -1,0 +1,155 @@
+name: iOS → TestFlight
+
+# Manual only. This repo takes backend commits constantly and macOS runner
+# minutes bill at 10x, so builds are never triggered automatically.
+on:
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: "What testers should know about this build"
+        required: false
+        default: "Internal build"
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macos-26 is the image that carries Xcode 26, which App Store Connect has
+    # required since 28 April 2026. macos-15 ships Xcode 16 and uploads are
+    # rejected.
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    env:
+      SCHEME: ViciInbox
+      PROJECT: ios/ViciInbox.xcodeproj
+      ARCHIVE: ${{ github.workspace }}/build/ViciInbox.xcarchive
+      EXPORT_DIR: ${{ github.workspace }}/build/export
+      KEY_DIR: ${{ github.workspace }}/private_keys
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          echo "Xcode: $(xcodebuild -version | head -1)"
+          echo "macOS: $(sw_vers -productVersion)"
+
+      # The Xcode project is generated rather than maintained by Xcode, so a
+      # Swift file added without regenerating would silently not be compiled.
+      # Fail loudly here instead.
+      - name: Verify the project references every source file
+        run: |
+          missing=0
+          for f in $(find ios/ViciInbox -name "*.swift" -exec basename {} \; | sort); do
+            if ! grep -q "$f" "ios/ViciInbox.xcodeproj/project.pbxproj"; then
+              echo "::error::$f exists on disk but is not in the Xcode project"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "Run: python3 ios/scripts/generate-xcodeproj.py  (then commit)"
+            exit 1
+          fi
+          echo "All Swift files are referenced."
+
+      # xcodebuild reads the key from disk. Stored base64 so newlines in the
+      # .p8 survive GitHub's secret storage intact.
+      - name: Write App Store Connect API key
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          if [ -z "$ASC_KEY_P8_BASE64" ]; then
+            echo "::error::ASC_KEY_P8_BASE64 secret is not set"
+            exit 1
+          fi
+          mkdir -p "$KEY_DIR"
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          # Prove it decoded to a real key without printing it.
+          head -1 "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" | grep -q "BEGIN PRIVATE KEY" \
+            || { echo "::error::Decoded key is not a PEM private key — check the secret was base64 of the .p8"; exit 1; }
+          echo "API key written."
+
+      # -allowProvisioningUpdates plus the authentication flags turns on
+      # cloud-managed signing: Xcode creates the distribution certificate and
+      # provisioning profile itself. Nothing has to be created by hand in the
+      # developer portal, which matters because that section is locked to the
+      # account holder on an Individual account.
+      #
+      # The API key must have the Admin role or cloud signing is refused.
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }}
+
+      - name: Export .ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE" \
+            -exportPath "$EXPORT_DIR" \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -lh "$EXPORT_DIR"
+
+      # altool is deprecated and currently broken against Xcode 26, so the
+      # upload goes through fastlane's pilot.
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          CHANGELOG: ${{ inputs.changelog }}
+        run: |
+          IPA=$(find "$EXPORT_DIR" -name "*.ipa" | head -1)
+          if [ -z "$IPA" ]; then echo "::error::No .ipa produced"; exit 1; fi
+          echo "Uploading $IPA"
+
+          # fastlane takes the key as a JSON file. Generated by a script rather
+          # than inline so the PEM's newline escaping is handled by json.dump
+          # and the whole thing can be tested off-CI.
+          trap 'rm -f asc_api_key.json' EXIT
+          python3 ios/scripts/make-asc-key-json.py asc_api_key.json
+
+          fastlane run upload_to_testflight \
+            api_key_path:asc_api_key.json \
+            ipa:"$IPA" \
+            skip_waiting_for_build_processing:true \
+            skip_submission:true \
+            changelog:"$CHANGELOG"
+
+      - name: Keep the build products
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-${{ github.run_number }}
+          path: |
+            ${{ env.EXPORT_DIR }}
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Remove the API key
+        if: always()
+        run: rm -rf "$KEY_DIR"

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Store distribution (TestFlight lives behind the same channel). -->
+	<key>method</key>
+	<string>app-store-connect</string>
+
+	<key>teamID</key>
+	<string>PQFYN2CD77</string>
+
+	<!-- Let Xcode fetch/create the distribution certificate and provisioning
+	     profile using the App Store Connect API key, so no signing assets have
+	     to be created by hand in the developer portal. Requires xcodebuild to
+	     be run with -allowProvisioningUpdates and the -authenticationKey* flags. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+
+	<!-- Uploading symbols gives readable crash reports in Xcode Organizer. -->
+	<key>uploadSymbols</key>
+	<true/>
+
+	<!-- Bitcode has been dead since Xcode 14; leaving it on breaks modern builds. -->
+	<key>compileBitcode</key>
+	<false/>
+
+	<key>destination</key>
+	<string>export</string>
+
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>
