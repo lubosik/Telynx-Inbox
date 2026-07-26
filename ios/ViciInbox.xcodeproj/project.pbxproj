@@ -1,0 +1,381 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
+		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
+		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
+		CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */; };
+		672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F149B900F4E19E4142123D9 /* AppConfig.swift */; };
+		7649D086E62D19440F809802 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285C11288F042740FCF4F46E /* CredentialStore.swift */; };
+		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
+		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
+		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
+		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
+		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
+		2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */; };
+		B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE3B0D9381CE8972333135E /* CallModels.swift */; };
+		22CF206CC1A92F82751A06CF /* TelnyxVoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */; };
+		1BB778EFCA135BD7AFD325DF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F822BC8AF24A7486E7783053 /* Assets.xcassets */; };
+		4EB6BFA629DFEF1F54ED4A74 /* TelnyxRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 1D6934380988D32AE034639F /* TelnyxRTC */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Vici Inbox.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
+		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
+		F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		0F149B900F4E19E4142123D9 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		285C11288F042740FCF4F46E /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
+		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
+		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
+		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitCoordinator.swift; sourceTree = "<group>"; };
+		7CE3B0D9381CE8972333135E /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
+		A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelnyxVoiceManager.swift; sourceTree = "<group>"; };
+		F822BC8AF24A7486E7783053 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B58E711A7827484F4718A534 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		EAAF111E9DDE967BCB5A6279 /* ViciInbox.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ViciInbox.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		019BAB185F97B56993A7087D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4EB6BFA629DFEF1F54ED4A74 /* TelnyxRTC in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		361FF3508AF23F4E0CB329EA = {
+			isa = PBXGroup;
+			children = (
+				72A4E8159DA0FAF5F5B01210 /* ViciInbox */,
+				31793280A19CDC7880B10A8E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		31793280A19CDC7880B10A8E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		52B0CA5238A8880EC14961ED /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				F822BC8AF24A7486E7783053 /* Assets.xcassets */,
+				B58E711A7827484F4718A534 /* Info.plist */,
+				EAAF111E9DDE967BCB5A6279 /* ViciInbox.entitlements */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		FF36A4DBA79DCC52999F31A6 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
+				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
+				B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A44C620988D5EB3D55C67934 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */,
+				0F149B900F4E19E4142123D9 /* AppConfig.swift */,
+				285C11288F042740FCF4F46E /* CredentialStore.swift */,
+				19325CE8AEB5A75468A51A38 /* Log.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		697370045E04810A74DEA8E0 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
+				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
+				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
+				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		1EE63E45131E064AA2A1C648 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */,
+				7CE3B0D9381CE8972333135E /* CallModels.swift */,
+				A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		72A4E8159DA0FAF5F5B01210 /* ViciInbox */ = {
+			isa = PBXGroup;
+			children = (
+				FF36A4DBA79DCC52999F31A6 /* App */,
+				A44C620988D5EB3D55C67934 /* Core */,
+				697370045E04810A74DEA8E0 /* UI */,
+				1EE63E45131E064AA2A1C648 /* Voice */,
+				52B0CA5238A8880EC14961ED /* Resources */,
+			);
+			path = ViciInbox;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0E8A3AD980EC179856012B7E /* ViciInbox */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A886B50DF087AEF7B87CDC65 /* Build configuration list */;
+			buildPhases = (
+				C2511B36F0F0E810A9E46328 /* Sources */,
+				019BAB185F97B56993A7087D /* Frameworks */,
+				C2112B99FC6905E49DE55430 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ViciInbox;
+			packageProductDependencies = (
+				1D6934380988D32AE034639F /* TelnyxRTC */,
+			);
+			productName = "Vici Inbox";
+			productReference = 38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		98F54143AB4E86B28C3AFEE0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					0E8A3AD980EC179856012B7E = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 26E84C2B3712F7DFAC8AD93F /* Build configuration list */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 361FF3508AF23F4E0CB329EA;
+			packageReferences = (
+				82D8E347E85B29BFCE8F9C84 /* XCRemoteSwiftPackageReference */,
+			);
+			productRefGroup = 31793280A19CDC7880B10A8E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0E8A3AD980EC179856012B7E /* ViciInbox */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C2112B99FC6905E49DE55430 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1BB778EFCA135BD7AFD325DF /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C2511B36F0F0E810A9E46328 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
+				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
+				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
+				CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */,
+				672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */,
+				7649D086E62D19440F809802 /* CredentialStore.swift in Sources */,
+				46B19C536CF21494312C71FA /* Log.swift in Sources */,
+				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
+				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
+				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
+				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
+				2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */,
+				B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */,
+				22CF206CC1A92F82751A06CF /* TelnyxVoiceManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F93C7AA9E9B99545F767BA13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+									"DEBUG=1",
+									"$(inherited)",
+				);
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		2ACD8C723DC350F8B910D0A5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		548D9D70B515C18F8B253F91 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ViciInbox/Resources/ViciInbox.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PQFYN2CD77;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ViciInbox/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+									"$(inherited)",
+									"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vicipeptides.inbox;
+				PRODUCT_NAME = "Vici Inbox";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		27D2C33D056E818B56FD33AF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ViciInbox/Resources/ViciInbox.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PQFYN2CD77;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ViciInbox/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+									"$(inherited)",
+									"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vicipeptides.inbox;
+				PRODUCT_NAME = "Vici Inbox";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		26E84C2B3712F7DFAC8AD93F /* Build configuration list for PBXProject "ViciInbox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F93C7AA9E9B99545F767BA13 /* Debug */,
+				2ACD8C723DC350F8B910D0A5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A886B50DF087AEF7B87CDC65 /* Build configuration list for PBXNativeTarget "ViciInbox" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				548D9D70B515C18F8B253F91 /* Debug */,
+				27D2C33D056E818B56FD33AF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		82D8E347E85B29BFCE8F9C84 /* XCRemoteSwiftPackageReference "telnyx-webrtc-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/team-telnyx/telnyx-webrtc-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.1.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1D6934380988D32AE034639F /* TelnyxRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 82D8E347E85B29BFCE8F9C84 /* XCRemoteSwiftPackageReference */;
+			productName = TelnyxRTC;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 98F54143AB4E86B28C3AFEE0 /* Project object */;
+}

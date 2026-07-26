@@ -1,0 +1,57 @@
+VICI INBOX - APPLE SETUP
+========================
+
+Hi Vin,
+
+There are two files in here:
+
+  1. START-HERE.html   <-- double-click this. It's the guide, with
+                           pictures showing exactly where to click.
+
+  2. ViciInbox_VoIP.certSigningRequest
+                        <-- don't open this. You just upload it
+                            during Task 2 of the guide.
+
+The whole thing takes about 10 minutes.
+
+At the end you'll download a file called voip_services.cer.
+Send that one back to Lubosi and you're done.
+
+You will NEVER be asked for your Apple password or a verification
+code. Don't share those with anyone.
+
+
+QUICK VERSION (if you'd rather not open the guide)
+--------------------------------------------------
+
+TASK 1 - Register the app
+  Go to: developer.apple.com/account/resources/identifiers/list
+  Click the blue + button
+  Choose "App IDs" -> Continue
+  Choose "App" -> Continue
+  Description: Vici Inbox
+  Bundle ID: select "Explicit", then type exactly:
+
+      com.vicipeptides.inbox
+
+  Scroll the Capabilities list and TICK "Push Notifications"
+  Continue -> Register
+
+TASK 2 - Create the calling certificate
+  Go to: developer.apple.com/account/resources/certificates/list
+  Click the blue + button
+  Scroll down to the SERVICES section
+  Choose "VoIP Services Certificate" -> Continue
+     (NOT "Apple Push Notification service SSL" - wrong one)
+  Pick "Vici Inbox" from the dropdown -> Continue
+  Click "Choose File" and select ViciInbox_VoIP.certSigningRequest
+  Continue -> Download
+
+  Send the downloaded voip_services.cer back to Lubosi.
+
+
+ONE THING FOR THE CALENDAR
+--------------------------
+July 2027: this certificate expires after one year. When it does,
+incoming calls quietly stop ringing on the phones with no other
+warning. Renewing is just Task 2 again, five minutes.

@@ -1,0 +1,30 @@
+# Secrets — NEVER commit
+certs/*.pem
+certs/*.p12
+certs/*.cer
+certs/*.key
+Config/Secrets.xcconfig
+
+# Xcode
+# NOTE: ViciInbox.xcodeproj IS committed on purpose — Xcode Cloud needs to find
+# a project and a shared scheme in the repo. Regenerate it with
+# scripts/generate-xcodeproj.py after adding or removing source files.
+*.xcworkspace/
+xcuserdata/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+
+# SPM
+.swiftpm/
+Packages/
+.build/
+
+# macOS
+.DS_Store
+
+# Build artefact — regenerate from handoff/
+Vici-Inbox-Apple-Setup.zip

@@ -1,0 +1,47 @@
+# XcodeGen spec — regenerates ViciInbox.xcodeproj deterministically.
+#   brew install xcodegen && cd ios && xcodegen generate
+# The .xcodeproj is gitignored on purpose: this file is the source of truth.
+
+name: ViciInbox
+options:
+  bundleIdPrefix: com.vicipeptides
+  # iOS 16 baseline: LabeledContent and modern SwiftUI APIs used in Settings.
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    TARGETED_DEVICE_FAMILY: "1"     # iPhone only
+    ENABLE_BITCODE: NO
+    CODE_SIGN_STYLE: Automatic
+    # Team ID read from the issued VoIP certificate (OU field).
+    DEVELOPMENT_TEAM: PQFYN2CD77
+
+packages:
+  TelnyxRTC:
+    url: https://github.com/team-telnyx/telnyx-webrtc-ios
+    from: "4.1.2"
+
+targets:
+  ViciInbox:
+    type: application
+    platform: iOS
+    sources:
+      - path: ViciInbox
+    dependencies:
+      - package: TelnyxRTC
+        product: TelnyxRTC
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.vicipeptides.inbox
+        PRODUCT_NAME: Vici Inbox
+        INFOPLIST_FILE: ViciInbox/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: ViciInbox/Resources/ViciInbox.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO

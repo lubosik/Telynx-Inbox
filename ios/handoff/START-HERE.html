@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vici Inbox — Apple setup (10 minutes)</title>
+<style>
+  :root{
+    --ink:#1d1d1f; --muted:#6e6e73; --line:#d2d2d7; --bg:#fff; --panel:#f5f5f7;
+    --blue:#0071e3; --mark:#ff6a00; --good:#1a7f37; --warn:#8a6d00; --warnbg:#fff8e1;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 16px 80px;
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg);
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  header{padding:40px 0 8px;border-bottom:1px solid var(--line);margin-bottom:32px}
+  h1{font-size:30px;line-height:1.2;margin:0 0 8px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0}
+  h2{font-size:22px;margin:48px 0 4px;letter-spacing:-.01em}
+  h3{font-size:17px;margin:28px 0 8px}
+  p{margin:12px 0}
+  code{
+    font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:var(--panel);padding:2px 6px;border-radius:5px;
+    word-break:break-all;
+  }
+  .lede{font-size:18px}
+  a{color:var(--blue)}
+
+  /* Step chrome */
+  .step{border:1px solid var(--line);border-radius:14px;padding:24px;margin:24px 0;background:var(--bg)}
+  .steptag{
+    display:inline-block;background:var(--ink);color:#fff;font-size:13px;font-weight:600;
+    padding:4px 12px;border-radius:20px;margin-bottom:12px;letter-spacing:.02em;
+  }
+  .time{color:var(--muted);font-size:14px;margin-left:8px}
+
+  /* Instruction list with numbered markers matching the mockups */
+  ol.clicks{list-style:none;padding:0;margin:16px 0}
+  ol.clicks li{position:relative;padding:8px 0 8px 42px;margin:0}
+  ol.clicks li .n{
+    position:absolute;left:0;top:8px;width:28px;height:28px;border-radius:50%;
+    background:var(--mark);color:#fff;font-weight:700;font-size:14px;
+    display:flex;align-items:center;justify-content:center;
+  }
+
+  /* Browser mockup */
+  .shot{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:20px 0;background:#fff}
+  .bar{
+    background:var(--panel);border-bottom:1px solid var(--line);padding:8px 12px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .dots{display:flex;gap:6px}
+  .dot{width:11px;height:11px;border-radius:50%;background:#d6d6da}
+  .url{
+    flex:1;background:#fff;border:1px solid var(--line);border-radius:6px;
+    padding:4px 10px;font:12px ui-monospace,Menlo,monospace;color:var(--muted);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .screen{display:flex;min-height:120px}
+  .side{
+    width:150px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--line);
+    padding:14px 10px;font-size:13px;
+  }
+  .side div{padding:6px 8px;border-radius:6px;color:var(--muted)}
+  .side div.on{background:#e8e8ed;color:var(--ink);font-weight:600}
+  .main{flex:1;padding:18px;min-width:0}
+  .titlerow{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .titlerow h4{margin:0;font-size:19px}
+
+  /* The + button and other targets */
+  .plus{
+    width:26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;
+    display:inline-flex;align-items:center;justify-content:center;font-size:19px;
+    line-height:1;font-weight:400;flex-shrink:0;
+  }
+  .field{margin:12px 0}
+  .label{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .input{border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-size:14px;background:#fff}
+  .input.filled{color:var(--ink)}
+  .input.empty{color:#b0b0b5}
+  .radio{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:14px}
+  .circle{width:16px;height:16px;border-radius:50%;border:1.5px solid #b0b0b5;flex-shrink:0}
+  .circle.sel{border:5px solid var(--blue)}
+  .check{width:16px;height:16px;border-radius:4px;border:1.5px solid #b0b0b5;flex-shrink:0}
+  .check.sel{background:var(--blue);border-color:var(--blue);position:relative}
+  .check.sel::after{
+    content:"";position:absolute;left:5px;top:1px;width:4px;height:9px;
+    border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);
+  }
+  .rowitem{display:flex;align-items:center;gap:8px;padding:8px 6px;border-bottom:1px solid #ededf0;font-size:14px}
+  .btn{
+    display:inline-block;background:var(--blue);color:#fff;border-radius:8px;
+    padding:8px 18px;font-size:14px;font-weight:500;
+  }
+  .btn.ghost{background:#fff;color:var(--blue);border:1px solid var(--blue)}
+  .sectionhead{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 4px}
+
+  /* Highlight + arrow callout */
+  .target{position:relative;outline:3px solid var(--mark);outline-offset:4px;border-radius:6px}
+  .callout{display:flex;align-items:center;gap:8px;margin:14px 0 4px;font-size:14px;font-weight:600;color:var(--mark)}
+  .callout .n{
+    width:24px;height:24px;border-radius:50%;background:var(--mark);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;
+  }
+  .arrow{color:var(--mark);font-size:18px;line-height:1}
+
+  /* Notices */
+  .note{background:var(--panel);border-radius:10px;padding:14px 16px;margin:18px 0;font-size:15px}
+  .warn{background:var(--warnbg);border-left:4px solid #e6b800;border-radius:8px;padding:14px 16px;margin:18px 0;font-size:15px}
+  .safe{background:#eaf6ec;border-left:4px solid var(--good);border-radius:8px;padding:14px 16px;margin:18px 0;font-size:15px}
+  .copy{
+    background:#1d1d1f;color:#fff;border-radius:10px;padding:14px 16px;margin:12px 0;
+    font:15px ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;
+  }
+  .done{border:2px solid var(--good);border-radius:12px;padding:20px;margin:32px 0;background:#f4fbf5}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+  td{padding:9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+  td:first-child{color:var(--muted);width:44%;padding-right:14px}
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+
+  @media (max-width:640px){
+    .side{display:none}
+    h1{font-size:25px}
+    .step{padding:18px}
+  }
+  @media print{
+    body{padding:0} .step{break-inside:avoid} .shot{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Vici Inbox — Apple setup</h1>
+  <p class="sub">Two tasks in the Apple Developer site. About 10 minutes total.</p>
+</header>
+
+<p class="lede">This lets incoming calls to the Vici business number ring on our iPhones like a
+normal phone call. Apple only allows the person who owns the developer account to do these two
+steps, which is why it needs you.</p>
+
+<div class="safe">
+  <strong>You will never be asked for your Apple password or a verification code.</strong>
+  Nobody needs them, and you should not share them with anyone, including us.
+</div>
+
+<div class="note">
+  <strong>One file to have ready.</strong> Along with this guide you were sent a file called
+  <code>ViciInbox_VoIP.certSigningRequest</code>. Save it somewhere you can find it, like your
+  Downloads folder. You will upload it in Task 2. It contains no passwords and is safe to keep.
+</div>
+
+<p style="color:var(--muted);font-size:14px">
+The pictures below are drawings of the Apple screens, made to match what you will see.
+Apple sometimes changes a word or moves a button slightly, so go by the labels rather than the exact look.
+</p>
+
+<!-- ═══════════════ TASK 1 ═══════════════ -->
+<h2>Task 1 — Register the app</h2>
+<span class="steptag">Task 1</span><span class="time">about 3 minutes</span>
+
+<div class="step">
+
+<h3>Go to this page</h3>
+<div class="copy">developer.apple.com/account/resources/identifiers/list</div>
+<p>Sign in if it asks. You should land on a page titled <strong>Identifiers</strong>.</p>
+
+<div class="callout"><span class="n">1</span><span class="arrow">▶</span> Click the blue <strong>+</strong> button next to the word “Identifiers”</div>
+<div class="shot">
+  <div class="bar">
+    <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="url">developer.apple.com/account/resources/identifiers/list</div>
+  </div>
+  <div class="screen">
+    <div class="side">
+      <div>Certificates</div>
+      <div class="on">Identifiers</div>
+      <div>Devices</div>
+      <div>Profiles</div>
+      <div>Keys</div>
+    </div>
+    <div class="main">
+      <div class="titlerow">
+        <h4>Identifiers</h4>
+        <span class="plus target">+</span>
+      </div>
+      <div style="color:var(--muted);font-size:14px">NAME</div>
+      <div class="rowitem" style="color:var(--muted)">(your existing items, if any)</div>
+    </div>
+  </div>
+</div>
+
+<div class="callout"><span class="n">2</span><span class="arrow">▶</span> Choose <strong>App IDs</strong>, then click <strong>Continue</strong> (top right)</div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Register a new identifier</h4>
+    <div class="radio target"><span class="circle sel"></span><strong>App IDs</strong></div>
+    <div class="radio"><span class="circle"></span>Services IDs</div>
+    <div class="radio"><span class="circle"></span>Pass Type IDs</div>
+    <div class="radio"><span class="circle"></span>iCloud Containers</div>
+    <div style="text-align:right;margin-top:14px"><span class="btn">Continue</span></div>
+  </div>
+</div>
+
+<div class="callout"><span class="n">3</span><span class="arrow">▶</span> Choose <strong>App</strong>, then <strong>Continue</strong></div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Select a type</h4>
+    <div class="radio target"><span class="circle sel"></span><strong>App</strong></div>
+    <div class="radio"><span class="circle"></span>App Clip</div>
+    <div style="text-align:right;margin-top:14px"><span class="btn">Continue</span></div>
+  </div>
+</div>
+
+<div class="callout"><span class="n">4</span><span class="arrow">▶</span> Fill in these two boxes exactly</div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Register an App ID</h4>
+    <div class="field">
+      <div class="label">Description</div>
+      <div class="input filled target">Vici Inbox</div>
+    </div>
+    <div class="field">
+      <div class="label">Bundle ID</div>
+      <div class="radio"><span class="circle sel"></span><strong>Explicit</strong></div>
+      <div class="input filled target" style="margin-top:6px">com.vicipeptides.inbox</div>
+    </div>
+  </div>
+</div>
+
+<p><strong>Description:</strong> type <code>Vici Inbox</code></p>
+<p><strong>Bundle ID:</strong> make sure <strong>Explicit</strong> is selected, then type this exactly.
+All lowercase, no spaces:</p>
+<div class="copy">com.vicipeptides.inbox</div>
+
+<div class="warn">
+  <strong>This one really matters.</strong> A single wrong character here and the app cannot be
+  built at all, and you would have to create a new one from scratch. Please double-check it
+  before continuing.
+</div>
+
+<div class="callout"><span class="n">5</span><span class="arrow">▶</span> Scroll down the Capabilities list and tick <strong>Push Notifications</strong></div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <div class="sectionhead">Capabilities</div>
+    <div class="rowitem"><span class="check"></span>NFC Tag Reading</div>
+    <div class="rowitem"><span class="check"></span>Personal VPN</div>
+    <div class="rowitem target"><span class="check sel"></span><strong>Push Notifications</strong></div>
+    <div class="rowitem"><span class="check"></span>Sign In with Apple</div>
+    <div class="rowitem"><span class="check"></span>Wallet</div>
+  </div>
+</div>
+<p>It is a long alphabetical list, so scroll until you find it. This is the switch that lets the
+phone ring when the app is closed. Leave every other box alone.</p>
+
+<div class="callout"><span class="n">6</span><span class="arrow">▶</span> Click <strong>Continue</strong>, then <strong>Register</strong></div>
+
+<div class="done" style="margin-top:24px">
+  <strong>Task 1 done.</strong> You should now see “Vici Inbox” in the Identifiers list.
+</div>
+
+</div>
+
+<!-- ═══════════════ TASK 2 ═══════════════ -->
+<h2>Task 2 — Create the calling certificate</h2>
+<span class="steptag">Task 2</span><span class="time">about 5 minutes</span>
+
+<p>This is the credential that allows the phone to ring for an incoming call.</p>
+
+<div class="step">
+
+<h3>Go to this page</h3>
+<div class="copy">developer.apple.com/account/resources/certificates/list</div>
+
+<div class="callout"><span class="n">1</span><span class="arrow">▶</span> Click the blue <strong>+</strong> button next to “Certificates”</div>
+<div class="shot">
+  <div class="bar">
+    <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+    <div class="url">developer.apple.com/account/resources/certificates/list</div>
+  </div>
+  <div class="screen">
+    <div class="side">
+      <div class="on">Certificates</div>
+      <div>Identifiers</div>
+      <div>Devices</div>
+      <div>Profiles</div>
+      <div>Keys</div>
+    </div>
+    <div class="main">
+      <div class="titlerow">
+        <h4>Certificates</h4>
+        <span class="plus target">+</span>
+      </div>
+      <div style="color:var(--muted);font-size:14px">NAME</div>
+      <div class="rowitem" style="color:var(--muted)">(your existing items, if any)</div>
+    </div>
+  </div>
+</div>
+
+<div class="callout"><span class="n">2</span><span class="arrow">▶</span> Scroll well down to the <strong>Services</strong> section and choose <strong>VoIP Services Certificate</strong></div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Create a New Certificate</h4>
+    <div class="sectionhead">Software</div>
+    <div class="radio"><span class="circle"></span>Apple Development</div>
+    <div class="radio"><span class="circle"></span>Apple Distribution</div>
+    <div class="sectionhead">Services</div>
+    <div class="radio"><span class="circle"></span>Apple Push Notification service SSL</div>
+    <div class="radio target"><span class="circle sel"></span><strong>VoIP Services Certificate</strong></div>
+    <div class="radio"><span class="circle"></span>WatchKit Services Certificate</div>
+    <div style="text-align:right;margin-top:14px"><span class="btn">Continue</span></div>
+  </div>
+</div>
+
+<div class="warn">
+  Careful here: there is a similarly named option called
+  <strong>Apple Push Notification service SSL</strong>. That is the wrong one.
+  You want <strong>VoIP Services Certificate</strong>, in the <strong>Services</strong> section
+  further down the page.
+</div>
+
+<div class="callout"><span class="n">3</span><span class="arrow">▶</span> Pick <strong>Vici Inbox</strong> from the dropdown, then <strong>Continue</strong></div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <div class="label">App ID</div>
+    <div class="input filled target">Vici Inbox — com.vicipeptides.inbox &nbsp;⌄</div>
+    <div style="text-align:right;margin-top:14px"><span class="btn">Continue</span></div>
+  </div>
+</div>
+<p>This is the app you created in Task 1.</p>
+
+<div class="callout"><span class="n">4</span><span class="arrow">▶</span> Click <strong>Choose File</strong> and pick the file we sent you</div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Upload a Certificate Signing Request</h4>
+    <div class="label">Certificate Signing Request (CSR)</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+      <span class="btn ghost target">Choose File</span>
+      <span style="color:var(--muted);font-size:14px">No file chosen</span>
+    </div>
+    <div style="text-align:right;margin-top:18px"><span class="btn">Continue</span></div>
+  </div>
+</div>
+<p>Select the file named:</p>
+<div class="copy">ViciInbox_VoIP.certSigningRequest</div>
+<p>Then click <strong>Continue</strong>.</p>
+
+<div class="callout"><span class="n">5</span><span class="arrow">▶</span> Click <strong>Download</strong></div>
+<div class="shot">
+  <div class="main" style="padding:18px">
+    <h4 style="margin:0 0 12px">Download Your Certificate</h4>
+    <div class="rowitem" style="border:none">
+      <span style="font-size:14px">Type: VoIP Services Certificate</span>
+    </div>
+    <div style="text-align:right;margin-top:10px"><span class="btn target">Download</span></div>
+  </div>
+</div>
+
+<p>You will get a file called <strong>voip_services.cer</strong>, usually saved in Downloads.</p>
+
+<div class="done">
+  <strong>Last step — send that file back.</strong><br>
+  WhatsApp or email <code>voip_services.cer</code> to Lubosi. That is everything we need.
+  <div style="margin-top:10px;color:var(--muted);font-size:14px">
+    On a Mac it will be in your Downloads folder. If WhatsApp will not attach it directly,
+    drag it into an email instead.
+  </div>
+</div>
+
+</div>
+
+<!-- ═══════════════ AFTER ═══════════════ -->
+<h2>After this</h2>
+<p>You will not need to touch the Apple site again. Everything else is handled from our side.</p>
+
+<div class="warn">
+  <strong>One date for your calendar: July 2027.</strong><br>
+  Apple expires this certificate after one year. When it lapses, incoming calls quietly stop
+  ringing on the phones with no other warning sign. Renewing is just Task 2 again, five minutes.
+  Worth setting a reminder now.
+</div>
+
+<h3>Quick reference</h3>
+<table>
+  <tr><td>App name</td><td>Vici Inbox</td></tr>
+  <tr><td>Bundle ID</td><td><code>com.vicipeptides.inbox</code></td></tr>
+  <tr><td>Capability to tick</td><td>Push Notifications</td></tr>
+  <tr><td>Certificate type</td><td>VoIP Services Certificate</td></tr>
+  <tr><td>File you upload</td><td><code>ViciInbox_VoIP.certSigningRequest</code></td></tr>
+  <tr><td>File you send back</td><td><code>voip_services.cer</code></td></tr>
+  <tr><td>Never share</td><td>Apple password, verification codes</td></tr>
+</table>
+
+<h3>If something goes wrong</h3>
+<p><strong>“An App ID with this identifier already exists.”</strong> — someone already registered it.
+Skip Task 1 and go straight to Task 2.</p>
+<p><strong>You cannot find VoIP Services Certificate.</strong> — keep scrolling. It sits in the
+<em>Services</em> section, below the Software section, near the bottom.</p>
+<p><strong>The dropdown in Task 2 is empty.</strong> — Task 1 did not save. Go back and redo it.</p>
+<p>Anything else, just send a screenshot and we will sort it out.</p>
+
+<footer>
+  Prepared for Vici Peptides. Questions to Lubosi.
+</footer>
+
+</div>
+</body>
+</html>
