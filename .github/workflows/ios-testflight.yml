@@ -83,20 +83,11 @@ jobs:
             || { echo "::error::Decoded key is not a PEM private key — check the secret was base64 of the .p8"; exit 1; }
           echo "API key written."
 
-      # -allowProvisioningUpdates plus the authentication flags turns on
-      # cloud-managed signing: Xcode creates the distribution certificate and
-      # provisioning profile itself. Nothing has to be created by hand in the
-      # developer portal, which matters because that section is locked to the
-      # account holder on an Individual account.
-      #
-      # The API key must have the Admin role or cloud signing is refused.
-      # Force distribution signing at archive time. Without this override,
-      # command-line automatic signing asks Apple for a development profile,
-      # which requires at least one registered physical device.
+      # Assemble the archive without development signing. A command-line
+      # archive otherwise asks Apple for a development profile, which requires
+      # at least one registered physical device. The export step below applies
+      # App Store distribution signing with the authenticated Team key.
       - name: Archive
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           xcodebuild archive \
             -project "$PROJECT" \
@@ -104,13 +95,12 @@ jobs:
             -configuration Release \
             -destination "generic/platform=iOS" \
             -archivePath "$ARCHIVE" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
+      # -allowProvisioningUpdates plus the authentication flags turns on
+      # cloud-managed distribution signing. The API key must be a Team key
+      # with the Admin role or this step is refused.
       - name: Export .ipa
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
