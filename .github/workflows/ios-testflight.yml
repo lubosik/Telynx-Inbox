@@ -90,6 +90,9 @@ jobs:
       # account holder on an Individual account.
       #
       # The API key must have the Admin role or cloud signing is refused.
+      # Force distribution signing at archive time. Without this override,
+      # command-line automatic signing asks Apple for a development profile,
+      # which requires at least one registered physical device.
       - name: Archive
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -105,6 +108,7 @@ jobs:
             -authenticationKeyPath "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
       - name: Export .ipa
