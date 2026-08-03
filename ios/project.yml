@@ -39,7 +39,9 @@ targets:
       - path: ViciInbox
     dependencies:
       - package: TelnyxRTC
-        product: TelnyxRTC
+        # The package's importable module is TelnyxRTC, but its published SPM
+        # product name is "telnyx-webrtc-ios".
+        product: telnyx-webrtc-ios
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.vicipeptides.inbox

@@ -22,7 +22,7 @@
 		B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE3B0D9381CE8972333135E /* CallModels.swift */; };
 		22CF206CC1A92F82751A06CF /* TelnyxVoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */; };
 		1BB778EFCA135BD7AFD325DF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F822BC8AF24A7486E7783053 /* Assets.xcassets */; };
-		4EB6BFA629DFEF1F54ED4A74 /* TelnyxRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 1D6934380988D32AE034639F /* TelnyxRTC */; };
+		05615C03B32EDD818CC516F9 /* telnyx-webrtc-ios in Frameworks */ = {isa = PBXBuildFile; productRef = 30FD16C8FEEF751AEF8AC830 /* telnyx-webrtc-ios */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -51,7 +51,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4EB6BFA629DFEF1F54ED4A74 /* TelnyxRTC in Frameworks */,
+				05615C03B32EDD818CC516F9 /* telnyx-webrtc-ios in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -155,7 +155,7 @@
 			);
 			name = ViciInbox;
 			packageProductDependencies = (
-				1D6934380988D32AE034639F /* TelnyxRTC */,
+				30FD16C8FEEF751AEF8AC830 /* telnyx-webrtc-ios */,
 			);
 			productName = "Vici Inbox";
 			productReference = 38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */;
@@ -370,10 +370,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		1D6934380988D32AE034639F /* TelnyxRTC */ = {
+		30FD16C8FEEF751AEF8AC830 /* telnyx-webrtc-ios */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 82D8E347E85B29BFCE8F9C84 /* XCRemoteSwiftPackageReference */;
-			productName = TelnyxRTC;
+			productName = telnyx-webrtc-ios;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
