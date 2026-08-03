@@ -35,7 +35,7 @@ ASSETS          = "ViciInbox/Resources/Assets.xcassets"
 
 SPM_URL         = "https://github.com/team-telnyx/telnyx-webrtc-ios"
 SPM_PRODUCT     = "TelnyxRTC"
-SPM_MIN_VERSION = "4.1.2"
+SPM_EXACT_VERSION = "4.1.2"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 IOS_DIR = os.path.abspath(os.path.join(HERE, ".."))
@@ -412,8 +412,8 @@ def main():
     w("\t\t\tisa = XCRemoteSwiftPackageReference;")
     w(f'\t\t\trepositoryURL = "{SPM_URL}";')
     w("\t\t\trequirement = {")
-    w("\t\t\t\tkind = upToNextMajorVersion;")
-    w(f'\t\t\t\tminimumVersion = {SPM_MIN_VERSION};')
+    w("\t\t\t\tkind = exactVersion;")
+    w(f'\t\t\t\tversion = {SPM_EXACT_VERSION};')
     w("\t\t\t};")
     w("\t\t};")
     w("/* End XCRemoteSwiftPackageReference section */")
@@ -496,7 +496,7 @@ def main():
     for p in swift_files:
         print(f"    {p}")
     print(f"  scheme: {TARGET_NAME} (shared)")
-    print(f"  package: {SPM_PRODUCT} from {SPM_MIN_VERSION}")
+    print(f"  package: {SPM_PRODUCT} exactly {SPM_EXACT_VERSION}")
 
 
 if __name__ == "__main__":

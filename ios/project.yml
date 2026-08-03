@@ -1,6 +1,7 @@
 # XcodeGen spec — regenerates ViciInbox.xcodeproj deterministically.
 #   brew install xcodegen && cd ios && xcodegen generate
-# The .xcodeproj is gitignored on purpose: this file is the source of truth.
+# The generated .xcodeproj is committed for cloud CI; this file remains the
+# human-readable source of truth.
 
 name: ViciInbox
 options:
@@ -26,7 +27,9 @@ settings:
 packages:
   TelnyxRTC:
     url: https://github.com/team-telnyx/telnyx-webrtc-ios
-    from: "4.1.2"
+    # The native call code was audited against this exact API. Do not allow a
+    # later 4.x release to change underneath an uncompiled release build.
+    exactVersion: "4.1.2"
 
 targets:
   ViciInbox:

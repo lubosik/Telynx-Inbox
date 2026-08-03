@@ -12,7 +12,7 @@ Verified on 2026-07-25:
 | This Mac | MacBook Pro 13" 2019 (`MacBookPro15,4`), Intel i5, 8 GB RAM |
 | Current OS | macOS 13.7.5 Ventura |
 | Xcode installed | none — Command Line Tools only |
-| Free disk | ~9 GB |
+| Free disk | ~3 GB (rechecked 3 August 2026) |
 
 Apple's rule, in force since **28 April 2026**: builds uploaded to App Store
 Connect **must be made with Xcode 26 or later, using the iOS 26 SDK**.
@@ -35,8 +35,8 @@ So: no TestFlight build can come off this machine as it stands.
 path exists:
 
 1. Free up disk. Sequoia needs ~25 GB free to install, and Xcode 26 needs a
-   further ~35 GB. Currently there is 9 GB. **This is the real obstacle** —
-   roughly 50 GB must be cleared.
+   further ~35 GB. Currently there is only about 3 GB. **This is the real
+   obstacle** — roughly 50 GB must be cleared.
 2. Upgrade macOS 13.7.5 → Sequoia 15.6+.
 3. Install Xcode 26.3 (the Universal build direct from Apple; the `xcodes`
    installer has a known bug on Intel).
@@ -59,12 +59,16 @@ Xcode Cloud can only be reached *through* Xcode, which needs macOS 15.6.
 
 ### Option C — GitHub Actions `macos-26` runners — CHOSEN
 
-The `macos-26` image ships Xcode 26.x, and `xcodebuild -allowProvisioningUpdates`
-with an App Store Connect API key does cloud-managed signing, so no certificate
-is ever created by hand. No local Xcode, no macOS upgrade, no bootstrap step.
+The `macos-26` image ships Xcode 26.x. The TestFlight workflow requests
+cloud-managed signing with `xcodebuild -allowProvisioningUpdates` and an App
+Store Connect API key, so no certificate should need to be created by hand.
+This account-specific signing path remains unverified until the first archive.
+No local Xcode, macOS upgrade, or Xcode Cloud bootstrap step is required.
 
-Set up in `CI-TESTFLIGHT.md`. Roughly 200 macOS minutes/month on the free tier,
-about 6-10 builds.
+Set up in `CI-TESTFLIGHT.md`. This repository is public, so standard hosted
+runners are currently free and unlimited. Release uploads remain manual as a
+deployment-safety control, while source-only iOS builds run when iOS files
+change.
 
 ### Option D — Borrow or rent a Mac
 

@@ -1,7 +1,7 @@
 # Building and shipping to TestFlight without a Mac
 
-The build runs on a GitHub Actions macOS runner. No Mac of ours ever compiles
-the app, and no certificate is created by hand.
+The build runs on a GitHub Actions macOS runner. No local Mac compiles the app,
+and no certificate is created by hand.
 
 ## Why not Xcode Cloud
 
@@ -22,17 +22,27 @@ GitHub Actions has no such bootstrap requirement.
 This is the part that would normally require a Mac and Account Holder access.
 
 `xcodebuild` is run with `-allowProvisioningUpdates` plus an App Store Connect
-API key. That switches on **cloud-managed signing**: Xcode creates the
-distribution certificate and provisioning profile itself, server-side. Nothing
-is stored in a keychain, nothing is committed, and nobody has to open
-Certificates, Identifiers & Profiles — which matters because on an Individual
-account that section is locked to the Account Holder.
+API key. The workflow is designed to use **cloud-managed signing**, allowing
+Xcode to create the distribution certificate and provisioning profile
+server-side. Nothing is committed and nobody has to open Certificates,
+Identifiers & Profiles — which matters because on an Individual account that
+section is locked to the Account Holder.
+
+This repository configuration has not yet completed a signed archive. The first
+TestFlight run is the verification that this account and key have the required
+cloud-signing permission; treat that as an assumption until the archive passes.
 
 Two constraints make or break this:
 
 - The key must be a **Team key**, not an Individual key. Individual keys cannot
   use the provisioning endpoints at all.
 - The key must have the **Admin** role. Cloud signing is refused otherwise.
+
+The `.p8` filename and contents do not identify the key type. Verify it in App
+Store Connect: **Users and Access → Integrations → App Store Connect API → Team
+Keys**. The key must appear in that table with the Admin role. A team key also
+uses the issuer UUID shown above that table; an individual key uses a different
+JWT shape and cannot satisfy this workflow.
 
 ## One-time setup
 
@@ -82,11 +92,14 @@ first upload.
 
 ## Running a build
 
+Run **iOS Build** first. It compiles for the iOS Simulator with signing disabled
+and needs no Apple credentials. A failure there is source code, Swift Package
+resolution, or simulator compatibility.
+
 GitHub → **Actions** → **iOS → TestFlight** → **Run workflow**.
 
-It is manual on purpose. This repo takes backend commits constantly, macOS
-minutes bill at ten times the Linux rate, and rebuilding the app for a change to
-an SMS template is pure waste.
+The TestFlight workflow is manual on purpose because it signs and uploads a
+release. The separate source-only workflow is path-filtered to iOS changes.
 
 Expect 15-30 minutes for the first run.
 
@@ -94,7 +107,8 @@ Expect 15-30 minutes for the first run.
 
 | Step | Why |
 |---|---|
-| Verify project references every source file | The project is generated, so a new Swift file could otherwise be silently left out of the build |
+| Regenerate and diff the project | Fails if the committed project or shared scheme is stale |
+| Compile for iOS Simulator | Separates source/package failures from Apple signing failures |
 | Write the API key | Decodes the secret, and fails immediately if it isn't a PEM |
 | Archive | Cloud-managed signing; build number comes from the run number so TestFlight never sees a duplicate |
 | Export .ipa | Uses `ExportOptions.plist`, method `app-store-connect` |
@@ -137,9 +151,9 @@ is production-signed and gets a production APNs token, which is what
 `AppConfig.pushEnvironmentIsProduction` assumes for a Release build. A
 locally-sideloaded Debug build would use sandbox instead.
 
-## Cost
+## Runner usage
 
-GitHub gives 2,000 free Actions minutes/month on private repos, but macOS bills
-at 10x, so that is roughly 200 macOS minutes — about 6-10 builds a month.
-Manual triggering keeps this comfortable. Codemagic (500 free macOS minutes) is
-the fallback if it gets tight.
+`lubosik/Telynx-Inbox` is currently public. GitHub's standard hosted runners,
+including `macos-26`, are free and unlimited for public repositories. If the
+repository becomes private, recheck the plan's included minutes and macOS
+multiplier before enabling automatic builds.
