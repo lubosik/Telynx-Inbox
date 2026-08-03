@@ -116,8 +116,9 @@ so a push-woken cold launch can connect without waiting on the network.
 
 ## Build
 
-No Mac here can compile this — see `BUILD-ENVIRONMENT.md`. Builds run on a
-GitHub Actions macOS runner and go straight to TestFlight: **`CI-TESTFLIGHT.md`**.
+No local Mac here can compile this — see `BUILD-ENVIRONMENT.md`. Source-only
+builds and signed TestFlight builds are configured on GitHub Actions:
+**`CI-TESTFLIGHT.md`**. Neither workflow has run yet.
 
 `ViciInbox.xcodeproj` **is committed**, because CI needs a project and a shared
 scheme to build. It is generated, not hand-maintained — after adding or removing
@@ -141,16 +142,18 @@ because XcodeGen cannot run on macOS 13.
 1. ✅ Code written (this repo)
 2. ✅ Account holder registered the App ID and created the VoIP certificate
 3. ✅ Certificate uploaded to Telnyx and attached to the `Vici` SIP connection
-4. ⬜ **Get a machine that can build** — see `BUILD-ENVIRONMENT.md` and `CI-TESTFLIGHT.md`; this Mac
-   cannot (macOS 13 vs the Xcode 26 requirement)
-5. ⬜ Build to a physical iPhone, sign in once in the foreground
+4. ✅ Configure GitHub Actions as the Xcode 26 build machine
+5. ⬜ Run the non-signing `iOS Build` workflow and fix any compiler errors
+6. ⬜ Verify the App Store Connect key is an Admin **Team** key, add its key ID,
+   issuer ID and private key as GitHub Actions secrets, then run `iOS → TestFlight`
+7. ⬜ Install from TestFlight on a physical iPhone and sign in once in the foreground
    (the push token only registers with Telnyx during a successful login)
-6. ⬜ **The spike:** force-quit the app, call `+1 305 404 3184`, confirm the
+8. ⬜ **The spike:** force-quit the app, call `+1 305 404 3184`, confirm the
    phone rings natively — see `TESTING.md` Test 1
-7. ⬜ TestFlight for the wider team
+9. ⬜ TestFlight for the wider team
 
-Everything that can be done without a compiler is done. Step 4 is the only
-thing standing between here and a ringing phone.
+The next proof point is the first `iOS Build` workflow run. It separates Swift
+or package failures from distribution-signing and App Store authentication.
 
 ## Known gotchas baked into the code
 

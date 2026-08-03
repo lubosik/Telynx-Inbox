@@ -1,0 +1,54 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-build.yml"
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    env:
+      SCHEME: ViciInbox
+      PROJECT: ios/ViciInbox.xcodeproj
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers -productVersion
+          xcodebuild -list -project "$PROJECT"
+          xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME"
+
+      - name: Verify generated project is current
+        run: |
+          python3 ios/scripts/generate-xcodeproj.py
+          git diff --exit-code -- ios/ViciInbox.xcodeproj
+
+      - name: Build for iOS Simulator without signing
+        run: |
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO

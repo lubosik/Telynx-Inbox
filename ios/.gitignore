@@ -3,11 +3,12 @@ certs/*.pem
 certs/*.p12
 certs/*.cer
 certs/*.key
+*.p8
 Config/Secrets.xcconfig
 
 # Xcode
-# NOTE: ViciInbox.xcodeproj IS committed on purpose — Xcode Cloud needs to find
-# a project and a shared scheme in the repo. Regenerate it with
+# NOTE: ViciInbox.xcodeproj IS committed on purpose — cloud CI needs a project
+# and a shared scheme in the repo. Regenerate it with
 # scripts/generate-xcodeproj.py after adding or removing source files.
 *.xcworkspace/
 xcuserdata/

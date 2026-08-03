@@ -1,7 +1,7 @@
 name: iOS → TestFlight
 
-# Manual only. This repo takes backend commits constantly and macOS runner
-# minutes bill at 10x, so builds are never triggered automatically.
+# Manual only because this workflow signs and uploads a release to TestFlight.
+# Source-only compilation runs separately in ios-build.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +13,9 @@ on:
 concurrency:
   group: ios-testflight
   cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -37,24 +40,27 @@ jobs:
         run: |
           echo "Xcode: $(xcodebuild -version | head -1)"
           echo "macOS: $(sw_vers -productVersion)"
+          echo "fastlane: $(fastlane --version | tail -1)"
 
       # The Xcode project is generated rather than maintained by Xcode, so a
       # Swift file added without regenerating would silently not be compiled.
       # Fail loudly here instead.
-      - name: Verify the project references every source file
+      - name: Verify generated project is current
         run: |
-          missing=0
-          for f in $(find ios/ViciInbox -name "*.swift" -exec basename {} \; | sort); do
-            if ! grep -q "$f" "ios/ViciInbox.xcodeproj/project.pbxproj"; then
-              echo "::error::$f exists on disk but is not in the Xcode project"
-              missing=1
-            fi
-          done
-          if [ "$missing" -eq 1 ]; then
-            echo "Run: python3 ios/scripts/generate-xcodeproj.py  (then commit)"
-            exit 1
-          fi
-          echo "All Swift files are referenced."
+          python3 ios/scripts/generate-xcodeproj.py
+          git diff --exit-code -- ios/ViciInbox.xcodeproj
+          echo "Generated project is in sync."
+
+      # Compile without signing first. A failure here is source code, package
+      # resolution, or simulator compatibility — not Apple credentials.
+      - name: Compile for iOS Simulator
+        run: |
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO
 
       # xcodebuild reads the key from disk. Stored base64 so newlines in the
       # .p8 survive GitHub's secret storage intact.
@@ -62,11 +68,14 @@ jobs:
         env:
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          if [ -z "$ASC_KEY_P8_BASE64" ]; then
-            echo "::error::ASC_KEY_P8_BASE64 secret is not set"
-            exit 1
-          fi
+          for name in ASC_KEY_P8_BASE64 ASC_KEY_ID ASC_ISSUER_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name secret is not set"
+              exit 1
+            fi
+          done
           mkdir -p "$KEY_DIR"
           echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
           # Prove it decoded to a real key without printing it.
@@ -139,16 +148,6 @@ jobs:
             skip_waiting_for_build_processing:true \
             skip_submission:true \
             changelog:"$CHANGELOG"
-
-      - name: Keep the build products
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-build-${{ github.run_number }}
-          path: |
-            ${{ env.EXPORT_DIR }}
-          retention-days: 14
-          if-no-files-found: warn
 
       - name: Remove the API key
         if: always()
