@@ -28,9 +28,10 @@ server-side. Nothing is committed and nobody has to open Certificates,
 Identifiers & Profiles — which matters because on an Individual account that
 section is locked to the Account Holder.
 
-This repository configuration has not yet completed a signed archive. The first
-TestFlight run is the verification that this account and key have the required
-cloud-signing permission; treat that as an assumption until the archive passes.
+This configuration was verified end to end on 3 August 2026: GitHub Actions
+created an unsigned archive, Xcode's export step obtained cloud-managed
+distribution signing, and App Store Connect accepted build 1.0.0 (4) as a valid
+TestFlight build.
 
 Two constraints make or break this:
 
@@ -110,8 +111,8 @@ Expect 15-30 minutes for the first run.
 | Regenerate and diff the project | Fails if the committed project or shared scheme is stale |
 | Compile for iOS Simulator | Separates source/package failures from Apple signing failures |
 | Write the API key | Decodes the secret, and fails immediately if it isn't a PEM |
-| Archive | Cloud-managed signing; build number comes from the run number so TestFlight never sees a duplicate |
-| Export .ipa | Uses `ExportOptions.plist`, method `app-store-connect` |
+| Archive | Creates an unsigned release archive; build number comes from the run number so TestFlight never sees a duplicate |
+| Export .ipa | Uses `ExportOptions.plist`, method `app-store-connect`, and applies cloud-managed distribution signing |
 | Upload | fastlane `pilot` — `altool` is deprecated and currently broken on Xcode 26 |
 | Remove the API key | Runs even if the build failed |
 
