@@ -91,6 +91,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    LabeledContent("Queued", value: "Waiting at Telnyx")
+                    LabeledContent("Sent", value: "Carrier received it")
+                    LabeledContent("Delivered", value: "Delivery confirmed")
+                    LabeledContent("Failed", value: "Not delivered")
+                } header: {
+                    Text("Message status guide")
+                } footer: {
+                    Text("Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
+                }
+
+                Section {
                     Button("Reconnect") { session.refreshConnection() }
                     Button("Sign out", role: .destructive) {
                         // Sign-out waits for the push-disable acknowledgement,
