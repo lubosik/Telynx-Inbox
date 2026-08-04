@@ -80,7 +80,20 @@ actor APIClient {
     // MARK: - Inbox
 
     func fetchConversations() async throws -> [ConversationSummary] {
-        try await decodedGET("/api/conversations")
+        let loaded: [ConversationSummary] = try await decodedGET("/api/conversations")
+        // Decorate-sort-undecorate: parse each activity date once. Doing date
+        // parsing inside the comparator caused O(n log n) formatter work on
+        // the MainActor and visibly froze long inboxes while scrolling.
+        return loaded.map { conversation in
+            let latest = [
+                conversation.latestOrderDate,
+                conversation.lastSeen,
+                conversation.lastMessage?.createdAt
+            ].compactMap(ServerDate.parse).max() ?? .distantPast
+            return (conversation, latest)
+        }
+        .sorted { $0.1 > $1.1 }
+        .map { $0.0 }
     }
 
     func fetchThread(phone: String) async throws -> [MessageRecord] {

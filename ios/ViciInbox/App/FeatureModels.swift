@@ -8,12 +8,17 @@ final class InboxModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSending = false
     @Published var errorMessage: String?
+    private var refreshInProgress = false
+    private var threadRefreshes: Set<String> = []
 
     func load() async {
+        guard !refreshInProgress else { return }
+        refreshInProgress = true
         isLoading = conversations.isEmpty
-        defer { isLoading = false }
+        defer { isLoading = false; refreshInProgress = false }
         do {
-            conversations = try await APIClient.shared.fetchConversations().sorted(by: Self.isNewer)
+            let loaded = try await APIClient.shared.fetchConversations()
+            if loaded != conversations { conversations = loaded }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -21,8 +26,12 @@ final class InboxModel: ObservableObject {
     }
 
     func loadThread(phone: String) async {
+        guard !threadRefreshes.contains(phone) else { return }
+        threadRefreshes.insert(phone)
+        defer { threadRefreshes.remove(phone) }
         do {
-            messages[phone] = try await APIClient.shared.fetchThread(phone: phone)
+            let loaded = try await APIClient.shared.fetchThread(phone: phone)
+            if messages[phone] != loaded { messages[phone] = loaded }
             if let index = conversations.firstIndex(where: { $0.phone == phone }),
                (conversations[index].unreadCount ?? 0) > 0 {
                 await load()
@@ -72,14 +81,6 @@ final class InboxModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-    }
-
-    private static func isNewer(_ lhs: ConversationSummary, _ rhs: ConversationSummary) -> Bool {
-        let left = [lhs.latestOrderDate, lhs.lastSeen, lhs.lastMessage?.createdAt]
-            .compactMap(ServerDate.parse).max() ?? .distantPast
-        let right = [rhs.latestOrderDate, rhs.lastSeen, rhs.lastMessage?.createdAt]
-            .compactMap(ServerDate.parse).max() ?? .distantPast
-        return left > right
     }
 
     private static func carrierSafeJPEG(_ image: UIImage) -> Data? {

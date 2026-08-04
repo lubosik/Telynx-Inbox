@@ -97,6 +97,7 @@ struct MessageThreadView: View {
     @State private var replyTarget: MessageRecord?
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var imageData: [Data] = []
+    @State private var didInitialScroll = false
 
     private var messages: [MessageRecord] { model.messages[conversation.phone] ?? [] }
 
@@ -117,7 +118,13 @@ struct MessageThreadView: View {
                     .padding(.horizontal).padding(.vertical, 10)
                 }
                 .onChange(of: messages.count) { _ in
-                    if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    guard let last = messages.last else { return }
+                    if didInitialScroll {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    } else {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                        didInitialScroll = true
+                    }
                 }
             }
             Divider()

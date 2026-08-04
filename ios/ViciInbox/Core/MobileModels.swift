@@ -83,7 +83,12 @@ struct MessageRecord: Codable, Identifiable, Hashable {
     let reactions: [MessageReaction]?
     let createdAt: String?
 
-    var id: String { recordID?.rawValue ?? telnyxMessageID ?? "\(contactPhone)-\(createdAt ?? UUID().uuidString)" }
+    var id: String {
+        if let recordID { return recordID.rawValue }
+        if let telnyxMessageID { return telnyxMessageID }
+        let media = (mediaURLs ?? []).map(\.url).joined(separator: "|")
+        return "\(contactPhone)|\(createdAt ?? "")|\(direction)|\(body ?? "")|\(media)"
+    }
     var isInbound: Bool { direction == "inbound" }
     var numericID: Int? { recordID.flatMap { Int($0.rawValue) } }
 
