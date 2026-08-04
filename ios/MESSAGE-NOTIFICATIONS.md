@@ -43,8 +43,13 @@ exported app and embedded provisioning profile say `production` before upload.
 
 ## One-time database and Railway setup
 
-Run `scripts/ios-push-devices-migration.sql` in the configured Supabase project,
-then configure these Railway service variables:
+The backend can activate immediately using typed records in the existing
+`push_subscriptions` table. Browser delivery filters those records by their
+`apns://` namespace. `scripts/ios-push-devices-migration.sql` remains the
+recommended long-term dedicated table; the API and sender switch to it
+automatically after it is applied.
+
+Configure these Railway service variables:
 
 | Variable | Meaning |
 |---|---|
@@ -62,7 +67,8 @@ locally installed Debug builds use sandbox.
 
 ## Verification order
 
-1. Deploy the backend only after the migration and Railway variables exist.
+1. Deploy the backend after the Railway variables exist. The dedicated database
+   migration may be applied before or after deployment.
 2. Distribute the updated iOS build through TestFlight.
 3. Open the app, sign in, and allow notifications at the system prompt.
 4. In Settings, confirm **Message notifications → Status: Enabled** and

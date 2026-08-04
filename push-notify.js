@@ -14,6 +14,10 @@ async function sendPushToAll(payload) {
   const { data: subs, error: dbErr } = await supabase
     .from('push_subscriptions')
     .select('id, endpoint, subscription')
+    // Native APNs tokens use this existing table only as a compatibility
+    // fallback until the dedicated ios_push_devices migration is applied.
+    // They are not valid Web Push subscriptions.
+    .not('endpoint', 'like', 'apns://%')
     .gte('updated_at', thirtyDaysAgo)
     .order('updated_at', { ascending: false })
     .limit(5);

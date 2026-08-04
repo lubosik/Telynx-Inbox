@@ -72,6 +72,7 @@ module.exports = () => {
     supabase
       .from('push_subscriptions')
       .select('id, endpoint, user_agent, updated_at')
+      .not('endpoint', 'like', 'apns://%')
       .then(({ data, error }) => {
         res.json({
           vapid_configured: !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),

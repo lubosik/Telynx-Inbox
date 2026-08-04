@@ -3,6 +3,25 @@ const { supabase } = require('../db');
 const TOKEN_PATTERN = /^[0-9a-f]{64,256}$/i;
 const BUNDLE_ID = 'com.vicipeptides.inbox';
 
+function legacyEndpoint(token, environment) {
+  return `apns://${environment}/${token}`;
+}
+
+async function registerInExistingPushTable(row) {
+  return supabase.from('push_subscriptions').upsert({
+    endpoint: legacyEndpoint(row.device_token, row.environment),
+    subscription: {
+      type: 'ios-apns',
+      deviceToken: row.device_token,
+      installationId: row.installation_id,
+      environment: row.environment,
+      bundleId: row.bundle_id
+    },
+    user_agent: row.user_agent,
+    updated_at: row.updated_at
+  }, { onConflict: 'endpoint' });
+}
+
 module.exports = () => {
   const router = require('express').Router();
 
@@ -39,8 +58,16 @@ module.exports = () => {
     const { error } = await supabase.from('ios_push_devices')
       .upsert(row, { onConflict: 'device_token' });
     if (error) {
-      console.error('APNs device registration failed:', error.message);
-      return res.status(500).json({ error: 'Could not register this device for notifications' });
+      // Keep rollout independent of a manual SQL-editor step. The existing
+      // browser push table can safely hold typed APNs records; browser delivery
+      // explicitly filters the apns:// namespace.
+      const { error: fallbackError } = await registerInExistingPushTable(row);
+      if (fallbackError) {
+        console.error('APNs device registration failed:', fallbackError.message);
+        return res.status(500).json({ error: 'Could not register this device for notifications' });
+      }
+      console.log(`APNs: registered ${environment} device in compatibility storage ...${row.device_token.slice(-8)}`);
+      return res.json({ ok: true, storage: 'compatibility' });
     }
     console.log(`APNs: registered ${environment} device ...${row.device_token.slice(-8)}`);
     res.json({ ok: true });
@@ -58,16 +85,49 @@ module.exports = () => {
       ? query.eq('installation_id', installationId.slice(0, 100))
       : query.eq('device_token', deviceToken.toLowerCase());
     const { error } = await query;
-    if (error) return res.status(500).json({ error: 'Could not unregister this device' });
+
+    // Also remove any compatibility record. This covers sign-out both before
+    // and after the dedicated table migration.
+    let fallbackError = null;
+    if (hasToken) {
+      ({ error: fallbackError } = await supabase.from('push_subscriptions')
+        .delete().like('endpoint', `apns://%/${deviceToken.toLowerCase()}`));
+    } else {
+      const { data: legacyRows, error: readError } = await supabase.from('push_subscriptions')
+        .select('id, subscription').like('endpoint', 'apns://%');
+      fallbackError = readError;
+      const matchingIDs = (legacyRows || [])
+        .filter(row => row.subscription?.installationId === installationId.slice(0, 100))
+        .map(row => row.id);
+      if (!fallbackError && matchingIDs.length) {
+        ({ error: fallbackError } = await supabase.from('push_subscriptions')
+          .delete().in('id', matchingIDs));
+      }
+    }
+    if (error && fallbackError) return res.status(500).json({ error: 'Could not unregister this device' });
     res.json({ ok: true });
   });
 
   router.get('/status', async (_req, res) => {
-    const { data, error } = await supabase.from('ios_push_devices')
+    let { data, error } = await supabase.from('ios_push_devices')
       .select('environment, enabled, updated_at, last_error');
+    let storage = 'dedicated';
+    if (error) {
+      storage = 'compatibility';
+      const fallback = await supabase.from('push_subscriptions')
+        .select('subscription, updated_at').like('endpoint', 'apns://%');
+      error = fallback.error;
+      data = (fallback.data || []).map(row => ({
+        environment: row.subscription?.environment,
+        enabled: true,
+        updated_at: row.updated_at,
+        last_error: null
+      }));
+    }
     res.json({
       apns_configured: !!(process.env.APNS_KEY_ID && process.env.APNS_TEAM_ID && process.env.APNS_KEY_P8_BASE64),
       device_count: data?.filter(row => row.enabled).length || 0,
+      storage,
       devices: (data || []).map(row => ({
         environment: row.environment,
         enabled: row.enabled,
