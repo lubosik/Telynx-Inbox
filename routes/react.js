@@ -14,6 +14,7 @@
 const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { isOptedOut } = require('../flows/utils');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 const VERBS = {
   loved:      { add: 'Loved',      remove: 'Removed a heart from' },
@@ -54,7 +55,7 @@ module.exports = (broadcastSSE) => {
         ? `${verb} “${target.body.trim()}”`
         : `${verb} an image`;
 
-      const { messageId: telnyxId } = await sendSMS(target.contact_phone, text);
+      const { messageId: telnyxId, status: providerStatus } = await sendSMS(target.contact_phone, text);
 
       const reactions = removing
         ? existing.filter(r => !(r.type === type && r.source === 'operator'))
@@ -71,7 +72,7 @@ module.exports = (broadcastSSE) => {
         contact_phone: target.contact_phone,
         direction: 'outbound',
         body: text,
-        status: 'queued',
+        status: normaliseTelnyxStatus(providerStatus),
         reply_to_message_id: target.id
       }).catch(() => {});
 

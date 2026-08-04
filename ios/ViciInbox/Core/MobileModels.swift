@@ -125,6 +125,10 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
         let joined = [firstName, lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
         return displayNameValue ?? (!joined.isEmpty ? joined : (name?.isEmpty == false ? name! : PhoneFormatter.pretty(phone)))
     }
+    var hasSavedName: Bool {
+        [firstName, lastName, name].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains { !$0.isEmpty }
+    }
     var initials: String {
         let pieces = displayName.split(separator: " ")
         return String(pieces.prefix(2).compactMap(\.first)).uppercased()
@@ -290,6 +294,7 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     let status: String?
     let startedAt: String?
     let recordingURL: String?
+    let contactName: String?
 
     var id: String { recordID.rawValue }
     enum CodingKeys: String, CodingKey {
@@ -300,6 +305,7 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
         case status
         case startedAt = "started_at"
         case recordingURL = "recording_url"
+        case contactName = "contact_name"
     }
 }
 

@@ -7,6 +7,7 @@
 
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 function isAuthorized(req) {
   if (!process.env.WEBHOOK_SECRET) return true;
@@ -55,7 +56,18 @@ module.exports = (broadcastSSE) => {
 
     try {
       // Send via Telnyx
-      const { messageId } = await sendSMS(to, message);
+      const { messageId, status: providerStatus } = await sendSMS(to, message);
+
+      // Insert before secondary contact work so an immediate Telnyx delivery
+      // callback always has a row to update.
+      await supabase.from('sms_messages').insert({
+        telnyx_message_id: messageId,
+        contact_phone: to,
+        direction: 'outbound',
+        body: message,
+        status: normaliseTelnyxStatus(providerStatus),
+        ghl_contact_id: contactId || null
+      });
 
       // Ensure contact exists in Supabase
       await supabase.from('sms_contacts').upsert({
@@ -64,16 +76,6 @@ module.exports = (broadcastSSE) => {
         ghl_contact_id: contactId || null,
         last_seen: new Date().toISOString()
       }, { onConflict: 'phone' });
-
-      // Store message
-      await supabase.from('sms_messages').insert({
-        telnyx_message_id: messageId,
-        contact_phone: to,
-        direction: 'outbound',
-        body: message,
-        status: 'queued',
-        ghl_contact_id: contactId || null
-      });
 
       // Push to inbox live
       broadcastSSE({ type: 'new_message', phone: to, body: message, direction: 'outbound' });

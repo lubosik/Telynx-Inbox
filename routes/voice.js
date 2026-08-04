@@ -32,7 +32,23 @@ router.get('/logs', async (req, res) => {
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data || []);
+
+  const logs = data || [];
+  const phones = [...new Set(logs.map(log => log.contact_phone).filter(Boolean))];
+  let names = new Map();
+  if (phones.length) {
+    const { data: contacts, error: contactsError } = await supabase
+      .from('sms_contacts')
+      .select('phone, first_name, last_name, name')
+      .in('phone', phones);
+    if (contactsError) console.warn('[VOICE] Call-history contact lookup failed:', contactsError.message);
+    names = new Map((contacts || []).map(contact => {
+      const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name || null;
+      return [contact.phone, fullName];
+    }));
+  }
+
+  res.json(logs.map(log => ({ ...log, contact_name: names.get(log.contact_phone) || null })));
 });
 
 // GET /api/voice/logs/:id

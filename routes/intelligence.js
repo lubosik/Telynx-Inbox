@@ -4,6 +4,7 @@ const { analyseConversation, generateCampaignBrief } = require('../intelligence'
 const { sendSMS } = require('../telnyx');
 const { isOptedOut } = require('../flows/utils');
 const { broadcast } = require('../lib/broadcaster');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 router.get('/campaigns/overview', async (req, res) => {
   try {
@@ -37,13 +38,13 @@ router.post('/campaigns/:id/send', async (req, res) => {
     if (await isOptedOut(suggestion.contact_phone)) {
       return res.status(403).json({ error: 'This contact opted out of messages' });
     }
-    const { messageId } = await sendSMS(suggestion.contact_phone, suggestion.suggested_message);
+    const { messageId, status: providerStatus } = await sendSMS(suggestion.contact_phone, suggestion.suggested_message);
     const inserted = await insertSmsMessage({
       telnyx_message_id: messageId,
       contact_phone: suggestion.contact_phone,
       direction: 'outbound',
       body: suggestion.suggested_message,
-      status: 'queued'
+      status: normaliseTelnyxStatus(providerStatus)
     });
     await supabase.from('sms_campaign_suggestions')
       .update({ status: 'sent' }).eq('id', req.params.id);

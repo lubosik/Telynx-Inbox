@@ -7,6 +7,7 @@ const { sendNativeMessagePush } = require('../lib/apns-notify');
 const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
 const { rehostInboundMedia } = require('../lib/mms-media');
 const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
+const { normaliseTelnyxStatus, updateMessageStatus } = require('../lib/message-status');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -39,17 +40,9 @@ module.exports = (broadcastSSE) => {
         const providerStatus = toEntry?.status || payload?.status || '';
         const toPhone = toEntry?.phone_number;
 
-        let status;
-        if (['delivered', 'received'].includes(providerStatus)) status = 'delivered';
-        else if (['delivery_failed', 'sending_failed', 'failed', 'gw_timeout'].includes(providerStatus)) status = 'failed';
-        else status = 'sent';
-
-        const { data: updated } = await supabase
-          .from('sms_messages')
-          .update({ status })
-          .eq('telnyx_message_id', messageId)
-          .select('contact_phone')
-          .maybeSingle();
+        const eventFallback = eventType === 'message.sent' ? 'sent' : null;
+        const status = normaliseTelnyxStatus(providerStatus, eventFallback);
+        const updated = await updateMessageStatus(supabase, messageId, status);
 
         if (updated) {
           broadcastSSE({ type: 'status_update', messageId, status, phone: updated.contact_phone });

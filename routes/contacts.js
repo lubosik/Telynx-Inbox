@@ -5,29 +5,45 @@ const { supabase } = require('../db');
 // Returns all contacts sorted alphabetically by first_name, last_name
 router.get('/', async (req, res) => {
   try {
-    const { search, page = 1 } = req.query;
-    const limit = 100;
-    const offset = (parseInt(page) - 1) * limit;
+    const { search, page = 1, per_page: perPage = 100 } = req.query;
+    const limit = Math.min(1000, Math.max(1, Number.parseInt(perPage, 10) || 100));
+    const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1);
+    const batchSize = 1000;
+    const rows = [];
 
-    let query = supabase
-      .from('sms_contacts')
-      .select('id, phone, first_name, last_name, name, email, notes, unread_count, last_seen, source, created_at')
-      .order('first_name', { ascending: true, nullsFirst: false })
-      .order('last_name', { ascending: true, nullsFirst: false })
-      .range(offset, offset + limit - 1);
+    // first_name/last_name are absent on many imported contacts while `name`
+    // is populated. Fetch matching rows in chunks, normalise, then sort by the
+    // actual display name before paginating so every page is globally A–Z.
+    for (let offset = 0; ; offset += batchSize) {
+      let query = supabase
+        .from('sms_contacts')
+        .select('id, phone, first_name, last_name, name, email, notes, unread_count, last_seen, source, created_at')
+        .order('id', { ascending: true })
+        .range(offset, offset + batchSize - 1);
 
-    if (search) {
-      query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%`
-      );
+      if (search) {
+        query = query.or(
+          `first_name.ilike.%${search}%,last_name.ilike.%${search}%,name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`
+        );
+      }
+
+      const { data, error } = await query;
+      if (error) return res.status(500).json({ error: error.message });
+      rows.push(...(data || []));
+      if ((data?.length || 0) < batchSize) break;
     }
 
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ error: error.message });
+    const normalised = rows.map(normaliseContact).sort((a, b) => {
+      const aHasName = Boolean(a.first_name || a.last_name || a.name);
+      const bHasName = Boolean(b.first_name || b.last_name || b.name);
+      if (aHasName !== bHasName) return aHasName ? -1 : 1;
+      const byName = a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base', numeric: true });
+      return byName || a.phone.localeCompare(b.phone);
+    });
+    const start = (pageNumber - 1) * limit;
+    const contacts = normalised.slice(start, start + limit);
 
-    const normalised = (data || []).map(c => normaliseContact(c));
-
-    res.json({ contacts: normalised, page: parseInt(page), hasMore: (data?.length || 0) === limit });
+    res.json({ contacts, page: pageNumber, hasMore: start + limit < normalised.length });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load contacts' });
   }
