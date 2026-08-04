@@ -6,6 +6,7 @@
 const { supabase } = require('../db');
 const { sendSMS }  = require('../telnyx');
 const { broadcast } = require('../lib/broadcaster');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 // ---------------------------------------------------------------------------
 // Phone formatting
@@ -118,7 +119,7 @@ async function sendAndLog(phone, message, orderId, flowType) {
       contact_phone:     phone,
       direction:         'outbound',
       body:              message,
-      status:            'sent',
+      status:            normaliseTelnyxStatus(result?.status),
       created_at:        new Date().toISOString()
     });
     await supabase.from('sms_contacts')

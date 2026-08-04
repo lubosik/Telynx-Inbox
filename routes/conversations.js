@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
+const { reconcileRecentMessageStatuses } = require('../lib/message-status');
 
 router.get('/', async (req, res) => {
   try {
@@ -63,17 +64,20 @@ router.get('/', async (req, res) => {
 router.get('/:phone', async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    const { data: messages } = await supabase
+    const { data: messages, error } = await supabase
       .from('sms_messages')
       .select('*')
       .eq('contact_phone', phone)
       .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    const reconciled = await reconcileRecentMessageStatuses(supabase, messages || []);
 
     await supabase.from('sms_contacts')
       .update({ unread_count: 0 })
       .eq('phone', phone);
 
-    res.json(messages || []);
+    res.json(reconciled);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load thread' });
   }

@@ -265,8 +265,9 @@ private struct MessageBubble: View {
                         Text(date, style: .time).font(.caption2).foregroundStyle(.secondary)
                     }
                     if !message.isInbound, let status = message.status {
-                        Text(status.capitalized).font(.caption2)
-                            .foregroundColor(status == "failed" ? Color.red : Color.secondary)
+                        Text(statusLabel(status)).font(.caption2)
+                            .foregroundColor(status.lowercased() == "failed" ? Color.red : Color.secondary)
+                            .accessibilityHint(statusHint(status))
                     }
                 }
                 if let reactions = message.reactions, !reactions.isEmpty {
@@ -294,6 +295,28 @@ private struct MessageBubble: View {
 
     private func reactionSymbol(_ type: String) -> String {
         ["loved": "❤️", "liked": "👍", "disliked": "👎", "laughed": "😂", "emphasized": "‼️", "questioned": "❓"][type] ?? "•"
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        switch status.lowercased() {
+        case "queued", "sending": return "Queued"
+        case "sent", "delivery_unconfirmed": return "Sent"
+        case "delivered": return "Delivered"
+        case "failed", "sending_failed", "delivery_failed": return "Failed"
+        case "unavailable", "status_unavailable": return "Status unavailable"
+        default: return status.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func statusHint(_ status: String) -> String {
+        switch status.lowercased() {
+        case "queued", "sending": return "Accepted by Telnyx and waiting to be sent."
+        case "sent", "delivery_unconfirmed": return "Sent to the carrier; delivery is not yet confirmed."
+        case "delivered": return "Carrier confirmed delivery. SMS does not provide read receipts."
+        case "failed", "sending_failed", "delivery_failed": return "The message was not delivered."
+        case "unavailable", "status_unavailable": return "Telnyx no longer has a retrievable delivery record."
+        default: return "Message delivery status."
+        }
     }
 }
 

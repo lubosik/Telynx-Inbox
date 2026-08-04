@@ -2,6 +2,7 @@ const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
 const { sendSMS } = require('../telnyx');
 const { formatPhone, isOptedOut } = require('../flows/utils');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
@@ -23,7 +24,31 @@ module.exports = (broadcastSSE) => {
         return res.status(403).json({ error: 'This contact opted out of messages' });
       }
 
-      const { messageId } = await sendSMS(normalisedTo, text, media.length ? media : null);
+      const { messageId, status: providerStatus } = await sendSMS(normalisedTo, text, media.length ? media : null);
+
+      const mediaRecord = media.length ? media.map(u => ({ url: u })) : null;
+      const replyTo = Number.isFinite(Number(replyToMessageId)) && replyToMessageId !== null && replyToMessageId !== undefined
+        ? Number(replyToMessageId)
+        : null;
+
+      // Store the Telnyx row immediately. Delivery webhooks can arrive within
+      // milliseconds; the previous CRM sync before this insert left a window
+      // where a delivered callback updated zero rows and the UI stayed queued.
+      let inserted = null;
+      try {
+        inserted = await insertSmsMessage({
+          telnyx_message_id: messageId,
+          contact_phone: normalisedTo,
+          direction: 'outbound',
+          body: text,
+          status: normaliseTelnyxStatus(providerStatus),
+          ghl_contact_id: null,
+          media_urls: mediaRecord,
+          reply_to_message_id: replyTo
+        });
+      } catch (dbErr) {
+        console.error('Send DB insert error:', dbErr.message);
+      }
 
       let ghlContactId = null;
       try {
@@ -34,25 +59,11 @@ module.exports = (broadcastSSE) => {
         console.error('GHL outbound sync error:', ghlErr.message);
       }
 
-      const mediaRecord = media.length ? media.map(u => ({ url: u })) : null;
-      const replyTo = Number.isFinite(Number(replyToMessageId)) && replyToMessageId !== null && replyToMessageId !== undefined
-        ? Number(replyToMessageId)
-        : null;
-
-      let inserted = null;
-      try {
-        inserted = await insertSmsMessage({
-          telnyx_message_id: messageId,
-          contact_phone: normalisedTo,
-          direction: 'outbound',
-          body: text,
-          status: 'queued',
-          ghl_contact_id: ghlContactId,
-          media_urls: mediaRecord,
-          reply_to_message_id: replyTo
-        });
-      } catch (dbErr) {
-        console.error('Send DB insert error:', dbErr.message);
+      if (inserted?.id && ghlContactId) {
+        const { error: ghlUpdateError } = await supabase.from('sms_messages')
+          .update({ ghl_contact_id: ghlContactId })
+          .eq('id', inserted.id);
+        if (ghlUpdateError) console.error('Send GHL link update error:', ghlUpdateError.message);
       }
 
       await supabase.from('sms_contacts').upsert({

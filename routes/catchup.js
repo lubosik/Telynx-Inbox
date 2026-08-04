@@ -15,6 +15,7 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
+const { normaliseTelnyxStatus } = require('../lib/message-status');
 
 const ORDER_SMS = (firstName) =>
   `Hey ${firstName}! It's Dom, founder of Vici Peptides. Huge thank you for your order - it genuinely means everything to me. We're getting it packed up right now and I'll personally text you the moment it ships!`;
@@ -91,13 +92,13 @@ router.post('/send', async (req, res) => {
       const msg = ORDER_SMS(firstName);
 
       try {
-        const { messageId } = await sendSMS(order.contact_phone, msg);
+        const { messageId, status: providerStatus } = await sendSMS(order.contact_phone, msg);
         await supabase.from('sms_messages').insert({
           telnyx_message_id: messageId,
           contact_phone: order.contact_phone,
           direction: 'outbound',
           body: msg,
-          status: 'sent',
+          status: normaliseTelnyxStatus(providerStatus),
           created_at: new Date().toISOString()
         });
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
@@ -145,13 +146,13 @@ router.post('/send', async (req, res) => {
       const msg = SHIPPED_SMS(firstName, order.tracking_number, order.carrier);
 
       try {
-        const { messageId } = await sendSMS(order.contact_phone, msg);
+        const { messageId, status: providerStatus } = await sendSMS(order.contact_phone, msg);
         await supabase.from('sms_messages').insert({
           telnyx_message_id: messageId,
           contact_phone: order.contact_phone,
           direction: 'outbound',
           body: msg,
-          status: 'sent',
+          status: normaliseTelnyxStatus(providerStatus),
           created_at: new Date().toISOString()
         });
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);

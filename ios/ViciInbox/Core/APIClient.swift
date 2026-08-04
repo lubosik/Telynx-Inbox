@@ -149,10 +149,29 @@ actor APIClient {
 
     // MARK: - Contacts and orders
 
-    func fetchContacts(search: String = "", page: Int = 1) async throws -> ContactPage {
-        var query = [URLQueryItem(name: "page", value: String(page))]
+    func fetchContacts(search: String = "", page: Int = 1, pageSize: Int = 100) async throws -> ContactPage {
+        var query = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "per_page", value: String(pageSize))
+        ]
         if !search.isEmpty { query.append(URLQueryItem(name: "search", value: search)) }
         return try await decodedGET("/api/contacts", queryItems: query)
+    }
+
+    func fetchAllContacts(search: String = "") async throws -> [ConversationSummary] {
+        var contacts: [ConversationSummary] = []
+        var pageNumber = 1
+        while true {
+            let response = try await fetchContacts(search: search, page: pageNumber, pageSize: 1000)
+            contacts.append(contentsOf: response.contacts)
+            guard response.hasMore, pageNumber < 100 else { break }
+            pageNumber += 1
+        }
+        return contacts.sorted {
+            if $0.hasSavedName != $1.hasSavedName { return $0.hasSavedName }
+            let order = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+            return order == .orderedSame ? $0.phone < $1.phone : order == .orderedAscending
+        }
     }
 
     func fetchContact(phone: String) async throws -> ContactDetailResponse {

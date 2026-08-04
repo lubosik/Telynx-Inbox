@@ -107,7 +107,7 @@ final class ContactsModel: ObservableObject {
         isLoading = contacts.isEmpty
         defer { isLoading = false }
         do {
-            contacts = try await APIClient.shared.fetchContacts(search: search).contacts
+            contacts = try await APIClient.shared.fetchAllContacts(search: search)
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }

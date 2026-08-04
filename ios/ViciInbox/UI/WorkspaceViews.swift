@@ -3,40 +3,72 @@ import AVKit
 
 struct ContactsView: View {
     @StateObject private var model = ContactsModel()
+    @EnvironmentObject private var session: SessionModel
     @State private var search = ""
     @State private var showingCreate = false
 
     private var filtered: [ConversationSummary] {
-        guard !search.isEmpty else { return model.contacts }
+        let contacts = model.contacts.filter { $0.phone != session.callerNumber }
+        guard !search.isEmpty else { return contacts }
         let query = search.lowercased()
-        return model.contacts.filter {
+        return contacts.filter {
             $0.displayName.lowercased().contains(query) || $0.phone.contains(query) ||
             ($0.email?.lowercased().contains(query) ?? false)
         }
+    }
+
+    private var businessLineMatchesSearch: Bool {
+        guard !session.callerNumber.isEmpty else { return false }
+        guard !search.isEmpty else { return true }
+        let query = search.lowercased()
+        return "vici peptides".contains(query) || session.callerNumber.contains(query) ||
+            PhoneFormatter.pretty(session.callerNumber).lowercased().contains(query)
     }
 
     var body: some View {
         NavigationStack {
             Group {
                 if model.isLoading && model.contacts.isEmpty { ProgressView("Loading contacts…") }
-                else if filtered.isEmpty {
+                else if filtered.isEmpty && !businessLineMatchesSearch {
                     EmptyState(icon: "person.2", title: "No contacts", detail: search.isEmpty ? "Create the first contact." : "Try another search.")
                 } else {
-                    List(filtered) { contact in
-                        NavigationLink {
-                            ContactDetailView(phone: contact.phone, model: model)
-                        } label: {
-                            HStack(spacing: 12) {
-                                InitialsAvatar(name: contact.displayName, imageURL: contact.avatarURL)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(contact.displayName)
-                                    Text(contact.phone).font(.caption).foregroundStyle(.secondary)
+                    List {
+                        if businessLineMatchesSearch {
+                            NavigationLink {
+                                BusinessLineDetailView(phone: session.callerNumber)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    InitialsAvatar(name: "Vici Peptides", imageURL: nil)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 5) {
+                                            Text("Vici Peptides").fontWeight(.semibold)
+                                            Image(systemName: "pin.fill").font(.caption2).foregroundColor(.blue)
+                                        }
+                                        Text(PhoneFormatter.pretty(session.callerNumber))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text("Business line").font(.caption2).foregroundStyle(.secondary)
                                 }
-                                Spacer()
-                                if let status = contact.latestOrderStatus {
-                                    Text(status.replacingOccurrences(of: "-", with: " ").capitalized)
-                                        .font(.caption2).padding(.horizontal, 7).padding(.vertical, 3)
-                                        .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                            }
+                        }
+
+                        ForEach(filtered) { contact in
+                            NavigationLink {
+                                ContactDetailView(phone: contact.phone, model: model)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    InitialsAvatar(name: contact.displayName, imageURL: contact.avatarURL)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(contact.displayName)
+                                        Text(contact.phone).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if let status = contact.latestOrderStatus {
+                                        Text(status.replacingOccurrences(of: "-", with: " ").capitalized)
+                                            .font(.caption2).padding(.horizontal, 7).padding(.vertical, 3)
+                                            .background(Color(.tertiarySystemFill)).clipShape(Capsule())
+                                    }
                                 }
                             }
                         }
@@ -60,6 +92,37 @@ struct ContactsView: View {
     }
 
     private var errorBinding: Binding<Bool> { Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }) }
+}
+
+private struct BusinessLineDetailView: View {
+    let phone: String
+    @State private var copied = false
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 14) {
+                    InitialsAvatar(name: "Vici Peptides", imageURL: nil)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Vici Peptides").font(.title3.bold())
+                        Text(PhoneFormatter.pretty(phone)).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }.padding(.vertical, 4)
+            }
+            Section {
+                Button {
+                    UIPasteboard.general.string = phone
+                    copied = true
+                } label: {
+                    Label(copied ? "Number copied" : "Copy business number", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+            } footer: {
+                Text("This is the Vici Peptides Telnyx number used for customer messages and calls.")
+            }
+        }
+        .navigationTitle("Business Line")
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }
 
 private struct ContactDetailView: View {
@@ -305,7 +368,10 @@ private struct CallHistoryView: View {
                     HStack(spacing: 12) {
                         Image(systemName: icon(log)).foregroundColor(color(log))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(log.contactPhone.map(PhoneFormatter.pretty) ?? "Unknown number")
+                            Text(log.contactName ?? log.contactPhone.map(PhoneFormatter.pretty) ?? "Unknown number")
+                            if let name = log.contactName, let phone = log.contactPhone {
+                                Text(PhoneFormatter.pretty(phone)).font(.caption).foregroundStyle(.secondary)
+                            }
                             HStack {
                                 Text((log.status ?? "unknown").capitalized)
                                 if let duration = log.durationSeconds, duration > 0 { Text("• \(duration / 60):\(String(format: "%02d", duration % 60))") }

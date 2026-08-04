@@ -67,6 +67,51 @@ function formatDate(ts) {
     year: 'numeric'
   });
 }
+function messageStatusMeta(status) {
+  switch ((status || '').toLowerCase()) {
+    case 'queued':
+    case 'sending':
+      return {
+        label: '· queued',
+        title: 'Accepted by Telnyx and waiting to be sent',
+        color: 'var(--text3)'
+      };
+    case 'sent':
+    case 'delivery_unconfirmed':
+      return {
+        label: '· sent',
+        title: 'Sent to the carrier; delivery is not yet confirmed',
+        color: 'var(--text3)'
+      };
+    case 'delivered':
+      return {
+        label: '· delivered',
+        title: 'Carrier confirmed delivery. SMS does not provide read receipts.',
+        color: 'var(--accent)'
+      };
+    case 'failed':
+    case 'sending_failed':
+    case 'delivery_failed':
+      return {
+        label: '· failed',
+        title: 'The message was not delivered',
+        color: 'var(--red)'
+      };
+    case 'unavailable':
+    case 'status_unavailable':
+      return {
+        label: '· status unavailable',
+        title: 'Telnyx no longer has a retrievable delivery record',
+        color: 'var(--text3)'
+      };
+    default:
+      return {
+        label: `· ${status}`,
+        title: 'Message delivery status',
+        color: 'var(--text3)'
+      };
+  }
+}
 function getInitials(contact) {
   const name = contact?.name || contact?.phone;
   if (!name) return '??';
@@ -1806,12 +1851,16 @@ function MessagesView({
       title: `${r.source === 'customer' ? 'Customer' : 'You'}: ${r.type}`
     }, TAPBACK_EMOJI[r.type] || '❤️')))), /*#__PURE__*/React.createElement("div", {
       className: `msg-meta ${m.direction}`
-    }, formatTime(m.created_at), m.direction === 'outbound' && m.status && /*#__PURE__*/React.createElement("span", {
-      style: {
-        marginLeft: '0.375rem',
-        color: m.status === 'delivered' ? 'var(--accent)' : m.status === 'failed' ? 'var(--red)' : 'var(--text3)'
-      }
-    }, m.status === 'queued' ? '· sending' : m.status === 'sent' ? '· sent' : m.status === 'delivered' ? '· ✓' : '· ✗ failed'))));
+    }, formatTime(m.created_at), m.direction === 'outbound' && m.status && (() => {
+      const meta = messageStatusMeta(m.status);
+      return /*#__PURE__*/React.createElement("span", {
+        title: meta.title,
+        style: {
+          marginLeft: '0.375rem',
+          color: meta.color
+        }
+      }, meta.label);
+    })())));
   }), /*#__PURE__*/React.createElement("div", {
     ref: messagesEndRef
   })), /*#__PURE__*/React.createElement("div", {

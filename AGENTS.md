@@ -43,12 +43,13 @@ Use npm because `package-lock.json` is authoritative.
 
 ```bash
 npm ci
+npm test
 npm run build
 find . -path './node_modules' -prune -o -path './.git' -prune -o -type f -name '*.js' -exec node --check {} \;
 ```
 
-There is no meaningful `npm test` script; it intentionally exits with an
-error. Relevant harnesses are:
+`npm test` runs focused, offline Node unit tests under `test/`. Broader harnesses
+are deliberately separate because some read live configured services:
 
 - `node scripts/test-mms-flows.js`: uses the configured Supabase project and a
   reserved fake number; Telnyx/GHL/push are mocked and created rows are cleaned.

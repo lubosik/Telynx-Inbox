@@ -125,6 +125,23 @@ default call endpoint.
 The SIP credentials are cached in the Keychain (`kSecAttrAccessibleAfterFirstUnlock`)
 so a push-woken cold launch can connect without waiting on the network.
 
+## Message delivery status
+
+Outbound SMS/MMS bubbles show the provider lifecycle, not a guessed receipt:
+
+- **Queued** — accepted by Telnyx and waiting to be sent.
+- **Sent** — handed to the carrier, with delivery not yet confirmed.
+- **Delivered** — the carrier/device confirmed delivery.
+- **Failed** — sending or delivery failed.
+- **Status unavailable** — Telnyx's ten-day message lookup window has expired,
+  so no final provider receipt can be recovered.
+
+SMS and MMS do not expose when the recipient opens or reads the message, so
+**Delivered does not mean Read**. Telnyx read receipts require a separately
+approved RCS agent and are not part of the current SMS/MMS transport. Opening a
+thread reconciles recent non-final rows against Telnyx, which repairs a status
+when a delivery webhook arrived before its database row or was otherwise missed.
+
 ## Build
 
 This local Mac cannot compile the app — see `BUILD-ENVIRONMENT.md`. Source-only
