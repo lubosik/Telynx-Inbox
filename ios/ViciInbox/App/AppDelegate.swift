@@ -1,6 +1,7 @@
 import UIKit
 import PushKit
 import CallKit
+import UserNotifications
 
 /// PushKit lives on the app delegate because VoIP pushes can arrive when the
 /// app has been terminated — the delegate is the earliest guaranteed entry
@@ -18,6 +19,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ = CallKitCoordinator.shared
         _ = TelnyxVoiceManager.shared
 
+        MessageNotificationManager.shared.configure()
+
         registerForVoIPPushes()
         return true
     }
@@ -31,6 +34,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         self.pushRegistry = registry
         Log.push("PushKit registered for VoIP")
     }
+
+    // MARK: - Standard APNs (message alerts)
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        MessageNotificationManager.shared.didReceiveDeviceToken(deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        MessageNotificationManager.shared.didFailToRegister(error)
+    }
 }
 
 extension AppDelegate: PKPushRegistryDelegate {
@@ -39,9 +54,10 @@ extension AppDelegate: PKPushRegistryDelegate {
                       didUpdate credentials: PKPushCredentials,
                       for type: PKPushType) {
         guard type == .voIP else { return }
-        // Lowercase hex, matching Telnyx's own reference implementation — their
-        // backend may compare tokens case-sensitively.
-        let token = credentials.token.reduce("") { $0 + String(format: "%02x", $1) }
+        // Match the Telnyx 4.1.2 reference implementation exactly. Hex is
+        // semantically case-insensitive, but using the documented uppercase
+        // form removes an avoidable variable from push-token troubleshooting.
+        let token = credentials.token.reduce("") { $0 + String(format: "%02X", $1) }
         Log.push("received VoIP push token")
         TelnyxVoiceManager.shared.updatePushToken(token)
     }

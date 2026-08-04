@@ -22,43 +22,40 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
-    @EnvironmentObject private var session: SessionModel
+    @State private var selection = 0
+    @ObservedObject private var notifications = MessageNotificationManager.shared
 
     var body: some View {
-        TabView {
-            DialerView()
-                .tabItem { Label("Keypad", systemImage: "circle.grid.3x3.fill") }
+        TabView(selection: $selection) {
+            InboxView()
+                .tabItem { Label("Inbox", systemImage: "message.fill") }
+                .tag(0)
 
-            RecentsPlaceholderView()
-                .tabItem { Label("Recents", systemImage: "clock.fill") }
+            ContactsView()
+                .tabItem { Label("Contacts", systemImage: "person.2.fill") }
+                .tag(1)
+
+            ActivityView()
+                .tabItem { Label("Automations", systemImage: "bolt.fill") }
+                .tag(2)
+
+            CallsView()
+                .tabItem { Label("Calls", systemImage: "phone.fill") }
+                .tag(3)
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(4)
         }
-    }
-}
-
-/// Call history lives in the web inbox today. This tab is a deliberate stub for
-/// phase 2 — the backend already exposes GET /api/voice/logs.
-struct RecentsPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text("Call history")
-                .font(.headline)
-            Text("Incoming calls appear in the iPhone's own Recents.\nFull history is in the web inbox.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        .onChange(of: notifications.pendingConversationPhone) { phone in
+            if phone != nil { selection = 0 }
         }
-        .padding()
     }
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var session: SessionModel
+    @ObservedObject private var notifications = MessageNotificationManager.shared
     @State private var isSigningOut = false
 
     var body: some View {
@@ -69,6 +66,28 @@ struct SettingsView: View {
                     LabeledContent("Number", value: session.callerNumber.isEmpty
                                    ? "—" : PhoneFormatter.pretty(session.callerNumber))
                     LabeledContent("Server", value: AppConfig.serverURL.host ?? "—")
+                    LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
+                    LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
+                    LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
+                }
+
+                Section {
+                    LabeledContent("Status", value: notifications.statusText)
+                    LabeledContent("APNs environment", value: notifications.environment.capitalized)
+                    if notifications.authorizationStatus == .denied {
+                        Button("Open iPhone Settings") { notifications.openSystemSettings() }
+                    } else if !notifications.isRegisteredWithBackend {
+                        Button("Enable notifications") {
+                            Task { await notifications.enableAndSync() }
+                        }
+                    }
+                    if let error = notifications.lastError {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Message notifications")
+                } footer: {
+                    Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
                 }
 
                 Section {
@@ -89,7 +108,7 @@ struct SettingsView: View {
                     LabeledContent("Version",
                                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 } footer: {
-                    Text("Incoming calls ring natively even when this app is closed.")
+                    Text("For incoming-call tests, leave the app normally with Home or the side gesture. Do not swipe it away from the app switcher; iOS can suppress relaunch after a force-quit.")
                 }
             }
             .navigationTitle("Settings")

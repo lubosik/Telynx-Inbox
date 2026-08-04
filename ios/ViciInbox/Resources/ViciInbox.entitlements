@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Push Notifications capability. Without aps-environment the OS
-	     silently drops VoIP pushes. Xcode flips this to "production"
-	     automatically for TestFlight/App Store builds. -->
+	<!-- Push Notifications capability for both standard message alerts and
+	     VoIP delivery. Xcode flips this to "production" automatically for
+	     TestFlight/App Store builds. -->
 	<key>aps-environment</key>
 	<string>development</string>
 </dict>

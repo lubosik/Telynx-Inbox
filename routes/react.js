@@ -13,6 +13,7 @@
 
 const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS } = require('../telnyx');
+const { isOptedOut } = require('../flows/utils');
 
 const VERBS = {
   loved:      { add: 'Loved',      remove: 'Removed a heart from' },
@@ -39,6 +40,9 @@ module.exports = (broadcastSSE) => {
         .eq('id', messageId)
         .maybeSingle();
       if (!target) return res.status(404).json({ error: 'Message not found' });
+      if (await isOptedOut(target.contact_phone)) {
+        return res.status(403).json({ error: 'This contact opted out of messages' });
+      }
 
       const existing = Array.isArray(target.reactions) ? [...target.reactions] : [];
       const already = existing.find(r => r.type === type && r.source === 'operator');

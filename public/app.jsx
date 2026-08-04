@@ -2202,7 +2202,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, conversations, onCreateContact, onGoToMessages, onBackfillRecordings }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, onDisableCalls, conversations, onCreateContact, onGoToMessages, onBackfillRecordings }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -2219,13 +2219,21 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onR
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
           <div style={{ width: 7, height: 7, borderRadius: '50%', background: voiceReady ? '#16a34a' : '#ef4444' }} />
-          {voiceReady ? 'Connected' : 'Not connected'}
+          {voiceReady ? 'Browser calls enabled' : 'iPhone is primary'}
           {!voiceReady && (
             <button onClick={onRetryConnect} style={{
               background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
               color: '#9ca3af', fontSize: 11, padding: '3px 8px', cursor: 'pointer'
             }}>
-              Reconnect
+              Enable browser calls
+            </button>
+          )}
+          {voiceReady && (
+            <button onClick={onDisableCalls} style={{
+              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
+              color: '#9ca3af', fontSize: 11, padding: '3px 8px', cursor: 'pointer'
+            }}>
+              Make iPhone primary
             </button>
           )}
         </div>
@@ -2300,8 +2308,6 @@ function App() {
   // Capture deep-link phone from URL on mount (?thread=+1xxx) — applied after conversations load
   const deepLinkPhone = useRef(new URLSearchParams(window.location.search).get('thread'));
   const deepLinkApplied = useRef(false);
-  // True if this page load was triggered by an incoming-call push notification
-  const openedForCall = useRef(new URLSearchParams(window.location.search).get('call') === 'incoming');
   const reconnectDelay = useRef(1000);
   const pollTimer = useRef(null);
 
@@ -2336,7 +2342,6 @@ function App() {
     loadConversations();
     requestNotificationPermission();
     connectSSE();
-    initVoiceClient();
     loadCallLogs();
     pollTimer.current = setInterval(loadConversations, 30000);
     return () => {
@@ -2344,6 +2349,13 @@ function App() {
       if (sseRef.current) sseRef.current.close();
       clearTimeout(reconnectTimer.current);
       stopRingVibration();
+      // Browser calling is opt-in. If it was enabled during this session,
+      // release the SIP registration when the inbox page goes away so the
+      // native iPhone remains the primary incoming-call endpoint.
+      if (telnyxClientRef.current) {
+        try { telnyxClientRef.current.disconnect(); } catch {}
+        telnyxClientRef.current = null;
+      }
     };
   }, [auth.ok]);
 
@@ -2355,25 +2367,15 @@ function App() {
     window.history.replaceState({}, '', '/');
   }, [auth.ok, conversations]);
 
-  // If opened via push notification for an incoming call (?call=incoming), switch to Voice tab.
-  // If SIP was already connected (app was open), send sip-ready immediately.
-  // If not, initVoiceClient() will connect and telnyx.ready will send sip-ready.
+  // A browser incoming-call notification may still bring the operator to the
+  // Voice tab, but it deliberately does not register SIP. Native iOS is the
+  // primary endpoint; browser calling is enabled only with the button there.
   useEffect(() => {
     if (!auth.ok) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('call') === 'incoming') {
       setMainTab('voice');
       window.history.replaceState({}, '', '/');
-      if (voiceReady) {
-        // SIP already registered — ping immediately without waiting for telnyx.ready
-        openedForCall.current = false;
-        api('POST', '/api/voice/sip-ready')
-          .then(d => console.log('[VOICE] Already-connected sip-ready ping:', d.status))
-          .catch(() => {});
-      } else {
-        initVoiceClient();
-        // openedForCall.current stays true — telnyx.ready handler will send the ping
-      }
     }
   }, [auth.ok]);
 
@@ -2587,16 +2589,6 @@ function App() {
       client.on('telnyx.ready', () => {
         console.log('[VOICE] Client ready');
         setVoiceReady(true);
-        // If opened from an incoming-call push, ping server to transfer immediately.
-        // 1.5s delay lets the SIP registration propagate before the INVITE arrives.
-        if (openedForCall.current) {
-          openedForCall.current = false;
-          setTimeout(() => {
-            api('POST', '/api/voice/sip-ready')
-              .then(d => console.log('[VOICE] SIP-ready ping:', d.status))
-              .catch(() => {});
-          }, 1500);
-        }
       });
       client.on('telnyx.error', (err) => { console.error('[VOICE] Client error:', err); setVoiceReady(false); });
       client.on('telnyx.notification', (notification) => {
@@ -2611,9 +2603,8 @@ function App() {
     }
   }
 
-  // Tear down existing client (if any) and reconnect — called manually from Voice tab
-  // and on tab open when not connected. This handles mobile where the initial
-  // auto-init may have failed silently (iOS Safari WebRTC needs a user gesture).
+  // Tear down any existing client and reconnect only after an explicit user
+  // action. This keeps the native iPhone as the primary SIP endpoint.
   async function retryVoiceConnect() {
     try {
       if (telnyxClientRef.current) {
@@ -2623,6 +2614,16 @@ function App() {
       setVoiceReady(false);
     } catch {}
     await initVoiceClient();
+  }
+
+  function disableBrowserCalls() {
+    if (telnyxClientRef.current) {
+      try { telnyxClientRef.current.disconnect(); } catch {}
+      telnyxClientRef.current = null;
+    }
+    activeCallRef.current = null;
+    setVoiceReady(false);
+    addToast('Browser calling disabled — iPhone is primary');
   }
 
   function handleCallStateChange(call) {
@@ -3121,7 +3122,7 @@ function App() {
           </button>
           <button
             className={`header-tab${mainTab === 'voice' ? ' active' : ''}`}
-            onClick={() => { setMainTab('voice'); if (!voiceReady) initVoiceClient(); }}
+            onClick={() => setMainTab('voice')}
           >
             VOICE
             <span style={{
@@ -3228,6 +3229,7 @@ function App() {
             onCall={initiateCall}
             voiceReady={voiceReady}
             onRetryConnect={retryVoiceConnect}
+            onDisableCalls={disableBrowserCalls}
             conversations={conversations}
             onCreateContact={(phone) => { setContactPrefill(normalisePhoneFrontend(phone) || phone); setMainTab('contacts'); }}
             onGoToMessages={goToMessages}
@@ -3288,7 +3290,7 @@ function App() {
             </button>
             <button
               className={`bnav-btn${mainTab === 'voice' ? ' active' : ''}`}
-              onClick={() => { setMainTab('voice'); if (!voiceReady) initVoiceClient(); }}
+              onClick={() => setMainTab('voice')}
             >
               <span className="bnav-icon">📞</span>
               Voice

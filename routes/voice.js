@@ -72,8 +72,6 @@ router.post('/logs', async (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/voice/sip-ready — app fires this when TelnyxRTC registers (telnyx.ready event).
-// Transfers immediately if music is already playing; if speak is still in progress (stage 1),
 // POST /api/voice/recording/start
 router.post('/recording/start', async (req, res) => {
   const { call_control_id } = req.body;

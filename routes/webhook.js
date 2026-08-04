@@ -3,6 +3,7 @@ const ghl = require('../ghl');
 const { verifyWebhookSignature } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
+const { sendNativeMessagePush } = require('../lib/apns-notify');
 const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
 const { rehostInboundMedia } = require('../lib/mms-media');
 const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
@@ -142,6 +143,11 @@ module.exports = (broadcastSSE) => {
               icon: '/icons/icon-192.png',
               tag: `sms-${fromPhone}`
             }).catch(() => {});
+            sendNativeMessagePush({
+              title: reactor?.name || fromPhone,
+              body: text,
+              phone: fromPhone
+            }).catch(err => console.error('APNs tapback error:', err.message));
 
             console.log(`[TAPBACK] ${tapback.action} ${tapback.type} on msg ${target.id} from ...${fromPhone.slice(-4)}`);
             return;
@@ -232,6 +238,11 @@ module.exports = (broadcastSSE) => {
         icon: '/icons/icon-192.png',
         tag: `sms-${fromPhone}`
       }).catch(err => console.error('Push notify error:', err.message));
+      sendNativeMessagePush({
+        title: `New message from ${senderName}`,
+        body: pushBody,
+        phone: fromPhone
+      }).catch(err => console.error('APNs notify error:', err.message));
 
       setTimeout(() => analyseConversation(fromPhone).catch(console.error), 5000);
 

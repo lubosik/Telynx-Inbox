@@ -95,6 +95,7 @@ app.use('/api/sync',          requireAuth, require('./routes/sync'));
 app.use('/api/contacts',      requireAuth, require('./routes/contacts'));
 app.use('/api/catchup',       requireAuth, require('./routes/catchup'));
 app.use('/api/push',          requireAuth, require('./routes/push')());
+app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 

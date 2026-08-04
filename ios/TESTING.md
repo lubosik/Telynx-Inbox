@@ -8,6 +8,8 @@ CallKit does not work in the Simulator. Every test below needs a physical iPhone
 - Certificate PEMs uploaded to Telnyx and assigned to the SIP connection used by
   `TELNYX_SIP_USERNAME`
 - App installed on a real iPhone from a build signed with that Bundle ID
+- Native-message migration applied and Railway APNs provider variables set; see
+  `MESSAGE-NOTIFICATIONS.md`
 
 ## Test 0 — First run (must pass before anything else)
 
@@ -15,40 +17,48 @@ The device token only registers with Telnyx during a successful login, so a
 fresh install must be opened once in the foreground.
 
 1. Launch the app, sign in with the inbox password
-2. Settings tab → **Status** should read **"Ready for calls"**
-3. In Console.app (Mac, device selected, filter subsystem `com.vicipeptides.inbox`)
+2. Allow notifications when iOS asks
+3. Settings tab → **Status** should read **"Ready for calls"**
+4. Settings → **Message notifications** should read **Enabled** and
+   **Production** for a TestFlight build
+5. In Console.app (Mac, device selected, filter subsystem `com.vicipeptides.inbox`)
    confirm: `received VoIP push token` then `client ready — registered with Telnyx`
 
 If the status never reaches Ready, nothing downstream will work. Check the SIP
 credentials returned by `GET /api/voice/token`.
 
-## Test 1 — The spike: incoming call, app force-quit
+## Test 1 — Incoming call, app normally backgrounded
 
-**This is the one test that decides whether the whole approach works.**
+**Do not swipe the app away from the app switcher for this test.** A user
+force-quit sets an iOS flag that can prevent the app being relaunched for a
+background push until it is opened manually again. That is an operating-system
+constraint, not a supported terminated-state test.
 
 The open question it answers: your backend does not receive calls directly — it
 answers them and then *transfers* to `sip:USERNAME@sip.telnyx.com`. Telnyx's docs
 say a push fires whenever an inbound INVITE reaches a credential with no live
 socket, but no documentation explicitly covers the answer-then-transfer path.
 
-1. Force-quit the app (swipe up from the app switcher)
-2. Lock the phone
-3. Call the business number from another phone
+1. Open Vici Inbox and confirm Settings shows **VoIP token: Received**,
+   **Push login: Registered**, and **Status: Ready for calls**
+2. Leave the app using the Home gesture, but do not swipe it away
+3. Close browser inbox tabs for the first isolation test, then lock the phone
+4. Call the business number from another phone
 4. Expect: after the "please hold" greeting, the iPhone rings with the **native
    full-screen incoming call UI**, Answer/Decline, on the lock screen
 5. Answer, confirm two-way audio
 6. Hang up, confirm the call appears in the iPhone's own **Recents**
 
-**If it rings:** the architecture is confirmed, proceed to Test 2.
+**If it rings:** the background push path is confirmed, proceed to Test 2.
 
 **If it does not ring:** check in this order —
 - Console.app for `incoming VoIP push`. If absent, Telnyx never sent the push:
   the certificate is not attached to the SIP connection, or the push
   environment does not match the build (debug build needs a sandbox token).
 - If the push arrives but no ring: look for `reportNewIncomingCall FAILED`.
-- If the push arrives and the call is reported but audio never connects: the
-  transfer is reaching a different registration (e.g. an open browser tab
-  holding the same SIP credential). Close all browser tabs and retry.
+- If the push arrives and the call is reported but audio never connects: inspect
+  the Telnyx invite/CallKit logs. Browser calling is now off by default, but an
+  explicitly enabled browser session can also receive the fork.
 
 ## Test 1b — Caller name on the lock screen
 
@@ -71,16 +81,20 @@ and only the display-name propagation failed. Check the Railway logs for
 fallback is client-side enrichment — the app can look the contact up and call
 `CallKitCoordinator.updateCall`, which is already wired.
 
-## Test 2 — Incoming call, app backgrounded
+## Test 2 — Incoming call, app foregrounded
 
-Same as Test 1 but with the app backgrounded rather than killed. Should behave
-identically.
+Leave Vici Inbox visible and call. This should work over the live SIP socket even
+without needing APNs. If this fails while Status says Ready, investigate the SIP
+registration/transfer. If this passes but Test 1 fails, investigate APNs token,
+certificate, and production-environment delivery.
 
-## Test 3 — Incoming call, app open
+## Test 3 — Browser and iPhone together
 
-With `pushWhenActive: true` both a push and a socket INVITE may arrive.
-Expected: exactly **one** call reported, no duplicate ring. The duplicate guard
-is the `activeCallUUIDs` check in `onIncomingCall`.
+Browser calling is off by default and the Voice tab should say **iPhone is
+primary**. First confirm the iPhone rings while the web inbox remains usable.
+Then explicitly choose **Enable browser calls** and call again. TelnyxRTC 4.1.2
+supports multi-device fanout; both endpoints may ring, and answering one should
+clear the other with an answered-elsewhere event.
 
 ## Test 4 — Decline and missed
 
@@ -104,18 +118,27 @@ With Do Not Disturb on, the call should be silenced exactly like a normal
 cellular call (and be visible in missed calls). This is correct behaviour, not a
 bug — CallKit calls obey the same rules as the system dialler.
 
-## Test 8 — Browser and iPhone together
+## Test 8 — System-terminated process (optional)
 
-Known weak spot. With the web inbox open in a browser *and* the iPhone
-registered, both share one SIP credential.
+After the app has registered successfully, leave it normally and let iOS evict
+it naturally under memory pressure. A later call should relaunch it from the
+VoIP push. There is no deterministic manual gesture for this state. Do not use
+swipe-away as a proxy.
 
-1. Call in, answer on the iPhone
-2. Check whether the browser stops ringing
+## Test 9 — Incoming message notifications
 
-Expect this to be imperfect. The backend has no device attribution, so
-"answered elsewhere" is handled by Telnyx's SIP fork semantics alone. Record
-what actually happens; it determines how much work the multi-device story needs
-before more than one person uses this.
+1. Leave Vici Inbox normally using the Home gesture and lock the iPhone
+2. Send an SMS to the business number from another phone
+3. Expect a Vici Inbox banner with the contact name/message preview and sound
+4. Tap it and confirm the app opens that conversation with the new message
+5. Repeat while Vici Inbox is onscreen; expect the foreground banner and sound
+6. Confirm the browser still receives its existing web notification
+
+If the message appears after opening the app but no banner arrives, inspect the
+Settings notification status first, then the authenticated
+`GET /api/mobile-push/status` response and Railway `APNs:` logs. A TestFlight
+device row must say `production`; `sandbox` is only for a locally installed
+Debug build.
 
 ## Reading logs from a terminated app
 
