@@ -1,6 +1,7 @@
 import UIKit
 import PushKit
 import CallKit
+import UserNotifications
 
 /// PushKit lives on the app delegate because VoIP pushes can arrive when the
 /// app has been terminated — the delegate is the earliest guaranteed entry
@@ -18,6 +19,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ = CallKitCoordinator.shared
         _ = TelnyxVoiceManager.shared
 
+        MessageNotificationManager.shared.configure()
+
         registerForVoIPPushes()
         return true
     }
@@ -30,6 +33,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         registry.desiredPushTypes = [.voIP]
         self.pushRegistry = registry
         Log.push("PushKit registered for VoIP")
+    }
+
+    // MARK: - Standard APNs (message alerts)
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        MessageNotificationManager.shared.didReceiveDeviceToken(deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        MessageNotificationManager.shared.didFailToRegister(error)
     }
 }
 

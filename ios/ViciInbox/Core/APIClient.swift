@@ -77,6 +77,25 @@ actor APIClient {
         _ = try? await post("/auth/logout", body: [:])
     }
 
+    // MARK: - Message notifications
+
+    func registerMessagePushDevice(token: String,
+                                   installationID: String,
+                                   environment: String) async throws {
+        let (data, response) = try await post("/api/mobile-push/register", body: [
+            "deviceToken": token,
+            "installationId": installationID,
+            "environment": environment
+        ])
+        try validate(data: data, response: response)
+    }
+
+    func unregisterMessagePushDevice(token: String?, installationID: String) async {
+        var body: [String: Any] = ["installationId": installationID]
+        if let token { body["deviceToken"] = token }
+        _ = try? await post("/api/mobile-push/unregister", body: body)
+    }
+
     // MARK: - Inbox
 
     func fetchConversations() async throws -> [ConversationSummary] {

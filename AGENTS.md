@@ -16,6 +16,8 @@ client.
   MMS, contacts, orders, automation visibility/control, call history, and native
   calling. Automations and provider integrations remain on the backend. Native
   incoming-call presentation uses Telnyx VoIP pushes and CallKit.
+- Native message alerts use standard UserNotifications/APNs from the Telnyx
+  inbound-message webhook. This is separate from browser VAPID and VoIP PushKit.
 
 ## Important paths
 
@@ -33,6 +35,7 @@ client.
 - `.github/workflows/ios-testflight.yml`: manual signed archive and TestFlight
   upload.
 - `ios/CI-TESTFLIGHT.md`, `ios/TESTING.md`: distribution and device test plans.
+- `ios/MESSAGE-NOTIFICATIONS.md`: native APNs architecture and activation steps.
 
 ## Web setup and checks
 
@@ -106,6 +109,10 @@ build proves compilation only.
 - Store distribution credentials only as GitHub Actions secrets named
   `ASC_ISSUER_ID`, `ASC_KEY_ID`, and `ASC_KEY_P8_BASE64`. Do not place their
   values in YAML, plist, xcconfig, Markdown, commits, or artifacts.
+- APNs provider delivery requires a separate Apple Developer APNs key. Store
+  its key ID, team ID, and base64 `.p8` only as Railway runtime variables
+  `APNS_KEY_ID`, `APNS_TEAM_ID`, and `APNS_KEY_P8_BASE64`. The App Store Connect
+  API key and the Telnyx VoIP credential are not substitutes.
 - Apple Developer Team ID, App Store Connect issuer ID, API key ID, bundle ID,
   and App Store numeric app ID are distinct identifiers. Never substitute one
   for another.

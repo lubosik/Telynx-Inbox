@@ -8,6 +8,8 @@ CallKit does not work in the Simulator. Every test below needs a physical iPhone
 - Certificate PEMs uploaded to Telnyx and assigned to the SIP connection used by
   `TELNYX_SIP_USERNAME`
 - App installed on a real iPhone from a build signed with that Bundle ID
+- Native-message migration applied and Railway APNs provider variables set; see
+  `MESSAGE-NOTIFICATIONS.md`
 
 ## Test 0 — First run (must pass before anything else)
 
@@ -15,8 +17,11 @@ The device token only registers with Telnyx during a successful login, so a
 fresh install must be opened once in the foreground.
 
 1. Launch the app, sign in with the inbox password
-2. Settings tab → **Status** should read **"Ready for calls"**
-3. In Console.app (Mac, device selected, filter subsystem `com.vicipeptides.inbox`)
+2. Allow notifications when iOS asks
+3. Settings tab → **Status** should read **"Ready for calls"**
+4. Settings → **Message notifications** should read **Enabled** and
+   **Production** for a TestFlight build
+5. In Console.app (Mac, device selected, filter subsystem `com.vicipeptides.inbox`)
    confirm: `received VoIP push token` then `client ready — registered with Telnyx`
 
 If the status never reaches Ready, nothing downstream will work. Check the SIP
@@ -119,6 +124,21 @@ After the app has registered successfully, leave it normally and let iOS evict
 it naturally under memory pressure. A later call should relaunch it from the
 VoIP push. There is no deterministic manual gesture for this state. Do not use
 swipe-away as a proxy.
+
+## Test 9 — Incoming message notifications
+
+1. Leave Vici Inbox normally using the Home gesture and lock the iPhone
+2. Send an SMS to the business number from another phone
+3. Expect a Vici Inbox banner with the contact name/message preview and sound
+4. Tap it and confirm the app opens that conversation with the new message
+5. Repeat while Vici Inbox is onscreen; expect the foreground banner and sound
+6. Confirm the browser still receives its existing web notification
+
+If the message appears after opening the app but no banner arrives, inspect the
+Settings notification status first, then the authenticated
+`GET /api/mobile-push/status` response and Railway `APNs:` logs. A TestFlight
+device row must say `production`; `sandbox` is only for a locally installed
+Debug build.
 
 ## Reading logs from a terminated app
 

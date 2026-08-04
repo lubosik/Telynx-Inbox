@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
 		82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39972EB378BFE723E62921A0 /* FeatureModels.swift */; };
+		A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
 		CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */; };
@@ -33,6 +34,7 @@
 		38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Vici Inbox.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		39972EB378BFE723E62921A0 /* FeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureModels.swift; sourceTree = "<group>"; };
+		5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotificationManager.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
 		F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
@@ -97,6 +99,7 @@
 			children = (
 				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
 				39972EB378BFE723E62921A0 /* FeatureModels.swift */,
+				5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */,
 				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
 				B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */,
 			);
@@ -227,6 +230,7 @@
 			files = (
 				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
 				82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */,
+				A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
 				CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */,

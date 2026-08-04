@@ -5,6 +5,9 @@ import UIKit
 struct InboxView: View {
     @StateObject private var model = InboxModel()
     @State private var search = ""
+    @State private var path: [ConversationSummary] = []
+    @State private var pendingNotificationPhone: String?
+    @ObservedObject private var notifications = MessageNotificationManager.shared
 
     private var filtered: [ConversationSummary] {
         guard !search.isEmpty else { return model.conversations }
@@ -17,7 +20,7 @@ struct InboxView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if model.isLoading && model.conversations.isEmpty {
                     ProgressView("Loading inbox…")
@@ -26,9 +29,7 @@ struct InboxView: View {
                                detail: search.isEmpty ? "Messages will appear here." : "Try another search.")
                 } else {
                     List(filtered) { conversation in
-                        NavigationLink {
-                            MessageThreadView(conversation: conversation, model: model)
-                        } label: {
+                        NavigationLink(value: conversation) {
                             ConversationRow(conversation: conversation)
                         }
                     }
@@ -37,6 +38,9 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("Inbox")
+            .navigationDestination(for: ConversationSummary.self) { conversation in
+                MessageThreadView(conversation: conversation, model: model)
+            }
             .searchable(text: $search, prompt: "Name or phone")
             .task {
                 while !Task.isCancelled {
@@ -48,7 +52,27 @@ struct InboxView: View {
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "Unknown error") }
+            .onAppear {
+                if let phone = notifications.pendingConversationPhone {
+                    pendingNotificationPhone = phone
+                    openPendingConversation()
+                }
+            }
+            .onChange(of: notifications.pendingConversationPhone) { phone in
+                guard let phone else { return }
+                pendingNotificationPhone = phone
+                openPendingConversation()
+            }
+            .onChange(of: model.conversations) { _ in openPendingConversation() }
         }
+    }
+
+    private func openPendingConversation() {
+        guard let phone = pendingNotificationPhone,
+              let conversation = model.conversations.first(where: { $0.phone == phone }) else { return }
+        path = [conversation]
+        pendingNotificationPhone = nil
+        notifications.consumePendingConversation()
     }
 }
 

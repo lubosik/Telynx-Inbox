@@ -33,6 +33,7 @@ final class SessionModel: ObservableObject {
         isSignedIn = authed
         isCheckingSession = false
         if authed {
+            await MessageNotificationManager.shared.enableAndSync()
             await voice.requestMicrophonePermissionIfNeeded()
             await voice.connectIfPossible()
         }
@@ -44,6 +45,7 @@ final class SessionModel: ObservableObject {
         // has everything it needs in the Keychain.
         _ = try? await APIClient.shared.fetchSIPCredentials()
         isSignedIn = true
+        await MessageNotificationManager.shared.enableAndSync()
         // Resolve microphone access now. If it is still undetermined when a
         // call is answered from the lock screen, iOS cannot prompt and the
         // call connects with no microphone.
@@ -57,6 +59,7 @@ final class SessionModel: ObservableObject {
         // Skipping this leaves Telnyx pushing to a signed-out device, which
         // then rings for calls it cannot answer.
         await voice.disablePushNotificationsAndWait()
+        await MessageNotificationManager.shared.unregisterFromBackend()
         voice.disconnect()
         await APIClient.shared.logout()
         CredentialStore.clearAll()
@@ -67,7 +70,10 @@ final class SessionModel: ObservableObject {
     /// socket if it dropped while backgrounded.
     func refreshConnection() {
         guard isSignedIn else { return }
-        Task { await voice.connectIfPossible() }
+        Task {
+            await MessageNotificationManager.shared.enableAndSync()
+            await voice.connectIfPossible()
+        }
     }
 
     // MARK: - Call controls

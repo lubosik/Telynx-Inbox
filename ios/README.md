@@ -88,7 +88,8 @@ ios/
 └── ViciInbox/
     ├── App/
     │   ├── ViciInboxApp.swift      SwiftUI entry point
-    │   ├── AppDelegate.swift       PushKit registration + VoIP push handling
+    │   ├── AppDelegate.swift       PushKit + standard APNs callbacks
+    │   ├── MessageNotificationManager.swift  message alerts + deep links
     │   ├── SessionModel.swift      Authentication + voice state
     │   └── FeatureModels.swift     Inbox/contact/activity/call feature state
     ├── Core/
@@ -114,6 +115,7 @@ The app reuses authenticated endpoints that already serve the browser:
 - `/api/contacts` — contact and order data
 - `/api/activity` — automation statistics, queue, history, cancellation
 - `/api/voice/token` and `/api/voice/logs` — native calling and history
+- `/api/mobile-push` — native APNs device registration and test delivery
 
 Railway must stay running: it owns the database access, webhooks, integrations,
 and scheduled automations. Provider credentials remain there and are never
@@ -193,7 +195,13 @@ ringing does not leave stale CallKit UI.
 
 ## Native message notifications
 
-Foreground/open-app data refresh works against the existing API. Background
-SMS alerts still require standard APNs device registration and a server-side
-APNs provider credential. This is separate from PushKit and from the App Store
-Connect API key; VoIP pushes must never be reused for message notifications.
+The repository-side implementation is complete. The same inbound Telnyx
+webhook now targets both the existing browser VAPID subscriptions and standard
+iOS APNs device tokens. The iOS app registers its current token after login,
+shows foreground banners/sounds, and deep-links notification taps into the
+matching conversation.
+
+Production activation still needs the one-time database migration, Railway
+variables, and a distinct Apple Developer APNs signing key described in
+`MESSAGE-NOTIFICATIONS.md`. The App Store Connect build/upload key is not an
+APNs provider key, and VoIP PushKit credentials must remain call-only.

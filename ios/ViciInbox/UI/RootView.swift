@@ -22,28 +22,40 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
+    @State private var selection = 0
+    @ObservedObject private var notifications = MessageNotificationManager.shared
+
     var body: some View {
-        TabView {
+        TabView(selection: $selection) {
             InboxView()
                 .tabItem { Label("Inbox", systemImage: "message.fill") }
+                .tag(0)
 
             ContactsView()
                 .tabItem { Label("Contacts", systemImage: "person.2.fill") }
+                .tag(1)
 
             ActivityView()
                 .tabItem { Label("Automations", systemImage: "bolt.fill") }
+                .tag(2)
 
             CallsView()
                 .tabItem { Label("Calls", systemImage: "phone.fill") }
+                .tag(3)
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(4)
+        }
+        .onChange(of: notifications.pendingConversationPhone) { phone in
+            if phone != nil { selection = 0 }
         }
     }
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var session: SessionModel
+    @ObservedObject private var notifications = MessageNotificationManager.shared
     @State private var isSigningOut = false
 
     var body: some View {
@@ -57,6 +69,23 @@ struct SettingsView: View {
                     LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
                     LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
                     LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
+                }
+
+                Section("Message notifications") {
+                    LabeledContent("Status", value: notifications.statusText)
+                    LabeledContent("APNs environment", value: notifications.environment.capitalized)
+                    if notifications.authorizationStatus == .denied {
+                        Button("Open iPhone Settings") { notifications.openSystemSettings() }
+                    } else if !notifications.isRegisteredWithBackend {
+                        Button("Enable notifications") {
+                            Task { await notifications.enableAndSync() }
+                        }
+                    }
+                    if let error = notifications.lastError {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
                 }
 
                 Section {
