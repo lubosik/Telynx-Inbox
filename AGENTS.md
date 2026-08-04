@@ -16,6 +16,9 @@ client.
   MMS, contacts, orders, automation visibility/control, call history, and native
   calling. Automations and provider integrations remain on the backend. Native
   incoming-call presentation uses Telnyx VoIP pushes and CallKit.
+- SIP credentials are native-only: `/api/voice/token` rejects browser user
+  agents. Do not re-enable shared browser calling without designing explicit
+  per-agent routing; otherwise web sessions compete with iPhones for calls.
 - Native message alerts use standard UserNotifications/APNs from the Telnyx
   inbound-message webhook. This is separate from browser VAPID and VoIP PushKit.
 

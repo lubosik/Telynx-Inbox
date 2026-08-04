@@ -2220,7 +2220,7 @@ function CallLogsSection({ logs, onCall, conversations, onCreateContact, onGoToM
   );
 }
 
-function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onRetryConnect, onDisableCalls, conversations, onCreateContact, onGoToMessages, onBackfillRecordings }) {
+function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, conversations, onCreateContact, onGoToMessages, onBackfillRecordings }) {
   const [activeSection, setActiveSection] = useState('dialer');
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -2236,24 +2236,8 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, onR
           </button>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: voiceReady ? '#16a34a' : '#ef4444' }} />
-          {voiceReady ? 'Browser calls enabled' : 'iPhone is primary'}
-          {!voiceReady && (
-            <button onClick={onRetryConnect} style={{
-              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
-              color: '#9ca3af', fontSize: 11, padding: '3px 8px', cursor: 'pointer'
-            }}>
-              Enable browser calls
-            </button>
-          )}
-          {voiceReady && (
-            <button onClick={onDisableCalls} style={{
-              background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6,
-              color: '#9ca3af', fontSize: 11, padding: '3px 8px', cursor: 'pointer'
-            }}>
-              Make iPhone primary
-            </button>
-          )}
+          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a' }} />
+          iPhone calling only
         </div>
       </div>
       {activeSection === 'dialer' && (
@@ -3246,8 +3230,6 @@ function App() {
             setDialNumber={setDialNumber}
             onCall={initiateCall}
             voiceReady={voiceReady}
-            onRetryConnect={retryVoiceConnect}
-            onDisableCalls={disableBrowserCalls}
             conversations={conversations}
             onCreateContact={(phone) => { setContactPrefill(normalisePhoneFrontend(phone) || phone); setMainTab('contacts'); }}
             onGoToMessages={goToMessages}
