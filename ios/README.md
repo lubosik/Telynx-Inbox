@@ -195,8 +195,10 @@ Swift or package failures from distribution-signing and App Store authentication
   answer action and applies it when the INVITE lands. Don't poll for the call.
 - **Login before push.** The device token only registers with Telnyx on a
   successful `connect()`. A fresh install must be opened once.
-- **`pushWhenActive: true`** is set so the phone still rings natively when the
-  app happens to be open.
+- **`pushWhenActive` stays false.** A foreground SDK socket receives the INVITE
+  directly and `onIncomingCall` still reports it through CallKit. With SDK
+  4.1.2, also processing a push while connected replaces that socket and can
+  lose the INVITE during Answer. Locked/background calls still use PushKit.
 
 ## Browser and iPhone call ownership
 

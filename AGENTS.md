@@ -19,6 +19,9 @@ client.
 - SIP credentials are native-only: `/api/voice/token` rejects browser user
   agents. Do not re-enable shared browser calling without designing explicit
   per-agent routing; otherwise web sessions compete with iPhones for calls.
+- Keep Telnyx `pushWhenActive` disabled. Foreground calls already reach CallKit
+  through the live SDK socket; SDK 4.1.2 replaces that socket while processing
+  an active-state push, which can lose the INVITE during Answer.
 - Native message alerts use standard UserNotifications/APNs from the Telnyx
   inbound-message webhook. This is separate from browser VAPID and VoIP PushKit.
 

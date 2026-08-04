@@ -29,6 +29,12 @@ enum AppConfig {
         #endif
     }
 
+    /// A connected SDK client receives the INVITE directly and reports it to
+    /// CallKit. Asking Telnyx to also push while that socket is active makes
+    /// SDK 4.1.2 disconnect the live socket in `processVoIPNotification`, which
+    /// can discard the INVITE while the user is answering.
+    static let pushWhenActive = false
+
     /// Shown as the app name in the native iOS call UI (lock screen, Recents).
     static let callKitDisplayName = "Vici Inbox"
 }

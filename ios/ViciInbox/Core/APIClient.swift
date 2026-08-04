@@ -260,7 +260,8 @@ actor APIClient {
 
     /// Best-effort log of a call from the device. The backend already exposes
     /// POST /api/voice/logs as a client-side fallback logger.
-    func logCall(direction: String, phone: String, status: String, durationSeconds: Int?) async {
+    func logCall(direction: String, phone: String, status: String,
+                 durationSeconds: Int?, startedAt: Date? = nil, endedAt: Date? = nil) async {
         var body: [String: Any] = [
             "direction": direction,
             "contact_phone": phone,
@@ -268,6 +269,9 @@ actor APIClient {
             "source": "ios"
         ]
         if let durationSeconds { body["duration_seconds"] = durationSeconds }
+        let formatter = ISO8601DateFormatter()
+        if let startedAt { body["started_at"] = formatter.string(from: startedAt) }
+        if let endedAt { body["ended_at"] = formatter.string(from: endedAt) }
         _ = try? await post("/api/voice/logs", body: body)
     }
 

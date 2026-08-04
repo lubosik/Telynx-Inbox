@@ -4,6 +4,7 @@ const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { sendPushToAll } = require('../push-notify');
 const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/telnyx-api');
+const { finalCallStatus } = require('../lib/call-status');
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
 async function dbUpsert(values, options = {}) {
@@ -222,25 +223,38 @@ router.post('/', async (req, res) => {
         break;
       }
 
-      case 'call.answered':
+      case 'call.answered': {
         console.log('[VOICE] call.answered');
-        await dbUpdate({ status: 'answered', answered_at: new Date().toISOString() }, cid);
+        // The Call Control app answers first to play the hold greeting. That is
+        // not evidence that an operator answered the iPhone. The iOS client
+        // reports the real ACTIVE outcome through POST /api/voice/logs.
+        const isGreetingAnswer = direction === 'inbound'
+          && payload?.flow_destination === 'telnyx_number_cc_app';
+        await dbUpdate(isGreetingAnswer
+          ? { status: 'connecting' }
+          : { status: 'answered', answered_at: new Date().toISOString() }, cid);
         broadcast({ type: 'call_update', event: 'answered', call_control_id: cid });
         break;
+      }
 
       case 'call.hangup': {
         inFlightCalls.delete(cid);
         let log = null;
         try {
           const { data } = await supabase.from('call_logs')
-            .select('answered_at, direction, contact_phone').eq('call_control_id', cid).maybeSingle();
+            .select('answered_at, direction, contact_phone, status').eq('call_control_id', cid).maybeSingle();
           log = data;
         } catch (_) {}
 
-        const wasAnswered = !!(log?.answered_at);
-        const wasInbound = (log?.direction || direction) === 'inbound';
-        const duration = wasAnswered ? Math.floor((Date.now() - new Date(log.answered_at).getTime()) / 1000) : 0;
-        const finalStatus = wasAnswered ? 'completed' : wasInbound ? 'missed' : 'failed';
+        const resolvedDirection = log?.direction || direction;
+        const finalStatus = finalCallStatus({
+          direction: resolvedDirection,
+          currentStatus: log?.status,
+          answeredAt: log?.answered_at
+        });
+        const duration = finalStatus === 'completed' && log?.answered_at
+          ? Math.max(0, Math.floor((Date.now() - new Date(log.answered_at).getTime()) / 1000))
+          : 0;
 
         console.log(`[VOICE] call.hangup — ${finalStatus} (${duration}s)`);
         await dbUpdate({ status: finalStatus, duration_seconds: duration, ended_at: new Date().toISOString() }, cid);

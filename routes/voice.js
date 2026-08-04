@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { isBrowserUserAgent } = require('../lib/client-platform');
+const { normalisePhone } = require('../lib/phone');
+const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
 
 // GET /api/voice/token — returns SIP credentials to the native iOS app only.
 // Protected by requireAuth at mount point in server.js
@@ -40,7 +42,10 @@ router.get('/logs', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  const logs = data || [];
+  // The transfer to sip:USERNAME is an implementation detail, not a second
+  // person-facing call. Keep it in the database for diagnostics but never show
+  // it as a failed call in History.
+  const logs = (data || []).filter(log => !isInternalSIPLog(log));
   const phones = [...new Set(logs.map(log => log.contact_phone).filter(Boolean))];
   let names = new Map();
   if (phones.length) {
@@ -71,9 +76,49 @@ router.get('/logs/:id', async (req, res) => {
 // POST /api/voice/logs — client-side fallback when Telnyx webhook doesn't fire
 router.post('/logs', async (req, res) => {
   const { call_control_id, direction, contact_phone, from_number, to_number,
-          duration_seconds, status, started_at, ended_at } = req.body;
+          duration_seconds, status, started_at, ended_at, source } = req.body;
 
   if (!contact_phone) return res.status(400).json({ error: 'contact_phone required' });
+
+  // The iPhone knows whether WebRTC actually reached ACTIVE. Reconcile that
+  // outcome onto the server-created inbound row so History represents one
+  // logical call and does not confuse the backend greeting with a human answer.
+  if (source === 'ios' && direction === 'inbound') {
+    const phone = normalisePhone(contact_phone) || contact_phone;
+    const clientStartedMs = Date.parse(started_at || '');
+    const anchorMs = Number.isFinite(clientStartedMs) ? clientStartedMs : Date.now();
+    const lower = new Date(anchorMs - 2 * 60 * 1000).toISOString();
+    const upper = new Date(anchorMs + 2 * 60 * 1000).toISOString();
+    const { data: candidates, error: lookupError } = await supabase
+      .from('call_logs')
+      .select('call_control_id, started_at')
+      .eq('direction', 'inbound')
+      .eq('contact_phone', phone)
+      .gte('started_at', lower)
+      .lte('started_at', upper)
+      .order('started_at', { ascending: false })
+      .limit(5);
+
+    if (lookupError) {
+      console.warn('[VOICE] Native call reconciliation lookup failed:', lookupError.message);
+    } else if (candidates?.length) {
+      const match = candidates.reduce((closest, candidate) => {
+        if (!Number.isFinite(clientStartedMs)) return closest || candidate;
+        const distance = Math.abs(Date.parse(candidate.started_at) - clientStartedMs);
+        return !closest || distance < closest.distance ? { ...candidate, distance } : closest;
+      }, null);
+      const finalEndedAt = ended_at || new Date().toISOString();
+      const connected = status === 'completed' && Number(duration_seconds) > 0;
+      const { error: updateError } = await supabase.from('call_logs').update({
+        status: connected ? 'completed' : 'missed',
+        duration_seconds: connected ? Math.floor(Number(duration_seconds)) : 0,
+        answered_at: connected ? answeredAtFromDuration(finalEndedAt, duration_seconds) : null,
+        ended_at: finalEndedAt
+      }).eq('call_control_id', match.call_control_id);
+      if (updateError) return res.status(500).json({ error: updateError.message });
+      return res.json({ ok: true, reconciled: true });
+    }
+  }
 
   const { error } = await supabase.from('call_logs').upsert({
     call_control_id: call_control_id || `client-${Date.now()}`,
@@ -85,7 +130,9 @@ router.post('/logs', async (req, res) => {
     status: status || 'completed',
     started_at: started_at || new Date().toISOString(),
     ended_at: ended_at || new Date().toISOString(),
-    answered_at: duration_seconds > 0 ? (ended_at || new Date().toISOString()) : null
+    answered_at: duration_seconds > 0
+      ? answeredAtFromDuration(ended_at || new Date().toISOString(), duration_seconds)
+      : null
   }, { onConflict: 'call_control_id' });
 
   if (error) {
