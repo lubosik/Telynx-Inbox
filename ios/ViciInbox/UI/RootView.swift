@@ -71,7 +71,7 @@ struct SettingsView: View {
                     LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
                 }
 
-                Section("Message notifications") {
+                Section {
                     LabeledContent("Status", value: notifications.statusText)
                     LabeledContent("APNs environment", value: notifications.environment.capitalized)
                     if notifications.authorizationStatus == .denied {
@@ -84,6 +84,8 @@ struct SettingsView: View {
                     if let error = notifications.lastError {
                         Text(error).font(.caption).foregroundStyle(.secondary)
                     }
+                } header: {
+                    Text("Message notifications")
                 } footer: {
                     Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
                 }
