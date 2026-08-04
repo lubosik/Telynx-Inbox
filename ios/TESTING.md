@@ -88,13 +88,19 @@ without needing APNs. If this fails while Status says Ready, investigate the SIP
 registration/transfer. If this passes but Test 1 fails, investigate APNs token,
 certificate, and production-environment delivery.
 
-## Test 3 — Browser and iPhone together
+## Test 3 — Web inbox open, iPhone owns calls
 
-Browser calling is off by default and the Voice tab should say **iPhone is
-primary**. First confirm the iPhone rings while the web inbox remains usable.
-Then explicitly choose **Enable browser calls** and call again. TelnyxRTC 4.1.2
-supports multi-device fanout; both endpoints may ring, and answering one should
-clear the other with an answered-elsewhere event.
+Browser SIP credentials are disabled. Leave the web inbox open and confirm the
+iPhone still rings while web messaging remains usable. The Voice tab should say
+**iPhone calling only** and must not offer a browser-calling control.
+
+Test both native paths separately:
+
+1. Leave Vici Inbox visible and call. The live SDK socket should receive the
+   INVITE directly and report it through CallKit; no VoIP push is requested.
+2. Lock the phone with Vici Inbox backgrounded and call again. PushKit should
+   wake the app, the SDK should attach to the INVITE, and Answer should reach
+   ACTIVE rather than remaining on Connecting.
 
 ## Test 4 — Decline and missed
 

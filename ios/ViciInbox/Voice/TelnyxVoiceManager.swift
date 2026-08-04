@@ -309,9 +309,10 @@ final class TelnyxVoiceManager: NSObject {
             pushEnvironment: AppConfig.pushEnvironmentIsProduction ? .production : .debug,
             logLevel: level,
             reconnectClient: true,
-            // Ask Telnyx to push this device even when it holds a live socket,
-            // so the phone rings natively with the app open too.
-            pushWhenActive: true
+            // Foreground calls arrive on the live socket and are still reported
+            // through CallKit by onIncomingCall. PushKit is reserved for the
+            // background/terminated path to avoid a socket-replacement race.
+            pushWhenActive: AppConfig.pushWhenActive
         )
     }
 
@@ -375,9 +376,8 @@ final class TelnyxVoiceManager: NSObject {
         let callerNumber = metadata?["caller_number"] as? String ?? ""
         Log.push("VoIP push for call \(uuid) from \(callerNumber) (\(callerName))")
 
-        // With pushWhenActive, a socket INVITE may have already reported this
-        // same call. Re-reporting fails with callUUIDAlreadyExists and would
-        // stomp on the live call's state, so only nudge the SDK and return.
+        // A delayed/duplicate push may arrive after a socket INVITE already
+        // reported this same call. Do not replace that live connection.
         if CallKitCoordinator.shared.activeCallUUIDs.contains(uuid) {
             Log.push("call \(uuid) already reported — re-reporting to satisfy PushKit only")
             if let metadata, !telnyxClient.isConnected() {
@@ -591,7 +591,9 @@ final class TelnyxVoiceManager: NSObject {
             await APIClient.shared.logCall(direction: call.isInbound ? "inbound" : "outbound",
                                            phone: call.callerNumber,
                                            status: status,
-                                           durationSeconds: duration)
+                                           durationSeconds: duration,
+                                           startedAt: call.startedAt,
+                                           endedAt: Date())
         }
     }
 }
