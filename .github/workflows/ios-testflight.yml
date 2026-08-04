@@ -117,6 +117,27 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
           ls -lh "$EXPORT_DIR"
 
+      # A TestFlight binary can compile and sign while still carrying the
+      # wrong APNs environment. Inspect the actual exported application—not
+      # the source entitlement—before upload so a sandbox push build never
+      # reaches testers.
+      - name: Verify production push signing
+        run: |
+          IPA=$(find "$EXPORT_DIR" -name "*.ipa" | head -1)
+          VERIFY_DIR=$(mktemp -d)
+          trap 'rm -rf "$VERIFY_DIR"' EXIT
+          unzip -q "$IPA" -d "$VERIFY_DIR"
+          APP=$(find "$VERIFY_DIR/Payload" -maxdepth 1 -name "*.app" | head -1)
+          codesign -d --entitlements :- "$APP" > "$VERIFY_DIR/entitlements.plist" 2>/dev/null
+          security cms -D -i "$APP/embedded.mobileprovision" > "$VERIFY_DIR/profile.plist"
+          APP_ENV=$(plutil -extract aps-environment raw "$VERIFY_DIR/entitlements.plist")
+          PROFILE_ENV=$(plutil -extract Entitlements.aps-environment raw "$VERIFY_DIR/profile.plist")
+          if [ "$APP_ENV" != "production" ] || [ "$PROFILE_ENV" != "production" ]; then
+            echo "::error::Exported push environment is not production (app=$APP_ENV profile=$PROFILE_ENV)"
+            exit 1
+          fi
+          echo "Exported app and provisioning profile both use production APNs."
+
       # altool is deprecated and currently broken against Xcode 26, so the
       # upload goes through fastlane's pilot.
       - name: Upload to TestFlight

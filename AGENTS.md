@@ -12,8 +12,10 @@ client.
   CallKit. It is not a WebView, Capacitor, React Native, Flutter, or another
   wrapper. It reuses the existing backend authentication, voice-token, and
   call-log endpoints.
-- The phase-one iOS objective is reliable native incoming-call presentation,
-  including lock-screen and terminated-app delivery through Telnyx VoIP pushes.
+- The iOS objective is a complete native client for the shared inbox: messages,
+  MMS, contacts, orders, automation visibility/control, call history, and native
+  calling. Automations and provider integrations remain on the backend. Native
+  incoming-call presentation uses Telnyx VoIP pushes and CallKit.
 
 ## Important paths
 

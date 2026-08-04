@@ -1,9 +1,9 @@
 # Vici Inbox — iOS app
 
-Native iPhone app for the Vici SMS/voice inbox. Its job in phase 1 is one thing:
-**incoming calls to the business number ring the iPhone like a normal phone call**
-— full-screen call UI, lock screen, ringtone, Recents entry — even when the app
-is closed or the phone is locked.
+Native iPhone client for the complete Vici SMS/voice inbox. It provides the
+conversation inbox, SMS/MMS composer, contacts and order detail, automation
+queue/history, call history, and native calling. Incoming business calls use
+PushKit and CallKit for the full-screen system call UI.
 
 This is not a separate system. It talks to the same Railway backend and the same
 Supabase database as the web inbox, reusing the existing endpoints.
@@ -89,36 +89,46 @@ ios/
     ├── App/
     │   ├── ViciInboxApp.swift      SwiftUI entry point
     │   ├── AppDelegate.swift       PushKit registration + VoIP push handling
-    │   └── SessionModel.swift      Observable state for the UI
+    │   ├── SessionModel.swift      Authentication + voice state
+    │   └── FeatureModels.swift     Inbox/contact/activity/call feature state
     ├── Core/
     │   ├── AppConfig.swift         Server URL, push environment
-    │   ├── APIClient.swift         Login + GET /api/voice/token (existing endpoints)
+    │   ├── APIClient.swift         Typed access to existing authenticated APIs
+    │   ├── MobileModels.swift      Native API data-transfer models
     │   ├── CredentialStore.swift   Keychain (survives cold launch from push)
     │   └── Log.swift               OSLog — how you debug the terminated-app path
     ├── Voice/
     │   ├── TelnyxVoiceManager.swift  TxClient + TxClientDelegate + CallKit bridge
     │   ├── CallKitCoordinator.swift  CXProvider / CXCallController
     │   └── CallModels.swift          UI-facing call state, phone formatting
-    ├── UI/                          LoginView, DialerView, InCallView, RootView
+    ├── UI/                          Inbox, contacts, automations, calls, settings
     └── Resources/                   Info.plist, entitlements, asset catalog
 ```
 
-## Backend: no changes required for the first test
+## Backend relationship
 
-The app reuses endpoints that already exist:
+The app reuses authenticated endpoints that already serve the browser:
 
 - `POST /auth/login` — the same shared inbox password as the web app
-- `GET /api/voice/token` — returns the SIP credentials
-- `POST /api/voice/logs` — best-effort call logging
+- `/api/conversations` and `/api/send` — threads and SMS/MMS
+- `/api/contacts` — contact and order data
+- `/api/activity` — automation statistics, queue, history, cancellation
+- `/api/voice/token` and `/api/voice/logs` — native calling and history
+
+Railway must stay running: it owns the database access, webhooks, integrations,
+and scheduled automations. Provider credentials remain there and are never
+embedded in iOS. The browser's SIP client is opt-in so the iPhone is the
+default call endpoint.
 
 The SIP credentials are cached in the Keychain (`kSecAttrAccessibleAfterFirstUnlock`)
 so a push-woken cold launch can connect without waiting on the network.
 
 ## Build
 
-No local Mac here can compile this — see `BUILD-ENVIRONMENT.md`. Source-only
-builds and signed TestFlight builds are configured on GitHub Actions:
-**`CI-TESTFLIGHT.md`**. Neither workflow has run yet.
+This local Mac cannot compile the app — see `BUILD-ENVIRONMENT.md`. Source-only
+builds and signed TestFlight builds run through GitHub Actions. Both pipelines
+have passed, and TestFlight build 1.0.0 (4) was installed successfully before
+the full-inbox migration began.
 
 `ViciInbox.xcodeproj` **is committed**, because CI needs a project and a shared
 scheme to build. It is generated, not hand-maintained — after adding or removing
@@ -143,14 +153,12 @@ because XcodeGen cannot run on macOS 13.
 2. ✅ Account holder registered the App ID and created the VoIP certificate
 3. ✅ Certificate uploaded to Telnyx and attached to the `Vici` SIP connection
 4. ✅ Configure GitHub Actions as the Xcode 26 build machine
-5. ⬜ Run the non-signing `iOS Build` workflow and fix any compiler errors
-6. ⬜ Verify the App Store Connect key is an Admin **Team** key, add its key ID,
-   issuer ID and private key as GitHub Actions secrets, then run `iOS → TestFlight`
-7. ⬜ Install from TestFlight on a physical iPhone and sign in once in the foreground
-   (the push token only registers with Telnyx during a successful login)
-8. ⬜ **The spike:** force-quit the app, call `+1 305 404 3184`, confirm the
-   phone rings natively — see `TESTING.md` Test 1
-9. ⬜ TestFlight for the wider team
+5. ✅ Non-signing build passed in GitHub Actions
+6. ✅ Team/Admin App Store Connect key configured securely in GitHub Actions
+7. ✅ TestFlight build 4 installed and signed in on a physical iPhone
+8. ⬜ Build and distribute the full-inbox update
+9. ⬜ Reopen that build, verify the three push diagnostics in Settings, then
+   background normally (do not swipe away) and execute `TESTING.md`
 
 The next proof point is the first `iOS Build` workflow run. It separates Swift
 or package failures from distribution-signing and App Store authentication.
@@ -171,14 +179,21 @@ or package failures from distribution-signing and App Store authentication.
 - **`pushWhenActive: true`** is set so the phone still rings natively when the
   app happens to be open.
 
-## Open item: the browser and the iPhone share one SIP credential
+## Browser and iPhone call ownership
 
-`GET /api/voice/token` returns a single shared SIP login. If a browser tab and
-the iPhone are both registered, Telnyx decides how the transferred call forks
-between them, and the backend has no device attribution — `call_logs` records a
-generic "answered" with no record of which device took it.
+`GET /api/voice/token` currently returns a shared SIP login. The browser no
+longer registers automatically: its Voice tab says **iPhone is primary** until
+the operator explicitly enables browser calls. TelnyxRTC 4.1.2 supports push
+fanout when both are enabled, but the backend still has no per-device identity.
 
-For the spike this is fine. Before rolling out to more than one person it needs
-either separate SIP credentials per device, or explicit answered-elsewhere
-handling. The SDK's `pushWhenActive` / `answered_device_token` primitives exist
-for exactly this.
+For a single operator this is sufficient. A multi-agent rollout should use
+per-agent telephony credentials and first-answer bridging. The app handles
+Telnyx answered-elsewhere and missed-call cleanup pushes so simultaneous device
+ringing does not leave stale CallKit UI.
+
+## Native message notifications
+
+Foreground/open-app data refresh works against the existing API. Background
+SMS alerts still require standard APNs device registration and a server-side
+APNs provider credential. This is separate from PushKit and from the App Store
+Connect API key; VoIP pushes must never be reused for message notifications.

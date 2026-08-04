@@ -1,6 +1,7 @@
 const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
 const { sendSMS } = require('../telnyx');
+const { formatPhone, isOptedOut } = require('../flows/utils');
 
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
@@ -14,14 +15,19 @@ module.exports = (broadcastSSE) => {
       const text = (message || '').trim();
 
       if (!to) return res.status(400).json({ error: 'to required' });
+      const normalisedTo = formatPhone(to);
+      if (!normalisedTo) return res.status(400).json({ error: 'Invalid phone number format' });
       if (!text && media.length === 0) return res.status(400).json({ error: 'message or media required' });
       if (text.length > 1600) return res.status(400).json({ error: 'Message too long' });
+      if (await isOptedOut(normalisedTo)) {
+        return res.status(403).json({ error: 'This contact opted out of messages' });
+      }
 
-      const { messageId } = await sendSMS(to, text, media.length ? media : null);
+      const { messageId } = await sendSMS(normalisedTo, text, media.length ? media : null);
 
       let ghlContactId = null;
       try {
-        const { contactId } = await ghl.upsertContact(to);
+        const { contactId } = await ghl.upsertContact(normalisedTo);
         ghlContactId = contactId;
         await ghl.addOutboundMessage(contactId, text || '[Picture]');
       } catch (ghlErr) {
@@ -37,7 +43,7 @@ module.exports = (broadcastSSE) => {
       try {
         inserted = await insertSmsMessage({
           telnyx_message_id: messageId,
-          contact_phone: to,
+          contact_phone: normalisedTo,
           direction: 'outbound',
           body: text,
           status: 'queued',
@@ -50,14 +56,14 @@ module.exports = (broadcastSSE) => {
       }
 
       await supabase.from('sms_contacts').upsert({
-        phone: to,
+        phone: normalisedTo,
         ghl_contact_id: ghlContactId,
         last_seen: new Date().toISOString()
       }, { onConflict: 'phone' });
 
       broadcastSSE({
         type: 'new_message',
-        phone: to,
+        phone: normalisedTo,
         body: text,
         direction: 'outbound',
         id: inserted?.id || null,

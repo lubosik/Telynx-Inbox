@@ -58,6 +58,7 @@ final class SessionModel: ObservableObject {
         // then rings for calls it cannot answer.
         await voice.disablePushNotificationsAndWait()
         voice.disconnect()
+        await APIClient.shared.logout()
         CredentialStore.clearAll()
         isSignedIn = false
     }

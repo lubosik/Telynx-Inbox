@@ -39,9 +39,10 @@ extension AppDelegate: PKPushRegistryDelegate {
                       didUpdate credentials: PKPushCredentials,
                       for type: PKPushType) {
         guard type == .voIP else { return }
-        // Lowercase hex, matching Telnyx's own reference implementation — their
-        // backend may compare tokens case-sensitively.
-        let token = credentials.token.reduce("") { $0 + String(format: "%02x", $1) }
+        // Match the Telnyx 4.1.2 reference implementation exactly. Hex is
+        // semantically case-insensitive, but using the documented uppercase
+        // form removes an avoidable variable from push-token troubleshooting.
+        let token = credentials.token.reduce("") { $0 + String(format: "%02X", $1) }
         Log.push("received VoIP push token")
         TelnyxVoiceManager.shared.updatePushToken(token)
     }

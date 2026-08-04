@@ -22,38 +22,23 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
-    @EnvironmentObject private var session: SessionModel
-
     var body: some View {
         TabView {
-            DialerView()
-                .tabItem { Label("Keypad", systemImage: "circle.grid.3x3.fill") }
+            InboxView()
+                .tabItem { Label("Inbox", systemImage: "message.fill") }
 
-            RecentsPlaceholderView()
-                .tabItem { Label("Recents", systemImage: "clock.fill") }
+            ContactsView()
+                .tabItem { Label("Contacts", systemImage: "person.2.fill") }
+
+            ActivityView()
+                .tabItem { Label("Automations", systemImage: "bolt.fill") }
+
+            CallsView()
+                .tabItem { Label("Calls", systemImage: "phone.fill") }
 
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-    }
-}
-
-/// Call history lives in the web inbox today. This tab is a deliberate stub for
-/// phase 2 — the backend already exposes GET /api/voice/logs.
-struct RecentsPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-            Text("Call history")
-                .font(.headline)
-            Text("Incoming calls appear in the iPhone's own Recents.\nFull history is in the web inbox.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding()
     }
 }
 
@@ -69,6 +54,9 @@ struct SettingsView: View {
                     LabeledContent("Number", value: session.callerNumber.isEmpty
                                    ? "—" : PhoneFormatter.pretty(session.callerNumber))
                     LabeledContent("Server", value: AppConfig.serverURL.host ?? "—")
+                    LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
+                    LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
+                    LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
                 }
 
                 Section {
@@ -89,7 +77,7 @@ struct SettingsView: View {
                     LabeledContent("Version",
                                    value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 } footer: {
-                    Text("Incoming calls ring natively even when this app is closed.")
+                    Text("For incoming-call tests, leave the app normally with Home or the side gesture. Do not swipe it away from the app switcher; iOS can suppress relaunch after a force-quit.")
                 }
             }
             .navigationTitle("Settings")

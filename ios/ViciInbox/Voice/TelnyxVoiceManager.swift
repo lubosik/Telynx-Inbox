@@ -49,6 +49,12 @@ final class TelnyxVoiceManager: NSObject {
         didSet { notifyReadinessChanged() }
     }
 
+    /// True only after `onClientReady` for a login configuration that included
+    /// a PushKit token. A socket can be ready without push registration, which
+    /// is not sufficient for background incoming calls.
+    private(set) var connectedWithPushToken = false
+    private var pendingLoginIncludedPushToken = false
+
     /// Ends the CallKit UI if a push-woken call never produces a real INVITE.
     private var pushCallWatchdog: DispatchWorkItem?
 
@@ -70,6 +76,11 @@ final class TelnyxVoiceManager: NSObject {
     }
 
     var readiness: (ready: Bool, status: String) { (isReady, statusText) }
+    var pushDiagnostics: (hasToken: Bool, registeredLogin: Bool, environment: String) {
+        (pushDeviceToken?.isEmpty == false,
+         connectedWithPushToken,
+         AppConfig.pushEnvironmentIsProduction ? "Production" : "Sandbox")
+    }
 
     // MARK: - Main-queue helpers
 
@@ -111,6 +122,8 @@ final class TelnyxVoiceManager: NSObject {
     func invalidatePushToken() {
         onMain { [weak self] in
             self?.pushDeviceToken = nil
+            self?.connectedWithPushToken = false
+            self?.setStatus("Waiting for VoIP token…", ready: false)
         }
     }
 
@@ -188,8 +201,18 @@ final class TelnyxVoiceManager: NSObject {
             return false
         }
 
+        // A successful SIP socket without a PushKit token looks healthy but
+        // cannot wake the app for background calls. Wait for PushKit; its
+        // update callback immediately retries this connection.
+        guard pushDeviceToken?.isEmpty == false else {
+            connectedWithPushToken = false
+            setStatus("Waiting for VoIP token…", ready: false)
+            return false
+        }
+
         do {
             let config = makeTxConfig(creds: creds)
+            pendingLoginIncludedPushToken = pushDeviceToken?.isEmpty == false
             setStatus("Connecting…", ready: false)
             try telnyxClient.connect(txConfig: config)
             return true
@@ -249,6 +272,7 @@ final class TelnyxVoiceManager: NSObject {
 
     func disconnect() {
         telnyxClient.disconnect()
+        connectedWithPushToken = false
         setStatus("Disconnected", ready: false)
     }
 
@@ -297,7 +321,45 @@ final class TelnyxVoiceManager: NSObject {
     /// malformed payloads and missing credentials — because iOS terminates the
     /// app if a VoIP push does not produce a reported call.
     func handleVoIPPush(payload: PKPushPayload) {
-        handleVoIPPush(metadata: payload.dictionaryPayload["metadata"] as? [String: Any])
+        let dictionary = payload.dictionaryPayload
+        let metadata = dictionary["metadata"] as? [String: Any]
+        let aps = dictionary["aps"] as? [String: Any]
+        let alert: String? = {
+            if let text = aps?["alert"] as? String { return text }
+            if let object = aps?["alert"] as? [String: Any] { return object["body"] as? String }
+            return nil
+        }()
+
+        // Telnyx sends cleanup pushes to the other registered devices after a
+        // call was answered elsewhere or became missed. Treating these as new
+        // invites leaves a phantom CallKit screen behind.
+        if alert == "Answered Elsewhere" || alert == "Missed call!" {
+            handleCleanupPush(metadata: metadata, answeredElsewhere: alert == "Answered Elsewhere")
+            return
+        }
+        handleVoIPPush(metadata: metadata)
+    }
+
+    private func handleCleanupPush(metadata: [String: Any]?, answeredElsewhere: Bool) {
+        let uuid = (metadata?["call_id"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
+        let name = metadata?["caller_name"] as? String ?? ""
+        let number = metadata?["caller_number"] as? String ?? ""
+        let reason: CXCallEndedReason = answeredElsewhere ? .answeredElsewhere : .unanswered
+        Log.push(answeredElsewhere ? "call \(uuid) answered elsewhere" : "call \(uuid) missed")
+
+        if CallKitCoordinator.shared.activeCallUUIDs.contains(uuid) {
+            CallKitCoordinator.shared.reportCallEnded(uuid: uuid, reason: reason)
+            clearCall(uuid)
+            return
+        }
+
+        // PushKit requires every VoIP push to result in a CallKit report, even
+        // when this is a terminal cleanup event. Report and immediately end.
+        CallKitCoordinator.shared.reportIncomingCall(uuid: uuid,
+                                                     callerName: name,
+                                                     callerNumber: number) { _ in
+            CallKitCoordinator.shared.reportCallEnded(uuid: uuid, reason: reason)
+        }
     }
 
     func handleVoIPPush(metadata: [String: Any]?) {
@@ -548,6 +610,7 @@ extension TelnyxVoiceManager: TxClientDelegate {
 
     func onSocketDisconnected() {
         Log.voice("socket disconnected")
+        connectedWithPushToken = false
         setStatus("Disconnected", ready: false)
         onMain { [weak self] in
             self?.resolveAllReadyWaiters(false)
@@ -559,6 +622,7 @@ extension TelnyxVoiceManager: TxClientDelegate {
 
     func onClientError(error: Error) {
         Log.voice("client error: \(error.localizedDescription)")
+        connectedWithPushToken = false
         setStatus("Error: \(error.localizedDescription)", ready: false)
         onMain { [weak self] in
             self?.resolveAllReadyWaiters(false)
@@ -567,9 +631,11 @@ extension TelnyxVoiceManager: TxClientDelegate {
     }
 
     func onClientReady() {
-        Log.voice("client ready — registered with Telnyx")
-        setStatus("Ready for calls", ready: true)
-        onMain { [weak self] in self?.resolveAllReadyWaiters(true) }
+        let pushReady = pendingLoginIncludedPushToken
+        connectedWithPushToken = pushReady
+        Log.voice("client ready — registered with Telnyx (VoIP push: \(pushReady))")
+        setStatus(pushReady ? "Ready for calls" : "Connected without VoIP push", ready: pushReady)
+        onMain { [weak self] in self?.resolveAllReadyWaiters(pushReady) }
     }
 
     func onPushDisabled(success: Bool, message: String) {

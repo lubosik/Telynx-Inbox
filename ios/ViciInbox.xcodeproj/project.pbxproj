@@ -8,16 +8,20 @@
 
 /* Begin PBXBuildFile section */
 		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
+		82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39972EB378BFE723E62921A0 /* FeatureModels.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
 		CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */; };
 		672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F149B900F4E19E4142123D9 /* AppConfig.swift */; };
 		7649D086E62D19440F809802 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285C11288F042740FCF4F46E /* CredentialStore.swift */; };
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
+		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
+		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
+		54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */; };
 		2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */; };
 		B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE3B0D9381CE8972333135E /* CallModels.swift */; };
 		22CF206CC1A92F82751A06CF /* TelnyxVoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */; };
@@ -28,16 +32,20 @@
 /* Begin PBXFileReference section */
 		38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Vici Inbox.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		39972EB378BFE723E62921A0 /* FeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureModels.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
 		F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		0F149B900F4E19E4142123D9 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		285C11288F042740FCF4F46E /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
+		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
+		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViews.swift; sourceTree = "<group>"; };
 		23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitCoordinator.swift; sourceTree = "<group>"; };
 		7CE3B0D9381CE8972333135E /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
 		A526D671850F1D501CB12EA2 /* TelnyxVoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelnyxVoiceManager.swift; sourceTree = "<group>"; };
@@ -88,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
+				39972EB378BFE723E62921A0 /* FeatureModels.swift */,
 				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
 				B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */,
 			);
@@ -101,6 +110,7 @@
 				0F149B900F4E19E4142123D9 /* AppConfig.swift */,
 				285C11288F042740FCF4F46E /* CredentialStore.swift */,
 				19325CE8AEB5A75468A51A38 /* Log.swift */,
+				D20048ACF33742E9925F16EA /* MobileModels.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -110,8 +120,10 @@
 			children = (
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
+				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
+				1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -214,16 +226,20 @@
 			buildActionMask = 2147483647;
 			files = (
 				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
+				82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
 				CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */,
 				672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */,
 				7649D086E62D19440F809802 /* CredentialStore.swift in Sources */,
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
+				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
+				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
+				54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */,
 				2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */,
 				B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */,
 				22CF206CC1A92F82751A06CF /* TelnyxVoiceManager.swift in Sources */,

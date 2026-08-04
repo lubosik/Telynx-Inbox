@@ -13,6 +13,7 @@ enum APIError: LocalizedError {
     case badResponse(Int)
     case unauthorised
     case decoding
+    case server(String)
     case transport(Error)
 
     var errorDescription: String? {
@@ -20,6 +21,7 @@ enum APIError: LocalizedError {
         case .badResponse(let code): return "Server returned \(code)."
         case .unauthorised:          return "Wrong password, or the session expired."
         case .decoding:              return "Unexpected response from the server."
+        case .server(let message):   return message
         case .transport(let err):    return err.localizedDescription
         }
     }
@@ -71,6 +73,111 @@ actor APIClient {
         return (try? await login(password: password)) ?? false
     }
 
+    func logout() async {
+        _ = try? await post("/auth/logout", body: [:])
+    }
+
+    // MARK: - Inbox
+
+    func fetchConversations() async throws -> [ConversationSummary] {
+        try await decodedGET("/api/conversations")
+    }
+
+    func fetchThread(phone: String) async throws -> [MessageRecord] {
+        try await decodedGET("/api/conversations/\(encodedPathSegment(phone))")
+    }
+
+    func sendMessage(to phone: String,
+                     message: String,
+                     mediaURLs: [String] = [],
+                     replyToMessageID: Int? = nil) async throws {
+        var body: [String: Any] = ["to": phone, "message": message, "mediaUrls": mediaURLs]
+        if let replyToMessageID { body["replyToMessageId"] = replyToMessageID }
+        let (data, response) = try await post("/api/send", body: body)
+        try validate(data: data, response: response)
+    }
+
+    func react(to messageID: Int, type: String) async throws {
+        let (data, response) = try await post("/api/react", body: ["messageId": messageID, "type": type])
+        try validate(data: data, response: response)
+    }
+
+    func uploadJPEG(_ data: Data) async throws -> String {
+        let body: [String: Any] = [
+            "filename": "ios-\(UUID().uuidString).jpg",
+            "contentType": "image/jpeg",
+            "data": data.base64EncodedString()
+        ]
+        let (responseData, response) = try await post("/api/upload", body: body)
+        try validate(data: responseData, response: response)
+        guard let json = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any],
+              let url = json["url"] as? String else { throw APIError.decoding }
+        return url
+    }
+
+    // MARK: - Contacts and orders
+
+    func fetchContacts(search: String = "", page: Int = 1) async throws -> ContactPage {
+        var query = [URLQueryItem(name: "page", value: String(page))]
+        if !search.isEmpty { query.append(URLQueryItem(name: "search", value: search)) }
+        return try await decodedGET("/api/contacts", queryItems: query)
+    }
+
+    func fetchContact(phone: String) async throws -> ContactDetailResponse {
+        try await decodedGET("/api/contacts/\(encodedPathSegment(phone))")
+    }
+
+    func createContact(firstName: String, lastName: String, phone: String,
+                       email: String, notes: String) async throws -> ConversationSummary {
+        let (data, response) = try await post("/api/contacts", body: [
+            "first_name": firstName, "last_name": lastName, "phone": phone,
+            "email": email, "notes": notes
+        ])
+        try validate(data: data, response: response)
+        struct Created: Decodable { let contact: ConversationSummary }
+        return try decoder.decode(Created.self, from: data).contact
+    }
+
+    func updateContact(phone: String, firstName: String, lastName: String,
+                       email: String, notes: String) async throws -> ConversationSummary {
+        let (data, response) = try await patch("/api/contacts/\(encodedPathSegment(phone))", body: [
+            "first_name": firstName, "last_name": lastName,
+            "email": email, "notes": notes
+        ])
+        try validate(data: data, response: response)
+        struct Updated: Decodable { let contact: ConversationSummary }
+        return try decoder.decode(Updated.self, from: data).contact
+    }
+
+    // MARK: - Automations
+
+    func fetchActivityStats() async throws -> ActivityStats {
+        try await decodedGET("/api/activity/stats")
+    }
+
+    func fetchActivityQueue(flow: String = "all", page: Int = 1) async throws -> ActivityPage {
+        try await decodedGET("/api/activity/queue", queryItems: [
+            URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page))
+        ])
+    }
+
+    func fetchRecentActivity(flow: String = "all", page: Int = 1) async throws -> ActivityPage {
+        try await decodedGET("/api/activity/recent", queryItems: [
+            URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page))
+        ])
+    }
+
+    func cancelScheduledMessage(id: String) async throws {
+        let (data, response) = try await delete("/api/activity/queue/\(encodedPathSegment(id))")
+        try validate(data: data, response: response)
+    }
+
+    // MARK: - Call history
+
+    func fetchCallLogs(page: Int = 1) async throws -> [CallLogRecord] {
+        try await decodedGET("/api/voice/logs", queryItems: [URLQueryItem(name: "page", value: String(page))])
+    }
+
     // MARK: - Voice
 
     /// Fetches SIP credentials. Falls back to the Keychain cache when the
@@ -115,19 +222,64 @@ actor APIClient {
 
     // MARK: - Plumbing
 
-    private func get(_ path: String) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: AppConfig.serverURL.appendingPathComponent(path))
+    private let decoder = JSONDecoder()
+
+    private func encodedPathSegment(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
+    }
+
+    private func url(_ path: String, queryItems: [URLQueryItem] = []) throws -> URL {
+        var components = URLComponents(url: AppConfig.serverURL, resolvingAgainstBaseURL: false)
+        components?.percentEncodedPath = path.hasPrefix("/") ? path : "/\(path)"
+        if !queryItems.isEmpty { components?.queryItems = queryItems }
+        guard let url = components?.url else { throw APIError.decoding }
+        return url
+    }
+
+    private func get(_ path: String, queryItems: [URLQueryItem] = []) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: try url(path, queryItems: queryItems))
         request.httpMethod = "GET"
         return try await perform(request)
     }
 
     @discardableResult
     private func post(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: AppConfig.serverURL.appendingPathComponent(path))
+        var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await perform(request)
+    }
+
+    private func patch(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await perform(request)
+    }
+
+    private func delete(_ path: String) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = "DELETE"
+        return try await perform(request)
+    }
+
+    private func decodedGET<T: Decodable>(_ path: String,
+                                          queryItems: [URLQueryItem] = []) async throws -> T {
+        let (data, response) = try await get(path, queryItems: queryItems)
+        try validate(data: data, response: response)
+        do { return try decoder.decode(T.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    private func validate(data: Data, response: HTTPURLResponse) throws {
+        guard (200..<300).contains(response.statusCode) else {
+            if response.statusCode == 401 { throw APIError.unauthorised }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let message = json["error"] as? String { throw APIError.server(message) }
+            throw APIError.badResponse(response.statusCode)
+        }
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
