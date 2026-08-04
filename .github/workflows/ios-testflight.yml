@@ -98,6 +98,27 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }}
 
+      # An unsigned archive has no embedded code-signing entitlement blob.
+      # exportArchive can still apply a distribution profile, but it derives
+      # the final signature's requested capabilities from the archived app.
+      # Seed that metadata with a local ad-hoc signature so PushKit survives
+      # the later cloud-managed re-sign; the export replaces `development`
+      # with the profile's production environment.
+      - name: Seed archive push entitlements
+        run: |
+          APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP" ]; then echo "::error::Archived app not found"; exit 1; fi
+          codesign --force --deep --sign - \
+            --entitlements ios/ViciInbox/Resources/ViciInbox.entitlements \
+            "$APP"
+          codesign -d --entitlements :- "$APP" > build/archive-entitlements.plist 2>/dev/null
+          ARCHIVE_ENV=$(plutil -extract aps-environment raw build/archive-entitlements.plist 2>/dev/null || true)
+          if [ "$ARCHIVE_ENV" != "development" ]; then
+            echo "::error::Archived app is missing its requested push entitlement"
+            exit 1
+          fi
+          echo "Archived app carries the requested push capability."
+
       # -allowProvisioningUpdates plus the authentication flags turns on
       # cloud-managed distribution signing. The API key must be a Team key
       # with the Admin role or this step is refused.
@@ -130,8 +151,8 @@ jobs:
           APP=$(find "$VERIFY_DIR/Payload" -maxdepth 1 -name "*.app" | head -1)
           codesign -d --entitlements :- "$APP" > "$VERIFY_DIR/entitlements.plist" 2>/dev/null
           security cms -D -i "$APP/embedded.mobileprovision" > "$VERIFY_DIR/profile.plist"
-          APP_ENV=$(plutil -extract aps-environment raw "$VERIFY_DIR/entitlements.plist")
-          PROFILE_ENV=$(plutil -extract Entitlements.aps-environment raw "$VERIFY_DIR/profile.plist")
+          APP_ENV=$(plutil -extract aps-environment raw "$VERIFY_DIR/entitlements.plist" 2>/dev/null || true)
+          PROFILE_ENV=$(plutil -extract Entitlements.aps-environment raw "$VERIFY_DIR/profile.plist" 2>/dev/null || true)
           if [ "$APP_ENV" != "production" ] || [ "$PROFILE_ENV" != "production" ]; then
             echo "::error::Exported push environment is not production (app=$APP_ENV profile=$PROFILE_ENV)"
             exit 1
