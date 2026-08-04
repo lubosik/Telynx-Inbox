@@ -23,12 +23,14 @@ struct RootView: View {
 
 struct MainTabView: View {
     @State private var selection = 0
+    @StateObject private var inboxModel = InboxModel()
     @ObservedObject private var notifications = MessageNotificationManager.shared
 
     var body: some View {
         TabView(selection: $selection) {
-            InboxView()
+            InboxView(model: inboxModel)
                 .tabItem { Label("Inbox", systemImage: "message.fill") }
+                .badge(inboxModel.unreadTotal)
                 .tag(0)
 
             ContactsView()
@@ -96,9 +98,17 @@ struct SettingsView: View {
                     LabeledContent("Delivered", value: "Delivery confirmed")
                     LabeledContent("Failed", value: "Not delivered")
                 } header: {
-                    Text("Message status guide")
+                    Text("Sent message status guide")
                 } footer: {
-                    Text("Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
+                    Text("This guide explains the status shown beneath messages you send. Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
+                }
+
+                Section {
+                    LabeledContent("Example", value: "6 min")
+                } header: {
+                    Text("Inbox conversation times")
+                } footer: {
+                    Text("The time at the right of each conversation shows how long ago the latest message in that thread was sent or received. It updates as time passes.")
                 }
 
                 Section {

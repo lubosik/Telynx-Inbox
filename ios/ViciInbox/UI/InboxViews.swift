@@ -3,11 +3,12 @@ import PhotosUI
 import UIKit
 
 struct InboxView: View {
-    @StateObject private var model = InboxModel()
+    @ObservedObject var model: InboxModel
     @State private var search = ""
     @State private var path: [ConversationSummary] = []
     @State private var pendingNotificationPhone: String?
     @ObservedObject private var notifications = MessageNotificationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     private var filtered: [ConversationSummary] {
         guard !search.isEmpty else { return model.conversations }
@@ -62,6 +63,13 @@ struct InboxView: View {
                 guard let phone else { return }
                 pendingNotificationPhone = phone
                 openPendingConversation()
+            }
+            .onChange(of: notifications.inboxRefreshSequence) { _ in
+                Task { await model.load() }
+            }
+            .onChange(of: scenePhase) { phase in
+                guard phase == .active else { return }
+                Task { await model.load() }
             }
             .onChange(of: model.conversations) { _ in openPendingConversation() }
         }

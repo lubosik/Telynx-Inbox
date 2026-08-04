@@ -11,6 +11,12 @@ final class InboxModel: ObservableObject {
     private var refreshInProgress = false
     private var threadRefreshes: Set<String> = []
 
+    var unreadTotal: Int {
+        conversations.reduce(0) { total, conversation in
+            total + max(0, conversation.unreadCount ?? 0)
+        }
+    }
+
     func load() async {
         guard !refreshInProgress else { return }
         refreshInProgress = true
@@ -19,6 +25,7 @@ final class InboxModel: ObservableObject {
         do {
             let loaded = try await APIClient.shared.fetchConversations()
             if loaded != conversations { conversations = loaded }
+            await MessageNotificationManager.shared.updateAppBadge(count: unreadTotal)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
