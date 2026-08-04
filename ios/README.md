@@ -200,15 +200,16 @@ Swift or package failures from distribution-signing and App Store authentication
 
 ## Browser and iPhone call ownership
 
-`GET /api/voice/token` currently returns a shared SIP login. The browser no
-longer registers automatically: its Voice tab says **iPhone is primary** until
-the operator explicitly enables browser calls. TelnyxRTC 4.1.2 supports push
-fanout when both are enabled, but the backend still has no per-device identity.
+The iPhone is the only supported SIP endpoint. `GET /api/voice/token` rejects
+browser user agents, and the browser Voice tab has no control for registering a
+TelnyxRTC client. Opening the web inbox therefore cannot compete with the native
+app for an incoming call. The same authenticated endpoint remains available to
+the native app so it can connect and register its VoIP push token.
 
-For a single operator this is sufficient. A multi-agent rollout should use
-per-agent telephony credentials and first-answer bridging. The app handles
-Telnyx answered-elsewhere and missed-call cleanup pushes so simultaneous device
-ringing does not leave stale CallKit UI.
+An already-connected browser session from an older deployment may remain
+registered until it disconnects or its SIP registration expires. A future
+multi-agent rollout should use per-agent telephony credentials and explicit
+first-answer routing rather than re-enabling the shared browser credential.
 
 ## Native message notifications
 

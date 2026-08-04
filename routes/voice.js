@@ -1,10 +1,17 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
+const { isBrowserUserAgent } = require('../lib/client-platform');
 
-// GET /api/voice/token — returns SIP credentials for WebRTC SDK
+// GET /api/voice/token — returns SIP credentials to the native iOS app only.
 // Protected by requireAuth at mount point in server.js
 router.get('/token', async (req, res) => {
   try {
+    if (isBrowserUserAgent(req.get('user-agent'))) {
+      return res.status(403).json({
+        error: 'Browser calling is disabled; use Vici Inbox on iPhone.'
+      });
+    }
+
     res.json({
       login: process.env.TELNYX_SIP_USERNAME,
       password: process.env.TELNYX_SIP_PASSWORD,

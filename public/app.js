@@ -3509,8 +3509,6 @@ function VoiceTab({
   setDialNumber,
   onCall,
   voiceReady,
-  onRetryConnect,
-  onDisableCalls,
   conversations,
   onCreateContact,
   onGoToMessages,
@@ -3557,31 +3555,9 @@ function VoiceTab({
       width: 7,
       height: 7,
       borderRadius: '50%',
-      background: voiceReady ? '#16a34a' : '#ef4444'
+      background: '#16a34a'
     }
-  }), voiceReady ? 'Browser calls enabled' : 'iPhone is primary', !voiceReady && /*#__PURE__*/React.createElement("button", {
-    onClick: onRetryConnect,
-    style: {
-      background: '#1a1a1a',
-      border: '1px solid #2a2a2a',
-      borderRadius: 6,
-      color: '#9ca3af',
-      fontSize: 11,
-      padding: '3px 8px',
-      cursor: 'pointer'
-    }
-  }, "Enable browser calls"), voiceReady && /*#__PURE__*/React.createElement("button", {
-    onClick: onDisableCalls,
-    style: {
-      background: '#1a1a1a',
-      border: '1px solid #2a2a2a',
-      borderRadius: 6,
-      color: '#9ca3af',
-      fontSize: 11,
-      padding: '3px 8px',
-      cursor: 'pointer'
-    }
-  }, "Make iPhone primary"))), activeSection === 'dialer' && /*#__PURE__*/React.createElement(DialerSection, {
+  }), "iPhone calling only")), activeSection === 'dialer' && /*#__PURE__*/React.createElement(DialerSection, {
     dialNumber: dialNumber,
     setDialNumber: setDialNumber,
     onCall: onCall,
@@ -4730,8 +4706,6 @@ function App() {
     setDialNumber: setDialNumber,
     onCall: initiateCall,
     voiceReady: voiceReady,
-    onRetryConnect: retryVoiceConnect,
-    onDisableCalls: disableBrowserCalls,
     conversations: conversations,
     onCreateContact: phone => {
       setContactPrefill(normalisePhoneFrontend(phone) || phone);
