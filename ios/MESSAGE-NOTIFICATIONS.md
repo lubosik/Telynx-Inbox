@@ -18,7 +18,8 @@ call invitations.
   the current device token to the authenticated backend.
 - `routes/mobile-push.js` stores and removes iOS device tokens.
 - `lib/apns-notify.js` signs an APNs provider JWT and sends alert pushes over
-  HTTP/2.
+  HTTP/2. Each payload includes the current shared-inbox unread total so iOS
+  can update the Home Screen badge while the app is suspended.
 - `routes/webhook.js` invokes both browser push and native APNs after an inbound
   message or tapback.
 - `scripts/ios-push-devices-migration.sql` creates the separate APNs device
@@ -76,9 +77,13 @@ locally installed Debug builds use sandbox.
 5. Call `POST /api/mobile-push/test` from an authenticated session or send a
    real inbound SMS. Confirm a banner and sound while the app is backgrounded.
 6. Tap the banner and confirm it opens the matching conversation.
-7. Confirm the browser still receives its existing notification.
+7. Confirm the Inbox tab and app icon show the same unread total, then open the
+   unread thread and confirm both badges disappear when the total reaches zero.
+8. Confirm the browser still receives its existing notification.
 
 The backend removes tokens when APNs reports them as unregistered or invalid.
 Signing out removes the current device's backend registration. APNs provider
 configuration failures do not block webhook storage, automations, SSE, or the
-existing web notification path.
+existing web notification path. The app also reconciles its icon badge from the
+server whenever the Inbox loads or returns to the foreground, so reading a
+thread clears stale counts without waiting for another push.

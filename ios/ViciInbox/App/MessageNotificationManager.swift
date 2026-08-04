@@ -15,6 +15,7 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     @Published private(set) var isRegisteredWithBackend = false
     @Published private(set) var lastError: String?
     @Published private(set) var pendingConversationPhone: String?
+    @Published private(set) var inboxRefreshSequence = 0
 
     private let installationDefaultsKey = "vici.apns.installation-id"
     private var deviceToken: String?
@@ -83,6 +84,17 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         pendingConversationPhone = nil
     }
 
+    /// Reconciles the Home Screen badge with the server-backed unread total.
+    /// Failures are diagnostic only and must not make notification registration
+    /// appear broken in Settings.
+    func updateAppBadge(count: Int) async {
+        do {
+            try await UNUserNotificationCenter.current().setBadgeCount(max(0, count))
+        } catch {
+            Log.push("app icon badge update failed")
+        }
+    }
+
     func didReceiveDeviceToken(_ data: Data) {
         let token = data.map { String(format: "%02x", $0) }.joined()
         // APNs can rotate this value. Keep it only for the current process and
@@ -139,6 +151,10 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         [.authorized, .provisional, .ephemeral].contains(authorizationStatus)
     }
 
+    private func noteIncomingMessage() {
+        inboxRefreshSequence &+= 1
+    }
+
     private var installationID: String {
         if let existing = UserDefaults.standard.string(forKey: installationDefaultsKey) {
             return existing
@@ -155,7 +171,10 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // The inbox may already be onscreen, but an audible banner is still
         // valuable for a shared business inbox.
-        completionHandler([.banner, .list, .sound])
+        Task { @MainActor in
+            MessageNotificationManager.shared.noteIncomingMessage()
+        }
+        completionHandler([.banner, .list, .sound, .badge])
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
@@ -164,6 +183,7 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         if let phone = response.notification.request.content.userInfo["phone"] as? String,
            !phone.isEmpty {
             Task { @MainActor in
+                MessageNotificationManager.shared.noteIncomingMessage()
                 MessageNotificationManager.shared.queueConversation(phone: phone)
                 completionHandler()
             }
