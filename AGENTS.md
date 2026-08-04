@@ -10,8 +10,8 @@ client.
   ShipStation, web push, and OpenRouter.
 - The iOS application is native SwiftUI with UIKit bridges for PushKit and
   CallKit. It is not a WebView, Capacitor, React Native, Flutter, or another
-  wrapper. It reuses the existing backend authentication, voice-token, and
-  call-log endpoints.
+  wrapper. It reuses the authenticated inbox, messaging, contacts, activity,
+  voice-token, and call-log endpoints.
 - The iOS objective is a complete native client for the shared inbox: messages,
   MMS, contacts, orders, automation visibility/control, call history, and native
   calling. Automations and provider integrations remain on the backend. Native

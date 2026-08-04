@@ -160,8 +160,8 @@ because XcodeGen cannot run on macOS 13.
 9. ⬜ Reopen that build, verify the three push diagnostics in Settings, then
    background normally (do not swipe away) and execute `TESTING.md`
 
-The next proof point is the first `iOS Build` workflow run. It separates Swift
-or package failures from distribution-signing and App Store authentication.
+The next proof point is the full-inbox `iOS Build` workflow run. It separates
+Swift or package failures from distribution-signing and App Store authentication.
 
 ## Known gotchas baked into the code
 
