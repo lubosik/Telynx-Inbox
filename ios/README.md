@@ -202,16 +202,20 @@ Swift or package failures from distribution-signing and App Store authentication
 
 ## Browser and iPhone call ownership
 
-The iPhone is the only supported SIP endpoint. `GET /api/voice/token` rejects
-browser user agents, and the browser Voice tab has no control for registering a
-TelnyxRTC client. Opening the web inbox therefore cannot compete with the native
-app for an incoming call. The same authenticated endpoint remains available to
-the native app so it can connect and register its VoIP push token.
+The iPhone is the only supported SIP endpoint. `GET /api/voice/token` requires
+the native app's `X-Vici-Client: ios` marker, rejects browser user agents, and
+sends `Cache-Control: no-store`. The browser bundle contains no Telnyx SDK
+loader, so opening the web inbox cannot compete with the native app for an
+incoming call. Browser VAPID notifications continue for messages but are not
+sent for calls. The native app refreshes the current credential when it returns
+to the foreground and stores it in Keychain for a push-woken launch.
 
 An already-connected browser session from an older deployment may remain
-registered until it disconnects or its SIP registration expires. A future
-multi-agent rollout should use per-agent telephony credentials and explicit
-first-answer routing rather than re-enabling the shared browser credential.
+registered until it disconnects or its SIP registration expires. Rotating the
+backend to a dedicated iOS-only telephony credential immediately isolates those
+legacy registrations. A future per-agent rollout should use separate telephony
+credentials and explicit first-answer routing rather than re-enabling browser
+calling.
 
 ## Native message notifications
 

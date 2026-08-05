@@ -231,18 +231,31 @@ actor APIClient {
 
     // MARK: - Voice
 
-    /// Fetches SIP credentials. Falls back to the Keychain cache when the
-    /// network or session is unavailable, so a push-woken app can still
-    /// register with Telnyx.
-    func fetchSIPCredentials() async throws -> SIPCredentials {
+    /// Fetches the current iOS-only SIP credentials. Normal launches may fall
+    /// back to Keychain when offline; callers that are checking for a server-
+    /// side credential rotation can require a fresh response instead.
+    func fetchSIPCredentials(allowCachedFallback: Bool = true) async throws -> SIPCredentials {
         guard await restoreSessionIfNeeded() else {
-            if let cached = CredentialStore.cachedSIPCredentials { return cached }
+            if allowCachedFallback, let cached = CredentialStore.cachedSIPCredentials { return cached }
             throw APIError.unauthorised
         }
 
-        let (data, response) = try await get("/api/voice/token")
+        var request = URLRequest(url: try url("/api/voice/token"),
+                                 cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: 20)
+        request.httpMethod = "GET"
+        request.setValue("ios", forHTTPHeaderField: "X-Vici-Client")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+
+        let (data, response): (Data, HTTPURLResponse)
+        do {
+            (data, response) = try await perform(request)
+        } catch {
+            if allowCachedFallback, let cached = CredentialStore.cachedSIPCredentials { return cached }
+            throw error
+        }
         guard response.statusCode == 200 else {
-            if let cached = CredentialStore.cachedSIPCredentials { return cached }
+            if allowCachedFallback, let cached = CredentialStore.cachedSIPCredentials { return cached }
             throw APIError.badResponse(response.statusCode)
         }
 

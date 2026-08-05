@@ -16,9 +16,14 @@ client.
   MMS, contacts, orders, automation visibility/control, call history, and native
   calling. Automations and provider integrations remain on the backend. Native
   incoming-call presentation uses Telnyx VoIP pushes and CallKit.
-- SIP credentials are native-only: `/api/voice/token` rejects browser user
-  agents. Do not re-enable shared browser calling without designing explicit
-  per-agent routing; otherwise web sessions compete with iPhones for calls.
+- SIP credentials are native-only: `/api/voice/token` requires the iOS app's
+  explicit client marker and rejects browser user agents. The browser bundle
+  contains no Telnyx SDK loader. Do not re-enable shared browser calling
+  without designing explicit per-agent routing; otherwise web sessions compete
+  with iPhones for calls.
+- Incoming and missed call presentation is native-only through Telnyx VoIP
+  push and CallKit. Browser VAPID notifications remain enabled for messages,
+  but the voice webhook must not send browser call notifications.
 - Keep Telnyx `pushWhenActive` disabled. Foreground calls already reach CallKit
   through the live SDK socket; SDK 4.1.2 replaces that socket while processing
   an active-state push, which can lose the INVITE during Answer.

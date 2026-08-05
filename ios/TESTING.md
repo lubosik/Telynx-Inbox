@@ -90,9 +90,11 @@ certificate, and production-environment delivery.
 
 ## Test 3 — Web inbox open, iPhone owns calls
 
-Browser SIP credentials are disabled. Leave the web inbox open and confirm the
-iPhone still rings while web messaging remains usable. The Voice tab should say
-**iPhone calling only** and must not offer a browser-calling control.
+Browser SIP credentials and browser call alerts are disabled. Leave the web
+inbox open and confirm the browser does not ring, show an incoming-call
+notification, or present a call panel while the iPhone rings through CallKit.
+Web messaging and browser message notifications remain usable. The Voice tab
+should say **iPhone calling only** and must not offer a browser-calling control.
 
 Test both native paths separately:
 

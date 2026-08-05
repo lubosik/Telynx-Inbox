@@ -54,6 +54,10 @@ final class TelnyxVoiceManager: NSObject {
     /// is not sufficient for background incoming calls.
     private(set) var connectedWithPushToken = false
     private var pendingLoginIncludedPushToken = false
+    /// Credentials used for the current socket. This lets a foreground refresh
+    /// rotate away from a retired/web-exposed SIP user without needlessly
+    /// reconnecting when the backend value is unchanged.
+    private var connectedCredentials: SIPCredentials?
 
     /// Ends the CallKit UI if a push-woken call never produces a real INVITE.
     private var pushCallWatchdog: DispatchWorkItem?
@@ -190,15 +194,22 @@ final class TelnyxVoiceManager: NSObject {
     ///   `waitUntilReady()` before doing anything that needs registration.
     @discardableResult
     func connectIfPossible(force: Bool = false) async -> Bool {
-        if telnyxClient.isConnected() {
-            guard force else { return true }
-            // Reconnecting over a live socket is undefined in the SDK.
-            telnyxClient.disconnect()
-        }
-
         guard let creds = await resolveCredentials() else {
             setStatus("Not signed in", ready: false)
             return false
+        }
+
+        if telnyxClient.isConnected() {
+            let credentialsChanged = connectedCredentials != creds
+            guard force || credentialsChanged else { return true }
+
+            // Never tear down media while a CallKit call is in progress. The
+            // fresh value is already in Keychain and will be adopted on the
+            // next foreground/connect attempt.
+            if let currentCall, currentCall.phase != .ended { return true }
+
+            // Reconnecting over a live socket is undefined in the SDK.
+            telnyxClient.disconnect()
         }
 
         // A successful SIP socket without a PushKit token looks healthy but
@@ -215,6 +226,7 @@ final class TelnyxVoiceManager: NSObject {
             pendingLoginIncludedPushToken = pushDeviceToken?.isEmpty == false
             setStatus("Connecting…", ready: false)
             try telnyxClient.connect(txConfig: config)
+            connectedCredentials = creds
             return true
         } catch {
             Log.voice("connect failed: \(error.localizedDescription)")
@@ -273,6 +285,7 @@ final class TelnyxVoiceManager: NSObject {
     func disconnect() {
         telnyxClient.disconnect()
         connectedWithPushToken = false
+        connectedCredentials = nil
         setStatus("Disconnected", ready: false)
     }
 
@@ -285,12 +298,13 @@ final class TelnyxVoiceManager: NSObject {
     }
 
     private func resolveCredentials() async -> SIPCredentials? {
-        // Prefer the cache — a push-woken launch must not wait on the network.
-        if let cached = CredentialStore.cachedSIPCredentials {
-            Task.detached { _ = try? await APIClient.shared.fetchSIPCredentials() }
-            return cached
+        // Foreground connections must observe a backend credential rotation.
+        // Push-woken launches do not use this method; startSDKForPush reads the
+        // Keychain synchronously so CallKit can be reported immediately.
+        if let fresh = try? await APIClient.shared.fetchSIPCredentials(allowCachedFallback: false) {
+            return fresh
         }
-        return try? await APIClient.shared.fetchSIPCredentials()
+        return CredentialStore.cachedSIPCredentials
     }
 
     private func makeTxConfig(creds: SIPCredentials) -> TxConfig {
