@@ -4,6 +4,7 @@ const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/telnyx-api');
 const { finalCallStatus } = require('../lib/call-status');
+const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
 async function dbUpsert(values, options = {}) {
@@ -98,7 +99,8 @@ function resolveCallerIdentityCapped(cid) {
 }
 
 async function transferToOperator(cid) {
-  const sipTarget = `sip:${process.env.TELNYX_SIP_USERNAME}@sip.telnyx.com`;
+  const { login } = getIOSVoiceCredentials();
+  const sipTarget = `sip:${login}@sip.telnyx.com`;
   const { phone, callerName } = await resolveCallerIdentityCapped(cid);
 
   // Telnyx requires `from` in +E.164. A malformed caller number would fail the
