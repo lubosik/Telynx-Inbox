@@ -210,6 +210,12 @@ incoming call. Browser VAPID notifications continue for messages but are not
 sent for calls. The native app refreshes the current credential when it returns
 to the foreground and stores it in Keychain for a push-woken launch.
 
+Production prefers the complete Railway override pair
+`TELNYX_IOS_SIP_USERNAME` / `TELNYX_IOS_SIP_PASSWORD`. The original
+`TELNYX_SIP_*` pair remains untouched as the rollback path; if either override
+is absent, both the token response and inbound transfer fall back to the legacy
+pair rather than mixing credentials.
+
 An already-connected browser session from an older deployment may remain
 registered until it disconnects or its SIP registration expires. Rotating the
 backend to a dedicated iOS-only telephony credential immediately isolates those

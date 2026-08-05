@@ -24,6 +24,10 @@ client.
 - Incoming and missed call presentation is native-only through Telnyx VoIP
   push and CallKit. Browser VAPID notifications remain enabled for messages,
   but the voice webhook must not send browser call notifications.
+- Live iOS SIP routing prefers the complete Railway pair
+  `TELNYX_IOS_SIP_USERNAME` / `TELNYX_IOS_SIP_PASSWORD`. The legacy
+  `TELNYX_SIP_*` pair is the rollback fallback; never overwrite or delete it
+  during an iOS credential rotation.
 - Keep Telnyx `pushWhenActive` disabled. Foreground calls already reach CallKit
   through the live SDK socket; SDK 4.1.2 replaces that socket while processing
   an active-state push, which can lose the INVITE during Answer.

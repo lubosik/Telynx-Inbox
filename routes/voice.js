@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { isNativeIOSClient } = require('../lib/client-platform');
+const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
 const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
 
@@ -17,9 +18,10 @@ router.get('/token', async (req, res) => {
     // SIP credentials must never be cached by a browser, proxy, or the app's
     // URL cache. The iOS app keeps the current value securely in Keychain.
     res.set('Cache-Control', 'no-store');
+    const credentials = getIOSVoiceCredentials();
     res.json({
-      login: process.env.TELNYX_SIP_USERNAME,
-      password: process.env.TELNYX_SIP_PASSWORD,
+      login: credentials.login,
+      password: credentials.password,
       callerNumber: process.env.TELNYX_PHONE_NUMBER
     });
   } catch (err) {
