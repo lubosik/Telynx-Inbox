@@ -2369,9 +2369,8 @@ function App() {
     window.history.replaceState({}, '', '/');
   }, [auth.ok, conversations]);
 
-  // A browser incoming-call notification may still bring the operator to the
-  // Voice tab, but it deliberately does not register SIP. Native iOS is the
-  // primary endpoint; browser calling is enabled only with the button there.
+  // Preserve old incoming-call deep links as a read-only route to History.
+  // The browser never registers SIP; native iOS is the only call endpoint.
   useEffect(() => {
     if (!auth.ok) return;
     const params = new URLSearchParams(window.location.search);
@@ -2561,48 +2560,11 @@ function App() {
 
   // ── Voice functions ──────────────────────────────────────────────────────────
 
-  function loadTelnyxSDK() {
-    if (window.TelnyxWebRTC || window.TelnyxRTC) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://unpkg.com/@telnyx/webrtc@2.27.1/lib/bundle.js';
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Failed to load Telnyx WebRTC SDK'));
-      document.head.appendChild(s);
-    });
-  }
-
+  // Kept as a no-op for older UI handlers. The browser bundle deliberately
+  // contains no SDK loader and never requests `/api/voice/token`.
   async function initVoiceClient() {
-    if (telnyxClientRef.current) return;
-    try {
-      await loadTelnyxSDK();
-
-      const res = await fetch('/api/voice/token', { credentials: 'include' });
-      if (!res.ok) throw new Error('Token fetch failed');
-      const { login, password, callerNumber } = await res.json();
-      if (callerNumber) callerNumberRef.current = callerNumber;
-
-      const TelnyxRTC = window.TelnyxWebRTC?.TelnyxRTC || window.TelnyxRTC;
-      if (!TelnyxRTC) throw new Error('Telnyx WebRTC SDK not loaded');
-
-      const client = new TelnyxRTC({ login, password });
-      client.remoteElement = 'telnyx-audio';
-
-      client.on('telnyx.ready', () => {
-        console.log('[VOICE] Client ready');
-        setVoiceReady(true);
-      });
-      client.on('telnyx.error', (err) => { console.error('[VOICE] Client error:', err); setVoiceReady(false); });
-      client.on('telnyx.notification', (notification) => {
-        if (notification.type !== 'callUpdate') return;
-        handleCallStateChange(notification.call);
-      });
-
-      await client.connect();
-      telnyxClientRef.current = client;
-    } catch (err) {
-      console.error('[VOICE] Init failed:', err.message);
-    }
+    setVoiceReady(false);
+    addToast('Calling is available in the Vici Inbox iPhone app');
   }
 
   // Tear down any existing client and reconnect only after an explicit user

@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
-const { isBrowserUserAgent } = require('../lib/client-platform');
+const { isNativeIOSClient } = require('../lib/client-platform');
 const { normalisePhone } = require('../lib/phone');
 const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
 
@@ -8,12 +8,15 @@ const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status
 // Protected by requireAuth at mount point in server.js
 router.get('/token', async (req, res) => {
   try {
-    if (isBrowserUserAgent(req.get('user-agent'))) {
+    if (!isNativeIOSClient(req.get('user-agent'), req.get('x-vici-client'))) {
       return res.status(403).json({
         error: 'Browser calling is disabled; use Vici Inbox on iPhone.'
       });
     }
 
+    // SIP credentials must never be cached by a browser, proxy, or the app's
+    // URL cache. The iOS app keeps the current value securely in Keychain.
+    res.set('Cache-Control', 'no-store');
     res.json({
       login: process.env.TELNYX_SIP_USERNAME,
       password: process.env.TELNYX_SIP_PASSWORD,

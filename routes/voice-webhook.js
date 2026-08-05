@@ -2,7 +2,6 @@ const router = require('express').Router();
 const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
-const { sendPushToAll } = require('../push-notify');
 const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/telnyx-api');
 const { finalCallStatus } = require('../lib/call-status');
 
@@ -171,16 +170,6 @@ router.post('/', async (req, res) => {
         const callerName = await lookupCallerName(contactPhone);
         rememberCall(cid, { phone: contactPhone, callerName });
 
-        // Push notification — fires BEFORE answerCall so user always gets notified
-        sendPushToAll({
-          type: 'incoming_call',
-          title: 'Incoming Call',
-          body: `${callerName || contactPhone} is calling`,
-          url: '/?call=incoming',
-          caller_phone: contactPhone,
-          caller_name: callerName
-        }).catch(e => console.error('[VOICE] Push error:', e.message));
-
         broadcast({ type: 'call_update', event: 'initiated', call_control_id: cid, direction: 'inbound', contact_phone: contactPhone });
 
         // Answer the call
@@ -260,11 +249,9 @@ router.post('/', async (req, res) => {
         await dbUpdate({ status: finalStatus, duration_seconds: duration, ended_at: new Date().toISOString() }, cid);
         broadcast({ type: 'call_update', event: 'hangup', call_control_id: cid, status: finalStatus, duration });
 
-        if (finalStatus === 'missed') {
-          const missedPhone = log?.contact_phone || contactPhone;
-          const missedName = await lookupCallerName(missedPhone);
-          sendPushToAll({ type: 'missed_call', title: 'Missed Call', body: `Missed call from ${missedName || missedPhone || from}`, url: '/?tab=voice', caller_phone: missedPhone, caller_name: missedName }).catch(() => {});
-        }
+        // Telnyx delivers native VoIP pushes and CallKit owns missed-call UI.
+        // Do not send a second browser notification that looks like a
+        // competing call endpoint.
         break;
       }
 
