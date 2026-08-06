@@ -290,10 +290,34 @@ struct ActivityView: View {
                 Section("Queued automations") {
                     if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
                     ForEach(model.queue) { item in
-                        ActivityRow(item: item, date: item.sendAt)
-                            .swipeActions {
-                                Button("Cancel", role: .destructive) { cancelTarget = item }
+                        // Visible button rather than swipe-only: a hidden
+                        // gesture is undiscoverable, and stopping a message
+                        // before it reaches a customer is time-sensitive.
+                        // The swipe stays for anyone used to it.
+                        HStack(alignment: .top, spacing: 12) {
+                            // ActivityRow already stretches to fill, so it takes
+                            // the slack and the button keeps its intrinsic width.
+                            ActivityRow(item: item, date: item.sendAt)
+                            Button {
+                                cancelTarget = item
+                            } label: {
+                                if model.cancellingID == item.id {
+                                    ProgressView()
+                                } else {
+                                    Text("Cancel")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                }
                             }
+                            // Borderless keeps the button's tap target separate
+                            // from the row's, which List would otherwise merge.
+                            .buttonStyle(.borderless)
+                            .disabled(model.cancellingID != nil)
+                            .accessibilityLabel("Cancel scheduled \(item.flowType ?? "automation")")
+                        }
+                        .swipeActions {
+                            Button("Cancel", role: .destructive) { cancelTarget = item }
+                        }
                     }
                 }
                 Section("Recent sends") {

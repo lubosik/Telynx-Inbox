@@ -158,6 +158,9 @@ final class ActivityModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var flow = "all"
     @Published var errorMessage: String?
+    /// Set while a cancel is in flight so the row can show progress and the
+    /// button cannot be tapped twice.
+    @Published private(set) var cancellingID: String?
 
     func load() async {
         isLoading = stats == nil
@@ -175,6 +178,9 @@ final class ActivityModel: ObservableObject {
     }
 
     func cancel(_ item: ActivityRecord) async {
+        guard cancellingID == nil else { return }
+        cancellingID = item.id
+        defer { cancellingID = nil }
         do {
             try await APIClient.shared.cancelScheduledMessage(id: item.id)
             await load()
