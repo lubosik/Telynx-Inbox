@@ -4,6 +4,7 @@ const { isNativeIOSClient } = require('../lib/client-platform');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
 const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
+const { countUnseenMissedCalls, markMissedCallsSeen } = require('../lib/missed-calls');
 
 // GET /api/voice/token — returns SIP credentials to the native iOS app only.
 // Protected by requireAuth at mount point in server.js
@@ -66,6 +67,22 @@ router.get('/logs', async (req, res) => {
   }
 
   res.json(logs.map(log => ({ ...log, contact_name: names.get(log.contact_phone) || null })));
+});
+
+// GET /api/voice/missed-count — outstanding missed calls for the app badge
+router.get('/missed-count', async (_req, res) => {
+  res.json({ count: await countUnseenMissedCalls() });
+});
+
+// POST /api/voice/logs/seen — the operator opened call history, so the missed
+// calls in it are no longer new. Registered before /logs/:id so the literal
+// path is never mistaken for a record id.
+router.post('/logs/seen', async (_req, res) => {
+  const { marked, ok } = await markMissedCallsSeen();
+  // A failure here only means the badge did not clear server-side; the app
+  // keeps its own record of what has been seen, so report the outcome rather
+  // than failing the request.
+  res.json({ marked, ok, count: await countUnseenMissedCalls() });
 });
 
 // GET /api/voice/logs/:id

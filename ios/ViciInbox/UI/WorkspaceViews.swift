@@ -367,6 +367,7 @@ private struct ActivityRow: View {
 }
 
 struct CallsView: View {
+    @ObservedObject var model: CallHistoryModel
     @State private var section = 0
     var body: some View {
         NavigationStack {
@@ -374,14 +375,14 @@ struct CallsView: View {
                 Picker("Calls section", selection: $section) {
                     Text("Keypad").tag(0); Text("History").tag(1)
                 }.pickerStyle(.segmented).padding()
-                if section == 0 { DialerView() } else { CallHistoryView() }
+                if section == 0 { DialerView() } else { CallHistoryView(model: model) }
             }.navigationTitle("Calls")
         }
     }
 }
 
 private struct CallHistoryView: View {
-    @StateObject private var model = CallHistoryModel()
+    @ObservedObject var model: CallHistoryModel
     @EnvironmentObject private var session: SessionModel
     var body: some View {
         Group {
@@ -407,9 +408,22 @@ private struct CallHistoryView: View {
                             Button { session.startOutgoingCall(to: phone) } label: { Image(systemName: "phone") }.buttonStyle(.borderless)
                         }
                     }
-                }.listStyle(.plain).refreshable { await model.load() }
+                }.listStyle(.plain)
+                    .refreshable { await model.load(); await model.markHistorySeen() }
             }
-        }.task { if model.logs.isEmpty { await model.load() } }
+        }
+        // Reaching this list is what clears the missed-call count: the operator
+        // can see who called without opening anything further.
+        .task {
+            if model.logs.isEmpty { await model.load() }
+            await model.markHistorySeen()
+        }
+        // A refresh can raise the count while this list is already on screen —
+        // returning to the foreground reloads it. Clear it again rather than
+        // showing a badge for calls the operator is currently looking at.
+        .onChange(of: model.unseenMissed) { count in
+            if count > 0 { Task { await model.markHistorySeen() } }
+        }
     }
 
     private func icon(_ log: CallLogRecord) -> String {

@@ -223,6 +223,34 @@ legacy registrations. A future per-agent rollout should use separate telephony
 credentials and explicit first-answer routing rather than re-enabling browser
 calling.
 
+## Missed-call and unread badges
+
+iOS gives an app a single Home Screen badge, so it carries both halves of the
+inbox: unread messages plus missed calls nobody has looked at. Five unread and
+two missed shows **7** on the icon, **5** on Inbox and **2** on Calls.
+
+The missed count clears by *seeing* call history, not by opening each call —
+the same rule WhatsApp uses. Switching the Calls tab to **History** clears it.
+Staying on **Keypad** does not.
+
+"Seen" is tracked in two places, deliberately:
+
+| Where | Purpose |
+|---|---|
+| `call_logs.seen_at` | Lets the server compute the badge it attaches to message pushes, and clears the count on a second signed-in device |
+| `vici.calls.seen-missed-ids` in `UserDefaults` | Keeps the in-app badge correct offline, when the mark request fails, and before the migration below is applied |
+
+**One-time migration:** run `scripts/missed-calls-seen-migration.sql` in the
+Supabase SQL editor. Until it is applied, everything still works, with one
+gap — an incoming SMS push resets the Home Screen badge to the unread count
+alone, dropping the missed-call part until the app is next opened. The
+migration also backfills existing missed calls as seen, so applying it does not
+light up the badge with old history.
+
+A call missed while the app is in the background moves the badge immediately:
+the VoIP push keeps the process alive, so it does not wait for the next launch.
+Call history replaces that estimate with the server's count when it loads.
+
 ## Native message notifications
 
 The repository-side implementation is complete. The same inbound Telnyx

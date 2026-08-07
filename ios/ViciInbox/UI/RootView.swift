@@ -24,7 +24,11 @@ struct RootView: View {
 struct MainTabView: View {
     @State private var selection = 0
     @StateObject private var inboxModel = InboxModel()
+    // Owned here rather than inside the Calls tab so the badge is right before
+    // the operator ever opens it.
+    @StateObject private var callsModel = CallHistoryModel()
     @ObservedObject private var notifications = MessageNotificationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $selection) {
@@ -41,8 +45,9 @@ struct MainTabView: View {
                 .tabItem { Label("Automations", systemImage: "bolt.fill") }
                 .tag(2)
 
-            CallsView()
+            CallsView(model: callsModel)
                 .tabItem { Label("Calls", systemImage: "phone.fill") }
+                .badge(callsModel.unseenMissed)
                 .tag(3)
 
             SettingsView()
@@ -51,6 +56,13 @@ struct MainTabView: View {
         }
         .onChange(of: notifications.pendingConversationPhone) { phone in
             if phone != nil { selection = 0 }
+        }
+        // RootView replaces this whole view with the in-call screen while a call
+        // is up, so this also runs each time a call finishes — which is exactly
+        // when a new missed call would have appeared.
+        .task { await callsModel.load() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { Task { await callsModel.load() } }
         }
     }
 }

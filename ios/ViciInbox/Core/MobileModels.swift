@@ -295,8 +295,18 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     let startedAt: String?
     let recordingURL: String?
     let contactName: String?
+    /// Set once anyone has opened call history. Nil on a schema that has not had
+    /// scripts/missed-calls-seen-migration.sql applied, which is why the app
+    /// also keeps its own record of what it has shown — see CallHistoryModel.
+    let seenAt: String?
 
     var id: String { recordID.rawValue }
+
+    /// What the badge counts: a call that came in and was not picked up. The
+    /// outbound leg to sip:USERNAME is an implementation detail and the backend
+    /// already filters it out of history.
+    var isMissedInbound: Bool { direction == "inbound" && status == "missed" }
+
     enum CodingKeys: String, CodingKey {
         case recordID = "id"
         case direction
@@ -306,6 +316,7 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
         case startedAt = "started_at"
         case recordingURL = "recording_url"
         case contactName = "contact_name"
+        case seenAt = "seen_at"
     }
 }
 

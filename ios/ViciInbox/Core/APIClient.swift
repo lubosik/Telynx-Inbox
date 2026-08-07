@@ -229,6 +229,13 @@ actor APIClient {
         try await decodedGET("/api/voice/logs", queryItems: [URLQueryItem(name: "page", value: String(page))])
     }
 
+    /// Clears the missed-call badge for everyone signed in. Deliberately
+    /// non-throwing: the device has already recorded what it has shown, so a
+    /// failure here must not surface an error over call history.
+    func markMissedCallsSeen() async {
+        _ = try? await post("/api/voice/logs/seen", body: [:])
+    }
+
     // MARK: - Voice
 
     /// Fetches the current iOS-only SIP credentials. Normal launches may fall

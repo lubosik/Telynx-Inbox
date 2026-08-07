@@ -601,6 +601,15 @@ final class TelnyxVoiceManager: NSObject {
             status = call.isInbound ? "missed" : "failed"
         }
         let duration = call.connectedAt.map { Int(Date().timeIntervalSince($0)) }
+
+        // Move the Home Screen badge now. A push-woken process is only briefly
+        // alive, and waiting for the next launch to reflect the call would mean
+        // the icon showed nothing until the app was opened. Call history
+        // replaces this estimate with the server's count when it next loads.
+        if status == "missed" {
+            Task { @MainActor in await MessageNotificationManager.shared.noteMissedCall() }
+        }
+
         Task {
             await APIClient.shared.logCall(direction: call.isInbound ? "inbound" : "outbound",
                                            phone: call.callerNumber,

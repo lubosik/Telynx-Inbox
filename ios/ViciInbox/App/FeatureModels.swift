@@ -25,7 +25,7 @@ final class InboxModel: ObservableObject {
         do {
             let loaded = try await APIClient.shared.fetchConversations()
             if loaded != conversations { conversations = loaded }
-            await MessageNotificationManager.shared.updateAppBadge(count: unreadTotal)
+            await MessageNotificationManager.shared.setUnreadMessages(unreadTotal)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -192,12 +192,78 @@ final class ActivityModel: ObservableObject {
 final class CallHistoryModel: ObservableObject {
     @Published private(set) var logs: [CallLogRecord] = []
     @Published private(set) var isLoading = false
+    /// Drives the red count on the Calls tab.
+    @Published private(set) var unseenMissed = 0
     @Published var errorMessage: String?
+
+    /// Missed calls this device has already shown in history.
+    ///
+    /// The server tracks the same thing in `call_logs.seen_at`, which is what
+    /// keeps the Home Screen badge correct on a message push. This local copy
+    /// exists so the badge still clears on a database that has not had
+    /// scripts/missed-calls-seen-migration.sql applied, and when the request to
+    /// mark them fails. Ids are used rather than a timestamp so there is no
+    /// dependence on the device clock agreeing with the server's.
+    private let seenIDsKey = "vici.calls.seen-missed-ids"
+    /// History returns 50 rows a page, so this cannot drop an id still on screen.
+    private let seenIDLimit = 300
+    private let didSeedKey = "vici.calls.seeded-existing-history"
+
+    private var seenIDs: [String] {
+        get { UserDefaults.standard.stringArray(forKey: seenIDsKey) ?? [] }
+        set { UserDefaults.standard.set(newValue.suffix(seenIDLimit).map { $0 }, forKey: seenIDsKey) }
+    }
 
     func load() async {
         isLoading = logs.isEmpty
         defer { isLoading = false }
         do { logs = try await APIClient.shared.fetchCallLogs(); errorMessage = nil }
         catch { errorMessage = error.localizedDescription }
+        seedExistingHistoryIfNeeded()
+        await recount()
+    }
+
+    /// Calls that happened before this device ever ran the feature are history,
+    /// not a backlog of notifications. Without this the badge would open on a
+    /// count of every missed call ever recorded. Mirrors the same one-off
+    /// backfill in scripts/missed-calls-seen-migration.sql.
+    private func seedExistingHistoryIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: didSeedKey) else { return }
+        // Only seed once the first response has actually arrived, or a failed
+        // load would mark the flag with nothing recorded and let old calls
+        // through on the next attempt.
+        guard !logs.isEmpty else { return }
+        seenIDs = seenIDs + logs.filter(\.isMissedInbound).map(\.id)
+        defaults.set(true, forKey: didSeedKey)
+    }
+
+    private func recount() async {
+        let seen = Set(seenIDs)
+        unseenMissed = logs.filter { $0.isMissedInbound && $0.seenAt == nil && !seen.contains($0.id) }.count
+        await MessageNotificationManager.shared.setMissedCalls(unseenMissed)
+    }
+
+    /// Called when call history is actually on screen. Looking at the list is
+    /// what clears the count, the same way WhatsApp behaves — the operator does
+    /// not have to open each call.
+    func markHistorySeen() async {
+        var seen = seenIDs
+        let known = Set(seen)
+        let newlySeen = logs.filter(\.isMissedInbound).map(\.id).filter { !known.contains($0) }
+        if !newlySeen.isEmpty {
+            seen.append(contentsOf: newlySeen)
+            seenIDs = seen
+        }
+
+        // Cleared unconditionally. A call missed while the app was in the
+        // background moves the Home Screen badge before its log row is written,
+        // so the count can be non-zero with nothing new in the list yet.
+        unseenMissed = 0
+        await MessageNotificationManager.shared.setMissedCalls(0)
+        // Best effort: this keeps the badge attached to message pushes correct
+        // and clears the count on the other signed-in device. A failure only
+        // means the server copy lags; this device has already recorded it.
+        await APIClient.shared.markMissedCallsSeen()
     }
 }

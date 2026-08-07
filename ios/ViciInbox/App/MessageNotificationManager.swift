@@ -21,6 +21,19 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     private var deviceToken: String?
     private var backendRegistrationEnabled = false
 
+    // MARK: - Home Screen badge
+    //
+    // iOS gives the app one badge number, so it has to carry both halves of the
+    // inbox: unread messages and missed calls. Both are persisted because a VoIP
+    // push can cold-launch this process in the background, where an in-memory
+    // count would start at zero and silently wipe the other half of the badge.
+
+    @Published private(set) var unreadMessages = 0
+    @Published private(set) var missedCalls = 0
+
+    private let unreadDefaultsKey = "vici.badge.unread-messages"
+    private let missedCallsDefaultsKey = "vici.badge.missed-calls"
+
     var statusText: String {
         switch authorizationStatus {
         case .authorized, .provisional, .ephemeral:
@@ -42,6 +55,11 @@ final class MessageNotificationManager: NSObject, ObservableObject {
 
     private override init() {
         super.init()
+        // Restored rather than defaulted to zero: a VoIP push can cold-launch
+        // this process, and a fresh count would drop the badge the operator can
+        // currently see on the Home Screen.
+        unreadMessages = UserDefaults.standard.integer(forKey: unreadDefaultsKey)
+        missedCalls = UserDefaults.standard.integer(forKey: missedCallsDefaultsKey)
     }
 
     func configure() {
@@ -84,12 +102,44 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         pendingConversationPhone = nil
     }
 
-    /// Reconciles the Home Screen badge with the server-backed unread total.
+    /// Reconciles the message half of the badge with the server-backed unread
+    /// total.
+    func setUnreadMessages(_ count: Int) async {
+        unreadMessages = max(0, count)
+        UserDefaults.standard.set(unreadMessages, forKey: unreadDefaultsKey)
+        await applyBadge()
+    }
+
+    /// Reconciles the call half of the badge with the missed calls nobody has
+    /// looked at yet.
+    func setMissedCalls(_ count: Int) async {
+        missedCalls = max(0, count)
+        UserDefaults.standard.set(missedCalls, forKey: missedCallsDefaultsKey)
+        await applyBadge()
+    }
+
+    /// A call that rang and was not answered. The VoIP push keeps this process
+    /// alive for the duration of the call even when the app is in the
+    /// background, so the badge can move immediately rather than waiting for the
+    /// next launch. The server-derived count replaces this estimate as soon as
+    /// call history loads.
+    func noteMissedCall() async {
+        await setMissedCalls(missedCalls + 1)
+    }
+
+    /// Both halves at once, for sign-out. A signed-out device must not keep
+    /// advertising a count it can no longer refresh.
+    func clearBadge() async {
+        await setUnreadMessages(0)
+        await setMissedCalls(0)
+    }
+
     /// Failures are diagnostic only and must not make notification registration
     /// appear broken in Settings.
-    func updateAppBadge(count: Int) async {
+    private func applyBadge() async {
         do {
-            try await UNUserNotificationCenter.current().setBadgeCount(max(0, count))
+            try await UNUserNotificationCenter.current()
+                .setBadgeCount(max(0, unreadMessages + missedCalls))
         } catch {
             Log.push("app icon badge update failed")
         }

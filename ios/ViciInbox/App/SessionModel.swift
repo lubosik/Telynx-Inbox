@@ -60,7 +60,7 @@ final class SessionModel: ObservableObject {
         // then rings for calls it cannot answer.
         await voice.disablePushNotificationsAndWait()
         await MessageNotificationManager.shared.unregisterFromBackend()
-        await MessageNotificationManager.shared.updateAppBadge(count: 0)
+        await MessageNotificationManager.shared.clearBadge()
         voice.disconnect()
         await APIClient.shared.logout()
         CredentialStore.clearAll()
