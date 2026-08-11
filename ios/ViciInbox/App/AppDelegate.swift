@@ -10,6 +10,23 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     private var pushRegistry: PKPushRegistry?
 
+    /// The last VoIP token PushKit handed us, kept here as well as in the voice
+    /// manager. PushKit delivers the token exactly once per launch, through the
+    /// delegate callback below — it cannot be asked for it again. Signing out
+    /// clears the voice manager's copy, so without this the app would sit on
+    /// "Waiting for VoIP token…" until the process was relaunched, unable to
+    /// receive calls.
+    ///
+    /// Written from the registry's main queue and read from the voice manager's
+    /// async connect path, so access is locked rather than left to chance.
+    private static let voIPTokenLock = NSLock()
+    private static var storedVoIPPushToken: String?
+
+    static var lastVoIPPushToken: String? {
+        get { voIPTokenLock.lock(); defer { voIPTokenLock.unlock() }; return storedVoIPPushToken }
+        set { voIPTokenLock.lock(); defer { voIPTokenLock.unlock() }; storedVoIPPushToken = newValue }
+    }
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         Log.app("didFinishLaunching")
@@ -59,6 +76,7 @@ extension AppDelegate: PKPushRegistryDelegate {
         // form removes an avoidable variable from push-token troubleshooting.
         let token = credentials.token.reduce("") { $0 + String(format: "%02X", $1) }
         Log.push("received VoIP push token")
+        AppDelegate.lastVoIPPushToken = token
         TelnyxVoiceManager.shared.updatePushToken(token)
     }
 
@@ -66,6 +84,9 @@ extension AppDelegate: PKPushRegistryDelegate {
                       didInvalidatePushTokenFor type: PKPushType) {
         guard type == .voIP else { return }
         Log.push("VoIP push token invalidated")
+        // Only iOS itself reaches here, and it means the token is genuinely
+        // dead — unlike sign-out, which must not discard it.
+        AppDelegate.lastVoIPPushToken = nil
         TelnyxVoiceManager.shared.invalidatePushToken()
     }
 

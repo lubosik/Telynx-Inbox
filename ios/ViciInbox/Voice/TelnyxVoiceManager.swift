@@ -212,6 +212,16 @@ final class TelnyxVoiceManager: NSObject {
             telnyxClient.disconnect()
         }
 
+        // Sign-out clears the token so a signed-out device stops being pushed.
+        // PushKit will not deliver it a second time in the same process, so
+        // signing back in has to take it from the copy the app delegate kept —
+        // otherwise calling stays dead until the app is force-quit.
+        if pushDeviceToken?.isEmpty != false, let retained = AppDelegate.lastVoIPPushToken,
+           !retained.isEmpty {
+            Log.push("restored VoIP token after sign-out")
+            pushDeviceToken = retained
+        }
+
         // A successful SIP socket without a PushKit token looks healthy but
         // cannot wake the app for background calls. Wait for PushKit; its
         // update callback immediately retries this connection.
