@@ -107,7 +107,7 @@ private struct ConversationRow: View {
                     Spacer()
                     if let count = conversation.unreadCount, count > 0 {
                         Text(String(count)).font(.caption2.bold()).foregroundColor(.white)
-                            .padding(.horizontal, 7).padding(.vertical, 3).background(Color.blue).clipShape(Capsule())
+                            .padding(.horizontal, 7).padding(.vertical, 3).background(ViciTheme.tealFill).clipShape(Capsule())
                     }
                 }
             }
@@ -198,7 +198,7 @@ struct MessageThreadView: View {
                     .lineLimit(1...5).textFieldStyle(.roundedBorder)
                 Button(action: send) {
                     if model.isSending { ProgressView().controlSize(.small) }
-                    else { Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(.blue) }
+                    else { Image(systemName: "arrow.up.circle.fill").font(.title).foregroundColor(ViciTheme.tint) }
                 }
                 .disabled(model.isSending || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && imageData.isEmpty))
             }
@@ -264,7 +264,7 @@ private struct MessageBubble: View {
                 if let body = message.body, !body.isEmpty {
                     Text(body).textSelection(.enabled)
                         .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(message.isInbound ? Color(.secondarySystemBackground) : Color.blue)
+                        .background(message.isInbound ? ViciTheme.bubbleIn : ViciTheme.bubbleOut)
                         .foregroundColor(message.isInbound ? .primary : .white)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
@@ -274,7 +274,7 @@ private struct MessageBubble: View {
                     }
                     if !message.isInbound, let status = message.status {
                         Text(statusLabel(status)).font(.caption2)
-                            .foregroundColor(status.lowercased() == "failed" ? Color.red : Color.secondary)
+                            .foregroundColor(status.lowercased() == "failed" ? ViciTheme.destructive : Color.secondary)
                             .accessibilityHint(statusHint(status))
                     }
                 }
@@ -334,7 +334,7 @@ struct InitialsAvatar: View {
 
     var body: some View {
         ZStack {
-            Circle().fill(Color(.tertiarySystemFill))
+            Circle().fill(ViciTheme.avatarFill)
             if let imageURL, let url = URL(string: imageURL) {
                 AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
                     .clipShape(Circle())
@@ -344,6 +344,7 @@ struct InitialsAvatar: View {
 
     private var initials: some View {
         Text(String(name.split(separator: " ").prefix(2).compactMap(\.first)).uppercased()).font(.subheadline.bold())
+            .foregroundStyle(ViciTheme.onAvatar)
     }
 }
 

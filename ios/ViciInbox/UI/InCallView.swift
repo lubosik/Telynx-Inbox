@@ -16,12 +16,12 @@ struct InCallView: View {
 
             VStack(spacing: 10) {
                 Circle()
-                    .fill(Color.green.opacity(0.18))
+                    .fill(ViciTheme.mintFill)
                     .frame(width: 108, height: 108)
                     .overlay(
                         Text(initials)
                             .font(.system(size: 40, weight: .medium))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(ViciTheme.tint)
                     )
 
                 Text(call.displayTitle)
@@ -60,7 +60,7 @@ struct InCallView: View {
                     .font(.system(size: 30))
                     .foregroundStyle(.white)
                     .frame(width: 76, height: 76)
-                    .background(Circle().fill(Color.red))
+                    .background(Circle().fill(ViciTheme.destructive))
             }
             .padding(.top, 8)
 

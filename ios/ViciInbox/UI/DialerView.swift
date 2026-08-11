@@ -53,7 +53,7 @@ struct DialerView: View {
                         .font(.system(size: 30))
                         .foregroundStyle(.white)
                         .frame(width: 72, height: 72)
-                        .background(Circle().fill(canCall ? Color.green : Color.green.opacity(0.4)))
+                        .background(Circle().fill(canCall ? ViciTheme.tealFill : ViciTheme.tealFill.opacity(0.4)))
                 }
                 .disabled(!canCall)
 
@@ -81,7 +81,7 @@ struct DialerView: View {
     private var connectionBanner: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(session.isVoiceReady ? Color.green : Color.orange)
+                .fill(session.isVoiceReady ? ViciTheme.success : ViciTheme.warning)
                 .frame(width: 8, height: 8)
             Text(session.voiceStatusText)
                 .font(.footnote)

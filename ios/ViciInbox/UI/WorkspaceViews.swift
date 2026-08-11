@@ -42,7 +42,7 @@ struct ContactsView: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         HStack(spacing: 5) {
                                             Text("Vici Peptides").fontWeight(.semibold)
-                                            Image(systemName: "pin.fill").font(.caption2).foregroundColor(.blue)
+                                            Image(systemName: "pin.fill").font(.caption2).foregroundColor(ViciTheme.tint)
                                         }
                                         Text(PhoneFormatter.pretty(session.callerNumber))
                                             .font(.caption).foregroundStyle(.secondary)
@@ -275,9 +275,9 @@ struct ActivityView: View {
                 if let stats = model.stats {
                     Section("Today") {
                         HStack {
-                            Stat(value: stats.pending, label: "Pending", color: .orange)
-                            Stat(value: stats.sentToday, label: "Sent", color: .green)
-                            Stat(value: stats.failedToday, label: "Failed", color: .red)
+                            Stat(value: stats.pending, label: "Pending", color: ViciTheme.warning)
+                            Stat(value: stats.sentToday, label: "Sent", color: ViciTheme.success)
+                            Stat(value: stats.failedToday, label: "Failed", color: ViciTheme.destructive)
                             Stat(value: stats.cancelledToday, label: "Cancelled", color: .secondary)
                         }.padding(.vertical, 6)
                     }
@@ -306,7 +306,7 @@ struct ActivityView: View {
                                 } else {
                                     Text("Cancel")
                                         .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(.red)
+                                        .foregroundStyle(ViciTheme.destructive)
                                 }
                             }
                             // Borderless keeps the button's tap target separate
@@ -430,5 +430,5 @@ private struct CallHistoryView: View {
         if log.status == "missed" { return "phone.down.fill" }
         return log.direction == "inbound" ? "phone.arrow.down.left.fill" : "phone.arrow.up.right.fill"
     }
-    private func color(_ log: CallLogRecord) -> Color { log.status == "missed" ? .red : .green }
+    private func color(_ log: CallLogRecord) -> Color { log.status == "missed" ? ViciTheme.destructive : ViciTheme.success }
 }

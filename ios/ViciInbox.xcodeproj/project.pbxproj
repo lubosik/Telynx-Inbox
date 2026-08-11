@@ -22,6 +22,7 @@
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
+		825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A571897E3D65CD158FDBD81 /* Theme.swift */; };
 		54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */; };
 		2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */; };
 		B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CE3B0D9381CE8972333135E /* CallModels.swift */; };
@@ -47,6 +48,7 @@
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		2A571897E3D65CD158FDBD81 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViews.swift; sourceTree = "<group>"; };
 		23DEE7966E5D5682DBBCE79F /* CallKitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitCoordinator.swift; sourceTree = "<group>"; };
 		7CE3B0D9381CE8972333135E /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
@@ -126,6 +128,7 @@
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
+				2A571897E3D65CD158FDBD81 /* Theme.swift */,
 				1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */,
 			);
 			path = UI;
@@ -243,6 +246,7 @@
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
+				825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */,
 				54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */,
 				2B5CDA794B004A857D5E4E5A /* CallKitCoordinator.swift in Sources */,
 				B96C7CA9A795A823B293C74E /* CallModels.swift in Sources */,
