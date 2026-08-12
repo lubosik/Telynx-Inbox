@@ -1,3 +1,11 @@
+// Generates the PWA icons. This is a one-off local utility — the icons it
+// writes are committed, so it is not part of the build and `canvas` is
+// deliberately NOT in package.json: canvas has a native addon, and when its
+// prebuilt binary fails to download it falls back to a node-gyp source build
+// that needs Python, which the deploy image does not have. Listing it at all
+// made every deploy hostage to that download. Install it on demand instead:
+//
+//   npm install --no-save canvas && node generate-icons.js
 const { createCanvas } = require('canvas');
 const fs = require('fs');
 const path = require('path');
