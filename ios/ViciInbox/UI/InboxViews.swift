@@ -125,6 +125,9 @@ private struct ConversationRow: View {
 struct MessageThreadView: View {
     let conversation: ConversationSummary
     @ObservedObject var model: InboxModel
+    // Needed for the call button. Supplied at the app root (ViciInboxApp) and
+    // inherited through the NavigationLink that pushes this view.
+    @EnvironmentObject private var session: SessionModel
     @State private var draft = ""
     @State private var replyTarget: MessageRecord?
     @State private var pickerItems: [PhotosPickerItem] = []
@@ -223,9 +226,19 @@ struct MessageThreadView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button { UIApplication.shared.open(URL(string: "tel:\(conversation.phone)")!) } label: {
+                // Place the call through Telnyx, exactly as the Dialer and the
+                // call-history rows do.
+                //
+                // This used to open "tel:" — handing off to the native dialer,
+                // which placed an ordinary cellular call from the user's own
+                // mobile. The customer saw a personal number instead of the
+                // business line, the app never learned the call happened, and
+                // nothing was logged. It was also the likeliest button to
+                // press, sitting at the top of a customer's conversation.
+                Button { session.startOutgoingCall(to: conversation.phone) } label: {
                     Image(systemName: "phone")
                 }
+                .disabled(!session.isVoiceReady)
             }
         }
     }
