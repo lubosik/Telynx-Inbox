@@ -11,8 +11,7 @@
 
 const { supabase }              = require('../db');
 const { sendAndLog, scheduleSMS } = require('./utils');
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const { privateCompletion } = require('../lib/openrouter-private');
 
 // ---------------------------------------------------------------------------
 // Shared context builder — city from sms_contacts, products from WooCommerce
@@ -72,27 +71,15 @@ Keep everything else exactly the same, including the FedEx tracking line and the
 Return ONLY the modified message. Nothing else.`;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
-        'X-Title': 'Vici SMS'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        max_tokens: 175,
-        temperature: 0.4
-      }),
-      signal: controller.signal
+    const completion = await privateCompletion({
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      maxTokens: 175,
+      temperature: 0.4,
+      timeoutMs: 5000,
+      title: 'Vici Shipment Personalisation',
+      sensitiveValues: [city, orderId]
     });
-    clearTimeout(timer);
-    const data = await response.json();
-    const msg = data.choices?.[0]?.message?.content?.trim();
+    const msg = completion.content;
     if (!msg || msg.length > 420 || msg.includes('—') || msg.includes('–')) {
       console.log(`[PERSONALISE] Shipped: invalid — fallback | order=${orderId}`);
       return null;
@@ -118,27 +105,15 @@ Task: Naturally mention their city in the check-in — for example change "every
 Return ONLY the modified message. Nothing else.`;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
-        'X-Title': 'Vici SMS'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        max_tokens: 100,
-        temperature: 0.4
-      }),
-      signal: controller.signal
+    const completion = await privateCompletion({
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+      maxTokens: 100,
+      temperature: 0.4,
+      timeoutMs: 5000,
+      title: 'Vici Delivery Personalisation',
+      sensitiveValues: [city, identifier]
     });
-    clearTimeout(timer);
-    const data = await response.json();
-    const msg = data.choices?.[0]?.message?.content?.trim();
+    const msg = completion.content;
     if (!msg || msg.length > 320 || msg.includes('—') || msg.includes('–')) return null;
     console.log(`[PERSONALISE] Delivery generated | id=${identifier} chars=${msg.length}`);
     return msg;

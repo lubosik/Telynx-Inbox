@@ -4,6 +4,7 @@ const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
 const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/telnyx-api');
 const { finalCallStatus } = require('../lib/call-status');
+const { archiveCallRecording } = require('../lib/private-recordings');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
@@ -257,15 +258,25 @@ router.post('/', async (req, res) => {
         break;
       }
 
-      case 'call.recording.saved':
+      case 'call.recording.saved': {
         console.log('[VOICE] Recording saved for cid=...'+cid?.slice(-6));
-        await dbUpdate({
-          recording_id: payload?.recording_id,
-          recording_url_mp3: payload?.recording_urls?.mp3,
-          recording_url_wav: payload?.recording_urls?.wav
-        }, cid);
+        const recordingID = payload?.recording_id;
+        // Never persist or expose Telnyx's temporary S3 link. Resolve the
+        // recording again through Telnyx's authenticated API and copy it into
+        // our private bucket while the provider download is available.
+        await dbUpdate({ recording_id: recordingID }, cid);
+        if (recordingID) {
+          try {
+            const archived = await archiveCallRecording(recordingID);
+            await dbUpdate(archived, cid);
+            console.log('[VOICE] Recording archived privately for cid=...'+cid?.slice(-6));
+          } catch (archiveError) {
+            console.error('[VOICE] Private recording archive failed:', archiveError.message);
+          }
+        }
         broadcast({ type: 'call_recording_saved', call_control_id: cid });
         break;
+      }
     }
 
   } catch (err) {

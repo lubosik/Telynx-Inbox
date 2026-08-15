@@ -1,5 +1,6 @@
 const { supabase } = require('./db');
 const ghl = require('./ghl');
+const { privateCompletion } = require('./lib/openrouter-private');
 
 const SYSTEM_PROMPT = `You are an AI analyst for Vici Peptides, a US research peptide e-commerce store.
 Vici sells: BPC-157, TB-500, Semaglutide, Tirzepatide, CJC-1295, Ipamorelin,
@@ -28,52 +29,48 @@ async function analyseConversation(phone) {
     .from('sms_messages')
     .select('direction, body, created_at')
     .eq('contact_phone', phone)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(50);
 
   if (!messages || messages.length === 0) return null;
 
-  const conversation = messages
+  // Minimise disclosure to the newest useful window, then restore chronology
+  // for the model. The entire lifetime thread is not needed for segmentation.
+  const conversation = [...messages].reverse()
     .map(m => `${m.direction === 'inbound' ? 'Customer' : 'Vici'}: ${m.body}`)
     .join('\n');
 
+  const { data: contact } = await supabase
+    .from('sms_contacts')
+    .select('ghl_contact_id, name, first_name, last_name, email')
+    .eq('phone', phone)
+    .maybeSingle();
+
   let parsed;
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.APP_URL || 'https://vici-sms.railway.app',
-        'X-Title': 'Vici SMS Intelligence'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `Conversation:\n${conversation}` }
-        ],
-        max_tokens: 1000,
-        temperature: 0.3
-      })
+    const completion = await privateCompletion({
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Conversation:\n${conversation}` }
+      ],
+      maxTokens: 1000,
+      temperature: 0.3,
+      title: 'Vici SMS Intelligence',
+      sensitiveValues: [
+        phone,
+        contact?.email,
+        contact?.name,
+        contact?.first_name,
+        contact?.last_name
+      ]
     });
-    const data = await response.json();
-    if (!data.choices?.[0]?.message?.content) {
-      console.error('OpenRouter analysis bad response:', JSON.stringify(data).slice(0, 200));
-      return null;
-    }
-    const raw = data.choices[0].message.content;
+    const raw = completion.content;
     const clean = raw.replace(/```json|```/g, '').trim();
     parsed = JSON.parse(clean);
   } catch (err) {
     console.error('OpenRouter analysis failed:', err.message);
     return null;
   }
-
-  const { data: contact } = await supabase
-    .from('sms_contacts')
-    .select('ghl_contact_id')
-    .eq('phone', phone)
-    .single();
 
   await supabase.from('sms_customer_profiles').upsert({
     contact_phone: phone,
@@ -140,32 +137,19 @@ async function generateCampaignBrief() {
       `${s.contact_phone}: ${s.suggestion_type} — ${s.suggestion_text}`
     ).join('\n');
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.APP_URL || '',
-        'X-Title': 'Vici SMS Intelligence'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [{
+    const completion = await privateCompletion({
+      messages: [{
           role: 'user',
           content: `You are an analyst for Vici Peptides. Based on these customer signals,
 write a 2-3 sentence insight about what customers are currently asking for and what
 campaigns would perform best right now. Be specific and actionable.\n\n${summaries}`
-        }],
-        max_tokens: 300,
-        temperature: 0.5
-      })
+      }],
+      maxTokens: 300,
+      temperature: 0.5,
+      title: 'Vici Campaign Intelligence',
+      sensitiveValues: uniquePhones
     });
-    const data = await response.json();
-    if (!data.choices?.[0]?.message?.content) {
-      console.error('Campaign brief OpenRouter bad response:', JSON.stringify(data).slice(0, 200));
-    } else {
-      overallInsight = data.choices[0].message.content;
-    }
+    overallInsight = completion.content;
   } catch (err) {
     console.error('Campaign brief OpenRouter call failed:', err.message);
   }

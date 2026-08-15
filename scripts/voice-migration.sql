@@ -16,12 +16,20 @@ CREATE TABLE IF NOT EXISTS call_logs (
   recording_id TEXT,
   recording_url_mp3 TEXT,
   recording_url_wav TEXT,
+  recording_storage_path TEXT,
+  recording_content_type TEXT,
+  recording_archived_at TIMESTAMPTZ,
+  recording_expires_at TIMESTAMPTZ,
+  recording_deleted_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ DEFAULT NOW(),
   answered_at TIMESTAMPTZ,
   ended_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_call_logs_phone ON call_logs(contact_phone);
 CREATE INDEX IF NOT EXISTS idx_call_logs_started ON call_logs(started_at DESC);
+CREATE INDEX IF NOT EXISTS call_logs_recording_expiry_idx
+  ON call_logs (recording_expires_at)
+  WHERE recording_expires_at IS NOT NULL AND recording_deleted_at IS NULL;
 ALTER TABLE call_logs DISABLE ROW LEVEL SECURITY;
 
 -- unread_count on sms_contacts (safe if already exists)

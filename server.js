@@ -8,6 +8,7 @@ const path    = require('path');
 const { verifyConnection }    = require('./db');
 const { checkAndSendDeliverySMS, pollForCarrierScans } = require('./routes/webhook-shipstation');
 const { processScheduledQueue } = require('./flows/utils');
+const { startRecordingRetentionJob } = require('./lib/private-recordings');
 require('./push-notify'); // initialises VAPID on startup
 
 const app = express();
@@ -162,6 +163,7 @@ app.listen(PORT, async () => {
   startScheduledQueue();
   startShipmentPoll();
   startDeliveryCheck();
+  startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);
   console.log(`WooCommerce: ${process.env.WC_CONSUMER_KEY ? 'configured' : 'NOT configured'}`);

@@ -8,8 +8,7 @@
 
 const { formatPhone, sendAndLog, alreadySent } = require('./utils');
 const { supabase } = require('../db');
-
-const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const { privateCompletion } = require('../lib/openrouter-private');
 
 // ---------------------------------------------------------------------------
 // Count prior SUCCESSFUL orders for this customer, excluding the current one.
@@ -206,33 +205,18 @@ Customer first name: ${firstName}
 Write a short SMS that continues this conversation naturally. Start from where the conversation left off. Confirm the order is confirmed and being prepared. Return ONLY the SMS text. No quotes. No explanation.`;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
-        'X-Title': 'Vici SMS Context'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt }
-        ],
-        max_tokens: 150,
-        temperature: 0.5
-      }),
-      signal: controller.signal
+    const completion = await privateCompletion({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      maxTokens: 150,
+      temperature: 0.5,
+      timeoutMs: 5000,
+      title: 'Vici SMS Context',
+      sensitiveValues: [phone, firstName, orderId, orderNumber]
     });
-
-    clearTimeout(timer);
-
-    const data = await response.json();
-    const generated = data.choices?.[0]?.message?.content?.trim();
+    const generated = completion.content;
 
     if (!generated || generated.length > 400) {
       console.log(`[CONTEXT] Invalid response | order=${orderId} — fallback`);
@@ -288,33 +272,18 @@ Task: Add ONE natural sentence after the first sentence. Use this style:
 Return ONLY the modified message text. Nothing else.`;
 
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://telynx-ghl-production.up.railway.app',
-        'X-Title': 'Vici SMS'
-      },
-      body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || 'anthropic/claude-3.5-haiku',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        max_tokens: 150,
-        temperature: 0.4
-      }),
-      signal: controller.signal
+    const completion = await privateCompletion({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      maxTokens: 150,
+      temperature: 0.4,
+      timeoutMs: 5000,
+      title: 'Vici SMS Personalisation',
+      sensitiveValues: [firstName, city, state, orderId]
     });
-
-    clearTimeout(timer);
-
-    const data = await response.json();
-    const personalised = data.choices?.[0]?.message?.content?.trim();
+    const personalised = completion.content;
 
     if (!personalised || personalised.length > 320) {
       console.log(`[PERSONALISE] Invalid response | order=${orderId} — fallback`);

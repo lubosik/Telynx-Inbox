@@ -8,11 +8,12 @@
  *
  * Pulls all recordings from Telnyx, matches them to call_logs by
  * call_leg_id / call_session_id / call_control_id, and fills in
- * recording_url_mp3 + recording_url_wav.
+ * private Supabase Storage metadata. Provider URLs are never retained.
  */
 
 require('dotenv').config();
 const { supabase } = require('../db');
+const { archiveCallRecording } = require('../lib/private-recordings');
 
 const TELNYX_API_KEY = process.env.TELNYX_API_KEY;
 
@@ -52,11 +53,11 @@ async function backfillRecordings() {
     return { total: 0, matched: 0, updated: 0 };
   }
 
-  // Fetch all call_logs that are missing recordings
+  // Fetch all call_logs that are not privately archived yet.
   const { data: logs, error } = await supabase
     .from('call_logs')
     .select('id, call_control_id, call_leg_id, call_session_id')
-    .is('recording_url_mp3', null);
+    .is('recording_storage_path', null);
 
   if (error) throw new Error('DB fetch error: ' + error.message);
   console.log(`[BACKFILL] Call logs missing recordings: ${logs?.length || 0}`);
@@ -80,9 +81,7 @@ async function backfillRecordings() {
   let matched = 0;
 
   for (const rec of recordings) {
-    const mp3 = rec.download_urls?.mp3 || rec.recording_urls?.mp3 || null;
-    const wav = rec.download_urls?.wav || rec.recording_urls?.wav || null;
-    if (!mp3 && !wav) continue;
+    if (!rec.id || (!rec.download_urls?.mp3 && !rec.download_urls?.wav && !rec.recording_urls?.mp3 && !rec.recording_urls?.wav)) continue;
 
     // Try to match by call_leg_id first (most precise), then session, then control id
     const log = byLegId[rec.call_leg_id]
@@ -93,20 +92,17 @@ async function backfillRecordings() {
     if (!log) continue;
     matched++;
 
-    const { error: updateErr } = await supabase
-      .from('call_logs')
-      .update({
-        recording_id: rec.id || null,
-        recording_url_mp3: mp3,
-        recording_url_wav: wav
-      })
-      .eq('id', log.id);
-
-    if (updateErr) {
-      console.error(`[BACKFILL] Update failed for log ${log.id}:`, updateErr.message);
-    } else {
+    try {
+      const archived = await archiveCallRecording(rec.id, { recording: rec });
+      const { error: updateErr } = await supabase
+        .from('call_logs')
+        .update({ recording_id: rec.id, ...archived })
+        .eq('id', log.id);
+      if (updateErr) throw new Error(updateErr.message);
       updated++;
-      console.log(`[BACKFILL] Updated log #${log.id} (cid=...${log.call_control_id?.slice(-6) || '?'})`);
+      console.log(`[BACKFILL] Privately archived log #${log.id} (cid=...${log.call_control_id?.slice(-6) || '?'})`);
+    } catch (archiveError) {
+      console.error(`[BACKFILL] Private archive failed for log ${log.id}: ${archiveError.message}`);
     }
   }
 

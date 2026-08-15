@@ -5,6 +5,11 @@ const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
 const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
 const { countUnseenMissedCalls, markMissedCallsSeen } = require('../lib/missed-calls');
+const {
+  archiveCallRecording,
+  privateCallLog,
+  signedRecordingURL
+} = require('../lib/private-recordings');
 
 // GET /api/voice/token — returns SIP credentials to the native iOS app only.
 // Protected by requireAuth at mount point in server.js
@@ -66,7 +71,11 @@ router.get('/logs', async (req, res) => {
     }));
   }
 
-  res.json(logs.map(log => ({ ...log, contact_name: names.get(log.contact_phone) || null })));
+  res.set('Cache-Control', 'no-store');
+  res.json(logs.map(log => privateCallLog({
+    ...log,
+    contact_name: names.get(log.contact_phone) || null
+  })));
 });
 
 // GET /api/voice/missed-count — outstanding missed calls for the app badge
@@ -85,6 +94,42 @@ router.post('/logs/seen', async (_req, res) => {
   res.json({ marked, ok, count: await countUnseenMissedCalls() });
 });
 
+// GET /api/voice/recordings/:id — authenticated, short-lived playback.
+// The database/API never returns Telnyx's temporary S3 link or the private
+// Storage object path. A signed URL is minted only when playback is requested.
+router.get('/recordings/:id', async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid call log id' });
+  const { data: log, error } = await supabase
+    .from('call_logs')
+    .select('id, recording_id, recording_storage_path, recording_deleted_at')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (error) return res.status(500).json({ error: 'Could not load recording' });
+  if (!log || log.recording_deleted_at) return res.status(404).json({ error: 'Recording not found' });
+
+  let storagePath = log.recording_storage_path;
+  if (!storagePath && log.recording_id) {
+    try {
+      const archived = await archiveCallRecording(log.recording_id);
+      const { error: updateError } = await supabase.from('call_logs').update(archived).eq('id', log.id);
+      if (updateError) throw new Error(updateError.message);
+      storagePath = archived.recording_storage_path;
+    } catch (archiveError) {
+      console.error(`[RECORDING] On-demand archive failed for log ${log.id}: ${archiveError.message}`);
+    }
+  }
+  if (!storagePath) return res.status(404).json({ error: 'Recording is not privately archived yet' });
+
+  try {
+    const signedURL = await signedRecordingURL(storagePath);
+    res.set('Cache-Control', 'no-store, private');
+    return res.redirect(302, signedURL);
+  } catch (signError) {
+    console.error(`[RECORDING] Signed playback failed for log ${log.id}: ${signError.message}`);
+    return res.status(500).json({ error: 'Could not open recording' });
+  }
+});
+
 // GET /api/voice/logs/:id
 router.get('/logs/:id', async (req, res) => {
   const { data } = await supabase
@@ -92,7 +137,8 @@ router.get('/logs/:id', async (req, res) => {
     .select('*')
     .eq('id', req.params.id)
     .single();
-  res.json(data || null);
+  res.set('Cache-Control', 'no-store');
+  res.json(privateCallLog(data));
 });
 
 // POST /api/voice/logs — client-side fallback when Telnyx webhook doesn't fire

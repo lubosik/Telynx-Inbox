@@ -33,6 +33,16 @@ client.
   an active-state push, which can lose the INVITE during Answer.
 - Native message alerts use standard UserNotifications/APNs from the Telnyx
   inbound-message webhook. This is separate from browser VAPID and VoIP PushKit.
+- Call recording stays functional, but provider download URLs must never be
+  returned to a client. `lib/private-recordings.js` archives audio into the
+  private `call-recordings` bucket and `/api/voice/recordings/:id` creates an
+  authenticated, short-lived playback redirect. Apply
+  `scripts/private-recordings-migration.sql` before deploying related code.
+  Retention deletion is destructive and must remain disabled until its dry run
+  and target rows are approved.
+- Every OpenRouter call must go through `lib/openrouter-private.js`. Direct
+  provider calls are forbidden because the shared boundary enforces PII
+  tokenisation, approved models/providers, ZDR, and data-collection denial.
 
 ## Important paths
 
@@ -41,6 +51,8 @@ client.
   its Babel build output.
 - `scripts/`: migrations and integration/visual test harnesses. Read a script's
   safety header before running it against configured services.
+- `scripts/private-recordings-migration.sql`: creates lifecycle columns and the
+  private call-recording bucket; apply before the matching backend deploy.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
