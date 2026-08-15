@@ -23,10 +23,7 @@ enum PhotoLibrarySaveError: LocalizedError {
 }
 
 enum PhotoLibrarySaver {
-    /// Downloads an attachment and preserves its original bytes when adding it
-    /// to Photos (important for animated GIFs). Only add-only permission is
-    /// requested; the app never needs general read access to the photo library.
-    static func saveImage(from url: URL) async throws {
+    static func imageData(from url: URL) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(from: url)
         guard let http = response as? HTTPURLResponse,
               (200...299).contains(http.statusCode),
@@ -34,6 +31,14 @@ enum PhotoLibrarySaver {
             throw PhotoLibrarySaveError.invalidResponse
         }
         guard UIImage(data: data) != nil else { throw PhotoLibrarySaveError.invalidImage }
+        return data
+    }
+
+    /// Downloads an attachment and preserves its original bytes when adding it
+    /// to Photos (important for animated GIFs). Only add-only permission is
+    /// requested; the app never needs general read access to the photo library.
+    static func saveImage(from url: URL) async throws {
+        let data = try await imageData(from: url)
 
         let status = await requestAddOnlyAuthorization()
         guard status == .authorized || status == .limited else {

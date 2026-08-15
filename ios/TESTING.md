@@ -168,6 +168,11 @@ not enough: the receiving carrier must actually deliver the attachment.
 7. Background and relaunch the app, reopen the same thread, and confirm the
    received images still load. This verifies the backend re-hosted the expiring
    Telnyx media URL rather than retaining only a temporary provider URL.
+8. Press and hold a message image. Confirm the menu contains **Reply**, **Copy**,
+   **React**, and **Save**. Copy should copy the caption when present, or the
+   image for an image-only message. Tap **Save** and confirm the image appears
+   in Photos without first opening the full-screen viewer. For a message
+   containing multiple images, Save should add every attachment.
 
 If send fails, inspect the user-visible error and Railway log without printing
 message contents. If receive or later reload fails, check the `mms-media`
