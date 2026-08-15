@@ -41,6 +41,10 @@
 	<string>Vici Inbox uses the camera when you choose to enable video during a call.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Vici Inbox can show customer names on incoming calls.</string>
+	<!-- Message attachments can be explicitly saved by the operator. The app
+	     requests add-only access and does not browse the library through PhotoKit. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Vici Inbox needs permission to save message images to your Photos library.</string>
 
 	<key>UILaunchScreen</key>
 	<dict>

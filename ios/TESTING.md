@@ -148,6 +148,33 @@ Settings notification status first, then the authenticated
 device row must say `production`; `sandbox` is only for a locally installed
 Debug build.
 
+## Test 10 — MMS send, receive and Photos saving
+
+Use disposable non-customer images and a test handset. A successful upload is
+not enough: the receiving carrier must actually deliver the attachment.
+
+1. In a Vici Inbox thread, tap the photo button and send one large HEIC camera
+   photo without a caption. Expect an outbound picture bubble, then a real image
+   on the test handset and a final Sent/Delivered state in Vici Inbox.
+2. Send four photos with a caption. Expect all four thumbnails before sending,
+   all four images on the test handset, and no `Media file too large` failure.
+3. From the test handset, send a picture-only MMS to the Vici number. Expect a
+   `Photo` notification/preview and the picture in the exact app thread.
+4. Repeat with a caption and confirm the image and text stay together.
+5. Tap a received image, tap Save, allow add-only Photos permission, and confirm
+   `Saved to Photos.` appears and the image is present in the iPhone library.
+6. Deny Photos permission once and confirm the app reports how to enable it in
+   Settings instead of claiming success. Re-enable access and repeat the save.
+7. Background and relaunch the app, reopen the same thread, and confirm the
+   received images still load. This verifies the backend re-hosted the expiring
+   Telnyx media URL rather than retaining only a temporary provider URL.
+
+If send fails, inspect the user-visible error and Railway log without printing
+message contents. If receive or later reload fails, check the `mms-media`
+Supabase bucket and `[MMS] Re-hosted inbound media` log entry. Do not use the
+live integration script unless its cleanup and fake-number safeguards have been
+reviewed for the configured environment.
+
 ## Reading logs from a terminated app
 
 The cold-launch path cannot be debugged with the Xcode console, because the app

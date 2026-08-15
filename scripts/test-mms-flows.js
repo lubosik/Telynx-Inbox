@@ -40,6 +40,19 @@ require.cache[pushPath] = {
   id: pushPath, filename: pushPath, loaded: true,
   exports: { sendPushToAll: async () => {} }
 };
+const apnsPath = require.resolve('../lib/apns-notify.js');
+require.cache[apnsPath] = {
+  id: apnsPath, filename: apnsPath, loaded: true,
+  exports: { sendNativeMessagePush: async () => ({ sent: 0, failed: 0 }) }
+};
+const intelligencePath = require.resolve('../intelligence.js');
+require.cache[intelligencePath] = {
+  id: intelligencePath, filename: intelligencePath, loaded: true,
+  exports: {
+    analyseConversation: async () => null,
+    generateCampaignBrief: async () => null
+  }
+};
 
 // Intercept ONLY Telnyx API calls; pass everything else (Supabase) through
 const realFetch = global.fetch;

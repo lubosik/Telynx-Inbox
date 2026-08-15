@@ -266,12 +266,7 @@ private struct MessageBubble: View {
             VStack(alignment: message.isInbound ? .leading : .trailing, spacing: 5) {
                 ForEach(message.mediaURLs ?? []) { media in
                     if let url = URL(string: media.url) {
-                        AsyncImage(url: url) { phase in
-                            if let image = phase.image { image.resizable().scaledToFill() }
-                            else if phase.error != nil { Image(systemName: "photo.badge.exclamationmark") }
-                            else { ProgressView() }
-                        }
-                        .frame(maxWidth: 240, minHeight: 100, maxHeight: 260).clipped().cornerRadius(12)
+                        MessageAttachmentView(url: url)
                     }
                 }
                 if let body = message.body, !body.isEmpty {
@@ -337,6 +332,110 @@ private struct MessageBubble: View {
         case "failed", "sending_failed", "delivery_failed": return "The message was not delivered."
         case "unavailable", "status_unavailable": return "Telnyx no longer has a retrievable delivery record."
         default: return "Message delivery status."
+        }
+    }
+}
+
+private struct MessageAttachmentView: View {
+    let url: URL
+    @State private var showingViewer = false
+
+    var body: some View {
+        Button { showingViewer = true } label: {
+            AsyncImage(url: url) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else if phase.error != nil {
+                    VStack(spacing: 6) {
+                        Image(systemName: "photo.badge.exclamationmark")
+                        Text("Image unavailable").font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                }
+            }
+            .frame(maxWidth: 240, minHeight: 100, maxHeight: 260)
+            .clipped()
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Message image")
+        .accessibilityHint("Opens the image with options to save or share it")
+        .sheet(isPresented: $showingViewer) {
+            MessageImageViewer(url: url)
+        }
+    }
+}
+
+private struct MessageImageViewer: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var isSaving = false
+    @State private var notice: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFit()
+                    } else if phase.error != nil {
+                        VStack(spacing: 10) {
+                            Image(systemName: "photo.badge.exclamationmark").font(.largeTitle)
+                            Text("Image unavailable").font(.headline)
+                            Text("The attachment could not be downloaded.").font(.footnote)
+                        }
+                        .multilineTextAlignment(.center)
+                            .foregroundStyle(.white)
+                    } else {
+                        ProgressView().tint(.white)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Image")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    Button(action: save) {
+                        if isSaving { ProgressView().tint(.white) }
+                        else { Image(systemName: "square.and.arrow.down") }
+                    }
+                    .disabled(isSaving)
+                    .accessibilityLabel("Save image to Photos")
+                }
+            }
+        }
+        .alert("Image", isPresented: Binding(
+            get: { notice != nil },
+            set: { if !$0 { notice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(notice ?? "")
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            do {
+                try await PhotoLibrarySaver.saveImage(from: url)
+                notice = "Saved to Photos."
+            } catch {
+                notice = error.localizedDescription
+            }
         }
     }
 }

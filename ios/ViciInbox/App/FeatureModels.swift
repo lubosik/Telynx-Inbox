@@ -57,9 +57,16 @@ final class InboxModel: ObservableObject {
         defer { isSending = false }
         do {
             var urls: [String] = []
-            for original in imageData.prefix(4) {
+            let selectedImages = Array(imageData.prefix(4))
+            // Telnyx accepts more at the API boundary, but recommends staying
+            // under 600 KB total for universal carrier compatibility. Keep a
+            // little transport/transcoding headroom and divide that budget
+            // across the complete selection instead of compressing each image
+            // independently.
+            let bytesPerImage = max(100_000, 580_000 / max(1, selectedImages.count))
+            for original in selectedImages {
                 guard let image = UIImage(data: original),
-                      let compressed = Self.carrierSafeJPEG(image) else {
+                      let compressed = Self.carrierSafeJPEG(image, maximumBytes: bytesPerImage) else {
                     throw APIError.server("One of the selected images could not be prepared.")
                 }
                 urls.append(try await APIClient.shared.uploadJPEG(compressed))
@@ -90,16 +97,31 @@ final class InboxModel: ObservableObject {
         }
     }
 
-    private static func carrierSafeJPEG(_ image: UIImage) -> Data? {
-        let maximumDimension: CGFloat = 1600
-        let scale = min(1, maximumDimension / max(image.size.width, image.size.height))
-        let size = CGSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        for quality in stride(from: 0.82, through: 0.25, by: -0.1) {
-            if let data = resized.jpegData(compressionQuality: quality), data.count <= 900_000 { return data }
+    private static func carrierSafeJPEG(_ image: UIImage, maximumBytes: Int) -> Data? {
+        guard image.size.width > 0, image.size.height > 0, maximumBytes > 0 else { return nil }
+
+        var longestEdge: CGFloat = 1_600
+        while longestEdge >= 480 {
+            let scale = min(1, longestEdge / max(image.size.width, image.size.height))
+            let size = CGSize(width: max(1, image.size.width * scale),
+                              height: max(1, image.size.height * scale))
+            let format = UIGraphicsImageRendererFormat.default()
+            format.scale = 1
+            format.opaque = true
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            let resized = renderer.image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(origin: .zero, size: size))
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }
+            for quality in stride(from: 0.82, through: 0.18, by: -0.08) {
+                if let data = resized.jpegData(compressionQuality: quality), data.count <= maximumBytes {
+                    return data
+                }
+            }
+            longestEdge *= 0.75
         }
-        return resized.jpegData(compressionQuality: 0.2)
+        return nil
     }
 }
 
