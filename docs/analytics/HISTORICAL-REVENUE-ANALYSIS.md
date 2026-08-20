@@ -35,15 +35,17 @@ The read-only source inventory found:
 
 | Source | Earliest reliable observed record | Snapshot volume |
 |---|---:|---:|
-| Local order mirror (`sms_orders`) | 17 January 2026 | 1,608 |
+| Local order mirror (`sms_orders`) | 17 January 2026 UTC / 16 January business date | 1,608 |
 | SMS messages (`sms_messages`) | 29 April 2026 | 2,665 |
 | Automation send log (`sms_sent_log`) | 27 May 2026 | 1,357 |
 | Call history (`call_logs`) | 11 June 2026 | 133 |
 | Authoritative WooCommerce orders | API snapshot | 1,712 |
 
 “All Time” must therefore not imply identical coverage for every metric. The
-Analytics API uses the earliest reliable application date for its range, while
-availability/warning metadata explains missing pre-source periods.
+Analytics API begins on 16 January in the account's `America/New_York`
+timezone so the first order observed at 03:06 UTC on 17 January is not lost at
+the civil-date boundary. Availability/warning metadata explains missing
+pre-source periods.
 
 ## 2–4. Reminder and order matching funnel
 

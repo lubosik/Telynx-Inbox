@@ -47,14 +47,13 @@ test('custom end date is inclusive and DST-safe', () => {
   assert.equal(range.previous, null);
 });
 
-test('all time starts at earliest reliable configured date', () => {
+test('all time defaults to the earliest reliable business-local date', () => {
   const range = rangeForPeriod({
     period: 'all',
-    reliableFrom: '2026-01-17',
     now: new Date('2026-08-20T00:00:00.000Z'),
     timeZone: 'America/New_York'
   });
-  assert.equal(range.start.toISOString(), '2026-01-17T05:00:00.000Z');
+  assert.equal(range.start.toISOString(), '2026-01-16T05:00:00.000Z');
   assert.equal(range.previous, null);
 });
 
