@@ -19,10 +19,10 @@
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
-		121A338FB83D393D2FE6AA6B /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
+		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
 		825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A571897E3D65CD158FDBD81 /* Theme.swift */; };
 		54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */; };
@@ -47,10 +47,10 @@
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
-		D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		2A571897E3D65CD158FDBD81 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViews.swift; sourceTree = "<group>"; };
@@ -129,10 +129,10 @@
 			isa = PBXGroup;
 			children = (
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
-				D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
+				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
 				2A571897E3D65CD158FDBD81 /* Theme.swift */,
 				1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */,
@@ -249,10 +249,10 @@
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
-				121A338FB83D393D2FE6AA6B /* RecordingPlayerView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
+				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
 				825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */,
 				54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */,
