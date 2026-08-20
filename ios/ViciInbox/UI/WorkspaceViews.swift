@@ -384,28 +384,60 @@ struct CallsView: View {
 private struct CallHistoryView: View {
     @ObservedObject var model: CallHistoryModel
     @EnvironmentObject private var session: SessionModel
+    /// Only one player is open at a time, so audio never overlaps.
+    @State private var expandedRecording: String?
     var body: some View {
         Group {
             if model.isLoading && model.logs.isEmpty { ProgressView("Loading calls…") }
             else if model.logs.isEmpty { EmptyState(icon: "phone.arrow.down.left", title: "No calls yet", detail: "Incoming and outgoing calls will appear here.") }
             else {
                 List(model.logs) { log in
-                    HStack(spacing: 12) {
-                        Image(systemName: icon(log)).foregroundColor(color(log))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(log.contactName ?? log.contactPhone.map(PhoneFormatter.pretty) ?? "Unknown number")
-                            if let name = log.contactName, let phone = log.contactPhone {
-                                Text(PhoneFormatter.pretty(phone)).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 12) {
+                            Image(systemName: icon(log)).foregroundColor(color(log))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(log.contactName ?? log.contactPhone.map(PhoneFormatter.pretty) ?? "Unknown number")
+                                if let name = log.contactName, let phone = log.contactPhone {
+                                    Text(PhoneFormatter.pretty(phone)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                HStack {
+                                    Text((log.status ?? "unknown").capitalized)
+                                    if let duration = log.durationSeconds, duration > 0 { Text("• \(duration / 60):\(String(format: "%02d", duration % 60))") }
+                                }.font(.caption).foregroundStyle(.secondary)
                             }
-                            HStack {
-                                Text((log.status ?? "unknown").capitalized)
-                                if let duration = log.durationSeconds, duration > 0 { Text("• \(duration / 60):\(String(format: "%02d", duration % 60))") }
-                            }.font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            if let date = ServerDate.parse(log.startedAt) { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary) }
+                            if let phone = log.contactPhone {
+                                Button { session.startOutgoingCall(to: phone) } label: { Image(systemName: "phone") }.buttonStyle(.borderless)
+                            }
                         }
-                        Spacer()
-                        if let date = ServerDate.parse(log.startedAt) { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary) }
-                        if let phone = log.contactPhone {
-                            Button { session.startOutgoingCall(to: phone) } label: { Image(systemName: "phone") }.buttonStyle(.borderless)
+
+                        // Recording, collapsed by default. Call history is long and
+                        // most rows are not being listened to, so the player is
+                        // opened deliberately and only then downloads the audio.
+                        if log.hasRecording {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    expandedRecording = (expandedRecording == log.id) ? nil : log.id
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "waveform")
+                                    Text("Recording")
+                                    Image(systemName: expandedRecording == log.id ? "chevron.up" : "chevron.down")
+                                        .font(.caption2)
+                                }
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(ViciTheme.tealFill)
+                            }
+                            .buttonStyle(.borderless)
+                            .padding(.top, 6)
+
+                            if expandedRecording == log.id {
+                                // Keyed by id so switching rows builds a fresh
+                                // player rather than reusing the previous audio.
+                                RecordingPlayerView(callLogID: log.id).id(log.id)
+                            }
                         }
                     }
                 }.listStyle(.plain)

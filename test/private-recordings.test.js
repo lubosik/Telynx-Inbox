@@ -88,6 +88,36 @@ test('call-log JSON hides storage and provider URLs behind authenticated playbac
   assert.equal(JSON.stringify(value).includes('provider.example'), false);
 });
 
+test('a recording that has not been archived yet is still offered for playback', () => {
+  // Recordings archive on demand, at first press of play. Reporting them
+  // missing until then hid 43 of 44 real recordings from the Calls tab.
+  const notYetArchived = privateCallLog({
+    id: 163,
+    contact_phone: '+15555550100',
+    recording_id: 'provider-recording-handle',
+    recording_storage_path: null,
+    recording_url_mp3: 'https://provider.example/temporary-secret'
+  });
+  assert.equal(notYetArchived.recording_available, true);
+  assert.equal(notYetArchived.recording_url, '/api/voice/recordings/163');
+  assert.equal(JSON.stringify(notYetArchived).includes('provider.example'), false);
+
+  // No recording at all stays unavailable.
+  const noRecording = privateCallLog({ id: 44, contact_phone: '+15555550100' });
+  assert.equal(noRecording.recording_available, false);
+  assert.equal(noRecording.recording_url, null);
+
+  // A deleted recording is gone for good, archived or not.
+  const deleted = privateCallLog({
+    id: 45,
+    recording_id: 'provider-recording-handle',
+    recording_storage_path: 'recordings/gone.mp3',
+    recording_deleted_at: '2026-08-20T00:00:00Z'
+  });
+  assert.equal(deleted.recording_available, false);
+  assert.equal(deleted.recording_url, null);
+});
+
 test('private playback creates a short-lived signed URL and rejects unsafe ids', async () => {
   const capture = {};
   const url = await signedRecordingURL('recordings/recording-1.mp3', {

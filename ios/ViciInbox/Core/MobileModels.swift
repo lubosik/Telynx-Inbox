@@ -294,6 +294,10 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     let status: String?
     let startedAt: String?
     let recordingURL: String?
+    /// Whether audio exists for this call. The server reports this true even
+    /// before the recording has been copied into private storage, because it
+    /// archives on demand when playback is first requested.
+    let recordingAvailable: Bool?
     let contactName: String?
     /// Set once anyone has opened call history. Nil on a schema that has not had
     /// scripts/missed-calls-seen-migration.sql applied, which is why the app
@@ -307,6 +311,10 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     /// already filters it out of history.
     var isMissedInbound: Bool { direction == "inbound" && status == "missed" }
 
+    /// A call worth offering a player for. `recordingAvailable` is absent on an
+    /// older server, so fall back to the presence of a playback URL.
+    var hasRecording: Bool { recordingAvailable ?? (recordingURL != nil) }
+
     enum CodingKeys: String, CodingKey {
         case recordID = "id"
         case direction
@@ -315,6 +323,7 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
         case status
         case startedAt = "started_at"
         case recordingURL = "recording_url"
+        case recordingAvailable = "recording_available"
         case contactName = "contact_name"
         case seenAt = "seen_at"
     }

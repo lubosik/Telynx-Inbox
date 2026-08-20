@@ -279,6 +279,31 @@ actor APIClient {
     }
 
     /// Best-effort log of a call from the device. The backend already exposes
+    /// Download a call recording to a temporary file for playback.
+    ///
+    /// The audio is fetched rather than streamed straight into AVPlayer because
+    /// the endpoint is cookie-authenticated and answers with a 302 to a
+    /// short-lived signed URL. URLSession here already carries the session
+    /// cookie and follows the redirect; AVPlayer does neither reliably. A local
+    /// file also makes scrubbing instant instead of re-buffering.
+    ///
+    /// The first request for a given call is slower — the server copies the
+    /// recording out of the provider into private storage before serving it.
+    func downloadRecording(callLogID: String) async throws -> URL {
+        let (data, response) = try await get("/api/voice/recordings/\(callLogID)")
+        guard response.statusCode == 200 else {
+            if response.statusCode == 401 { throw APIError.unauthorised }
+            if response.statusCode == 404 { throw APIError.server("This recording is no longer available.") }
+            throw APIError.badResponse(response.statusCode)
+        }
+        guard !data.isEmpty else { throw APIError.server("The recording came back empty.") }
+
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recording-\(callLogID).mp3")
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
     /// POST /api/voice/logs as a client-side fallback logger.
     func logCall(direction: String, phone: String, status: String,
                  durationSeconds: Int?, startedAt: Date? = nil, endedAt: Date? = nil) async {

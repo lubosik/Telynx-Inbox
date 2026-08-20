@@ -19,6 +19,7 @@
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
+		121A338FB83D393D2FE6AA6B /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
@@ -46,6 +47,7 @@
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
+		D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
@@ -127,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
+				D3C733E28E1EA9A37696BFB6 /* RecordingPlayerView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
@@ -246,6 +249,7 @@
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
+				121A338FB83D393D2FE6AA6B /* RecordingPlayerView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
