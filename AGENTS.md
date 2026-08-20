@@ -170,7 +170,9 @@ build proves compilation only.
   ordering issue, or classifier failure may not interrupt a working SMS, call,
   commerce webhook, fulfilment, CRM sync, or automation. Do not present
   candidate historical revenue as final, and never force uncertain orders out
-  of the Unattributed bucket.
+  of the Unattributed bucket. Verified staff/internal/test identities are a
+  separate exclusion class and must be removed from all Analytics metrics rather
+  than relabelled as Unattributed.
 - Live SMS delivery/reply evidence requires a verified Telnyx v2 Ed25519 event
   recorded in `analytics_message_events`. `TELNYX_PUBLIC_KEY` is public
   configuration, but must be sourced from the correct Telnyx account; never

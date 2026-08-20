@@ -23,9 +23,10 @@ The headline terminology is deliberately precise:
   explicitly tracked workflow. It is always separate from Recovered Revenue.
 - **Total Revenue Impact**: Direct + Strong + Influenced, visibly broken down so
   it cannot be mistaken for fully causal revenue.
-- **Unattributed**: the mandatory default when evidence is incomplete,
-  contradictory, ambiguous, outside its window, internal/test, or otherwise
-  unfair to claim.
+- **Unattributed**: the mandatory default when eligible business revenue has
+  incomplete, contradictory, ambiguous or out-of-window evidence. Verified
+  staff/internal/test activity is excluded before aggregation rather than
+  presented as business activity in this bucket.
 
 Weighted value (Direct × 1.00 + Strong × 0.90 + Influenced × 0.60) is retained
 for internal analysis only. It is not the primary owner-facing revenue metric.
@@ -54,8 +55,9 @@ All of these must be true for historical payment recovery:
 6. Between that reminder and payment, the customer sent a narrowly recognised,
    whole-message payment confirmation such as “sent” or “I've paid.” A matching
    prefix followed by unrelated or ambiguous context does not qualify.
-7. There is no merged-order wording, duplicate order, test/internal marker,
-   refund, cancellation, identity mismatch, or contrary timestamp evidence.
+7. There is no merged-order wording, duplicate order, refund, cancellation,
+   identity mismatch, contrary timestamp evidence, or configured staff/test
+   exclusion.
 
 The reply does not create attribution by itself. It upgrades an otherwise exact,
 authoritatively paid match from Strong to Direct.
@@ -90,13 +92,18 @@ Use this for everything else, including:
 - payment outside the configured window;
 - merged or combined-order wording that prevents a one-order claim;
 - a reminder sentinel produced by an old `BACKFILL ...` skip record;
-- test/internal data;
 - historical refund-bearing orders pending reconciliation;
 - a statement of payment without authoritative payment data;
 - weak timing or ordinary conversation evidence.
 
 Unattributed orders remain available as a completeness/data-quality measure;
 their value is not added to Revenue Impact.
+
+Configured staff/internal/test phones and order IDs are excluded from all
+Analytics sources, denominators, activity counts, sentiment, attribution rows
+and drill-downs. They are not silently relabelled as Unattributed. The exclusion
+list is operational configuration and must be reviewed when staff or test
+identities change.
 
 ## Attribution window and winner
 
@@ -156,7 +163,7 @@ The safe process is:
 2. Manually review every Direct candidate plus representative Strong and
    Unattributed samples
    against WooCommerce and the conversation.
-3. Resolve mismatches, duplicates, test numbers and refund cases.
+3. Resolve mismatches, duplicates, staff/test exclusions and refund cases.
 4. Record approval outside the repository.
 5. Only then run with both `--persist` and
    `ANALYTICS_BACKFILL_APPROVED=YES`.

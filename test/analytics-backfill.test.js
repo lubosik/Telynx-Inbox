@@ -98,7 +98,9 @@ test('historical analysis rejects weak and contaminated evidence as Unattributed
   ];
   const messages = orders.map(item => delivered(item.id));
   const analysis = analyseHistoricalRevenue({ orders, sentLogs, messages });
-  assert.equal(analysis.aggregate.counts.unattributed, 7);
+  assert.equal(analysis.aggregate.counts.unattributed, 6);
+  assert.equal(analysis.aggregate.excluded_orders, 1);
+  assert.equal(analysis.records.some(item => item.orderID === '207'), false);
   assert.equal(analysis.aggregate.counts.influenced, 0);
   assert.match(analysis.records.find(item => item.orderID === '205').reason, /before the delivered reminder/);
   assert.match(analysis.records.find(item => item.orderID === '206').reason, /refund activity/);

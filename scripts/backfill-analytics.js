@@ -158,12 +158,22 @@ function publicCandidate(record) {
 function analyseHistoricalRevenue({ orders = [], sentLogs = [], messages = [] }, options = {}) {
   const excludedPhones = options.excludedPhones || new Set();
   const excludedOrderIDs = options.excludedOrderIDs || new Set();
-  const statuses = providerStatusMap(messages);
-  const inboundByPhone = groupInbound(messages);
+  const excluded = order => isExcludedOrder(order, { excludedPhones, excludedOrderIDs });
+  const eligibleOrders = orders.filter(order => !excluded(order));
+  const eligibleLogs = sentLogs.filter(log => {
+    const phone = normalizePhone(log?.phone);
+    return !excludedOrderIDs.has(String(log?.order_id || '')) && !(phone && excludedPhones.has(phone));
+  });
+  const eligibleMessages = messages.filter(message => {
+    const phone = normalizePhone(message?.contact_phone);
+    return !(phone && excludedPhones.has(phone));
+  });
+  const statuses = providerStatusMap(eligibleMessages);
+  const inboundByPhone = groupInbound(eligibleMessages);
   const logsByOrder = new Map();
   const reminderLogs = [];
 
-  for (const log of sentLogs) {
+  for (const log of eligibleLogs) {
     if (!PAYMENT_REMINDER_FLOWS.has(log?.flow_type)) continue;
     reminderLogs.push(log);
     const orderID = safeID(log.order_id);
@@ -202,14 +212,14 @@ function analyseHistoricalRevenue({ orders = [], sentLogs = [], messages = [] },
   }
 
   const orderMultiplicity = new Map();
-  for (const order of orders) {
+  for (const order of eligibleOrders) {
     const orderID = safeID(order?.id);
     if (orderID) orderMultiplicity.set(orderID, (orderMultiplicity.get(orderID) || 0) + 1);
   }
   const wooOrderIDs = new Set(orderMultiplicity.keys());
   const records = [];
 
-  for (const order of orders) {
+  for (const order of eligibleOrders) {
     const conversionAt = paidTimestamp(order);
     if (!conversionAt) continue;
     const orderID = safeID(order.id);
@@ -221,8 +231,6 @@ function analyseHistoricalRevenue({ orders = [], sentLogs = [], messages = [] },
       record = unattributedRecord(order, 'Order identifier is missing or non-numeric.', refundedAmount);
     } else if (orderMultiplicity.get(orderID) !== 1) {
       record = unattributedRecord(order, 'Duplicate authoritative order records make the source ambiguous.', refundedAmount);
-    } else if (isExcludedOrder(order, { excludedPhones, excludedOrderIDs })) {
-      record = unattributedRecord(order, 'Order is explicitly marked as test or internal data.', refundedAmount);
     } else if (refundedAmount > 0 || order.status === 'refunded') {
       record = unattributedRecord(order, 'Historical order has refund activity and is excluded pending refund reconciliation.', refundedAmount);
     } else {
@@ -282,7 +290,7 @@ function analyseHistoricalRevenue({ orders = [], sentLogs = [], messages = [] },
   const numericReminderOrderIDs = new Set(reminderLogs.map(row => safeID(row.order_id)).filter(id => /^\d+$/.test(id || '')));
   const exactWooReminderIDs = new Set([...numericReminderOrderIDs].filter(id => wooOrderIDs.has(id)));
   const phoneMatchedReminderIDs = new Set();
-  for (const order of orders) {
+  for (const order of eligibleOrders) {
     const orderID = safeID(order?.id);
     if (!exactWooReminderIDs.has(orderID)) continue;
     const phone = normalizePhone(order?.billing?.phone || order?.shipping?.phone);
@@ -294,7 +302,8 @@ function analyseHistoricalRevenue({ orders = [], sentLogs = [], messages = [] },
     records: uniqueRecords,
     publicCandidates: uniqueRecords.map(publicCandidate),
     aggregate: {
-      woo_orders_examined: orders.length,
+      woo_orders_examined: eligibleOrders.length,
+      excluded_orders: orders.length - eligibleOrders.length,
       paid_orders_examined: uniqueRecords.length,
       recovery_reminder_rows: reminderLogs.length,
       unique_reminder_order_ids: new Set(reminderLogs.map(row => safeID(row.order_id)).filter(Boolean)).size,

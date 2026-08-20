@@ -160,7 +160,9 @@ Like revenue backfill, persistence requires both `--persist` and
 - refunds and cancellations trigger reconciliation; previous classifications
   remain in revision history.
 - internal/test phones and order IDs are centrally supplied through environment
-  exclusions.
+  exclusions and removed by `lib/analytics/exclusions.js` from messages,
+  reminders, calls, sentiment, attribution rows and historical candidates
+  before any metric or denominator is calculated.
 - timestamps use UTC in storage and the configured account timezone only at
   range boundaries/presentation.
 - source safety ceilings surface warnings rather than silently returning a

@@ -14,17 +14,20 @@ The existing data supports a narrow historical payment-recovery candidate set,
 but it does not yet support publishing a final historical revenue claim.
 
 - **13 reviewed 100% Direct candidates — $2,398.48**
-- **61 structurally qualified 90% Strong candidates — $11,479.06**
-- **74 total exact paid candidates inside 24 hours — $13,877.54**
+- **62 structurally qualified 90% Strong candidates — $11,585.85**
+- **75 total exact paid candidates inside 24 hours — $13,984.33**
 - **Historical 60% Influenced — $0.00** (deliberately disabled)
-- **1,325 of 1,399 paid orders remain Unattributed — $249,416.92 excluded from impact**
+- **1,322 of 1,397 eligible paid orders remain Unattributed — $249,297.26 excluded from impact**
 
 These are reviewed candidates, not persisted Analytics totals. An independent
-read-only review passed all 13 Direct records, all 61 Strong records on their
+read-only review passed all 13 Direct records, all 62 Strong records on their
 structured invariants, ten Strong timing/value extremes, and twelve
-Unattributed edge cases. The production promotion gate remains closed until the
-business exclusion list, timezone/rule settings, database backup and deployment
-sequence are explicitly approved.
+Unattributed edge cases. Two verified owner/staff identities and 43 linked local
+Woo order IDs were applied as exclusions. Three authoritative Woo records in
+this snapshot (two paid, totaling $12.87) were removed from Analytics entirely;
+they are not included in activity, revenue, sentiment, denominators or the
+Unattributed bucket. The production promotion gate remains closed until the
+database migration, trusted webhook configuration and deployment checks finish.
 
 ## 1. How far the data goes
 
@@ -32,9 +35,9 @@ The read-only source inventory found:
 
 | Source | Earliest reliable observed record | Snapshot volume |
 |---|---:|---:|
-| Local order mirror (`sms_orders`) | 17 January 2026 | 1,607 |
-| SMS messages (`sms_messages`) | 29 April 2026 | 2,661 |
-| Automation send log (`sms_sent_log`) | 27 May 2026 | 1,355 |
+| Local order mirror (`sms_orders`) | 17 January 2026 | 1,608 |
+| SMS messages (`sms_messages`) | 29 April 2026 | 2,665 |
+| Automation send log (`sms_sent_log`) | 27 May 2026 | 1,357 |
 | Call history (`call_logs`) | 11 June 2026 | 133 |
 | Authoritative WooCommerce orders | API snapshot | 1,712 |
 
@@ -51,7 +54,7 @@ The audit found:
 - 152 distinct reminder order identifiers;
 - 150 numeric identifiers, all found in the WooCommerce snapshot;
 - 149 exact order/phone identity matches;
-- 74 rigorous paid candidates with a delivered provider message, exact latest
+- 75 rigorous paid candidates with a delivered provider message, exact latest
   eligible touch and payment inside 24 hours.
 
 A reminder row or a nearby payment alone is insufficient. Sent/unconfirmed,
@@ -78,11 +81,17 @@ create the match; it only strengthened an already exact structured sequence.
 
 ## 6. Provisional Strong assistance
 
-The remaining 61 exact candidates total **$11,479.06**. They have authoritative
+The remaining 62 exact candidates total **$11,585.85**. They have authoritative
 payment, delivery, identity, order and timing evidence but no explicit customer
-confirmation under the strict whole-message rule. All 61 passed structural
+confirmation under the strict whole-message rule. All 62 passed structural
 review; ten unique timing/value extremes were sampled. They remain `90% Strong`,
 not `100% Direct`.
+
+One $106.79 order moved from Unattributed to Strong on the refreshed source
+snapshot. Independent review confirmed an exact delivered reminder, order and
+phone match, a payment 4.4 minutes later, no refund and no staff/test overlap.
+A short inbound financial-completion signal did not satisfy the strict Direct
+reply rule, so the more conservative Strong classification was retained.
 
 The 24-hour window is deliberately short for a failed/on-hold payment-recovery
 workflow. It is centrally configurable and documented in
@@ -97,11 +106,12 @@ explicit event/cohort tracking from their future release onward.
 
 ## 8. Cases that cannot fairly be attributed
 
-1,325 of 1,399 paid orders remain Unattributed in the audited snapshot.
+1,322 of 1,397 eligible paid orders remain Unattributed in the audited snapshot.
 Reasons include no recovery reminder, no carrier-delivery proof, mismatched or
 missing identity, payment before the reminder, payment outside 24 hours,
-merged-order language, duplicate/malformed evidence, or test/internal/refund
-controls.
+merged-order language, duplicate/malformed evidence, or refund controls.
+Verified test/internal orders are excluded before cohort calculation rather
+than being presented as Unattributed business activity.
 
 There were six refund-bearing WooCommerce orders overall and none in the
 candidate cohort. Historical backfill still rejects any refund-bearing order by
@@ -119,7 +129,8 @@ rule until refund timing and amount are reviewed.
 - Three reminder/order phone mismatches demonstrate that order ID alone is not
   enough.
 - Combined-order messages are not safely divisible into one revenue claim.
-- Staff/internal/test exclusions require a complete centrally maintained list.
+- Staff/internal/test exclusions are centrally maintained and must be updated
+  whenever another verified internal identity is introduced.
 - Historical calls lack workflow-specific revenue intent/evidence.
 - Historical campaign/reorder/win-back opportunity events do not exist.
 
@@ -143,8 +154,8 @@ A separate aggregate-only sentiment dry run examined 721 inbound rows: 665 were
 eligible for the versioned local classifier, 16 reply/reaction audit rows, 39
 empty/media-only or tapback rows, and one ambiguous mixed-sentiment row were
 excluded. The aggregate result was not persisted. No raw bodies or phone
-numbers were emitted. The configured internal/test exclusion list was empty in
-that run and must be completed before any sentiment persistence.
+numbers were emitted. This sentiment snapshot predates the now-configured
+staff/test exclusions and must be rerun with them before persistence.
 
 WooCommerce documents the paid timestamp, status, totals and refunds used as the
 authoritative financial fields in its [REST order schema](https://woocommerce.github.io/woocommerce-rest-api-docs/#orders). Its [webhook documentation](https://developer.woocommerce.com/docs/apis/rest-api/v2/webhooks/) documents the signed delivery metadata used for future trusted events.
@@ -155,11 +166,11 @@ Do not run persistence yet. The next review must:
 
 1. retain the completed independent review record for all 13 Direct candidates,
    all Strong structural invariants, 10 Strong samples and 12 Unattributed edges;
-2. confirm the complete internal/test phone and order exclusion lists;
+2. load the approved internal/test phone and order exclusions into production;
 3. confirm the account timezone and currency;
-4. approve or adjust the 24-hour recovery rule;
+4. retain approval of the 24-hour recovery rule;
 5. back up the production database and deploy the reviewed schema/backend commit;
-6. record explicit approval before using `--persist` plus
+6. retain explicit approval before using `--persist` plus
    `ANALYTICS_BACKFILL_APPROVED=YES`.
 
 Any generated candidate JSON contains internal order/action/evidence IDs even
