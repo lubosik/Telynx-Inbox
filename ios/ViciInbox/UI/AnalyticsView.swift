@@ -216,10 +216,14 @@ private struct AnalyticsFreshnessView: View {
             : rawEnd
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = businessTimeZone
+        var monthDay = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        monthDay.timeZone = businessTimeZone
+        var monthDayYear = monthDay.year()
+        monthDayYear.timeZone = businessTimeZone
         if calendar.isDate(start, inSameDayAs: end) {
-            return start.formatted(.dateTime.month(.abbreviated).day().year().timeZone(businessTimeZone))
+            return start.formatted(monthDayYear)
         }
-        return "\(start.formatted(.dateTime.month(.abbreviated).day().timeZone(businessTimeZone)))–\(end.formatted(.dateTime.month(.abbreviated).day().year().timeZone(businessTimeZone)))"
+        return "\(start.formatted(monthDay))–\(end.formatted(monthDayYear))"
     }
 }
 
