@@ -2,32 +2,35 @@
 
 Audit snapshot: **20 August 2026**
 
-Status: **read-only discovery and independent sample review; not persisted**
+Status: **independently reviewed and promoted to production on 20 August 2026**
 
-No analytics schema migration or historical revenue/sentiment backfill had been
-applied when this report was written. The figures below are local read-only
-analysis, not database rows and not production dashboard claims.
+The figures below are the approved historical snapshot. The additive analytics
+schema was migrated with row-level security, the reviewed cohort was promoted
+idempotently, and production API totals were reconciled against the database
+after deployment. Later live events are reported separately from this snapshot.
 
 ## Executive result
 
-The existing data supports a narrow historical payment-recovery candidate set,
-but it does not yet support publishing a final historical revenue claim.
+The existing data supports a narrow historical payment-recovery attribution
+set. All other paid orders remain explicitly Unattributed.
 
-- **13 reviewed 100% Direct candidates — $2,398.48**
-- **62 structurally qualified 90% Strong candidates — $11,585.85**
+- **13 reviewed 100% Direct orders — $2,398.48**
+- **62 structurally qualified 90% Strong orders — $11,585.85**
 - **75 total exact paid candidates inside 24 hours — $13,984.33**
 - **Historical 60% Influenced — $0.00** (deliberately disabled)
 - **1,322 of 1,397 eligible paid orders remain Unattributed — $249,297.26 excluded from impact**
 
-These are reviewed candidates, not persisted Analytics totals. An independent
-read-only review passed all 13 Direct records, all 62 Strong records on their
+These are the persisted historical Analytics totals. An independent read-only
+review passed all 13 Direct records, all 62 Strong records on their
 structured invariants, ten Strong timing/value extremes, and twelve
 Unattributed edge cases. Two verified owner/staff identities and 43 linked local
 Woo order IDs were applied as exclusions. Three authoritative Woo records in
 this snapshot (two paid, totaling $12.87) were removed from Analytics entirely;
 they are not included in activity, revenue, sentiment, denominators or the
-Unattributed bucket. The production promotion gate remains closed until the
-database migration, trusted webhook configuration and deployment checks finish.
+Unattributed bucket. The migration, trusted webhook configuration, deployment
+checks and controlled promotion all completed. A later live order was
+independently classified as Unattributed; it does not change the historical
+figures above.
 
 ## 1. How far the data goes
 
@@ -63,7 +66,7 @@ A reminder row or a nearby payment alone is insufficient. Sent/unconfirmed,
 failed, queued, post-payment, outside-window, merged, refunded and otherwise
 ambiguous evidence remains Unattributed.
 
-## 5. Plausible Direct recovery
+## 5. Direct recovery
 
 Thirteen candidates totaling **$2,398.48** passed the strongest historical rule:
 
@@ -81,7 +84,7 @@ linkage, non-GHL Telnyx delivery, identity match, unique reply assignment,
 action → reply → payment chronology and no refund. Keyword evidence did not
 create the match; it only strengthened an already exact structured sequence.
 
-## 6. Provisional Strong assistance
+## 6. Strong assistance
 
 The remaining 62 exact candidates total **$11,585.85**. They have authoritative
 payment, delivery, identity, order and timing evidence but no explicit customer
@@ -152,28 +155,33 @@ The new architecture adds:
 - an analytics state version/realtime invalidation signal;
 - dry-run-first revenue/sentiment backfill tools with dual persistence gates.
 
-A separate aggregate-only sentiment dry run examined 721 inbound rows: 665 were
-eligible for the versioned local classifier, 16 reply/reaction audit rows, 39
-empty/media-only or tapback rows, and one ambiguous mixed-sentiment row were
-excluded. The aggregate result was not persisted. No raw bodies or phone
-numbers were emitted. This sentiment snapshot predates the now-configured
-staff/test exclusions and must be rerun with them before persistence.
+The approved production sentiment run examined 723 inbound rows. It removed six
+verified staff/internal rows and persisted 662 eligible customer-message
+classifications: 5 very negative, 22 negative, 396 neutral, 196 positive and 43
+very positive. No raw bodies or phone numbers were emitted. One subsequent live
+classification brought the verified production total to 663 without changing
+the historical distribution above.
 
 WooCommerce documents the paid timestamp, status, totals and refunds used as the
 authoritative financial fields in its [REST order schema](https://woocommerce.github.io/woocommerce-rest-api-docs/#orders). Its [webhook documentation](https://developer.woocommerce.com/docs/apis/rest-api/v2/webhooks/) documents the signed delivery metadata used for future trusted events.
 
-## Review decision required before persistence
+## Promotion record
 
-Do not run persistence yet. The next review must:
+The controlled promotion completed only after:
 
-1. retain the completed independent review record for all 13 Direct candidates,
+1. retaining the completed independent review record for all 13 Direct candidates,
    all Strong structural invariants, 10 Strong samples and 12 Unattributed edges;
-2. load the approved internal/test phone and order exclusions into production;
-3. confirm the account timezone and currency;
-4. retain approval of the 24-hour recovery rule;
-5. back up the production database and deploy the reviewed schema/backend commit;
-6. retain explicit approval before using `--persist` plus
-   `ANALYTICS_BACKFILL_APPROVED=YES`.
+2. loading the approved internal/test phone and order exclusions into production;
+3. confirming the account timezone and USD currency;
+4. retaining approval of the 24-hour recovery rule;
+5. taking a scoped pre-deploy snapshot and deploying the additive schema/backend;
+6. using the dual `--persist` plus `ANALYTICS_BACKFILL_APPROVED=YES` gate;
+7. reconciling production API totals, drill-down counts and database aggregates.
+
+The production check immediately after release showed 13 Direct orders,
+62 Strong orders, zero Influenced orders, 1,322 historical Unattributed orders
+and one additional live Unattributed order. Staff/test exclusions had no overlap
+with the promoted cohort.
 
 Any generated candidate JSON contains internal order/action/evidence IDs even
 though it excludes direct PII. It must stay in a private local, untracked review
