@@ -16,6 +16,7 @@ const {
   fetchPaged,
   isMissingAnalyticsSchema,
   publicAttribution,
+  sentimentChange,
   sourceCoverage
 } = require('../lib/analytics/aggregate');
 
@@ -168,6 +169,12 @@ test('sentiment reports distribution and coverage without raw message content', 
   assert.equal(result.averageScore, 0.67);
   assert.equal(result.positivePercentage, 66.7);
   assert.equal(result.coveragePercentage, 50);
+});
+
+test('All Time sentiment has no comparison instead of dereferencing a missing previous period', () => {
+  const current = { sentiment: { averageScore: 0.38 } };
+  assert.equal(sentimentChange(current, null), null);
+  assert.equal(sentimentChange(current, { sentiment: { averageScore: 0.2 } }), 0.18);
 });
 
 test('large in-memory aggregate remains deterministic and bounded by supplied rows', () => {
