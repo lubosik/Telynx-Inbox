@@ -211,11 +211,14 @@ jobs:
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
           CHANGELOG: ${{ inputs.changelog }}
         run: |
-          python3 -m pip install --quiet pyjwt cryptography
+          # macos-26's Homebrew Python is PEP 668 managed and rejects direct
+          # system installs. Keep the small ASC client dependencies isolated.
+          python3 -m venv build/testflight-publish-venv
+          build/testflight-publish-venv/bin/pip install --quiet pyjwt cryptography
           printf '%s' "$CHANGELOG" > changelog.txt
           trap 'rm -f changelog.txt' EXIT
           ASC_KEY_P8="$(echo "$ASC_KEY_P8_BASE64" | base64 --decode)" \
-            python3 ios/scripts/publish-testflight-build.py \
+            build/testflight-publish-venv/bin/python ios/scripts/publish-testflight-build.py \
               "$ASC_APP_ID" "$ASC_BETA_GROUP_ID" changelog.txt
 
       - name: Remove the API key
