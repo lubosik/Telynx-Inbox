@@ -1,6 +1,6 @@
 const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
-const { verifyWebhookSignature } = require('../telnyx');
+const { verifyWebhookSignature, verifyWebhookSignatureV2 } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
 const { sendNativeMessagePush } = require('../lib/apns-notify');
@@ -8,6 +8,8 @@ const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flo
 const { rehostInboundMedia } = require('../lib/mms-media');
 const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
 const { normaliseTelnyxStatus, updateMessageStatus } = require('../lib/message-status');
+const { classifyAndStoreSentiment } = require('../lib/analytics/sentiment');
+const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = require('../lib/analytics/events');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -20,6 +22,17 @@ module.exports = (broadcastSSE) => {
     try {
       const rawBody = req.body;
       const body = JSON.parse(rawBody.toString());
+
+      // Existing message handling remains backwards-compatible, but Analytics
+      // trusts only current Telnyx v2 Ed25519 signatures with replay tolerance.
+      const signatureV2 = req.headers['telnyx-signature-ed25519'];
+      const timestampV2 = req.headers['telnyx-timestamp'];
+      const analyticsSignatureValid = verifyWebhookSignatureV2(
+        rawBody, signatureV2, timestampV2, process.env.TELNYX_PUBLIC_KEY
+      );
+      if (signatureV2 && !analyticsSignatureValid) {
+        console.warn('[ANALYTICS] Telnyx v2 signature invalid; event excluded from trusted metrics');
+      }
 
       const sig = req.headers['x-telnyx-signature'];
       if (sig) {
@@ -42,11 +55,22 @@ module.exports = (broadcastSSE) => {
 
         const eventFallback = eventType === 'message.sent' ? 'sent' : null;
         const status = normaliseTelnyxStatus(providerStatus, eventFallback);
+        const trustedWrite = recordTelnyxMessageEvent(event, {
+          signatureValid: analyticsSignatureValid,
+          status
+        }).catch(error => {
+          console.warn('[ANALYTICS] Trusted delivery capture skipped:', error.code || 'write_error');
+          return { trusted: false };
+        });
         const updated = await updateMessageStatus(supabase, messageId, status);
 
         if (updated) {
           broadcastSSE({ type: 'status_update', messageId, status, phone: updated.contact_phone });
           console.log(`Delivery update: ${messageId} → ${status}`);
+          if (status === 'delivered' && analyticsSignatureValid) {
+            trustedWrite
+              .then(result => result.trusted && reconcileAttributionForDeliveredMessage(messageId));
+          }
         }
         return;
       }
@@ -168,6 +192,7 @@ module.exports = (broadcastSSE) => {
       }
 
       let insertedRow = null;
+      const messageCreatedAt = payload.received_at || new Date().toISOString();
       try {
         insertedRow = await insertSmsMessage({
           telnyx_message_id: messageId,
@@ -177,8 +202,21 @@ module.exports = (broadcastSSE) => {
           status: 'delivered',
           ghl_contact_id: ghlContactId,
           media_urls: mediaRecord,
-          created_at: payload.received_at || new Date().toISOString()
+          created_at: messageCreatedAt
         });
+        if (analyticsSignatureValid) {
+          recordTelnyxMessageEvent(event, {
+            signatureValid: true,
+            status: 'delivered'
+          }).catch(error => console.warn('[ANALYTICS] Trusted inbound capture skipped:', error.code || 'write_error'));
+          classifyAndStoreSentiment(supabase, {
+            id: insertedRow?.id,
+            contact_phone: fromPhone,
+            direction: 'inbound',
+            body: text,
+            created_at: messageCreatedAt
+          }).catch(error => console.warn('[ANALYTICS] Sentiment classification skipped:', error.code || 'write_error'));
+        }
       } catch (dbErr) {
         console.error('Inbound DB insert error:', dbErr.message);
       }

@@ -223,6 +223,70 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    // MARK: - Analytics
+
+    func fetchAnalyticsOverview(query: AnalyticsQuery) async throws -> AnalyticsOverview {
+        try await decodedGET("/api/analytics/overview", queryItems: query.queryItems)
+    }
+
+    func fetchAttributions(query: AnalyticsQuery,
+                           page: Int = 1,
+                           pageSize: Int = 25,
+                           scope: AttributionScope = .attributed,
+                           confidence: AttributionConfidence? = nil,
+                           category: String? = nil) async throws -> AttributionPage {
+        var items = query.queryItems + [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize)),
+            URLQueryItem(name: "scope", value: scope.rawValue)
+        ]
+        if let confidence { items.append(URLQueryItem(name: "confidence", value: confidence.rawValue)) }
+        if let category, !category.isEmpty { items.append(URLQueryItem(name: "category", value: category)) }
+        return try await decodedGET("/api/analytics/attributions", queryItems: items)
+    }
+
+    /// Authenticated Server-Sent Events used only as an invalidation signal.
+    /// The stream never carries or computes dashboard values; a matching event
+    /// asks the model to refetch a server-calculated snapshot after a debounce.
+    func analyticsEvents() throws -> AsyncThrowingStream<AnalyticsEvent, Error> {
+        var preparedRequest = URLRequest(url: try url("/api/sse"),
+                                         cachePolicy: .reloadIgnoringLocalCacheData,
+                                         timeoutInterval: 60)
+        preparedRequest.httpMethod = "GET"
+        preparedRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        let request = preparedRequest
+        let streamingSession = session
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await streamingSession.bytes(for: request)
+                    guard let http = response as? HTTPURLResponse else { throw APIError.decoding }
+                    guard http.statusCode == 200 else {
+                        if http.statusCode == 401 { throw APIError.unauthorised }
+                        throw APIError.badResponse(http.statusCode)
+                    }
+
+                    for try await line in bytes.lines {
+                        try Task.checkCancellation()
+                        guard line.hasPrefix("data:") else { continue }
+                        let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                        guard let data = payload.data(using: .utf8),
+                              let event = try? JSONDecoder().decode(AnalyticsEvent.self, from: data)
+                        else { continue }
+                        continuation.yield(event)
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     // MARK: - Call history
 
     func fetchCallLogs(page: Int = 1) async throws -> [CallLogRecord] {
