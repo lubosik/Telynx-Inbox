@@ -50,8 +50,8 @@ struct MainTabView: View {
                 .badge(callsModel.unseenMissed)
                 .tag(3)
 
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            AnalyticsView(isSelected: selection == 4)
+                .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
                 .tag(4)
         }
         .onChange(of: notifications.pendingConversationPhone) { phone in
@@ -68,6 +68,7 @@ struct MainTabView: View {
 }
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @State private var isSigningOut = false
@@ -145,6 +146,11 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
         .navigationViewStyle(.stack)
     }

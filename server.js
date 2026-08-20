@@ -99,6 +99,7 @@ app.use('/api/push',          requireAuth, require('./routes/push')());
 app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
+app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
 
 // Voice webhooks (public — Telnyx calls this directly)
 app.use('/webhooks/voice', require('./routes/voice-webhook'));

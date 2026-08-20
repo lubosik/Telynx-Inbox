@@ -51,6 +51,14 @@ client.
   its Babel build output.
 - `scripts/`: migrations and integration/visual test harnesses. Read a script's
   safety header before running it against configured services.
+- `docs/analytics/`: revenue-claim methodology, implementation architecture,
+  and the provisional historical audit. Read the methodology before changing
+  attribution rules or displaying revenue.
+- `scripts/analytics-migration.sql`: additive analytics schema. Apply once
+  before deploying Analytics code; it does not mutate existing source rows.
+- `scripts/backfill-analytics.js`, `scripts/backfill-sentiment.js`: read-only by
+  default. Historical persistence requires explicit owner review plus both
+  `--persist` and `ANALYTICS_BACKFILL_APPROVED=YES`. Never run persist as a test.
 - `scripts/private-recordings-migration.sql`: creates lifecycle columns and the
   private call-recording bucket; apply before the matching backend deploy.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
@@ -87,6 +95,13 @@ are deliberately separate because some read live configured services:
   check when Playwright is installed.
 
 Do not run migrations, backfills, or send scripts merely as validation.
+
+Analytics dry runs may read configured production sources only when the task
+explicitly authorizes a historical audit. Their output must remain aggregate or
+go to a private, untracked review location; never log raw message bodies, names,
+emails, addresses, or phone numbers. Configure all staff/test exclusions with
+`ANALYTICS_EXCLUDED_PHONES` / `ANALYTICS_EXCLUDED_ORDER_IDS` before approving a
+historical write. Historical Influenced revenue is disabled in methodology v1.
 
 ## iOS project and checks
 
@@ -151,6 +166,15 @@ build proves compilation only.
 
 - The `main` branch auto-deploys the web service to Railway. Treat pushes to
   `main` as deployments even when a change appears documentation-only.
+- Analytics must remain additive and fail-safe: an analytics write, migration
+  ordering issue, or classifier failure may not interrupt a working SMS, call,
+  commerce webhook, fulfilment, CRM sync, or automation. Do not present
+  candidate historical revenue as final, and never force uncertain orders out
+  of the Unattributed bucket.
+- Live SMS delivery/reply evidence requires a verified Telnyx v2 Ed25519 event
+  recorded in `analytics_message_events`. `TELNYX_PUBLIC_KEY` is public
+  configuration, but must be sourced from the correct Telnyx account; never
+  fall back to an unsigned message status for revenue attribution.
 - Do not push, merge, trigger a signed archive, upload to TestFlight, submit to
   App Review, alter signing ownership, rotate/revoke credentials, run database
   migrations, or modify GitHub/Apple/Railway secrets without explicit approval.

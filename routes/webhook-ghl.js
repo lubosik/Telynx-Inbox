@@ -100,7 +100,8 @@ module.exports = (broadcastSSE) => {
 
         // Store message (dedup by GHL message id)
         const msgId = body.id || body.messageId || `ghl-out-${body.contactId}-${Date.now()}`;
-        await supabase.from('sms_messages').upsert({
+        const createdAt = body.dateAdded || body.createdAt || new Date().toISOString();
+        const { data: storedMessage } = await supabase.from('sms_messages').upsert({
           telnyx_message_id: msgId,
           contact_phone: phone,
           direction: 'outbound',
@@ -109,10 +110,10 @@ module.exports = (broadcastSSE) => {
           ghl_contact_id: body.contactId,
           ghl_conversation_id: body.conversationId,
           ghl_message_id: body.id || body.messageId,
-          created_at: body.dateAdded || body.createdAt || new Date().toISOString()
-        }, { onConflict: 'telnyx_message_id' });
+          created_at: createdAt
+        }, { onConflict: 'telnyx_message_id' }).select('id').maybeSingle();
 
-        console.log(`GHL webhook: outbound SMS to ${phone}: ${messageBody.slice(0, 50)}`);
+        console.log(`GHL webhook: outbound SMS stored for ...${phone.replace(/\D/g, '').slice(-4)} id=${storedMessage?.id || 'unknown'}`);
         broadcastSSE({ type: 'new_message', phone, body: messageBody, direction: 'outbound' });
         return;
       }
@@ -145,7 +146,8 @@ module.exports = (broadcastSSE) => {
         }, { onConflict: 'phone' });
 
         const msgId = body.id || body.messageId || `ghl-in-${body.contactId}-${Date.now()}`;
-        await supabase.from('sms_messages').upsert({
+        const createdAt = body.dateAdded || body.createdAt || new Date().toISOString();
+        const { data: storedMessage } = await supabase.from('sms_messages').upsert({
           telnyx_message_id: msgId,
           contact_phone: phone,
           direction: 'inbound',
@@ -154,10 +156,10 @@ module.exports = (broadcastSSE) => {
           ghl_contact_id: body.contactId,
           ghl_conversation_id: body.conversationId,
           ghl_message_id: body.id || body.messageId,
-          created_at: body.dateAdded || body.createdAt || new Date().toISOString()
-        }, { onConflict: 'telnyx_message_id' });
+          created_at: createdAt
+        }, { onConflict: 'telnyx_message_id' }).select('id').maybeSingle();
 
-        console.log(`GHL webhook: inbound SMS from ${phone}: ${messageBody.slice(0, 50)}`);
+        console.log(`GHL webhook: inbound SMS stored for ...${phone.replace(/\D/g, '').slice(-4)} id=${storedMessage?.id || 'unknown'}`);
         broadcastSSE({ type: 'new_message', phone, body: messageBody, direction: 'inbound' });
         return;
       }

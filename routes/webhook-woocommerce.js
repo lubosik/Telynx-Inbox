@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { supabase } = require('../db');
 const { syncOrder, runWooSync } = require('../sync-woocommerce');
+const { recordWooOrderEvent } = require('../lib/analytics/events');
 const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
 
@@ -63,7 +64,9 @@ async function resolvePhone(order) {
 function verifyWooSignature(rawBody, signature, secret) {
   try {
     const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
-    return signature === expected;
+    const supplied = Buffer.from(String(signature), 'utf8');
+    const calculated = Buffer.from(expected, 'utf8');
+    return supplied.length === calculated.length && crypto.timingSafeEqual(supplied, calculated);
   } catch { return false; }
 }
 
@@ -153,8 +156,10 @@ module.exports = (broadcastSSE) => {
 
     try {
       const sig = req.headers['x-wc-webhook-signature'];
+      let signatureValid = false;
       if (sig && process.env.WC_WEBHOOK_SECRET) {
-        if (!verifyWooSignature(req.body, sig, process.env.WC_WEBHOOK_SECRET)) {
+        signatureValid = verifyWooSignature(req.body, sig, process.env.WC_WEBHOOK_SECRET);
+        if (!signatureValid) {
           console.warn('WooCommerce webhook signature mismatch — processing anyway');
         }
       }
@@ -221,6 +226,15 @@ module.exports = (broadcastSSE) => {
         default:
           console.log(`[WEBHOOK] WooCommerce status=${status} | order=${orderId} — no SMS flow`);
       }
+
+      // Analytics runs only after every existing operational workflow has
+      // completed. It is deliberately not awaited: a slow/missing analytics
+      // schema must never delay payment-flow cancellation or customer SMS.
+      void recordWooOrderEvent(order, {
+        deliveryID: req.headers['x-wc-delivery-id'] || null,
+        topic,
+        signatureValid
+      }).catch(error => console.error('[ANALYTICS] Deferred Woo capture failed:', error.code || 'write_error'));
     } catch (err) {
       console.error('[WEBHOOK] WooCommerce handler error:', err.message, err.stack);
     }

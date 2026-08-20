@@ -187,3 +187,55 @@ is not attached to the debugger when the push arrives.
 
 Use **Console.app** on the Mac: select the iPhone in the sidebar, filter on
 subsystem `com.vicipeptides.inbox`. Categories are `push`, `voice`, and `app`.
+
+## Test 11 — Analytics (after the additive analytics migration)
+
+Analytics is read-only from the iPhone. Do not create fake orders or payments
+in production to exercise it. Validate historical numbers against the approved
+backfill report and use an isolated fixture database for destructive or
+high-volume scenarios.
+
+Prerequisite: Railway must have the correct account `TELNYX_PUBLIC_KEY`. Send a
+real test message and confirm no v2 signature warning appears before treating
+new delivery, reply or sentiment evidence as live Analytics data.
+
+1. Confirm the tab bar still contains exactly **Inbox**, **Contacts**,
+   **Automations**, **Calls**, and **Analytics**. Open Settings from the gear in
+   the Analytics navigation bar and confirm voice/push controls remain usable.
+2. Exercise Today, Week, Month, Year, All Time, and a Custom start/end range.
+   Confirm every visible card changes to the same server-reported range and the
+   account timezone is shown. Include a range crossing midnight and a daylight
+   saving boundary.
+3. Compare Direct, Strong, Influenced, and Unattributed counts/totals with the
+   API response. Influenced must remain separate from Attributed Revenue;
+   Unattributed must never increase a revenue headline. Confirm refunded value
+   is deducted and duplicate order/webhook records appear only once.
+4. Tap Attributed Revenue and inspect multiple orders. Verify order ID, amount,
+   confidence, timestamps, rule explanation, and non-sensitive evidence codes.
+   Confirm invalidated/refunded attribution is labelled and excluded from the
+   headline total.
+   Tap Influenced and Unattributed independently and confirm each opens its own
+   filtered audit list. Tap Payment Recovery and confirm only that workflow is
+   shown. Change filters rapidly on a slow connection and verify an older
+   response never appears under the newly selected label.
+5. Verify payment recovery, message/reply/delivery, first-response, sentiment,
+   and call totals against a small known sample. Missing data must show an
+   honest empty/unavailable treatment rather than a fabricated zero or sample.
+6. Leave Analytics visible, then send and receive a test message and complete a
+   test call. Confirm the relevant card refreshes after the authenticated live
+   event without full-dashboard polling. Background/foreground the app and pull
+   to refresh to verify both fallback refresh paths and the freshness version.
+7. Test no-data, malformed-data, unauthenticated, offline, HTTP 500, and
+   `ANALYTICS_NOT_READY` responses. Existing data may stay visible with a stale
+   warning; first load must show a retryable error and messaging/calling must
+   remain unaffected.
+8. Test attribution pagination with more than 25 and more than 100 records;
+   verify there are no duplicates when the next page loads.
+9. On the smallest supported iPhone and a current large-screen iPhone, verify
+   scrolling, chart labels, long currency values, custom calendars, light/dark
+   mode, largest accessibility text sizes, VoiceOver labels, loading states,
+   and pull-to-refresh.
+10. Before TestFlight, reconcile the complete historical totals against the
+    reviewed report, run the server regression suite and simulator build, then
+    repeat Tests 0, 1, 3, 9, and 10 to ensure Analytics did not regress login,
+    native calls, message notifications, or MMS.

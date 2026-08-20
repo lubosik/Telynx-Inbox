@@ -7,17 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */; };
 		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
 		82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39972EB378BFE723E62921A0 /* FeatureModels.swift */; };
 		A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
 		CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */; };
+		9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */; };
 		672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F149B900F4E19E4142123D9 /* AppConfig.swift */; };
 		7649D086E62D19440F809802 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285C11288F042740FCF4F46E /* CredentialStore.swift */; };
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
+		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
@@ -35,17 +38,20 @@
 
 /* Begin PBXFileReference section */
 		38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Vici Inbox.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsViewModel.swift; sourceTree = "<group>"; };
 		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		39972EB378BFE723E62921A0 /* FeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureModels.swift; sourceTree = "<group>"; };
 		5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotificationManager.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
 		F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
 		0F149B900F4E19E4142123D9 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		285C11288F042740FCF4F46E /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
@@ -103,6 +109,7 @@
 		FF36A4DBA79DCC52999F31A6 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */,
 				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
 				39972EB378BFE723E62921A0 /* FeatureModels.swift */,
 				5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */,
@@ -116,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				F9CF9E95EEA9899BB91B4BC4 /* APIClient.swift */,
+				AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */,
 				0F149B900F4E19E4142123D9 /* AppConfig.swift */,
 				285C11288F042740FCF4F46E /* CredentialStore.swift */,
 				19325CE8AEB5A75468A51A38 /* Log.swift */,
@@ -128,6 +136,7 @@
 		697370045E04810A74DEA8E0 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
@@ -237,17 +246,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */,
 				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
 				82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */,
 				A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
 				CECB41CF3185F6A600E44961 /* APIClient.swift in Sources */,
+				9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */,
 				672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */,
 				7649D086E62D19440F809802 /* CredentialStore.swift in Sources */,
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
+				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
