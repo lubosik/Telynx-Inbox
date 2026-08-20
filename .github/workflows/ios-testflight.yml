@@ -31,6 +31,11 @@ jobs:
       ARCHIVE: ${{ github.workspace }}/build/ViciInbox.xcarchive
       EXPORT_DIR: ${{ github.workspace }}/build/export
       KEY_DIR: ${{ github.workspace }}/private_keys
+      # App Store Connect identifiers for this app. Not secrets — they appear
+      # in every ASC URL — and keeping them here makes the publish step
+      # readable rather than hiding two opaque ids in a secret store.
+      ASC_APP_ID: '6794893971'
+      ASC_BETA_GROUP_ID: c3b04f34-53c3-4e3d-9177-c392b9b58659
 
     steps:
       - name: Check out
@@ -161,7 +166,18 @@ jobs:
 
       # altool is deprecated and currently broken against Xcode 26, so the
       # upload goes through fastlane's pilot.
+      #
+      # The changelog is deliberately NOT passed here. pilot runs with
+      # skip_waiting_for_build_processing, because waiting hangs long enough to
+      # hit the job timeout — on 20 Aug 2026 a build uploaded fine and the run
+      # still reported "cancelled" an hour later. A changelog cannot be applied
+      # while skipping that wait, so passing both silently produced an empty
+      # release note. Notes and distribution happen in the next step instead.
+      #
+      # The step timeout is well under the job's 60 minutes so a hung upload
+      # fails loudly and quickly rather than burning the whole budget.
       - name: Upload to TestFlight
+        timeout-minutes: 25
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -182,8 +198,25 @@ jobs:
             api_key_path:asc_api_key.json \
             ipa:"$IPA" \
             skip_waiting_for_build_processing:true \
-            skip_submission:true \
-            changelog:"$CHANGELOG"
+            skip_submission:true
+
+      # Release notes and tester distribution, through the App Store Connect
+      # API. This needs no processing wait, and it is also what makes a build
+      # installable: an uploaded build assigned to no group notifies nobody.
+      - name: Publish notes and distribute to testers
+        timeout-minutes: 10
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          CHANGELOG: ${{ inputs.changelog }}
+        run: |
+          python3 -m pip install --quiet pyjwt cryptography
+          printf '%s' "$CHANGELOG" > changelog.txt
+          trap 'rm -f changelog.txt' EXIT
+          ASC_KEY_P8="$(echo "$ASC_KEY_P8_BASE64" | base64 --decode)" \
+            python3 ios/scripts/publish-testflight-build.py \
+              "$ASC_APP_ID" "$ASC_BETA_GROUP_ID" changelog.txt
 
       - name: Remove the API key
         if: always()
