@@ -201,6 +201,7 @@ async function cancelScheduledForCustomer(phone, flowTypes = null) {
     .eq('phone', phone)
     .eq('status', 'pending');
   if (flowTypes && flowTypes.length > 0) {
+    // bounded: a fixed set of flow-type names supplied by the caller, never data-derived.
     query = query.in('flow_type', flowTypes);
   }
   const { data } = await query.select('id');

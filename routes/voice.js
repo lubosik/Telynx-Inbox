@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
+const { selectIn } = require('../lib/fetch-all-rows');
 const { isNativeIOSClient } = require('../lib/client-platform');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
@@ -60,10 +61,15 @@ router.get('/logs', async (req, res) => {
   const phones = [...new Set(logs.map(log => log.contact_phone).filter(Boolean))];
   let names = new Map();
   if (phones.length) {
-    const { data: contacts, error: contactsError } = await supabase
-      .from('sms_contacts')
-      .select('phone, first_name, last_name, name')
-      .in('phone', phones);
+    // Chunked: `.in()` puts every value in the URL, and a long list overflows
+    // the HTTP header limit. See lib/fetch-all-rows.js.
+    let contacts = [];
+    let contactsError = null;
+    try {
+      contacts = await selectIn(supabase, 'sms_contacts', 'phone, first_name, last_name, name', 'phone', phones);
+    } catch (err) {
+      contactsError = err;
+    }
     if (contactsError) console.warn('[VOICE] Call-history contact lookup failed:', contactsError.message);
     names = new Map((contacts || []).map(contact => {
       const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name || null;

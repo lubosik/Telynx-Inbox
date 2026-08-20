@@ -100,6 +100,8 @@ module.exports = () => {
         .filter(row => row.subscription?.installationId === installationId.slice(0, 100))
         .map(row => row.id);
       if (!fallbackError && matchingIDs.length) {
+        // bounded: rows for a single installationId — one device's own duplicate
+        // registrations, a handful at most, never the whole table.
         ({ error: fallbackError } = await supabase.from('push_subscriptions')
           .delete().in('id', matchingIDs));
       }

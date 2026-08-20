@@ -1,0 +1,26 @@
+name: Server tests
+
+# The inbox went down on 20 August 2026 because routes/conversations.js passed
+# every contact phone into a Supabase `.in()` filter. That serialises into the
+# URL, and at 907 contacts it overflowed Node's HTTP header limit, so the query
+# failed and every message preview came back null. No CI existed to catch it.
+#
+# test/no-unbounded-in.test.js now fails on that shape. This runs it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci || npm install
+      - run: npm test

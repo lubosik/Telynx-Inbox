@@ -191,6 +191,7 @@ async function deduplicateFailedFlow(phone, currentOrderId) {
 
   console.log(`[FAILED] Race dedup: cancelling ${others.length} stale rows for phone=...${phone.slice(-4)}`);
   const ids = others.map(r => r.id);
+  // bounded: stale scheduled rows for one phone and one order, a handful at most.
   await supabase.from('sms_scheduled')
     .update({ status: 'cancelled' })
     .in('id', ids);

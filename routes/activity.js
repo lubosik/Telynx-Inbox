@@ -1,6 +1,7 @@
 'use strict';
 const router    = require('express').Router();
 const { supabase } = require('../db');
+const { selectIn } = require('../lib/fetch-all-rows');
 const { broadcast } = require('../lib/broadcaster');
 
 // GET /api/activity/stats
@@ -129,10 +130,13 @@ async function enrichWithNames(rows) {
   if (!rows.length) return rows;
   const phones = [...new Set(rows.map(r => r.phone).filter(Boolean))];
   if (!phones.length) return rows;
-  const { data: contacts } = await supabase
-    .from('sms_contacts')
-    .select('phone, name')
-    .in('phone', phones);
+  // Chunked: see lib/fetch-all-rows.js — a long `.in()` list overflows the URL.
+  let contacts = [];
+  try {
+    contacts = await selectIn(supabase, 'sms_contacts', 'phone, name', 'phone', phones);
+  } catch (err) {
+    console.warn('[ACTIVITY] Contact name lookup failed:', err.message);
+  }
   const nameMap = {};
   (contacts || []).forEach(c => { nameMap[c.phone] = c.name; });
   return rows.map(r => ({ ...r, contact_name: nameMap[r.phone] || null }));
