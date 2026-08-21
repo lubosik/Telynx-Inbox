@@ -16,6 +16,7 @@ const router = require('express').Router();
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
+const { logAuditSafely } = require('../lib/audit/log');
 
 const ORDER_SMS = (firstName) =>
   `Hey ${firstName}! It's Dom, founder of Vici Peptides. Huge thank you for your order - it genuinely means everything to me. We're getting it packed up right now and I'll personally text you the moment it ships!`;
@@ -52,10 +53,50 @@ router.get('/preview', async (req, res) => {
   }
 });
 
+/**
+ * One audit row per catch-up run, never one per recipient.
+ *
+ * This is the highest blast-radius endpoint in the application: a single POST
+ * sends real SMS to every customer in the unanswered backlog, with no
+ * confirmation step and no undo. lib/route-policy.js has always flagged it
+ * `audit: true`; until now that flag wrote nothing, so the only record of a
+ * run was the individual sms_messages rows, which look identical to ordinary
+ * automation traffic.
+ *
+ * Per-recipient rows are deliberately not written: a backlog run can cover
+ * hundreds of orders, and hundreds of audit rows would bury the one fact a
+ * reader needs, which is that a person pressed this button and how far it got.
+ * The individual messages remain in sms_messages.
+ *
+ * Safe-logged, and awaited only after the sends: the customers have already
+ * been messaged by this point, so a failed audit insert must not turn a
+ * completed run into a 500 that invites somebody to run it again.
+ */
+async function auditCatchupRun(req, { sent, failed, results, processingCandidates, shippedCandidates, error = null }) {
+  const skipped = results.filter(entry => entry.status === 'skipped').length;
+  const outcome = error ? ' before the run failed' : '';
+  await logAuditSafely({
+    eventType: 'message.catchup.sent',
+    req,
+    entityId: `catchup:${new Date().toISOString()}`,
+    summary: `Ran the catch-up sender${outcome}: ${sent} message(s) sent, ${failed} failed, ${skipped} skipped, from ${processingCandidates} order and ${shippedCandidates} shipped candidate(s)`,
+    metadata: {
+      sent,
+      failed,
+      skipped,
+      processing_candidates: processingCandidates,
+      shipped_candidates: shippedCandidates,
+      source: 'manual_catchup'
+    }
+  });
+}
+
 // Execute catch-up sends
 router.post('/send', async (req, res) => {
   let sent = 0;
   let failed = 0;
+  let processingCandidates = 0;
+  let shippedCandidates = 0;
   const results = [];
 
   try {
@@ -65,6 +106,7 @@ router.post('/send', async (req, res) => {
       .select('id, contact_phone, woo_order_id, status')
       .in('status', ['processing', 'completed'])
       .eq('order_sms_sent', false);
+    processingCandidates = processingOrders?.length || 0;
 
     for (const order of (processingOrders || [])) {
       // Atomically claim the flag first — prevents duplicate sends if a webhook fires
@@ -121,6 +163,7 @@ router.post('/send', async (req, res) => {
       .select('id, contact_phone, woo_order_id, status, tracking_number, carrier')
       .eq('status', 'shipped')
       .eq('shipped_sms_sent', false);
+    shippedCandidates = shippedOrders?.length || 0;
 
     for (const order of (shippedOrders || [])) {
       // Atomically claim before sending — same pattern as above
@@ -167,8 +210,13 @@ router.post('/send', async (req, res) => {
       await new Promise(r => setTimeout(r, 300));
     }
 
+    await auditCatchupRun(req, { sent, failed, results, processingCandidates, shippedCandidates });
     res.json({ sent, failed, results });
   } catch (err) {
+    // Audit what actually went out before the run died. A partial catch-up has
+    // already messaged real customers, and that is precisely the run somebody
+    // will need to reconstruct later.
+    await auditCatchupRun(req, { sent, failed, results, processingCandidates, shippedCandidates, error: err });
     res.status(500).json({ error: err.message, sent, failed });
   }
 });

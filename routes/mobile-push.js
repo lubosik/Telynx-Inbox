@@ -1,10 +1,59 @@
+'use strict';
+/**
+ * routes/mobile-push.js — APNs device registration for the native iPhone app.
+ *
+ * Two storages, one behaviour. `ios_push_devices` is the dedicated table
+ * (scripts/ios-push-devices-migration.sql); until that migration is applied,
+ * every write falls back to a typed row in `push_subscriptions` with
+ * `endpoint = 'apns://{environment}/{token}'`. Anything done to one storage has
+ * to be done to the other, or it only works on whichever half is live —
+ * which is exactly how stale-token cleanup came to be a no-op in production.
+ */
+
 const { supabase } = require('../db');
 
 const TOKEN_PATTERN = /^[0-9a-f]{64,256}$/i;
 const BUNDLE_ID = 'com.vicipeptides.inbox';
+const BUILD_PATTERN = /^\d{1,9}$/;
+/** `user_id` is a bigint column; a non-numeric id would fail the insert. */
+const NUMERIC_ID_PATTERN = /^\d{1,19}$/;
+/** Rows to read per page when the compatibility fallback has to scan. */
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 10;
+
+let didWarnAboutNonNumericActor = false;
 
 function legacyEndpoint(token, environment) {
   return `apns://${environment}/${token}`;
+}
+
+/**
+ * The build the app reports about itself. Optional: an older client that does
+ * not send it must keep registering, so an absent or malformed value becomes
+ * null rather than a 400. lib/release-targets.js then falls back to the
+ * User-Agent, and treats an unknown build as "include", not "skip".
+ */
+function normaliseAppBuild(value) {
+  const text = String(value ?? '').trim();
+  return BUILD_PATTERN.test(text) ? text : null;
+}
+
+/**
+ * The owner of this device, taken ONLY from the authenticated session.
+ *
+ * Never from the request body. A client-supplied user id is a trivial
+ * impersonation vector: anyone who can register a device could claim to be
+ * another operator and receive pushes addressed to them.
+ */
+function actorUserID(req) {
+  const id = req?.actor?.id;
+  if (id === null || id === undefined || id === '') return null;
+  const text = String(id).slice(0, 64);
+  if (!NUMERIC_ID_PATTERN.test(text) && !didWarnAboutNonNumericActor) {
+    didWarnAboutNonNumericActor = true;
+    console.warn('APNs: actor id is not numeric — ios_push_devices.user_id is bigint, so device ownership will only persist in compatibility storage');
+  }
+  return text;
 }
 
 async function registerInExistingPushTable(row) {
@@ -15,18 +64,67 @@ async function registerInExistingPushTable(row) {
       deviceToken: row.device_token,
       installationId: row.installation_id,
       environment: row.environment,
-      bundleId: row.bundle_id
+      bundleId: row.bundle_id,
+      // The column is already jsonb, so ownership and build ride along here
+      // with no migration. lib/apns-notify.js normalises these back out.
+      userId: row.user_id,
+      appBuild: row.app_build
     },
     user_agent: row.user_agent,
     updated_at: row.updated_at
   }, { onConflict: 'endpoint' });
 }
 
+/**
+ * APNs rotates a device token. The prior row for the same app install has to
+ * go, or it keeps receiving alerts until APNs eventually 410s it — which can
+ * take weeks, and every send in between is wasted or delivered to a device the
+ * operator has signed out of.
+ *
+ * This mirrors the dedicated-table cleanup into compatibility storage. Without
+ * it the cleanup only ran against `ios_push_devices`, which does not exist in
+ * production, so the error was logged, swallowed, and nothing was ever removed.
+ */
+async function removeStaleCompatibilityRegistrations(installationId, deviceToken) {
+  // Preferred: let Postgres do the matching on the jsonb key. Nothing is read
+  // into memory, so there is no row cap to trip over.
+  const direct = await supabase.from('push_subscriptions')
+    .delete()
+    .eq('subscription->>installationId', installationId)
+    .not('endpoint', 'like', `%/${deviceToken}`);
+  if (!direct.error) return null;
+
+  // Fallback for a PostgREST that rejects the arrow operator in a filter. Read
+  // in pages: an unpaged read is silently capped at 1000 rows, and a stale row
+  // past the cap would never be cleaned up.
+  const stale = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE_SIZE;
+    const { data, error } = await supabase.from('push_subscriptions')
+      .select('id, endpoint, subscription')
+      .like('endpoint', 'apns://%')
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) return error;
+    for (const row of data || []) {
+      if (row.subscription?.installationId !== installationId) continue;
+      if (row.subscription?.deviceToken === deviceToken) continue;
+      stale.push(row.id);
+    }
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  if (!stale.length) return null;
+
+  // bounded: prior registrations of one installationId — one iPhone's own
+  // rotated tokens, a handful at most, never the whole table.
+  const { error } = await supabase.from('push_subscriptions').delete().in('id', stale);
+  return error || null;
+}
+
 module.exports = () => {
   const router = require('express').Router();
 
   router.post('/register', async (req, res) => {
-    const { deviceToken, installationId, environment } = req.body || {};
+    const { deviceToken, installationId, environment, appBuild } = req.body || {};
     if (!TOKEN_PATTERN.test(deviceToken || '')) {
       return res.status(400).json({ error: 'Invalid APNs device token' });
     }
@@ -40,6 +138,8 @@ module.exports = () => {
       environment,
       bundle_id: BUNDLE_ID,
       enabled: true,
+      user_id: actorUserID(req),
+      app_build: normaliseAppBuild(appBuild),
       user_agent: req.headers['user-agent']?.slice(0, 200) || 'Vici Inbox iOS',
       last_error: null,
       updated_at: new Date().toISOString()
@@ -54,9 +154,21 @@ module.exports = () => {
       if (cleanupError) {
         console.error('APNs stale device cleanup failed:', cleanupError.message);
       }
+      const compatibilityCleanupError = await removeStaleCompatibilityRegistrations(
+        row.installation_id, row.device_token
+      );
+      if (compatibilityCleanupError) {
+        console.error('APNs stale compatibility cleanup failed:', compatibilityCleanupError.message);
+      }
+    }
+    const dedicatedRow = { ...row };
+    // A bigint column cannot take a non-numeric id. Drop it rather than fail the
+    // whole registration; compatibility storage still records the owner.
+    if (dedicatedRow.user_id && !NUMERIC_ID_PATTERN.test(dedicatedRow.user_id)) {
+      dedicatedRow.user_id = null;
     }
     const { error } = await supabase.from('ios_push_devices')
-      .upsert(row, { onConflict: 'device_token' });
+      .upsert(dedicatedRow, { onConflict: 'device_token' });
     if (error) {
       // Keep rollout independent of a manual SQL-editor step. The existing
       // browser push table can safely hold typed APNs records; browser delivery
@@ -156,3 +268,6 @@ module.exports = () => {
 
   return router;
 };
+
+module.exports.normaliseAppBuild = normaliseAppBuild;
+module.exports.actorUserID = actorUserID;

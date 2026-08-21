@@ -1,21 +1,69 @@
+'use strict';
 /**
  * POST /webhook/send
  * Called by GHL custom webhook action to send an outbound SMS.
  * Mirrors the old bridge's /send endpoint format exactly.
  * Auth: x-webhook-secret header OR body.webhookSecret OR ?secret= query param.
+ *
+ * THIS ENDPOINT FAILS CLOSED. It used to return true when no secret was
+ * configured. That is the wrong default anywhere, and specifically wrong here:
+ * this route sends an SMS to any number in the request body, on the company's
+ * Telnyx account, with no session and no rate limit in front of it. An unset or
+ * renamed WEBHOOK_SECRET would have turned it into an open SMS relay. An
+ * unconfigured secret is now a 503, which is visible, rather than an allow,
+ * which is not.
+ *
+ * `GHL_WEBHOOK_SECRET` is the dedicated variable for this caller.
+ * `WEBHOOK_SECRET` — which routes/webhook.js also uses as the legacy Telnyx v1
+ * signing secret — remains accepted so the live GHL automation keeps working
+ * through the deploy that splits them.
  */
 
+const crypto = require('crypto');
 const { supabase } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 
-function isAuthorized(req) {
-  if (!process.env.WEBHOOK_SECRET) return true;
+const UNCONFIGURED = 'unconfigured';
+const MISMATCH = 'mismatch';
+
+let didLogMissingSecret = false;
+
+function expectedSecrets() {
+  return [process.env.GHL_WEBHOOK_SECRET, process.env.WEBHOOK_SECRET]
+    .filter(value => typeof value === 'string' && value.length > 0);
+}
+
+/**
+ * Constant-time comparison over fixed-length digests. `===` on strings returns
+ * at the first differing character, which leaks how much of a guess was right.
+ */
+function secretsMatch(provided, expected) {
+  if (typeof provided !== 'string' || !provided) return false;
+  const a = crypto.createHash('sha256').update(provided, 'utf8').digest();
+  const b = crypto.createHash('sha256').update(expected, 'utf8').digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * @returns {true|'unconfigured'|'mismatch'} — the caller distinguishes a
+ * deployment fault (503, ours to fix) from a bad credential (401, theirs).
+ */
+function authorize(req) {
+  const accepted = expectedSecrets();
+  if (!accepted.length) {
+    if (!didLogMissingSecret) {
+      didLogMissingSecret = true;
+      console.error('[WEBHOOK] /webhook/send refused: neither GHL_WEBHOOK_SECRET nor WEBHOOK_SECRET is configured. Outbound SMS through this route is disabled until one is set.');
+    }
+    return UNCONFIGURED;
+  }
+
   const provided =
     req.get('x-webhook-secret') ||
     req.body?.webhookSecret ||
     req.query?.secret;
-  return provided === process.env.WEBHOOK_SECRET;
+  return accepted.some(secret => secretsMatch(provided, secret)) ? true : MISMATCH;
 }
 
 function extractPayload(body = {}) {
@@ -39,8 +87,12 @@ module.exports = (broadcastSSE) => {
   const router = require('express').Router();
 
   router.post('/send', async (req, res) => {
-    if (!isAuthorized(req)) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const authorization = authorize(req);
+    if (authorization === UNCONFIGURED) {
+      return res.status(503).json({ success: false, error: 'Webhook send is not configured', code: 503 });
+    }
+    if (authorization !== true) {
+      return res.status(401).json({ success: false, error: 'Unauthorized', code: 401 });
     }
 
     const { to, message, contactId, name } = extractPayload(req.body);
@@ -91,3 +143,5 @@ module.exports = (broadcastSSE) => {
 
   return router;
 };
+
+module.exports.authorize = authorize;

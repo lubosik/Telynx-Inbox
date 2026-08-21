@@ -5,6 +5,8 @@ const { sendSMS } = require('../telnyx');
 const { isOptedOut } = require('../flows/utils');
 const { broadcast } = require('../lib/broadcaster');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
+const { logAuditSafely } = require('../lib/audit/log');
+const { messageFingerprint } = require('../lib/audit/redact');
 
 router.get('/campaigns/overview', async (req, res) => {
   try {
@@ -25,9 +27,34 @@ router.get('/campaigns/all', async (req, res) => {
 });
 
 router.post('/campaigns/:id/dismiss', async (req, res) => {
-  await supabase.from('sms_campaign_suggestions')
-    .update({ status: 'dismissed' }).eq('id', req.params.id);
-  res.json({ success: true });
+  try {
+    const { data: dismissed, error } = await supabase
+      .from('sms_campaign_suggestions')
+      .update({ status: 'dismissed' })
+      .eq('id', req.params.id)
+      .select('id, contact_phone, suggestion_type, status')
+      .maybeSingle();
+    // PostgREST reports failure in `error`, never as a rejection, so this has
+    // to be checked rather than relied upon to throw.
+    if (error) throw Object.assign(new Error(error.message), { code: error.code });
+    if (!dismissed) return res.status(404).json({ error: 'Not found', code: 'SUGGESTION_NOT_FOUND' });
+
+    await logAuditSafely({
+      eventType: 'campaign.suggestion.dismissed',
+      req,
+      entityId: dismissed.id,
+      contactPhone: dismissed.contact_phone || null,
+      summary: `Dismissed the ${dismissed.suggestion_type || 'campaign'} suggestion for ${dismissed.contact_phone || 'an unknown contact'}`,
+      previousState: { status: 'pending' },
+      newState: { status: 'dismissed' },
+      metadata: { suggestion_id: dismissed.id, suggestion_type: dismissed.suggestion_type || null }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[INTELLIGENCE] Dismiss failed:', err?.code || err?.message || 'internal_error');
+    res.status(500).json({ error: 'That suggestion could not be dismissed.', code: 'SUGGESTION_DISMISS_FAILED' });
+  }
 });
 
 router.post('/campaigns/:id/send', async (req, res) => {
@@ -60,6 +87,25 @@ router.post('/campaigns/:id/send', async (req, res) => {
       id: inserted?.id || null,
       telnyx_message_id: messageId
     });
+
+    // The SMS has already gone out by this point, so this is safe-logged: an
+    // audit failure must not produce a 500 that invites a second send. The
+    // drafted body is referenced by length and digest, never copied.
+    await logAuditSafely({
+      eventType: 'campaign.suggestion.sent',
+      req,
+      entityId: suggestion.id,
+      contactPhone: suggestion.contact_phone,
+      summary: `Approved and sent the ${suggestion.suggestion_type || 'campaign'} suggestion to ${suggestion.contact_phone}`,
+      previousState: { status: suggestion.status || 'pending' },
+      newState: { status: 'sent' },
+      metadata: {
+        suggestion_id: suggestion.id,
+        suggestion_type: suggestion.suggestion_type || null,
+        ...messageFingerprint(suggestion.suggested_message)
+      }
+    });
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

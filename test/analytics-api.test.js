@@ -108,7 +108,35 @@ test('an internal TypeError is not misreported as a client request mistake', asy
   assert.equal(res.payload.code, 'ANALYTICS_LOAD_FAILED');
 });
 
-test('both analytics endpoints remain behind the existing session auth boundary', () => {
+test('both analytics endpoints remain behind the session and role boundary', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+
+  // Session auth, as before.
   assert.match(server, /app\.use\('\/api\/analytics',\s+requireAuth,\s+require\('\.\/routes\/analytics'\)\(\)\)/);
+
+  // And the authorisation gate, which must be registered BEFORE the mount or
+  // it never runs for these routes. Asserting only the mount line would let
+  // revenue figures quietly become readable by every role.
+  const gate = server.indexOf("app.use('/api', requireAuth, resolveActor, createPolicyEnforcer())");
+  const mount = server.indexOf("app.use('/api/analytics'");
+  assert.ok(gate > -1, 'the /api authorisation gate is registered');
+  assert.ok(gate < mount, 'the gate is registered before the analytics mount');
+
+  // The property that actually matters: revenue is admin-only.
+  const { ROUTE_POLICY } = require('../lib/route-policy');
+  for (const path of ['/api/analytics/overview', '/api/analytics/attributions']) {
+    const entry = ROUTE_POLICY.find(row => row.path === path && row.method === 'GET');
+    assert.ok(entry, `${path} has a policy entry`);
+    assert.equal(entry.permission, 'analytics.read');
+  }
+
+  // ...and that Support Agent is not granted it. The grant lives in SQL, so
+  // this reads the migration rather than trusting a comment about it.
+  const migration = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts', 'rbac-migration.sql'), 'utf8');
+  const agentGrants = migration.slice(migration.indexOf("('agent',"));
+  assert.ok(
+    !/\('agent',\s*'analytics\.read'\)/.test(agentGrants),
+    'Support Agent must not be granted analytics.read'
+  );
 });

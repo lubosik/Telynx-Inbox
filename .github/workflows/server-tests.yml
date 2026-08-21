@@ -24,3 +24,32 @@ jobs:
           node-version: '22'
       - run: npm ci || npm install
       - run: npm test
+
+      # public/app.js is a committed build artifact of public/app.jsx.
+      #
+      # This comment used to say "Nothing rebuilds it at deploy time". That is
+      # false: railway.json sets buildCommand to `npm install && npm run build`,
+      # so Railway DOES rebuild the bundle on every deploy. The check is still
+      # worth having, for three reasons the old justification obscured:
+      #
+      #   1. The committed artifact is what any other consumer of this repo
+      #      sees — a local `node server.js`, a clone, a code review, a rollback
+      #      to a tagged commit, or a second deploy target that does not run a
+      #      build step. A stale public/app.js means every one of those serves
+      #      different code from production.
+      #   2. It makes the diff honest. A reviewer reading a change to app.jsx
+      #      can see the compiled consequence in the same commit instead of
+      #      trusting that a build somewhere will produce what they expect.
+      #   3. It catches a build that no longer reproduces: a Babel or preset
+      #      version bump that changes the output fails here, at review time,
+      #      rather than silently changing the shipped bundle on the next
+      #      unrelated deploy.
+      #
+      # If railway.json's buildCommand is ever changed to skip `npm run build`,
+      # this step becomes load-bearing for production too. Do not delete it.
+      # It is the web-side counterpart of the generated-Xcode-project check in
+      # .github/workflows/ios-build.yml.
+      - name: Verify the browser bundle matches its source
+        run: |
+          npm run build
+          git diff --exit-code -- public/app.js

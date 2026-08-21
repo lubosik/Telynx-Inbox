@@ -1,8 +1,26 @@
 'use strict';
+/**
+ * routes/activity.js — the scheduled-SMS QUEUE monitor.
+ *
+ * NAME COLLISION, READ THIS BEFORE YOU GO LOOKING FOR THE AUDIT TRAIL
+ *   This file is not the Activity Center. It backs `/api/activity/*`, which the
+ *   iOS tab labelled "Automations" calls to read the pending queue, the recent
+ *   send log, and to cancel a single queued message. It reads sms_scheduled and
+ *   sms_sent_log.
+ *
+ *   The Activity Center audit trail is a different subsystem: `/api/audit`,
+ *   backed by `routes/audit.js` and the append-only `sms_audit_log` table.
+ *
+ *   These routes are NOT being renamed this release. The iOS binary already in
+ *   the field calls `/api/activity/*` by that exact path, and renaming it would
+ *   break every installed copy for the sake of tidiness.
+ */
 const router    = require('express').Router();
 const { supabase } = require('../db');
 const { selectIn } = require('../lib/fetch-all-rows');
 const { broadcast } = require('../lib/broadcaster');
+const { logAudit } = require('../lib/audit/log');
+const { messageFingerprint } = require('../lib/audit/redact');
 
 // GET /api/activity/stats
 router.get('/stats', async (req, res) => {
@@ -109,6 +127,41 @@ router.delete('/queue/:id', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message });
 
     console.log(`[ACTIVITY] Cancelled | id=${id} flow=${row.flow_type} order=${row.order_id} phone=...${row.phone?.slice(-4)}`);
+
+    // Audit — the flagship case. One Admin cancels an automation; another Admin
+    // has to be able to see who did it, when, and what it looked like before.
+    // The SELECT above already fetched the full prior row, so this is the exact
+    // pre-change state rather than a reconstruction.
+    //
+    // message_body is deliberately absent from both snapshots. Its length and
+    // sha256 digest go into metadata instead, and sms_scheduled still holds the
+    // text itself — see lib/audit/redact.js for why that split is the right one.
+    const cancelSnapshot = {
+      id: row.id,
+      order_id: row.order_id,
+      phone: row.phone,
+      flow_type: row.flow_type,
+      send_at: row.send_at,
+      status: 'pending'
+    };
+    await logAudit({
+      eventType: 'automation.queue_item.cancelled',
+      req,
+      entityId: row.id,
+      contactPhone: row.phone,
+      summary: `Cancelled the queued ${row.flow_type} message for order ${row.order_id || 'n/a'}`,
+      previousState: cancelSnapshot,
+      newState: { ...cancelSnapshot, status: 'cancelled' },
+      changedFields: ['status'],
+      metadata: {
+        scheduled_id: row.id,
+        order_id: row.order_id,
+        flow_type: row.flow_type,
+        send_at: row.send_at,
+        reason: 'manual',
+        ...messageFingerprint(row.message_body)
+      }
+    });
 
     broadcast({
       type:      'queue_cancelled',

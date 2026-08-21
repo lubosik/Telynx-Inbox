@@ -48,7 +48,15 @@ client.
 
 - `server.js`, `routes/`, `lib/`, `db.js`: backend entry point and services.
 - `public/`: browser UI. `public/app.jsx` is the source and `public/app.js` is
-  its Babel build output.
+  its committed Babel build output. Railway's `buildCommand` does run
+  `npm run build`, so the deployed bundle is never stale — but the committed
+  artifact is what a reviewer reads and what a local run serves, so run
+  `npm run build` after editing the source; the bundle-sync step in
+  `.github/workflows/server-tests.yml` fails the build otherwise. `LoginScreen`
+  has an optional email field — filled in, it signs in as a named account;
+  blank, it keeps the shared-access-code path. Team management and the Activity
+  Center remain iOS-only; the browser calls neither `/api/users` nor
+  `/api/audit`.
 - `scripts/`: migrations and integration/visual test harnesses. Read a script's
   safety header before running it against configured services.
 - `docs/analytics/`: revenue-claim methodology, implementation architecture,
@@ -61,6 +69,50 @@ client.
   `--persist` and `ANALYTICS_BACKFILL_APPROVED=YES`. Never run persist as a test.
 - `scripts/private-recordings-migration.sql`: creates lifecycle columns and the
   private call-recording bucket; apply before the matching backend deploy.
+- `docs/team/RBAC.md`: roles, the permission catalogue, server-side enforcement,
+  session epochs and the shared-password retirement path. Read it before
+  changing an authorisation rule or the route policy.
+- `lib/route-policy.js`: the single declarative source of truth for which
+  permission each `/api` endpoint requires. `lib/enforce-policy.js` compiles it
+  at boot and default-denies anything unlisted. Adding an endpoint without a
+  policy entry fails `test/route-policy.test.js`, not production.
+  **The enforcer never passes a request through.** It lower-cases before
+  matching (Express routing is case-insensitive by default, and a case-sensitive
+  prefix test that called `next()` on its own failure was a live bypass:
+  `GET /API/users` returned 200 with the full team list). A path that does not
+  classify is denied, not forwarded. Webhooks stay unauthenticated because of
+  the `/api` MOUNT, never because of a branch inside the enforcer — do not add
+  one back. `server.js` also sets `case sensitive routing` and collapses
+  repeated slashes, because `//api/x` previously missed both the gate and the
+  handler and returned `index.html` with HTTP 200.
+- `scripts/rbac-migration.sql`: additive accounts/roles/permissions schema. Every
+  seeded human has `password_hash NULL`, so applying it alone changes nobody's
+  access. Apply before deploying the matching code.
+- `docs/team/ACTIVITY-CENTER.md` and `lib/audit/`: the append-only audit trail
+  (`sms_audit_log`, `/api/audit`). 36 event types, 6 of them reserved
+  `campaign.*` that the writer throws on. The nine `team.*` types are live and
+  instrumented in `routes/users.js` and `routes/invitations.js`. Note the name
+  collision: `routes/activity.js` and `/api/activity/*` are the scheduled-SMS
+  queue behind the iOS tab labelled "Automations", not the audit trail. Do not
+  rename the live route.
+- `scripts/audit-migration.sql`: additive append-only audit table. Apply before
+  the matching deploy; the writer fails open, so out-of-order degrades to "no
+  audit rows" rather than a broken send. In `lib/audit/log.js` the
+  missing-schema check runs **before** the consent-bearing throw, deliberately:
+  an unapplied migration must not break the inbound STOP path. An unrecorded
+  suppression is a bookkeeping problem; an unhonoured STOP is a regulatory one.
+  The hard failure still applies when the table exists and refuses the write.
+  Use `logAuditSafely()` at any call site where the audit follows the effect.
+- `docs/notifications/RELEASE-NOTIFICATIONS.md`, `lib/apns-notify.js`,
+  `lib/release-targets.js`: APNs release announcements and their targeting.
+- `scripts/ios-push-devices-migration.sql`: NOT applied in production. Device
+  registration and delivery run through the `push_subscriptions` compatibility
+  path; keep both storages in step or a change only works on the half that is
+  live. The file is transaction-wrapped, re-runnable, and enables RLS with no
+  policies. **Known gap:** `push_subscriptions` — the storage actually holding
+  the live APNs device tokens, and now a `userId` inside its jsonb column — has
+  no RLS. Fixing that needs its own deliberate migration reviewing every reader
+  of that table; do not fold it into this file.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
@@ -83,8 +135,22 @@ npm run build
 find . -path './node_modules' -prune -o -path './.git' -prune -o -type f -name '*.js' -exec node --check {} \;
 ```
 
-`npm test` runs focused, offline Node unit tests under `test/`. Broader harnesses
-are deliberately separate because some read live configured services:
+`npm test` runs focused, offline Node unit tests under `test/` (279 at present).
+Two of them are shape guards rather than behaviour tests, and both exist because
+the shape they ban already caused an outage:
+
+- `test/no-unbounded-in.test.js` — no unbounded `.in()` filter.
+- `test/no-builder-catch.test.js` — no `.catch()`/`.finally()` on a Supabase
+  query builder. A builder is a thenable with `then` only, so `.catch()` throws
+  a `TypeError` **before the query is sent** and skips every statement after it.
+  That silently killed the inbound STOP path here and in the Shore fork. Use
+  try/catch around the `await` and check `error`.
+
+`.github/workflows/server-tests.yml` runs `npm test` and then verifies that
+`public/app.js` matches a fresh build of `public/app.jsx`.
+
+Broader harnesses are deliberately separate because some read live configured
+services:
 
 - `node scripts/test-mms-flows.js`: uses the configured Supabase project and a
   reserved fake number; Telnyx/GHL/push are mocked and created rows are cleaned.
@@ -173,6 +239,30 @@ build proves compilation only.
   of the Unattributed bucket. Verified staff/internal/test identities are a
   separate exclusion class and must be removed from all Analytics metrics rather
   than relabelled as Unattributed.
+- Authorisation is server-side only. Nothing authority-bearing goes in the
+  session cookie: it carries `{ v, authenticated, uid, se }` and the role,
+  active state and permissions are read from the database every request. Apply
+  `scripts/rbac-migration.sql` before deploying code that expects it — startup
+  validates every policy permission key and `LEGACY_SHARED_ROLE` against the
+  database and exits 1 rather than serving a broken authorisation layer.
+  `server.js` calls `process.exit(1)` for three causes: `SESSION_SECRET` unset,
+  `assertPolicyPermissionsExist()` failing, and `syncLegacySharedRole()`
+  failing. `main` auto-deploys, so the wrong order is a production crash loop,
+  not a warning. `docs/team/RBAC.md` enumerates every cause and precondition.
+- The `legacy` shared identity keeps Admin-equivalent grants on purpose while
+  two people share `INBOX_PASSWORD` on an un-updatable iOS build. A pre-existing
+  cookie carries no session epoch and cannot be epoch-revoked; ending those
+  sessions requires `LEGACY_SHARED_LOGIN=disabled` plus a `SESSION_SECRET`
+  rotation. Do not remove the no-`uid` branch in `lib/authz.js`.
+- The audit trail is append-only and gives tamper-resistance, not
+  tamper-evidence: a Supabase superuser can still disable the trigger. It has no
+  retention job by design, and message bodies are never stored in it — only
+  length, a sha256 digest, and a reference by id. Do not add a body column, a
+  write API, or a purge job.
+- `POST /admin/release-notify` defaults to `dryRun: true`; only an explicit
+  `"dryRun": false` sends. A push cannot install a TestFlight build, and a new
+  payload key is always a two-release change because the receiving device is
+  running the previous build.
 - Live SMS delivery/reply evidence requires a verified Telnyx v2 Ed25519 event
   recorded in `analytics_message_events`. `TELNYX_PUBLIC_KEY` is public
   configuration, but must be sourced from the correct Telnyx account; never

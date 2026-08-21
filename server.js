@@ -9,6 +9,10 @@ const { verifyConnection }    = require('./db');
 const { checkAndSendDeliverySMS, pollForCarrierScans } = require('./routes/webhook-shipstation');
 const { processScheduledQueue } = require('./flows/utils');
 const { startRecordingRetentionJob } = require('./lib/private-recordings');
+const { requireAuth, resolveActor } = require('./lib/authz');
+const { collapseDuplicateSlashes, rejectMiscasedApiPaths } = require('./lib/request-normalise');
+const { createPolicyEnforcer, assertPolicyPermissionsExist } = require('./lib/enforce-policy');
+const { syncLegacySharedRole } = require('./routes/auth');
 require('./push-notify'); // initialises VAPID on startup
 
 const app = express();
@@ -36,6 +40,24 @@ app.use(cors({
 
 app.set('trust proxy', 1);
 
+// Route matching is case-sensitive from here on. Express defaults to
+// case-INSENSITIVE, which meant `GET /API/users` reached the /api handlers.
+// The policy enforcer now lower-cases before matching so those requests are
+// still authorised correctly; this is the second layer, so a future mount that
+// forgets the gate cannot be reached by casing either.
+app.set('case sensitive routing', true);
+
+// Collapse repeated slashes before routing.
+//
+// `app.use('/api', ...)` does not match `//api/conversations`, so neither the
+// authorisation gate NOR the real handler runs — the request falls through to
+// the SPA catch-all and returns index.html with HTTP 200. That is not a data
+// leak, but a client asking for JSON gets a page of HTML and is told it
+// succeeded, which is exactly the failure mode the gate exists to remove.
+// Normalise instead of special-casing, so it is fixed for every route at once.
+app.use(collapseDuplicateSlashes);
+app.use(rejectMiscasedApiPaths);
+
 // Raw body for HMAC signature verification on these webhooks
 app.use('/webhook/telnyx',              express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce',         express.raw({ type: 'application/json' }));
@@ -52,19 +74,28 @@ app.use(express.json());
 
 // Cookie-session: signed client-side cookie — survives Railway restarts/redeploys.
 // Session only stores { authenticated: true } so cookie stays tiny (<100 bytes).
+// A signed cookie is only as good as its secret. The previous fallback value
+// was committed to this repository, so an unset SESSION_SECRET meant anyone who
+// could read the source could mint a valid session. Refuse to start instead:
+// a service that will not boot is recoverable, a forgeable session is not.
+if (!process.env.SESSION_SECRET) {
+  console.error('SESSION_SECRET is not set. Refusing to start — without it the session cookie signature is forgeable from this repository.');
+  process.exit(1);
+}
+
 app.use(cookieSession({
   name:   'vici_sess',
-  secret: process.env.SESSION_SECRET || 'fallback-secret-change-this',
+  secret: process.env.SESSION_SECRET,
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict',
   maxAge: 30 * 24 * 60 * 60 * 1000  // 30 days
 }));
 
-function requireAuth(req, res, next) {
-  if (req.session?.authenticated) return next();
-  return res.status(401).json({ error: 'Unauthorised' });
-}
+// requireAuth now lives in lib/authz.js. It proves there is a signed session;
+// resolveActor turns that session into a database-backed identity; the policy
+// enforcer decides what that identity may do. Nothing authority-bearing is ever
+// read out of the cookie, so there is no role field for a client to forge.
 
 const sendLimiter = rateLimit({
   windowMs: 60000,
@@ -85,6 +116,20 @@ app.use('/auth', require('./routes/auth'));
 // ── Admin (backfill endpoints, protected by INBOX_PASSWORD) ──────────────
 app.use('/admin', require('./routes/admin')());
 
+// ── Authorisation for every /api request ──────────────────────────────────
+// Session -> actor (read from the database, uncached) -> route policy.
+//
+// DEFAULT DENY: an /api path with no entry in lib/route-policy.js answers 403
+// POLICY_MISSING, so a new endpoint cannot ship open by omission. That also
+// stops an unmatched /api request falling through to the SPA catch-all below
+// and returning index.html with HTTP 200.
+//
+// Mounted on '/api' ONLY. It must never become a bare app.use(): every webhook
+// above runs unauthenticated by design, and guarding them globally would stop
+// inbound SMS, delivery receipts, Woo order flows, shipping updates and
+// inbound calls, all at once and silently.
+app.use('/api', requireAuth, resolveActor, createPolicyEnforcer());
+
 // ── Authenticated API routes ──────────────────────────────────────────────
 app.use('/api/sse',           requireAuth, require('./routes/sse')(sseClients));
 app.use('/api/send',          requireAuth, sendLimiter, require('./routes/send')(broadcastSSE));
@@ -100,6 +145,9 @@ app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
+app.use('/api/users',         requireAuth, require('./routes/users')());
+app.use('/api/invitations',   requireAuth, require('./routes/invitations')());
+app.use('/api/audit',         requireAuth, require('./routes/audit')());
 
 // Voice webhooks (public — Telnyx calls this directly)
 app.use('/webhooks/voice', require('./routes/voice-webhook'));
@@ -161,6 +209,21 @@ function startDeliveryCheck() {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
+
+  // Fail startup rather than serve a build whose permission keys do not exist
+  // in the database, which would deny every endpoint for every role including
+  // Owner. Both calls require scripts/rbac-migration.sql to have been applied,
+  // so the deploy order is migration first, then code — and getting it wrong
+  // crash-loops loudly instead of quietly serving a broken authorisation layer.
+  try {
+    await assertPolicyPermissionsExist();
+    const legacy = await syncLegacySharedRole();
+    console.log(`Accounts: route policy validated; shared login role = ${legacy.role}${legacy.changed ? ' (updated from env)' : ''}`);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+
   startScheduledQueue();
   startShipmentPoll();
   startDeliveryCheck();

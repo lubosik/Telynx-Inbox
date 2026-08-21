@@ -15,6 +15,9 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     @Published private(set) var isRegisteredWithBackend = false
     @Published private(set) var lastError: String?
     @Published private(set) var pendingConversationPhone: String?
+    /// A top-level `screen` value from a tapped notification, e.g. the release
+    /// announcement's `"analytics"`. Consumed by MainTabView.
+    @Published private(set) var pendingScreen: String?
     @Published private(set) var inboxRefreshSequence = 0
 
     private let installationDefaultsKey = "vici.apns.installation-id"
@@ -100,6 +103,14 @@ final class MessageNotificationManager: NSObject, ObservableObject {
 
     func consumePendingConversation() {
         pendingConversationPhone = nil
+    }
+
+    func queueScreen(_ screen: String) {
+        pendingScreen = screen
+    }
+
+    func consumePendingScreen() {
+        pendingScreen = nil
     }
 
     /// Reconciles the message half of the badge with the server-backed unread
@@ -230,14 +241,27 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let phone = response.notification.request.content.userInfo["phone"] as? String,
-           !phone.isEmpty {
-            Task { @MainActor in
-                MessageNotificationManager.shared.noteIncomingMessage()
-                MessageNotificationManager.shared.queueConversation(phone: phone)
-                completionHandler()
+        let userInfo = response.notification.request.content.userInfo
+        let phone = userInfo["phone"] as? String
+        // A top-level `screen` is a destination rather than a conversation, so
+        // it is handled alongside `phone` rather than instead of it. The two are
+        // independent: a payload may carry either, both, or neither.
+        let screen = userInfo["screen"] as? String
+
+        guard (phone?.isEmpty == false) || (screen?.isEmpty == false) else {
+            completionHandler()
+            return
+        }
+
+        Task { @MainActor in
+            let manager = MessageNotificationManager.shared
+            if let phone, !phone.isEmpty {
+                manager.noteIncomingMessage()
+                manager.queueConversation(phone: phone)
             }
-        } else {
+            if let screen, !screen.isEmpty {
+                manager.queueScreen(screen)
+            }
             completionHandler()
         }
     }

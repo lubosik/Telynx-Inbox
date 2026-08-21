@@ -164,7 +164,17 @@ async function api(method, path, body) {
   const opts = { method, credentials: 'include', headers: {} };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
   const r = await fetch(path, opts);
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    // Carry the machine-readable code alongside the message. The server
+    // distinguishes ACCOUNT_LOCKED from FORBIDDEN from LEGACY_LOGIN_DISABLED,
+    // and collapsing all of them to a sentence throws that away — callers that
+    // only read `.message` are unaffected.
+    const err = new Error(e.error || r.statusText);
+    err.code = e.code || null;
+    err.status = r.status;
+    throw err;
+  }
   return r.json();
 }
 
@@ -180,7 +190,14 @@ function ToastContainer({ toasts }) {
 
 // ─── Login ───────────────────────────────────────────────────────────────────
 
+// Email is optional on purpose. Blank takes the shared-access-code path that
+// this app has always used and that both operators are using today; filling it
+// in signs in as a named account, which is the only way an invited Support
+// Agent can reach the web UI at all. Without this field, retiring the shared
+// login (LEGACY_SHARED_LOGIN=disabled) would lock the browser out completely
+// with no way back in.
 function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -189,10 +206,21 @@ function LoginScreen({ onLogin }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true); setError('');
+    const trimmed = email.trim();
     try {
-      await api('POST', '/auth/login', { password: pw });
+      await api('POST', '/auth/login', trimmed ? { email: trimmed, password: pw } : { password: pw });
       onLogin();
-    } catch { setError('Incorrect password'); }
+    } catch (err) {
+      // The server distinguishes a bad credential from a locked account and
+      // from the shared login being switched off. Saying "incorrect password"
+      // to all three sends someone hunting for a typo that is not there.
+      const code = err && err.code;
+      if (code === 'ACCOUNT_LOCKED') setError('Too many attempts. Try again shortly.');
+      else if (code === 'LEGACY_LOGIN_DISABLED') setError('The shared access code has been retired. Sign in with your email address.');
+      else if (code === 'ACCOUNT_DISABLED') setError('This account has been deactivated.');
+      else if (code === 'PASSWORD_CHANGE_REQUIRED') setError('Your password must be reset before you can sign in.');
+      else setError(trimmed ? 'Incorrect email or password' : 'Incorrect access code');
+    }
     finally { setLoading(false); }
   }
 
@@ -204,11 +232,21 @@ function LoginScreen({ onLogin }) {
         <form onSubmit={handleSubmit}>
           <div className="input-wrap">
             <input
+              type="email"
+              placeholder="Email (leave blank for the shared code)"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              autoComplete="username"
+              autoFocus
+            />
+          </div>
+          <div className="input-wrap">
+            <input
               type={show ? 'text' : 'password'}
-              placeholder="Access code"
+              placeholder={email.trim() ? 'Password' : 'Access code'}
               value={pw}
               onChange={e => setPw(e.target.value)}
-              autoFocus
+              autoComplete="current-password"
             />
             <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
               {show ? '◉' : '○'}
