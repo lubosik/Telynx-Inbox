@@ -103,3 +103,39 @@ test('list responses are decoded under the envelope key the server actually uses
       `${fn} must decode the { ${key}: [...] } envelope`);
   }
 });
+
+test('the client reads the identity envelope the auth endpoints actually send', () => {
+  // Third mismatch of this class, so it gets a guard. routes/auth.js answers
+  // with the identity under `actor`; the client originally decoded only `user`,
+  // which left currentUser nil and made can() fail open — a Support Agent would
+  // have been shown admin controls that then refuse server-side.
+  const auth = fs.readFileSync(path.join(ROOT, 'routes', 'auth.js'), 'utf8');
+  assert.match(auth, /actor\s*:/, 'routes/auth.js sends the identity as `actor`');
+
+  const model = MODELS.match(/struct AuthResponse[\s\S]*?\n\}/);
+  assert.ok(model, 'AuthResponse exists');
+  assert.match(model[0], /let actor: AuthUser\?/,
+    'AuthResponse must decode `actor` — the key the server actually sends');
+
+  // And nothing may read the raw `user` field directly, or a rename silently
+  // reintroduces the bug at whichever call site was missed.
+  const rawReads = API_CLIENT.match(/(decoded|wrapped)\.user\b/g) || [];
+  assert.deepEqual(rawReads, [],
+    'read AuthResponse.identity, not .user — it is the alias-tolerant accessor');
+});
+
+test('every permission the client gates UI on is a permission the server grants', () => {
+  // A typo here hides a control forever, silently: the server never sends the
+  // key, so can() is false and the button simply never appears.
+  const migration = fs.readFileSync(path.join(ROOT, 'scripts', 'rbac-migration.sql'), 'utf8');
+  const known = new Set([...migration.matchAll(/\('([a-z_]+\.[a-z_.]+)',\s*'[a-z_]+',/g)].map(m => m[1]));
+  assert.ok(known.size > 20, `expected a full permission catalogue, parsed ${known.size}`);
+
+  const used = [...MODELS.matchAll(/static let \w+ = "([a-z_]+\.[a-z_.]+)"/g)].map(m => m[1]);
+  assert.ok(used.length > 0, 'Permission constants are declared in AccountModels.swift');
+  for (const key of used) {
+    assert.ok(known.has(key),
+      `the app gates on "${key}", which is not in scripts/rbac-migration.sql — ` +
+      'the server will never grant it and the control is permanently hidden');
+  }
+});

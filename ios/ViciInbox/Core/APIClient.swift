@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Reuses the exact endpoints the web app already uses:
 ///   POST /auth/login        { password }        -> sets `vici_sess` cookie
-///   GET  /auth/check                            -> { authenticated: Bool }
+///   GET  /auth/check                            -> { authenticated: Bool, actor: {...} }
 ///   GET  /api/voice/token                       -> { login, password, callerNumber }
 ///
 /// Session is a cookie, so we let URLSession's shared cookie storage handle
@@ -98,7 +98,7 @@ actor APIClient {
             if response.statusCode == 401 { throw APIError.unauthorised }
             throw APIError.badResponse(response.statusCode)
         }
-        if let decoded = try? decoder.decode(AuthResponse.self, from: data), let user = decoded.user {
+        if let decoded = try? decoder.decode(AuthResponse.self, from: data), let user = decoded.identity {
             lastKnownUser = user
         }
         // Cached so a cold launch from a VoIP push can re-authenticate silently.
@@ -113,7 +113,7 @@ actor APIClient {
               response.statusCode == 200
         else { return false }
         if let decoded = try? decoder.decode(AuthResponse.self, from: data) {
-            if let user = decoded.user { lastKnownUser = user }
+            if let user = decoded.identity { lastKnownUser = user }
             return decoded.isAuthenticated
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
@@ -158,7 +158,7 @@ actor APIClient {
                 lastKnownUser = user
                 return user
             }
-            if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.user {
+            if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.identity {
                 lastKnownUser = user
                 return user
             }

@@ -57,12 +57,19 @@ struct AuthUser: Codable, Identifiable, Hashable {
 /// `POST /auth/login` and `GET /auth/check`. Both are a strict superset of the
 /// legacy `{ success: true }` / `{ authenticated: true }` bodies, so an older
 /// backend still decodes with `user == nil`.
-struct AuthResponse: Codable {
+/// The server calls the identity object `actor`, not `user`. Decoding only
+/// `user` leaves `currentUser` nil, which makes `can()` fail open — harmless
+/// for the shared login, but it means a Support Agent would be shown admin
+/// controls that then refuse server-side. `user` is kept as an accepted alias
+/// so this survives the field being renamed in either direction.
+struct AuthResponse: Decodable {
     let success: Bool?
     let authenticated: Bool?
+    let actor: AuthUser?
     let user: AuthUser?
 
     var isAuthenticated: Bool { authenticated ?? success ?? false }
+    var identity: AuthUser? { actor ?? user }
 }
 
 // MARK: - Roles
