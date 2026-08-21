@@ -11,7 +11,15 @@ release note and testers saw nothing describing the build.
 So the upload step uploads, and this sets the notes and distributes afterwards
 through the App Store Connect API, which needs no processing wait.
 
-Usage: publish-testflight-build.py <app_id> <beta_group_id> <changelog_file>
+The build is selected by EXACT version, never by "newest". Apple takes minutes
+to process an upload, so at the moment this runs the build just pushed is often
+not yet the newest VALID one — on 21 Aug 2026 that made this script attach the
+notes to the PREVIOUS build and redistribute it, while reporting success. A
+green workflow said nothing about whether the intended build reached anybody.
+Selecting by version also removes a second hazard: `sort=-version` orders a
+string, so build "9" sorts above build "21".
+
+Usage: publish-testflight-build.py <app_id> <beta_group_id> <changelog_file> <build_version>
 Requires ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_P8 in the environment.
 """
 
@@ -60,10 +68,54 @@ def call(method, path, jwt_token, body=None):
             return err.code, {"raw": raw.decode("utf-8", "replace")[:400]}
 
 
+# Apple's processing is usually a couple of minutes, occasionally longer.
+PROCESSING_TIMEOUT_SECONDS = 900
+PROCESSING_POLL_SECONDS = 20
+
+
+def await_build(app_id, version, jwt_token):
+    """The build with this exact version, once Apple has finished processing it.
+
+    Returns its id. Exits non-zero rather than falling back to another build:
+    publishing the wrong one silently is the failure this function exists to
+    prevent.
+    """
+    deadline = time.time() + PROCESSING_TIMEOUT_SECONDS
+    seen = None
+    while time.time() < deadline:
+        status, payload = call(
+            "GET", f"/builds?filter[app]={app_id}&filter[version]={version}&limit=1", jwt_token)
+        if status != 200:
+            sys.exit(f"could not read builds: {status} {payload}")
+
+        rows = payload.get("data") or []
+        if rows:
+            attributes = rows[0]["attributes"]
+            state = attributes.get("processingState")
+            if state != seen:
+                print(f"build {version}: {state}")
+                seen = state
+            if state == "VALID":
+                if attributes.get("expired"):
+                    sys.exit(f"build {version} is already expired")
+                return rows[0]["id"]
+            if state in ("FAILED", "INVALID"):
+                sys.exit(f"build {version} finished processing as {state} — it cannot be distributed")
+        elif seen is None:
+            print(f"build {version}: not visible to App Store Connect yet")
+            seen = "pending"
+
+        time.sleep(PROCESSING_POLL_SECONDS)
+
+    sys.exit(
+        f"build {version} did not become VALID within {PROCESSING_TIMEOUT_SECONDS}s. "
+        "It may still be processing; re-run this step rather than assuming it shipped.")
+
+
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         sys.exit(__doc__)
-    app_id, group_id, changelog_path = sys.argv[1:4]
+    app_id, group_id, changelog_path, build_version = sys.argv[1:5]
 
     with open(changelog_path, encoding="utf-8") as handle:
         notes = handle.read().strip()
@@ -72,13 +124,8 @@ def main():
 
     jwt_token = token()
 
-    status, payload = call("GET", f"/builds?filter[app]={app_id}&limit=1&sort=-version", jwt_token)
-    if status != 200 or not payload.get("data"):
-        sys.exit(f"could not read builds: {status} {payload}")
-    build = payload["data"][0]
-    build_id = build["id"]
-    version = build["attributes"]["version"]
-    print(f"newest build: {version} ({build['attributes']['processingState']})")
+    build_id = await_build(app_id, build_version, jwt_token)
+    version = build_version
 
     # fastlane may already have created an empty localisation, so update in
     # place when one exists rather than failing on the duplicate.

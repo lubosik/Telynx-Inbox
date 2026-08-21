@@ -9,6 +9,10 @@ on:
         description: "What testers should know about this build"
         required: false
         default: "Internal build"
+      publish_build:
+        description: "Publish-only: finish an ALREADY UPLOADED build number (skips archive and upload). Leave blank for a normal release."
+        required: false
+        default: ""
 
 concurrency:
   group: ios-testflight
@@ -59,6 +63,7 @@ jobs:
       # Compile without signing first. A failure here is source code, package
       # resolution, or simulator compatibility — not Apple credentials.
       - name: Compile for iOS Simulator
+        if: inputs.publish_build == ''
         run: |
           xcodebuild build \
             -project "$PROJECT" \
@@ -93,6 +98,7 @@ jobs:
       # at least one registered physical device. The export step below applies
       # App Store distribution signing with the authenticated Team key.
       - name: Archive
+        if: inputs.publish_build == ''
         run: |
           xcodebuild archive \
             -project "$PROJECT" \
@@ -110,6 +116,7 @@ jobs:
       # the later cloud-managed re-sign; the export replaces `development`
       # with the profile's production environment.
       - name: Seed archive push entitlements
+        if: inputs.publish_build == ''
         run: |
           APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" | head -1)
           if [ -z "$APP" ]; then echo "::error::Archived app not found"; exit 1; fi
@@ -128,6 +135,7 @@ jobs:
       # cloud-managed distribution signing. The API key must be a Team key
       # with the Admin role or this step is refused.
       - name: Export .ipa
+        if: inputs.publish_build == ''
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -148,6 +156,7 @@ jobs:
       # the source entitlement—before upload so a sandbox push build never
       # reaches testers.
       - name: Verify production push signing
+        if: inputs.publish_build == ''
         run: |
           IPA=$(find "$EXPORT_DIR" -name "*.ipa" | head -1)
           VERIFY_DIR=$(mktemp -d)
@@ -177,6 +186,7 @@ jobs:
       # The step timeout is well under the job's 60 minutes so a hung upload
       # fails loudly and quickly rather than burning the whole budget.
       - name: Upload to TestFlight
+        if: inputs.publish_build == ''
         timeout-minutes: 25
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -203,13 +213,20 @@ jobs:
       # Release notes and tester distribution, through the App Store Connect
       # API. This needs no processing wait, and it is also what makes a build
       # installable: an uploaded build assigned to no group notifies nobody.
+      # Selected by EXACT build number. Apple takes minutes to process an
+      # upload, so "the newest build" is frequently the PREVIOUS one at the
+      # moment this runs — on 21 Aug 2026 that attached the notes to build 21
+      # and redistributed it while the workflow reported success. The script
+      # now waits for this specific build to reach VALID and fails if it does
+      # not, so a green tick means the intended build actually reached testers.
       - name: Publish notes and distribute to testers
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
           CHANGELOG: ${{ inputs.changelog }}
+          BUILD_VERSION: ${{ inputs.publish_build != '' && inputs.publish_build || github.run_number }}
         run: |
           # macos-26's Homebrew Python is PEP 668 managed and rejects direct
           # system installs. Keep the small ASC client dependencies isolated.
@@ -219,7 +236,7 @@ jobs:
           trap 'rm -f changelog.txt' EXIT
           ASC_KEY_P8="$(echo "$ASC_KEY_P8_BASE64" | base64 --decode)" \
             build/testflight-publish-venv/bin/python ios/scripts/publish-testflight-build.py \
-              "$ASC_APP_ID" "$ASC_BETA_GROUP_ID" changelog.txt
+              "$ASC_APP_ID" "$ASC_BETA_GROUP_ID" changelog.txt "$BUILD_VERSION"
 
       - name: Remove the API key
         if: always()
