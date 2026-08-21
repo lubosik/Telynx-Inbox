@@ -1,5 +1,26 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
+const { logAudit, diffFields } = require('../lib/audit/log');
+
+/**
+ * The snapshot stored in an audit row's previous_state/new_state.
+ *
+ * `notes` is deliberately excluded. It is freeform operator text that routinely
+ * carries customer detail, and sms_audit_log cannot be deleted from, so a note
+ * copied in here could not be removed on an erasure request. That a note
+ * changed is still visible, by name, in changed_fields.
+ */
+function auditSnapshot(contact) {
+  if (!contact) return null;
+  return {
+    phone: contact.phone || null,
+    first_name: contact.first_name || null,
+    last_name: contact.last_name || null,
+    name: contact.name || null,
+    email: contact.email || null,
+    has_notes: Boolean(contact.notes)
+  };
+}
 
 // GET /api/contacts?search=&page=1
 // Returns all contacts sorted alphabetically by first_name, last_name
@@ -117,6 +138,18 @@ router.post('/', async (req, res) => {
         .eq('phone', formattedPhone)
         .select()
         .single();
+      const updatedSnapshot = auditSnapshot(updated);
+      await logAudit({
+        eventType: 'contact.updated',
+        req,
+        entityId: formattedPhone,
+        contactPhone: formattedPhone,
+        summary: `Updated the existing contact ${formattedPhone}`,
+        previousState: auditSnapshot(existing),
+        newState: updatedSnapshot,
+        changedFields: diffFields(auditSnapshot(existing), updatedSnapshot),
+        metadata: { source: 'manual', updated_via: 'create_form' }
+      });
       return res.json({ contact: normaliseContact(updated), created: false });
     }
 
@@ -138,6 +171,15 @@ router.post('/', async (req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     console.log(`[CONTACTS] created | phone=${formattedPhone?.slice(-4).padStart(formattedPhone.length, '*')}`);
+    await logAudit({
+      eventType: 'contact.created',
+      req,
+      entityId: formattedPhone,
+      contactPhone: formattedPhone,
+      summary: `Created the contact ${buildFullName(first_name, last_name) || formattedPhone}`,
+      newState: auditSnapshot(created),
+      metadata: { source: 'manual', created_via: 'contacts_api', has_email: Boolean(email) }
+    });
     res.status(201).json({ contact: normaliseContact(created), created: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create contact' });
@@ -159,9 +201,16 @@ router.patch('/:phone', async (req, res) => {
     if (avatar_url !== undefined) updates.avatar_url = avatar_url;
     if (name !== undefined) updates.name = name;
 
+    // Read the prior row once, for both the display-name rebuild and the audit
+    // snapshot. sms_audit_log cannot be updated later, so the before-state has
+    // to be captured here or not at all.
+    const { data: current } = await supabase
+      .from('sms_contacts')
+      .select('phone, first_name, last_name, name, email, notes')
+      .eq('phone', phone)
+      .maybeSingle();
+
     if ((first_name !== undefined || last_name !== undefined) && name === undefined) {
-      const { data: current } = await supabase
-        .from('sms_contacts').select('first_name, last_name').eq('phone', phone).single();
       updates.name = buildFullName(
         first_name ?? current?.first_name,
         last_name ?? current?.last_name
@@ -183,6 +232,33 @@ router.patch('/:phone', async (req, res) => {
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+
+    const previousSnapshot = auditSnapshot(current);
+    const nextSnapshot = auditSnapshot(data);
+    const changed = diffFields(previousSnapshot, nextSnapshot);
+    const phoneChanged = Boolean(updates.phone && updates.phone !== phone);
+
+    // A phone change is severity 'warning', not 'info'. sms_messages and
+    // sms_orders key on the number, so changing it silently detaches every
+    // message and order from the contact — the behaviour the comment above
+    // already describes. That is exactly the kind of quiet, hard-to-reverse
+    // change an Admin later needs to find.
+    await logAudit({
+      eventType: phoneChanged ? 'contact.phone_changed' : 'contact.updated',
+      req,
+      entityId: updates.phone || phone,
+      contactPhone: updates.phone || phone,
+      summary: phoneChanged
+        ? `Changed the phone number for ${current?.name || phone} from ${phone} to ${updates.phone}; message and order history stays on the old number`
+        : `Updated the contact ${current?.name || phone}`,
+      previousState: previousSnapshot,
+      newState: nextSnapshot,
+      changedFields: changed,
+      metadata: phoneChanged
+        ? { previous_phone: phone, new_phone: updates.phone, history_detached: true }
+        : { source: 'manual', updated_via: 'contacts_api' }
+    });
+
     res.json({ contact: normaliseContact(data) });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update contact' });

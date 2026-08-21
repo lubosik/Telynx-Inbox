@@ -11,6 +11,7 @@ const {
   privateCallLog,
   signedRecordingURL
 } = require('../lib/private-recordings');
+const { logAudit, logAuditSafely } = require('../lib/audit/log');
 
 // GET /api/voice/token — returns SIP credentials to the native iOS app only.
 // Protected by requireAuth at mount point in server.js
@@ -26,6 +27,23 @@ router.get('/token', async (req, res) => {
     // URL cache. The iOS app keeps the current value securely in Keychain.
     res.set('Cache-Control', 'no-store');
     const credentials = getIOSVoiceCredentials();
+
+    // Audit that SIP credentials were handed out, and which credential it was.
+    // The password is NEVER part of this row, and `password` is not on the
+    // allowlist for this event type in lib/audit/redact.js, so it could not be
+    // written even if a future edit passed it in here by mistake.
+    await logAudit({
+      eventType: 'security.voice_credentials.issued',
+      req,
+      entityId: credentials.login || null,
+      summary: `Issued SIP credentials for ${credentials.login || 'unknown login'} to the iPhone app`,
+      metadata: {
+        login: credentials.login || null,
+        dedicated_ios_pair: Boolean(credentials.usingDedicatedIOSCredential),
+        client: req.get('x-vici-client') || null
+      }
+    });
+
     res.json({
       login: credentials.login,
       password: credentials.password,
@@ -128,6 +146,19 @@ router.get('/recordings/:id', async (req, res) => {
 
   try {
     const signedURL = await signedRecordingURL(storagePath);
+
+    // Who listened to a customer recording is a compliance question, so this is
+    // visibility 'audit' and stays out of the main feed. The signed URL itself
+    // is never recorded: it would outlive its own short expiry inside a table
+    // that cannot be deleted from.
+    await logAudit({
+      eventType: 'recording.played',
+      req,
+      entityId: log.id,
+      summary: `Played the call recording for call log ${log.id}`,
+      metadata: { call_log_id: log.id, recording_archived: true }
+    });
+
     res.set('Cache-Control', 'no-store, private');
     return res.redirect(302, signedURL);
   } catch (signError) {
@@ -237,6 +268,13 @@ router.post('/recording/start', async (req, res) => {
       const err = await response.json();
       return res.status(400).json({ error: err?.errors?.[0]?.detail || 'Recording start failed' });
     }
+    await logAudit({
+      eventType: 'call.recording.started',
+      req,
+      entityId: call_control_id,
+      summary: `Started recording call ${call_control_id}`,
+      metadata: { call_control_id }
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -260,6 +298,13 @@ router.post('/recording/stop', async (req, res) => {
         body: JSON.stringify({})
       }
     );
+    await logAudit({
+      eventType: 'call.recording.stopped',
+      req,
+      entityId: call_control_id,
+      summary: `Stopped recording call ${call_control_id}`,
+      metadata: { call_control_id }
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -267,13 +312,68 @@ router.post('/recording/stop', async (req, res) => {
 });
 
 // POST /api/voice/backfill-recordings — pull all recordings from Telnyx and match to call_logs
+//
+// `lib/route-policy.js` marks this route `audit: true`. That flag was inert:
+// nothing in the enforcer reads it and this handler wrote no audit row, so the
+// policy table asserted coverage the code did not provide. A decorative flag is
+// worse than a missing one, because the next reader trusts it.
+//
+// It is instrumented rather than de-flagged because the flag was right. This is
+// an admin action that enumerates EVERY recording in the Telnyx account and
+// writes storage paths onto call_logs. Two rows, triggered and completed/failed,
+// matching routes/sync.js — that pairing is what makes "these recordings
+// appeared overnight, who ran what?" answerable.
+//
+// logAuditSafely, not logAudit: an audit write must never break the operation
+// it describes. Both calls sit inside the try, and the triggered row is awaited
+// before the work starts so the record exists even if the backfill then dies.
+const RECORDING_BACKFILL_SYNC_TYPE = 'call_recordings_backfill';
+
 router.post('/backfill-recordings', async (req, res) => {
+  const startedAt = Date.now();
   try {
+    await logAuditSafely({
+      eventType: 'settings.sync.triggered',
+      req,
+      entityId: RECORDING_BACKFILL_SYNC_TYPE,
+      summary: 'Started the call-recording backfill from Telnyx',
+      metadata: { sync_type: RECORDING_BACKFILL_SYNC_TYPE, source: 'api' }
+    });
+
     const { backfillRecordings } = require('../scripts/backfill-recordings');
     const result = await backfillRecordings();
+
+    await logAuditSafely({
+      eventType: 'settings.sync.completed',
+      req,
+      entityId: RECORDING_BACKFILL_SYNC_TYPE,
+      summary: `Call-recording backfill finished in ${Date.now() - startedAt}ms: ` +
+        `${result?.matched ?? 0} of ${result?.total ?? 0} Telnyx recordings matched, ${result?.updated ?? 0} call logs updated`,
+      metadata: {
+        sync_type: RECORDING_BACKFILL_SYNC_TYPE,
+        duration_ms: Date.now() - startedAt,
+        // `fixed` and `skipped` are the two count keys on the allowlist for
+        // this event type in lib/audit/redact.js. `updated` is what was fixed;
+        // everything the backfill saw and did not match was skipped.
+        fixed: result?.updated ?? 0,
+        skipped: Math.max(0, (result?.total ?? 0) - (result?.matched ?? 0))
+      }
+    });
+
     res.json(result);
   } catch (err) {
     console.error('[VOICE] Backfill recordings error:', err.message);
+    await logAuditSafely({
+      eventType: 'settings.sync.failed',
+      req,
+      entityId: RECORDING_BACKFILL_SYNC_TYPE,
+      summary: `Call-recording backfill failed after ${Date.now() - startedAt}ms`,
+      metadata: {
+        sync_type: RECORDING_BACKFILL_SYNC_TYPE,
+        duration_ms: Date.now() - startedAt,
+        error_code: err?.code || 'unknown'
+      }
+    });
     res.status(500).json({ error: err.message });
   }
 });

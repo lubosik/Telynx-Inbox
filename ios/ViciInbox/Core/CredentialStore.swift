@@ -10,6 +10,7 @@ enum CredentialStore {
     private static let service = "com.vicipeptides.inbox"
 
     enum Key: String {
+        case inboxEmail      = "inbox_email"
         case inboxPassword   = "inbox_password"
         case sipUser         = "sip_user"
         case sipPassword     = "sip_password"
@@ -75,8 +76,19 @@ enum CredentialStore {
         set(creds.callerNumber, for: .callerNumber)
     }
 
+    /// Destroys every stored credential, including the SIP login the VoIP
+    /// answer path reads synchronously.
+    ///
+    /// This must remain reachable only from an explicit user tap on Sign Out.
+    /// `TelnyxVoiceManager.startSDKForPush` reads `cachedSIPCredentials`
+    /// straight out of the Keychain when a VoIP push wakes a terminated app,
+    /// and never touches HTTP auth, so no authentication failure can stop the
+    /// phone ringing. Clearing these keys is the one thing that can: after it
+    /// runs, a push reports a CallKit call that immediately ends. Never call
+    /// this from a 401 handler, a failed session restore, an ACCOUNT_DISABLED
+    /// or SESSION_STALE response, or any other non-interactive path.
     static func clearAll() {
-        [Key.inboxPassword, .sipUser, .sipPassword, .callerNumber].forEach(remove)
+        [Key.inboxEmail, .inboxPassword, .sipUser, .sipPassword, .callerNumber].forEach(remove)
     }
 }
 

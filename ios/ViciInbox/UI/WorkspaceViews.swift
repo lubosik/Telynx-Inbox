@@ -266,7 +266,15 @@ private struct ContactEditor: View {
 
 struct ActivityView: View {
     @StateObject private var model = ActivityModel()
+    @EnvironmentObject private var session: SessionModel
     @State private var cancelTarget: ActivityRecord?
+
+    /// Cancelling a queued automation is a permissioned action. The control is
+    /// disabled rather than hidden: a Support Agent should understand why the
+    /// button will not work, not conclude the app is broken. The server rejects
+    /// the request independently either way.
+    private var canCancel: Bool { session.can(Permission.automationCancel) }
+
     private let flows = ["all", "failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "confirmed-new", "confirmed-returning", "shipped-msg1"]
 
     var body: some View {
@@ -287,7 +295,7 @@ struct ActivityView: View {
                         ForEach(flows, id: \.self) { Text(flowLabel($0)).tag($0) }
                     }
                 }
-                Section("Queued automations") {
+                Section {
                     if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
                     ForEach(model.queue) { item in
                         // Visible button rather than swipe-only: a hidden
@@ -297,7 +305,16 @@ struct ActivityView: View {
                         HStack(alignment: .top, spacing: 12) {
                             // ActivityRow already stretches to fill, so it takes
                             // the slack and the button keeps its intrinsic width.
-                            ActivityRow(item: item, date: item.sendAt)
+                            // The row itself opens this message's own history:
+                            // scheduled by the hold flow at 09:12, cancelled by
+                            // Dominic at 14:32.
+                            NavigationLink {
+                                EntityHistoryView(entityType: "scheduled_message",
+                                                  entityID: item.id,
+                                                  title: "Message history")
+                            } label: {
+                                ActivityRow(item: item, date: item.sendAt)
+                            }
                             Button {
                                 cancelTarget = item
                             } label: {
@@ -306,18 +323,35 @@ struct ActivityView: View {
                                 } else {
                                     Text("Cancel")
                                         .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(ViciTheme.destructive)
+                                        .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
                                 }
                             }
                             // Borderless keeps the button's tap target separate
                             // from the row's, which List would otherwise merge.
                             .buttonStyle(.borderless)
-                            .disabled(model.cancellingID != nil)
+                            .disabled(!canCancel || model.cancellingID != nil)
                             .accessibilityLabel("Cancel scheduled \(item.flowType ?? "automation")")
+                            .accessibilityHint(canCancel
+                                               ? "Stops this queued automation"
+                                               : "Your role cannot cancel automations")
                         }
+                        // The swipe shortcut is attached only when the action is
+                        // actually permitted; a swipe that always fails is worse
+                        // than no swipe. The disabled button above carries the
+                        // explanation.
                         .swipeActions {
-                            Button("Cancel", role: .destructive) { cancelTarget = item }
+                            if canCancel {
+                                Button("Cancel", role: .destructive) { cancelTarget = item }
+                            }
                         }
+                    }
+                } header: {
+                    Text("Queued automations")
+                } footer: {
+                    if canCancel {
+                        Text("Tap a queued message to see everything that has happened to it.")
+                    } else {
+                        Text("Your role can see the queue but cannot cancel automations. Ask an admin if a queued message needs stopping. Tap a message to see its history.")
                     }
                 }
                 Section("Recent sends") {
@@ -326,6 +360,18 @@ struct ActivityView: View {
                 }
             }
             .navigationTitle("Automations")
+            .toolbar {
+                if session.can(Permission.auditRead) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        NavigationLink {
+                            ActivityLogView(category: .automations)
+                        } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                        }
+                        .accessibilityLabel("Automation activity")
+                    }
+                }
+            }
             .refreshable { await model.load() }
             .task { if model.stats == nil { await model.load() } }
             .onChange(of: model.flow) { _ in Task { await model.load() } }

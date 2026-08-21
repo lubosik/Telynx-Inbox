@@ -97,17 +97,47 @@ module.exports = (broadcastSSE) => {
       const stopPattern = /^(stop|stopall|stop all|unsubscribe|cancel|end|quit|opt[\s-]?out|stop the messages|stop texting|stop messaging|no more texts|no more messages|these emails|stop these emails)$/i;
       if (stopPattern.test(text.trim())) {
         console.log(`[OPT-OUT] Received STOP from ...${fromPhone.slice(-4)}`);
-        await markOptedOut(fromPhone);
+        // The suppression work must survive a failure to AUDIT the suppression.
+        //
+        // markOptedOut writes the opt-out sentinel and then a consent-bearing
+        // audit row that THROWS if it cannot be written. That throw is correct
+        // for an action gated on consent being recorded — but honouring a STOP
+        // is not such an action. If the audit row fails, the right outcome is
+        // still to cancel this customer's queued messages and shout about the
+        // missing record; the wrong outcome is to leave them subscribed because
+        // a logging table was unavailable. An unrecorded suppression is a
+        // bookkeeping problem. An unhonoured STOP is a regulatory one.
+        try {
+          await markOptedOut(fromPhone);
+        } catch (optOutErr) {
+          console.error(`[OPT-OUT] Proceeding with suppression despite an unrecorded consent event for ...${fromPhone.slice(-4)}: ${optOutErr.message}`);
+        }
         await cancelScheduledForCustomer(fromPhone).catch(() => {});
-        // Log the inbound stop message but do not send any auto-reply
-        await supabase.from('sms_messages').insert({
-          telnyx_message_id: messageId,
-          contact_phone: fromPhone,
-          direction: 'inbound',
-          body: text,
-          status: 'delivered',
-          created_at: payload.received_at || new Date().toISOString()
-        }).catch(() => {});
+        // Log the inbound stop message but do not send any auto-reply.
+        //
+        // This used to end in `.catch(() => {})`. A Supabase query builder is a
+        // thenable with `then` only — it has no `catch` — so that threw
+        // `TypeError: ...insert(...).catch is not a function` before the request
+        // was dispatched, and the outer catch below swallowed it. The same shape
+        // in markOptedOut (flows/utils.js) meant the STOP branch died at its
+        // first statement: no opt-out sentinel, no sequence cancellation, no
+        // record of the message, and no opt_out broadcast. Fixing only that one
+        // would have moved the crash here. A PostgREST failure arrives in
+        // `error`, never as a rejection, so try/catch around the await is the
+        // correct shape.
+        try {
+          const { error: stopLogError } = await supabase.from('sms_messages').insert({
+            telnyx_message_id: messageId,
+            contact_phone: fromPhone,
+            direction: 'inbound',
+            body: text,
+            status: 'delivered',
+            created_at: payload.received_at || new Date().toISOString()
+          });
+          if (stopLogError) console.error('[OPT-OUT] Could not record the STOP message:', stopLogError.message);
+        } catch (stopLogErr) {
+          console.error('[OPT-OUT] Could not record the STOP message:', stopLogErr.message);
+        }
         broadcastSSE({ type: 'opt_out', phone: fromPhone });
         return;
       }

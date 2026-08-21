@@ -9,6 +9,24 @@ import Foundation
 ///
 /// Session is a cookie, so we let URLSession's shared cookie storage handle
 /// it — same 30-day cookie the browser gets.
+///
+/// The multi-user release adds an optional named account: `POST /auth/login`
+/// takes either `{ email, password }` or the legacy `{ password }` alone. Both
+/// remain supported and the legacy path is still what two people use in
+/// production, so it is never removed or deprecated in the client.
+extension Notification.Name {
+    /// Posted when a request 401'd and re-authenticating from the Keychain also
+    /// failed. Purely informational: it drives a "signed out — tap to sign in"
+    /// state. It must never trigger a sign-out, a credential wipe, or a push
+    /// unregistration, because the VoIP answer path depends on the Keychain
+    /// surviving every authentication failure.
+    static let viciAuthenticationLost = Notification.Name("vici.auth.lost")
+    /// Posted after a silent re-authentication succeeded. Permissions may have
+    /// changed (that is what a 401 `SESSION_STALE` means), so the session model
+    /// reloads the current user.
+    static let viciAuthenticationRecovered = Notification.Name("vici.auth.recovered")
+}
+
 enum APIError: LocalizedError {
     case badResponse(Int)
     case unauthorised
@@ -44,37 +62,113 @@ actor APIClient {
 
     // MARK: - Auth
 
+    /// The user object from the most recent successful login or session check.
+    /// Kept so a backend without `/api/users/me` still yields a display name
+    /// and permissions.
+    private var lastKnownUser: AuthUser?
+
+    /// Guards the silent re-authentication path against re-entrancy. A 401 on
+    /// several concurrent requests must produce one login attempt, not one per
+    /// request.
+    private var isReauthenticating = false
+
+    /// Legacy shared-password login. Still the path two people use in
+    /// production; it is not deprecated and must keep working.
     @discardableResult
     func login(password: String) async throws -> Bool {
-        let body = ["password": password]
-        let (_, response) = try await post("/auth/login", body: body)
+        try await performLogin(email: nil, password: password)
+    }
+
+    /// Named-account login. An empty email falls through to the legacy path
+    /// rather than sending a blank username the server would have to reject.
+    @discardableResult
+    func login(email: String, password: String) async throws -> Bool {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try await performLogin(email: trimmed.isEmpty ? nil : trimmed,
+                                      password: password)
+    }
+
+    @discardableResult
+    private func performLogin(email: String?, password: String) async throws -> Bool {
+        var body: [String: Any] = ["password": password]
+        if let email { body["email"] = email }
+        // Never retried on 401: a wrong password must surface, not loop.
+        let (data, response) = try await post("/auth/login", body: body, retryOn401: false)
         guard response.statusCode == 200 else {
             if response.statusCode == 401 { throw APIError.unauthorised }
             throw APIError.badResponse(response.statusCode)
         }
-        // Cache so a cold launch from a VoIP push can re-authenticate silently.
+        if let decoded = try? decoder.decode(AuthResponse.self, from: data), let user = decoded.user {
+            lastKnownUser = user
+        }
+        // Cached so a cold launch from a VoIP push can re-authenticate silently.
         CredentialStore.set(password, for: .inboxPassword)
+        CredentialStore.set(email, for: .inboxEmail)
         return true
     }
 
     func isAuthenticated() async -> Bool {
-        guard let (data, response) = try? await get("/auth/check"),
-              response.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        // Not retried on 401: this call is itself the authentication probe.
+        guard let (data, response) = try? await get("/auth/check", retryOn401: false),
+              response.statusCode == 200
         else { return false }
+        if let decoded = try? decoder.decode(AuthResponse.self, from: data) {
+            if let user = decoded.user { lastKnownUser = user }
+            return decoded.isAuthenticated
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
         return json["authenticated"] as? Bool ?? false
     }
 
-    /// Re-login using the stored password. Called on cold launch before
-    /// fetching SIP credentials.
+    /// Re-login using the stored credentials. Called on cold launch before
+    /// fetching SIP credentials, so it must stay cheap and must never block on
+    /// anything interactive.
+    ///
+    /// Fallback chain: a stored email uses the named-account form first, and a
+    /// failure there still tries the legacy password-only form. That second
+    /// attempt matters during the rollout — an account can exist locally as an
+    /// email while the deployed server is still on the shared password.
     func restoreSessionIfNeeded() async -> Bool {
         if await isAuthenticated() { return true }
+        return await loginFromStoredCredentials()
+    }
+
+    /// Shared by `restoreSessionIfNeeded` and the 401 interceptor. Returns
+    /// false rather than throwing: no caller of this may treat a failure as a
+    /// reason to sign the user out.
+    private func loginFromStoredCredentials() async -> Bool {
         guard let password = CredentialStore.get(.inboxPassword) else { return false }
-        return (try? await login(password: password)) ?? false
+        if let email = CredentialStore.get(.inboxEmail), !email.isEmpty,
+           ((try? await performLogin(email: email, password: password)) ?? false) {
+            return true
+        }
+        return (try? await performLogin(email: nil, password: password)) ?? false
+    }
+
+    /// The current account, for the permission-aware UI.
+    ///
+    /// Falls back to the user captured at login when `/api/users/me` is absent
+    /// (older backend) or unreachable. A nil result means "unknown", and the
+    /// client treats unknown as the legacy full-access shared account rather
+    /// than hiding the whole app.
+    func loadCurrentUser() async -> AuthUser? {
+        if let (data, response) = try? await get("/api/users/me"),
+           (200..<300).contains(response.statusCode) {
+            if let user = try? decoder.decode(AuthUser.self, from: data) {
+                lastKnownUser = user
+                return user
+            }
+            if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.user {
+                lastKnownUser = user
+                return user
+            }
+        }
+        return lastKnownUser
     }
 
     func logout() async {
-        _ = try? await post("/auth/logout", body: [:])
+        _ = try? await post("/auth/logout", body: [:], retryOn401: false)
+        lastKnownUser = nil
     }
 
     // MARK: - Message notifications
@@ -384,6 +478,119 @@ actor APIClient {
         _ = try? await post("/api/voice/logs", body: body)
     }
 
+    // MARK: - Audit trail
+
+    /// `GET /api/audit`. `nextCursor` is opaque paging state; the caller keeps
+    /// it and hands it back rather than computing page numbers.
+    func fetchAudit(category: AuditCategory = .all,
+                    actorID: String? = nil,
+                    from: Date? = nil,
+                    to: Date? = nil,
+                    cursor: Int? = nil,
+                    limit: Int = 50) async throws -> AuditPage {
+        // `all` is a client-side idea, not a server one: routes/audit.js validates
+        // `category` against the real category list and answers 400 for anything
+        // else. Sending it unconditionally 400s the default, unfiltered feed —
+        // the very first request the Activity screen makes. Omit it instead.
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if category != .all {
+            items.append(URLQueryItem(name: "category", value: category.rawValue))
+        }
+        if let actorID, !actorID.isEmpty { items.append(URLQueryItem(name: "actor", value: actorID)) }
+        let formatter = ISO8601DateFormatter()
+        if let from { items.append(URLQueryItem(name: "from", value: formatter.string(from: from))) }
+        if let to { items.append(URLQueryItem(name: "to", value: formatter.string(from: to))) }
+        if let cursor { items.append(URLQueryItem(name: "cursor", value: String(cursor))) }
+        return try await decodedGET("/api/audit", queryItems: items)
+    }
+
+    /// `GET /api/audit/entity/:entityType/:entityId`. The contract says "same
+    /// item shape" without stating whether it is wrapped, so both a paged
+    /// envelope and a bare array decode.
+    func fetchEntityHistory(entityType: String, entityID: String) async throws -> [AuditItem] {
+        let path = "/api/audit/entity/\(encodedPathSegment(entityType))/\(encodedPathSegment(entityID))"
+        let (data, response) = try await get(path)
+        try validate(data: data, response: response)
+        if let page = try? decoder.decode(AuditPage.self, from: data) { return page.items }
+        if let list = try? decoder.decode([AuditItem].self, from: data) { return list }
+        throw APIError.decoding
+    }
+
+    func fetchAuditActors() async throws -> [AuditActor] {
+        let (data, response) = try await get("/api/audit/actors")
+        try validate(data: data, response: response)
+        if let list = try? decoder.decode([AuditActor].self, from: data) { return list }
+        // The server names each list after its resource — `{ actors: [...] }` —
+        // rather than using a generic `items` envelope. Decoding only the
+        // generic shape throws, and the screen renders empty with no error
+        // that points at the cause.
+        struct Named: Decodable { let actors: [AuditActor] }
+        if let named = try? decoder.decode(Named.self, from: data) { return named.actors }
+        struct Wrapped: Decodable { let items: [AuditActor] }
+        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.items }
+        throw APIError.decoding
+    }
+
+    // MARK: - Team
+
+    func fetchTeam() async throws -> [TeamMember] {
+        let (data, response) = try await get("/api/users")
+        try validate(data: data, response: response)
+        if let list = try? decoder.decode([TeamMember].self, from: data) { return list }
+        // The server names each list after its resource — `{ users: [...] }` —
+        // rather than using a generic `items` envelope. Decoding only the
+        // generic shape throws, and the screen renders empty with no error
+        // that points at the cause.
+        struct Named: Decodable { let users: [TeamMember] }
+        if let named = try? decoder.decode(Named.self, from: data) { return named.users }
+        struct Wrapped: Decodable { let items: [TeamMember] }
+        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.items }
+        throw APIError.decoding
+    }
+
+    func updateUserRole(id: String, role: String) async throws {
+        let (data, response) = try await patch("/api/users/\(encodedPathSegment(id))",
+                                               body: ["role": role])
+        try validate(data: data, response: response)
+    }
+
+    /// The server refuses to remove the last active admin with a 409
+    /// `CANNOT_DEACTIVATE_LAST_OWNER`, which `validate` turns into a sentence
+    /// the operator can act on.
+    func deactivateUser(id: String) async throws {
+        let (data, response) = try await post("/api/users/\(encodedPathSegment(id))/deactivate",
+                                              body: [:])
+        try validate(data: data, response: response)
+    }
+
+    func fetchInvitations() async throws -> [Invitation] {
+        let (data, response) = try await get("/api/invitations")
+        try validate(data: data, response: response)
+        if let list = try? decoder.decode([Invitation].self, from: data) { return list }
+        // The server names each list after its resource — `{ invitations: [...] }` —
+        // rather than using a generic `items` envelope. Decoding only the
+        // generic shape throws, and the screen renders empty with no error
+        // that points at the cause.
+        struct Named: Decodable { let invitations: [Invitation] }
+        if let named = try? decoder.decode(Named.self, from: data) { return named.invitations }
+        struct Wrapped: Decodable { let items: [Invitation] }
+        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.items }
+        throw APIError.decoding
+    }
+
+    /// Creation is the only time `inviteToken` / `inviteUrl` are returned.
+    /// There is no email sender configured, so the caller must show the link
+    /// once and let the admin copy it.
+    func createInvitation(email: String, role: String) async throws -> Invitation {
+        let (data, response) = try await post("/api/invitations",
+                                              body: ["email": email, "role": role])
+        try validate(data: data, response: response)
+        if let invitation = try? decoder.decode(Invitation.self, from: data) { return invitation }
+        struct Wrapped: Decodable { let invitation: Invitation }
+        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.invitation }
+        throw APIError.decoding
+    }
+
     // MARK: - Plumbing
 
     private let decoder = JSONDecoder()
@@ -400,19 +607,23 @@ actor APIClient {
         return url
     }
 
-    private func get(_ path: String, queryItems: [URLQueryItem] = []) async throws -> (Data, HTTPURLResponse) {
+    private func get(_ path: String,
+                     queryItems: [URLQueryItem] = [],
+                     retryOn401: Bool = true) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: try url(path, queryItems: queryItems))
         request.httpMethod = "GET"
-        return try await perform(request)
+        return try await perform(request, retryOn401: retryOn401)
     }
 
     @discardableResult
-    private func post(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
+    private func post(_ path: String,
+                      body: [String: Any],
+                      retryOn401: Bool = true) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        return try await perform(request)
+        return try await perform(request, retryOn401: retryOn401)
     }
 
     private func patch(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
@@ -437,16 +648,97 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    /// Maps a non-2xx response onto an `APIError`.
+    ///
+    /// Only 401 becomes `.unauthorised`. A 403 `FORBIDDEN_PERMISSION` is a
+    /// role decision about one action, not a broken session, so it surfaces as
+    /// an ordinary message and must never be mistaken for a sign-out.
     private func validate(data: Data, response: HTTPURLResponse) throws {
         guard (200..<300).contains(response.statusCode) else {
             if response.statusCode == 401 { throw APIError.unauthorised }
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let message = json["error"] as? String { throw APIError.server(message) }
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if let message = Self.readableMessage(from: json, statusCode: response.statusCode) {
+                throw APIError.server(message)
+            }
             throw APIError.badResponse(response.statusCode)
         }
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    /// Server error bodies carry either a plain `error`/`message` string or a
+    /// machine `code`. The two codes with real consequences for the operator
+    /// get sentences rather than an opaque identifier.
+    private static func readableMessage(from json: [String: Any]?, statusCode: Int) -> String? {
+        guard let json else { return nil }
+        let code = json["code"] as? String
+        switch code {
+        case "FORBIDDEN_PERMISSION":
+            let permission = json["permission"] as? String
+            let role = RoleCatalog.label(json["role"] as? String)
+            if let permission {
+                return "\(role) accounts cannot do this. It needs the \(permission) permission."
+            }
+            return "\(role) accounts cannot do this."
+        case "CANNOT_DEACTIVATE_LAST_OWNER":
+            return "This is the last active admin. Add or promote another admin first, then try again."
+        default:
+            break
+        }
+        if let message = json["error"] as? String, !message.isEmpty { return message }
+        if let message = json["message"] as? String, !message.isEmpty { return message }
+        if let code, !code.isEmpty { return code }
+        return nil
+    }
+
+    /// Performs a request and, on a 401, re-authenticates once from the
+    /// Keychain and replays it exactly once.
+    ///
+    /// This is the global recovery the client previously lacked: without it a
+    /// single 401 left every tab showing "the session expired" until the app
+    /// happened to be backgrounded and reopened. It also implements the
+    /// `SESSION_STALE` contract, where a permissions change invalidates the
+    /// cookie and the correct response is a silent re-login.
+    ///
+    /// Three things it deliberately does not do, because the VoIP answer path
+    /// reads SIP credentials straight from the Keychain and only a wipe can
+    /// stop the phone ringing:
+    ///   1. It never calls `SessionModel.signOut()`.
+    ///   2. It never calls `CredentialStore.clearAll()`.
+    ///   3. It never unregisters push.
+    /// A total failure posts `viciAuthenticationLost` and nothing else.
+    ///
+    /// The replay calls `send` directly rather than recursing, so there is
+    /// exactly one retry per request and no possibility of a loop.
+    private func perform(_ request: URLRequest,
+                         retryOn401: Bool = true) async throws -> (Data, HTTPURLResponse) {
+        let (data, http) = try await send(request)
+        guard http.statusCode == 401, retryOn401 else { return (data, http) }
+
+        guard await reauthenticateSilently() else {
+            NotificationCenter.default.post(name: .viciAuthenticationLost, object: nil)
+            return (data, http)
+        }
+
+        let replayed = try await send(request)
+        if replayed.1.statusCode == 401 {
+            NotificationCenter.default.post(name: .viciAuthenticationLost, object: nil)
+        }
+        return replayed
+    }
+
+    /// One login attempt at a time. Concurrent 401s wait for the in-flight
+    /// attempt instead of stampeding the login endpoint.
+    private func reauthenticateSilently() async -> Bool {
+        guard !isReauthenticating else { return false }
+        isReauthenticating = true
+        defer { isReauthenticating = false }
+
+        guard await loginFromStoredCredentials() else { return false }
+        Log.push("session re-authenticated silently after a 401")
+        NotificationCenter.default.post(name: .viciAuthenticationRecovered, object: nil)
+        return true
+    }
+
+    private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw APIError.decoding }

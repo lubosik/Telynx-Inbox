@@ -1,7 +1,11 @@
 import SwiftUI
 
-/// One-time login using the same shared inbox password the web app uses.
-/// After this the password lives in the Keychain so a push-woken cold launch
+/// One-time login. The email is optional: leaving it blank signs in with the
+/// shared inbox password the web app has always used, which is still how two
+/// people sign in today and is not going away. Filling it in uses the named
+/// account instead.
+///
+/// After this the credentials live in the Keychain so a push-woken cold launch
 /// can re-authenticate without any user interaction.
 ///
 /// The backdrop is the brand treatment: two or three very soft mint blooms
@@ -11,10 +15,13 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject private var session: SessionModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var email = CredentialStore.get(.inboxEmail) ?? ""
     @State private var password = ""
     @State private var isWorking = false
     @State private var error: String?
-    @FocusState private var focused: Bool
+    @FocusState private var focused: Field?
+
+    private enum Field: Hashable { case email, password }
 
     var body: some View {
         ZStack {
@@ -28,12 +35,30 @@ struct LoginView: View {
                 wordmark
 
                 VStack(spacing: 12) {
+                    TextField("Email (optional)", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focused = .password }
+
                     SecureField("Inbox password", text: $password)
                         .textContentType(.password)
                         .textFieldStyle(.roundedBorder)
-                        .focused($focused)
+                        .focused($focused, equals: .password)
                         .submitLabel(.go)
                         .onSubmit(submit)
+
+                    Text(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                         ? "Leave the email blank to use the shared inbox password."
+                         : "Signing in as \(email.trimmingCharacters(in: .whitespacesAndNewlines)).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
 
                     if let error {
                         Text(error)
@@ -60,7 +85,7 @@ struct LoginView: View {
                 Spacer()
             }
         }
-        .onAppear { focused = true }
+        .onAppear { focused = email.isEmpty ? .email : .password }
     }
 
     /// The Vici Peptides lockup: Didone-style serif wordmark over small
@@ -92,7 +117,9 @@ struct LoginView: View {
         error = nil
         Task { @MainActor in
             do {
-                try await session.signIn(password: password)
+                // An empty email is the legacy shared-password path, which the
+                // session model routes to `login(password:)` unchanged.
+                try await session.signIn(email: email, password: password)
             } catch {
                 self.error = error.localizedDescription
             }
