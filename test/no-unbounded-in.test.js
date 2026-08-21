@@ -145,7 +145,7 @@ test('the scan reaches nested directories, repo-root scripts, and scripts/', () 
     path.join('lib', 'fetch-all-rows.js'),        // top level of a scanned dir
     path.join('routes', 'conversations.js'),      // the original outage site
     path.join('scripts', 'backfill-analytics.js'),// scripts/ is now scanned
-    'check-failed-orders.js'                      // repo root is now scanned
+    'sync-ghl.js'                                 // repo root is now scanned
   ]) {
     assert.ok(files.includes(expected), `${expected} must be inside the scan, but is not`);
   }
@@ -153,14 +153,35 @@ test('the scan reaches nested directories, repo-root scripts, and scripts/', () 
   assert.ok(!files.some(file => file.split(path.sep).includes('node_modules')));
 });
 
-test('every allowlist entry names a real file and states a reason', () => {
-  // An allowlist without reasons becomes a place to hide failures. An
-  // allowlist that outlives its files becomes a lie about coverage.
+test('every allowlist entry states a reason, and none of them is load-bearing code', () => {
+  // An allowlist without reasons becomes a place to hide failures.
+  //
+  // Existence is deliberately NOT asserted. An entry may name a file that is
+  // untracked, or deleted, or simply absent from a given checkout —
+  // check-failed-orders.js is untracked, so asserting existence passed on the
+  // machine that wrote this test and failed in CI on a clean clone. What
+  // matters is that the entry is justified and that it does not silence a file
+  // the server actually depends on.
   for (const [file, reason] of ALLOWLIST) {
-    assert.ok(fs.existsSync(path.join(ROOT, file)),
-      `${file} is allowlisted but no longer exists — remove the entry`);
     assert.ok(typeof reason === 'string' && reason.length > 40,
       `${file} is allowlisted without a stated reason`);
+
+    if (!fs.existsSync(path.join(ROOT, file))) continue;
+
+    // An allowlisted file must not be reachable from the running server.
+    // Silencing the guard for a hand-run diagnostic is a judgement call;
+    // silencing it for something on the request path is how the outage happens
+    // again.
+    const basename = path.basename(file, '.js');
+    const required = sourceFiles()
+      .filter(other => other !== file)
+      .some(other => new RegExp(`require\\(['"\`][^'"\`]*${basename}['"\`]\\)`)
+        .test(fs.readFileSync(path.join(ROOT, other), 'utf8')));
+
+    if (file === 'lib/fetch-all-rows.js') continue; // the helper itself, required everywhere by design
+    assert.equal(required, false,
+      `${file} is allowlisted but is required by other source — it is on the ` +
+      'request path and must be fixed, not silenced');
   }
 });
 
