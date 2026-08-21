@@ -191,7 +191,21 @@ git diff --exit-code -- ios/ViciInbox.xcodeproj
 Portable checks available without Xcode:
 
 ```bash
+# Syntax only. This does NOT type-check, so it cannot catch a wrong Codable
+# conformance, a bad conditional binding, or a missing protocol requirement.
+# Two such errors reached CI before this note was written.
 swiftc -frontend -parse ios/ViciInbox/App/*.swift ios/ViciInbox/Core/*.swift ios/ViciInbox/Voice/*.swift ios/ViciInbox/UI/*.swift
+
+# A REAL type-check of the Foundation-only layer. Run this before pushing any
+# change to the models or the API client — it is where most Swift edits land and
+# where -parse is blindest. The UI and Voice layers cannot be checked this way
+# (SwiftUI needs the iOS SDK, TelnyxRTC is a Swift Package that is not vendored),
+# so a full compile still belongs to the `iOS Build` workflow.
+swiftc -typecheck \
+  ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
+  ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/AppConfig.swift \
+  ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
+  ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift
 plutil -lint ios/ExportOptions.plist ios/ViciInbox/Resources/Info.plist ios/ViciInbox/Resources/ViciInbox.entitlements
 xmllint --noout ios/ViciInbox.xcodeproj/xcshareddata/xcschemes/ViciInbox.xcscheme
 ```

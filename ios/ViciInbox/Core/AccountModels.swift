@@ -202,9 +202,16 @@ struct AuditActor: Decodable, Identifiable, Hashable {
         displayName = try? container.decodeIfPresent(String.self, forKey: .actorDisplayName)
         role = try? container.decodeIfPresent(String.self, forKey: .actorRole)
 
-        if let value = try? container.decodeIfPresent(Int.self, forKey: .actorUserID), let value {
+        // `try?` on an already-Optional expression flattens rather than nesting,
+        // so each of these binds a non-Optional value. A second `let value`
+        // would be unwrapping something that is not an Optional.
+        //
+        // Both branches exist because Postgres bigint arrives as a JSON number
+        // from PostgREST but is quoted by some clients; decoding only one shape
+        // silently drops the id and collapses every actor onto the name key.
+        if let value = try? container.decodeIfPresent(Int.self, forKey: .actorUserID) {
             id = String(value)
-        } else if let value = try? container.decodeIfPresent(String.self, forKey: .actorUserID), let value {
+        } else if let value = try? container.decodeIfPresent(String.self, forKey: .actorUserID) {
             id = value
         } else {
             // No user id: the automation, a webhook, or the shared identity.
