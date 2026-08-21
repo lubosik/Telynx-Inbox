@@ -174,7 +174,13 @@ struct AuditPage: Codable {
     let hasMore: Bool?
 }
 
-struct AuditActor: Codable, Identifiable, Hashable {
+// Decodable, not Codable. This is a response model — it is only ever read from
+// the server, never sent back — and its CodingKeys map the server's field names
+// (`actor_user_id`, `actor_display_name`) rather than the property names, so
+// Swift cannot synthesise a matching encoder. Declaring Codable asks for one and
+// fails to compile. `swiftc -frontend -parse` does not type-check, so this only
+// surfaced in CI.
+struct AuditActor: Decodable, Identifiable, Hashable {
     let id: String
     let displayName: String?
     let role: String?
