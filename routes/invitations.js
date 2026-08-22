@@ -298,19 +298,34 @@ function createInvitationStore({ client } = {}) {
       // information they are least likely to have to hand, in the one flow
       // where they have no account to recover from. Best-effort: a failure here
       // must not undo a redemption that has already committed.
+      //
+      // `mustChangePassword` is read back rather than assumed. The value is set
+      // by redeem_sms_invitation, a database function, and the application has
+      // no way to know which version of it is deployed. Asserting `false` here
+      // would make the app tell an invitee "you can sign in now" while the
+      // database quietly flags the account for rotation — the response and the
+      // truth diverging on the one screen where a new person has no way to tell
+      // which to believe. Reading it costs one indexed lookup we are already
+      // making, and it is correct whether or not the migration has been applied.
       let email = null;
+      let mustChangePassword = null;
       try {
         const row = await db()
           .from('sms_users')
-          .select('email')
+          .select('email, must_change_password')
           .eq('id', userId)
           .maybeSingle();
-        if (!row.error) email = row.data?.email || null;
+        if (!row.error) {
+          email = row.data?.email || null;
+          if (typeof row.data?.must_change_password === 'boolean') {
+            mustChangePassword = row.data.must_change_password;
+          }
+        }
       } catch (err) {
-        console.warn('[INVITE] Could not read the email for the accepted invitation:', err.message);
+        console.warn('[INVITE] Could not read back the accepted account:', err.message);
       }
 
-      return { userId, email };
+      return { userId, email, mustChangePassword };
     },
 
     /**
