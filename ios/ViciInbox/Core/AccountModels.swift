@@ -619,3 +619,149 @@ indirect enum JSONValue: Codable, Hashable {
         }
     }
 }
+
+// MARK: - Accepting an invitation
+
+/// Password rules, mirrored from `validatePasswordStrength` in `lib/password.js`.
+///
+/// The server is the only authority here. These constants exist so the rules
+/// can be stated before the invitee types rather than after a rejected attempt,
+/// and the numbers are copied from `MIN_PASSWORD_LENGTH` / `MAX_PASSWORD_LENGTH`
+/// in that file. If they ever drift, the server still wins: it answers
+/// `PASSWORD_TOO_WEAK` with its own sentence and the screen shows that verbatim.
+enum PasswordPolicy {
+    static let minimumLength = 12
+    static let maximumLength = 200
+
+    /// The same three checks the server runs, in the same order.
+    /// Returns nil when the password is acceptable.
+    static func problem(with password: String) -> String? {
+        if password.count < minimumLength {
+            return "Password must be at least \(minimumLength) characters."
+        }
+        if password.count > maximumLength {
+            return "Password must be at most \(maximumLength) characters."
+        }
+        if password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Password must not be only whitespace."
+        }
+        return nil
+    }
+
+    static var summary: String {
+        "At least \(minimumLength) characters, up to \(maximumLength). No capital, digit or symbol is required. Length is what counts, and it cannot be only spaces."
+    }
+}
+
+/// The 201 body of `POST /auth/invitation/accept`.
+///
+/// `mustChangePassword` is reported from the row the server actually created,
+/// not assumed. When the invitation-password-fix migration has not been applied
+/// the new account is still flagged, and the invitee has to be told rather than
+/// promised a clean sign-in they will not get.
+struct InvitationAcceptance: Decodable {
+    let success: Bool?
+    let userId: String?
+    let email: String?
+    let mustChangePassword: Bool?
+    let note: String?
+
+    /// Read from the response, never assumed by the client. The current server
+    /// always sends this key explicitly on a 201, so an absent value means a
+    /// backend that predates the flag and therefore has no lock to report.
+    var requiresPasswordChange: Bool { mustChangePassword ?? false }
+
+    /// Prefill for the sign-in form. Empty rather than nil so the caller does
+    /// not have to distinguish "no email" from "blank email".
+    var prefillEmail: String { email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+
+    private enum CodingKeys: String, CodingKey {
+        case success, userId, email, mustChangePassword, note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        success = try? container.decodeIfPresent(Bool.self, forKey: .success)
+        // The server sends a bigint id. Older rows and other backends have sent
+        // it as a string, and neither is worth failing an account creation over.
+        if let text = try? container.decodeIfPresent(String.self, forKey: .userId) {
+            userId = text
+        } else if let number = try? container.decodeIfPresent(Int.self, forKey: .userId) {
+            userId = String(number)
+        } else {
+            userId = nil
+        }
+        email = try? container.decodeIfPresent(String.self, forKey: .email)
+        mustChangePassword = try? container.decodeIfPresent(Bool.self, forKey: .mustChangePassword)
+        note = try? container.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// Every failure `POST /auth/invitation/accept` can produce, as a case rather
+/// than a string, so the screen can offer the right next action for each one.
+///
+/// The codes are the ones in `routes/auth.js` and `REDEMPTION_ERRORS` in
+/// `routes/invitations.js`. An unrecognised code is not collapsed into a
+/// generic failure: the server writes those sentences for a person to read.
+enum InvitationAcceptError: Error, Equatable {
+    case notFound
+    case expired
+    case revoked
+    case alreadyUsed
+    case emailAlreadyExists
+    case passwordTooWeak(String?)
+    case tooManyAttempts
+    case serverFailure(String?)
+    case network
+
+    /// Maps a `code` from the error body. Nil when the code is not one of ours,
+    /// which leaves the caller free to fall back to the server's own message.
+    static func from(code: String?) -> InvitationAcceptError? {
+        switch code {
+        case "INVITATION_NOT_FOUND":     return .notFound
+        case "INVITATION_EXPIRED":       return .expired
+        case "INVITATION_REVOKED":       return .revoked
+        case "INVITATION_USED":          return .alreadyUsed
+        case "EMAIL_ALREADY_EXISTS":     return .emailAlreadyExists
+        case "TOO_MANY_ATTEMPTS":        return .tooManyAttempts
+        case "INVITATION_ACCEPT_FAILED": return .serverFailure(nil)
+        default: return nil
+        }
+    }
+
+    /// One sentence per cause, each one saying what to do next.
+    var message: String {
+        switch self {
+        case .notFound:
+            return "This invitation link is not valid. Ask whoever invited you to send a new one."
+        case .expired:
+            return "This invitation has expired. Ask whoever invited you for a fresh link."
+        case .revoked:
+            return "This invitation was revoked. Ask whoever invited you to send a new one."
+        case .alreadyUsed:
+            return "This invitation has already been used. If that was you, sign in instead."
+        case .emailAlreadyExists:
+            return "An account already exists for this address. Sign in instead."
+        case .passwordTooWeak(let serverMessage):
+            return serverMessage ?? "Password must be at least \(PasswordPolicy.minimumLength) characters."
+        case .tooManyAttempts:
+            return "Too many attempts from this network. Wait a few minutes and try again."
+        case .serverFailure(let serverMessage):
+            return serverMessage ?? "Something went wrong setting up the account. Try again in a moment."
+        case .network:
+            return "Could not reach the server. Check your connection and try again."
+        }
+    }
+
+    /// Whether trying the same token again could ever work. A revoked, used or
+    /// expired invitation cannot, so the screen offers sign-in instead of a
+    /// retry that is guaranteed to fail.
+    var isRetryable: Bool {
+        switch self {
+        case .notFound, .expired, .revoked, .alreadyUsed, .emailAlreadyExists:
+            return false
+        case .passwordTooWeak, .tooManyAttempts, .serverFailure, .network:
+            return true
+        }
+    }
+}

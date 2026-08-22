@@ -15,13 +15,26 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject private var session: SessionModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var email = CredentialStore.get(.inboxEmail) ?? ""
+    @State private var email: String
     @State private var password = ""
     @State private var isWorking = false
     @State private var error: String?
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case email, password }
+
+    /// `prefilledEmail` is supplied by the Accept Invitation screen, which has
+    /// just been told by the server which address the invitation belonged to.
+    /// It is empty everywhere else, in which case the previously used address
+    /// from the Keychain is offered exactly as before. The password is never
+    /// prefilled: the server deliberately does not sign an invitee in, because
+    /// the inviting Admin sometimes holds the link.
+    init(prefilledEmail: String = "") {
+        let trimmed = prefilledEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        _email = State(initialValue: trimmed.isEmpty
+                       ? (CredentialStore.get(.inboxEmail) ?? "")
+                       : trimmed)
+    }
 
     var body: some View {
         ZStack {
@@ -135,7 +148,10 @@ struct LoginView: View {
 /// animations, nothing to tear down when the view leaves the hierarchy. With
 /// `isStatic` (Reduce Motion) the TimelineView is skipped entirely and a
 /// single still frame is drawn.
-private struct MintDriftBackground: View {
+/// Internal rather than file-private: `AcceptInvitationView` is the other
+/// screen that renders before the sign-in gate, and it has to sit on the same
+/// backdrop or the invitation flow looks like a different app.
+struct MintDriftBackground: View {
     let isStatic: Bool
     @Environment(\.colorScheme) private var colorScheme
 

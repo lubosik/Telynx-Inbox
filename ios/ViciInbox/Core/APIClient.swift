@@ -611,6 +611,59 @@ actor APIClient {
         throw APIError.decoding
     }
 
+    /// `POST /auth/invitation/accept`. The one authenticated-looking call in
+    /// this client that has no session behind it. The invitee has never signed
+    /// in; the token from the invitation link is the only credential accepted,
+    /// and the server compares it by hash.
+    ///
+    /// `retryOn401` is off deliberately. The generic 401 interceptor
+    /// re-authenticates from the Keychain, and on this endpoint that would be
+    /// actively wrong: the inviting Admin frequently opens the invitation link
+    /// on their own phone, so a silent re-login would attach the Admin's
+    /// session to a request meant to create somebody else's account. The
+    /// endpoint does not answer 401 in any case.
+    ///
+    /// This throws `InvitationAcceptError`, not `APIError`, so the caller can
+    /// offer the right next action for each cause. The token is never logged.
+    func acceptInvitation(token: String, password: String) async throws -> InvitationAcceptance {
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await post("/auth/invitation/accept",
+                                              body: ["token": token, "password": password],
+                                              retryOn401: false)
+        } catch {
+            throw InvitationAcceptError.network
+        }
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let code = json?["code"] as? String
+        let serverMessage = (json?["error"] as? String) ?? (json?["message"] as? String)
+
+        guard (200..<300).contains(response.statusCode) else {
+            // 400 PASSWORD_TOO_WEAK carries the server's own sentence, which is
+            // more specific than anything the client could reconstruct.
+            if code == "PASSWORD_TOO_WEAK" {
+                throw InvitationAcceptError.passwordTooWeak(serverMessage)
+            }
+            if let mapped = InvitationAcceptError.from(code: code) {
+                // INVITATION_ACCEPT_FAILED carries no useful detail, so its
+                // own sentence is kept rather than the server's generic one.
+                if case .serverFailure = mapped { throw InvitationAcceptError.serverFailure(nil) }
+                throw mapped
+            }
+            // An unrecognised code still shows the server's sentence. Falling
+            // back to a generic failure would throw away the only description
+            // of what actually went wrong.
+            throw InvitationAcceptError.serverFailure(serverMessage)
+        }
+
+        guard let accepted = try? decoder.decode(InvitationAcceptance.self, from: data) else {
+            throw InvitationAcceptError.serverFailure(nil)
+        }
+        return accepted
+    }
+
     // MARK: - Plumbing
 
     private let decoder = JSONDecoder()

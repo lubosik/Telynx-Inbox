@@ -36,6 +36,25 @@
  *   design, so POST /api/invitations/:id/resend can only mail a link the caller
  *   hands back to it. See the handler for why that is not a workaround.
  *
+ * TESTFLIGHT
+ *   The accept link is a Universal Link that opens the native app. A brand-new
+ *   teammate has no app and cannot get one: Vici Inbox is distributed through
+ *   TestFlight, and TestFlight will not let anybody install a build unless
+ *   Apple already knows them as a beta tester. So POST /api/invitations also
+ *   registers the invitee with App Store Connect through
+ *   lib/testflight-testers.js, and Apple's own "you're invited to test" email
+ *   arrives alongside this one.
+ *
+ *   THE THREE EFFECTS ARE INDEPENDENT, IN THIS ORDER: the row is committed, the
+ *   tester is provisioned, the email is sent. Neither of the last two may fail
+ *   the request, and neither may prevent the other from being attempted — the
+ *   token is shown exactly once, so anything that rolled the request back would
+ *   destroy a working credential nobody had seen. The response reports all
+ *   three separately and never optimistically: `emailSent`/`emailReason` and
+ *   `testFlightInvited`/`testFlightReason`. With no ASC_* variables configured,
+ *   which is the state on deploy day, every response says
+ *   `testFlightInvited: false, testFlightReason: 'not_configured'`.
+ *
  * CONCURRENCY
  *   Redemption goes through the redeem_sms_invitation SQL function, which does
  *   SELECT ... FOR UPDATE and then inserts and marks accepted in one
@@ -46,7 +65,13 @@
  *
  * AUDIT
  *   Inviting somebody, revoking that invitation, and the invitation being
- *   redeemed are all access grants, so all three write a `team.*` row.
+ *   redeemed are all access grants, so all three write a `team.*` row. So is
+ *   provisioning a TestFlight tester: it hands a named person the ability to
+ *   install a build carrying this workspace's data. It reuses
+ *   `team.member.invited` for the same reason the resend handler does — see
+ *   there — and is written ONLY when a call was actually attempted, because a
+ *   row recording that an unconfigured integration did nothing is noise, not
+ *   evidence.
  *
  *   NOTHING TOKEN-SHAPED GOES IN. Not the raw token, not its sha256, and not
  *   `token_prefix` — which is a prefix of that sha256, and therefore a head
@@ -62,6 +87,7 @@ const crypto = require('crypto');
 const { logAuditSafely } = require('../lib/audit/log');
 const { sendEmail, appUrl, isEmailConfigured } = require('../lib/email');
 const { invitationEmail } = require('../lib/email-templates');
+const { addTesterToBetaGroup } = require('../lib/testflight-testers');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TOKEN_BYTES = 32;
@@ -449,13 +475,64 @@ async function sendInvitationEmail(invitation, { rawToken, inviterName, roleDisp
 }
 
 /**
+ * Register one invitee as a TestFlight beta tester.
+ *
+ * Wraps lib/testflight-testers.js, which documents itself as never throwing.
+ * The try/catch is still here and is not belt-and-braces: `add` is injectable,
+ * a test double or a future replacement can throw, and by the time this runs
+ * the invitation row is committed and its one-time token is on its way into a
+ * response body. An exception escaping here would turn a working credential
+ * nobody has seen into a 500.
+ *
+ * @param {object} invitation  the committed sms_invitations row
+ * @param {{add?: Function}} [options]
+ * @returns {Promise<{added: boolean, alreadyExisted?: boolean, reason?: string, appId?: string|null}>}
+ */
+async function provisionTestFlightTester(invitation, { add = addTesterToBetaGroup } = {}) {
+  try {
+    const result = await add({
+      email: invitation.email,
+      displayName: invitation.display_name
+    });
+    if (!result || typeof result.added !== 'boolean') {
+      return { added: false, reason: 'unknown' };
+    }
+    return result;
+  } catch (error) {
+    console.error('[INVITE] TestFlight provisioning threw:', error?.message || 'unknown');
+    return { added: false, reason: 'provisioning_error' };
+  }
+}
+
+/**
+ * The sentence a human should read about the TestFlight side of an invite.
+ *
+ * Every branch is literal about what did and did not happen. "We could not add
+ * them" with the next step spelled out is far more useful to an admin than
+ * silence, because the invitee's link will open Safari until somebody fixes it.
+ */
+function testFlightNoteFor(result, email) {
+  if (result.added && result.alreadyExisted) {
+    return `${email} was already a TestFlight tester, so they can install Vici Inbox from TestFlight now.`;
+  }
+  if (result.added) {
+    return `${email} was added as a TestFlight tester. Apple emails them separately with the TestFlight invitation; they need the app installed before the accept link will open it.`;
+  }
+  if (result.reason === 'not_configured') {
+    return 'TestFlight provisioning is not configured on this service, so nothing was requested from Apple. Add them to the beta group by hand, or they will not be able to install the app.';
+  }
+  return 'They could NOT be added as a TestFlight tester, so they cannot install the app yet. Add them to the beta group in App Store Connect by hand.';
+}
+
+/**
  * @param {{
  *   store?: object,
  *   userStore?: object,
  *   now?: () => number,
  *   audit?: Function,
  *   sendMail?: Function,
- *   emailConfigured?: () => boolean
+ *   emailConfigured?: () => boolean,
+ *   addTester?: Function
  * }} [options]
  */
 function createInvitationsRouter({
@@ -464,7 +541,8 @@ function createInvitationsRouter({
   now = () => Date.now(),
   audit,
   sendMail,
-  emailConfigured
+  emailConfigured,
+  addTester
 } = {}) {
   const invitations = store || createInvitationStore({});
   const users = userStore || require('./users').createUserStore({});
@@ -476,6 +554,11 @@ function createInvitationsRouter({
   // into process.env. The default can never throw either; see lib/email.js.
   const mail = sendMail || sendEmail;
   const mailConfigured = emailConfigured || isEmailConfigured;
+  // Injectable for the same reasons as `mail`, and one that matters more: the
+  // default talks to the real App Store Connect API, and a unit test must never
+  // provision a live tester on somebody's Apple account. Every test in this
+  // repository passes a double; nothing offline reaches Apple.
+  const provisionTester = addTester || addTesterToBetaGroup;
   const router = express.Router();
 
   // ── GET /api/invitations ──────────────────────────────────────────────────
@@ -556,6 +639,46 @@ function createInvitationsRouter({
         }
       });
 
+      // TestFlight, before the email and after the row. Best-effort and fully
+      // contained: it cannot throw and it cannot fail the invitation. Doing it
+      // BEFORE the send is deliberate — Apple's own TestFlight email and this
+      // one should land together, and if the ordering has to be wrong it is
+      // better for the app invitation to arrive first than for somebody to read
+      // "install the app" before Apple has let them.
+      const tester = await provisionTestFlightTester(created, { add: provisionTester });
+
+      // Audited only when a call was actually made. With no credentials the
+      // module no-ops, and a row saying an unconfigured integration did nothing
+      // is noise in an append-only table that can never be cleaned up.
+      //
+      // `team.member.invited` rather than a new event type. The catalogue in
+      // lib/audit/event-types.js is closed and its `category` is CHECK-
+      // constrained, and this is the same fact as an invitation — this person
+      // was granted access, on this device path. The resend handler reuses the
+      // type for exactly this reason. Metadata keys are the allowlist for the
+      // type in lib/audit/redact.js and nothing else, so the TestFlight outcome
+      // lives in the summary, which is the part that is actually stored.
+      if (tester.reason !== 'not_configured') {
+        const outcome = tester.added
+          ? (tester.alreadyExisted ? 'was already a TestFlight tester' : 'was added as a TestFlight tester')
+          : `could NOT be added as a TestFlight tester (${tester.reason || 'unknown'})`;
+        await logAudit({
+          eventType: 'team.member.invited',
+          req,
+          entityId: created.id,
+          summary: `${actorName(req)} invited ${email} to join as ${roleRow.display_name || role}, and they ${outcome}`
+            + `${tester.appId ? ` for app ${tester.appId}` : ''}`,
+          metadata: {
+            invitation_id: created.id,
+            email,
+            role,
+            role_display_name: roleRow.display_name || role,
+            expires_at: created.expires_at,
+            ttl_hours: ttlHours
+          }
+        });
+      }
+
       // Best-effort, and deliberately last. The row is committed and the audit
       // written by this point, so the worst a mail failure can do is cost the
       // admin a copy and paste. It is awaited rather than fired and forgotten
@@ -579,6 +702,16 @@ function createInvitationsRouter({
         // `true` means the provider accepted the message.
         emailSent: delivery.sent,
         emailReason: delivery.sent ? null : delivery.reason,
+        // Reported with exactly the same discipline as `emailSent`, and read by
+        // the UI to decide whether to tell the admin to go and add somebody to
+        // the beta group by hand. `true` means Apple accepted the registration
+        // or already had it; it never means "we did not check".
+        testFlightInvited: tester.added,
+        testFlightReason: tester.added ? null : (tester.reason || 'unknown'),
+        // null, not false, when nothing was added: "were they already a tester?"
+        // is unanswered in that case, and false would assert that they were not.
+        testFlightAlreadyTester: tester.added ? tester.alreadyExisted === true : null,
+        testFlightNote: testFlightNoteFor(tester, email),
         note: delivery.sent
           ? `An invitation email was sent to ${email}. This token is shown once and is not recoverable; keep the link until they accept, because it cannot be re-sent without it.`
           : 'No email was sent. This token is shown once and is not recoverable — pass the link to them over a channel you trust.'

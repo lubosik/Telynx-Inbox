@@ -10,6 +10,7 @@
 		999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */; };
 		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
 		82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39972EB378BFE723E62921A0 /* FeatureModels.swift */; };
+		3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */; };
 		A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */; };
@@ -22,6 +23,7 @@
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
+		6D8B6B0E50CAFA9DE92355A8 /* AcceptInvitationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FDDD3E46FDBB4F01257CF1E /* AcceptInvitationView.swift */; };
 		407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */; };
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
@@ -47,6 +49,7 @@
 		3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsViewModel.swift; sourceTree = "<group>"; };
 		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		39972EB378BFE723E62921A0 /* FeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureModels.swift; sourceTree = "<group>"; };
+		847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteLinkRouter.swift; sourceTree = "<group>"; };
 		5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotificationManager.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamActivityModels.swift; sourceTree = "<group>"; };
@@ -59,6 +62,7 @@
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		9FDDD3E46FDBB4F01257CF1E /* AcceptInvitationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcceptInvitationView.swift; sourceTree = "<group>"; };
 		3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenuView.swift; sourceTree = "<group>"; };
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
@@ -124,6 +128,7 @@
 				3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */,
 				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
 				39972EB378BFE723E62921A0 /* FeatureModels.swift */,
+				847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */,
 				5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */,
 				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
 				81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */,
@@ -150,6 +155,7 @@
 		697370045E04810A74DEA8E0 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				9FDDD3E46FDBB4F01257CF1E /* AcceptInvitationView.swift */,
 				3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */,
 				07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */,
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
@@ -267,6 +273,7 @@
 				999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */,
 				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
 				82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */,
+				3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */,
 				A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */,
@@ -279,6 +286,7 @@
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
+				6D8B6B0E50CAFA9DE92355A8 /* AcceptInvitationView.swift in Sources */,
 				407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */,
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
