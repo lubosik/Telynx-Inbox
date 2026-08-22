@@ -570,6 +570,8 @@ function makeUserStore(users) {
     async countActiveAdministrators() {
       return state.users.filter(user => user.is_active && ['owner', 'admin'].includes(user.role)).length;
     },
+    /** Deactivation revokes push registrations; recorded so a test can assert it. */
+    async revokePushDevices(id) { (state.revokedDevices ||= []).push(Number(id)); return 1; },
     async bumpEpoch(id) {
       state.mutations.push({ op: 'bumpEpoch', id });
       const user = state.users.find(entry => entry.id === id);

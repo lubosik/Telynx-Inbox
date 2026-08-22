@@ -664,6 +664,131 @@ actor APIClient {
         return accepted
     }
 
+    // MARK: - Passwords
+
+    /// `POST /auth/password-reset/request`.
+    ///
+    /// Public, and never retried on 401: there is no session behind this call
+    /// and the person making it is by definition unable to produce one.
+    ///
+    /// RESOLVES FOR ALMOST EVERYTHING. The endpoint answers the same generic
+    /// 202 for every address, and the caller must be no more specific than the
+    /// server is or the anti-enumeration design is undone from the client side.
+    /// Only two server answers throw, and both are provably independent of the
+    /// address: the pre-lookup shape check and the per-network throttle. A 5xx
+    /// resolves like a success, because on the server a storage failure and a
+    /// missing account already answer identically.
+    ///
+    /// The address is not logged.
+    func requestPasswordReset(email: String) async throws {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await post("/auth/password-reset/request",
+                                              body: ["email": trimmed],
+                                              retryOn401: false)
+        } catch {
+            throw PasswordResetRequestError.unreachable
+        }
+
+        if (200..<300).contains(response.statusCode) { return }
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let code = json?["code"] as? String
+        let serverMessage = (json?["error"] as? String) ?? (json?["message"] as? String)
+
+        switch code {
+        case "INVALID_EMAIL":     throw PasswordResetRequestError.invalidEmail(serverMessage)
+        case "TOO_MANY_ATTEMPTS": throw PasswordResetRequestError.throttled(serverMessage)
+        default:                  return
+        }
+    }
+
+    /// `POST /auth/password-reset/confirm`.
+    ///
+    /// The token is the only credential accepted and the server compares it by
+    /// hash. It is passed in, used once, and never logged, never rendered and
+    /// never stored.
+    ///
+    /// Not retried on 401 for the same reason `acceptInvitation` is not: there
+    /// is no session here, and a silent re-login from the Keychain would attach
+    /// somebody else's session to a request that must not have one.
+    ///
+    /// THIS DOES NOT SIGN ANYBODY IN, because the server deliberately does not.
+    /// A reset link forwarded to the wrong person must be a dead end rather
+    /// than a session, so the caller sends them to the sign-in form instead.
+    /// Nothing is written to the Keychain here.
+    func confirmPasswordReset(token: String, password: String) async throws {
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await post("/auth/password-reset/confirm",
+                                              body: ["token": token, "password": password],
+                                              retryOn401: false)
+        } catch {
+            throw PasswordResetConfirmError.network
+        }
+
+        if (200..<300).contains(response.statusCode) { return }
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        throw PasswordResetConfirmError.from(code: json?["code"] as? String,
+                                             serverMessage: (json?["error"] as? String)
+                                                ?? (json?["message"] as? String))
+    }
+
+    /// `POST /api/users/me/password`, the change-with-current-password path.
+    ///
+    /// NOT retried on 401, deliberately, and this is the interesting one. A
+    /// wrong current password IS a 401 here (`CURRENT_PASSWORD_INCORRECT`). Let
+    /// the generic interceptor see it and a simple typo would silently
+    /// re-authenticate from the Keychain, replay the request, collect the same
+    /// 401, and then post `viciAuthenticationLost` — putting a "signed out"
+    /// banner in front of somebody who is perfectly signed in and merely
+    /// mistyped. Reading the code here is the only way to tell the two 401s
+    /// apart.
+    ///
+    /// The server bumps the session epoch, which ends every OTHER session, and
+    /// re-stamps this request's cookie so this device stays signed in. Nothing
+    /// in this client clears a credential as a result, so the phone keeps its
+    /// SIP login and keeps ringing.
+    func changePassword(currentPassword: String, newPassword: String) async throws {
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await post("/api/users/me/password",
+                                              body: ["currentPassword": currentPassword,
+                                                     "newPassword": newPassword],
+                                              retryOn401: false)
+        } catch {
+            throw PasswordChangeError.network
+        }
+
+        if (200..<300).contains(response.statusCode) {
+            // The stored password is what a cold launch from a VoIP push
+            // re-authenticates with. Leaving the old one there would mean the
+            // next push-woken launch fails to sign in and the phone stops
+            // ringing, which is the one failure this app cannot have.
+            //
+            // Guarded because `CredentialStore.set` treats an empty value as a
+            // removal, and removing this key is exactly the thing that must
+            // only ever happen behind Sign Out. The server has already refused
+            // anything shorter than the policy minimum by this point, so the
+            // guard can never fire; it exists so that no future caller can make
+            // it fire either.
+            if !newPassword.isEmpty {
+                CredentialStore.set(newPassword, for: .inboxPassword)
+            }
+            return
+        }
+
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        throw PasswordChangeError.from(code: json?["code"] as? String,
+                                       serverMessage: (json?["error"] as? String)
+                                          ?? (json?["message"] as? String))
+    }
+
     // MARK: - Plumbing
 
     private let decoder = JSONDecoder()

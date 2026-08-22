@@ -22,7 +22,7 @@ const path = require('path');
 process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://offline.test.invalid';
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'offline-test-key';
 
-const { ROUTE_POLICY } = require('../lib/route-policy');
+const { ROUTE_POLICY, PASSWORD_CHANGE_EXEMPT } = require('../lib/route-policy');
 const { compilePolicy, findPolicy, normalisePath } = require('../lib/enforce-policy');
 
 const ROOT = path.join(__dirname, '..');
@@ -177,9 +177,41 @@ test('literal paths win over parameterised ones regardless of table order', () =
   assert.equal(findPolicy('POST', '/api/users/7/deactivate').permission, 'user.manage');
 });
 
-test('exactly two endpoints are open to any authenticated actor, and they are the password-rotation escape hatch', () => {
+test('the only endpoints open to any authenticated actor act on the caller\'s own account', () => {
+  // This list is exhaustive and hardcoded on purpose: `permission: null` is the
+  // one way to ship an endpoint every Support Agent can call, so growing the
+  // set has to be a deliberate edit here rather than a line quietly added to
+  // the table. Two properties must hold for every entry, and both are asserted
+  // rather than described.
   const open = ROUTE_POLICY.filter(entry => entry.permission === null).map(signature).sort();
-  assert.deepEqual(open, ['GET /api/users/me', 'POST /api/users/me/password']);
+  assert.deepEqual(open, [
+    'GET /api/users/me',
+    'PATCH /api/users/me',
+    'POST /api/users/me/email',
+    'POST /api/users/me/email/cancel',
+    'POST /api/users/me/password'
+  ]);
+
+  // 1. Every one of them is under /api/users/me. An open endpoint that took a
+  //    :id would let an Agent act on somebody else.
+  for (const entry of open) {
+    assert.ok(
+      entry.includes(' /api/users/me'),
+      `${entry} is open to every actor but is not an /api/users/me endpoint`
+    );
+    assert.ok(
+      !entry.includes('/:'),
+      `${entry} is open to every actor and takes a path parameter, so it can be pointed at another person`
+    );
+  }
+
+  // 2. The password-rotation escape hatch is still there. A must_change_password
+  //    account can reach exactly these two and nothing else, so the forced
+  //    rotation is not a dead end.
+  assert.deepEqual(
+    PASSWORD_CHANGE_EXEMPT.map(entry => `${entry.method} ${entry.path}`).sort(),
+    ['GET /api/users/me', 'POST /api/users/me/password']
+  );
 });
 
 test('the previously ungated backfill endpoint now requires admin.backfill', () => {

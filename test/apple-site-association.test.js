@@ -94,6 +94,11 @@ test('the document is exactly the shape Apple parses', () => {
               '/': '/accept-invite',
               '?': { token: '?*' },
               comment: 'team invitation'
+            },
+            {
+              '/': '/reset-password',
+              '?': { token: '?*' },
+              comment: 'password reset'
             }
           ]
         }
@@ -106,11 +111,17 @@ test('the document is exactly the shape Apple parses', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(document)), document);
 });
 
-test('only /accept-invite is claimed, so the browser UI stays reachable from a link', () => {
+test('only the two mailed links are claimed, so the browser UI stays reachable', () => {
   const components = buildAssociation(configuredEnv()).applinks.details[0].components;
 
-  assert.equal(components.length, 1, 'exactly one component, not a wildcard domain claim');
-  assert.equal(components[0]['/'], '/accept-invite');
+  // Exactly the paths that arrive in an email and must land in the app. Every
+  // addition here takes a URL away from the browser permanently for anyone with
+  // the app installed, so this list should grow only with a good reason.
+  assert.equal(components.length, 2, 'exactly two components, not a wildcard domain claim');
+  assert.deepEqual(
+    components.map(component => component['/']).sort(),
+    ['/accept-invite', '/reset-password']
+  );
 
   // The property that matters is negative: nothing may claim the whole domain.
   // A '*' or '/' component would make EVERY link into this service open the
@@ -118,7 +129,8 @@ test('only /accept-invite is claimed, so the browser UI stays reachable from a l
   // would become unreachable from any link the moment the app was installed.
   const serialised = JSON.stringify(components);
   assert.equal(serialised.includes('"*"'), false, 'no wildcard path may be claimed');
-  assert.equal(components[0]['/'] === '/', false, 'the domain root may not be claimed');
+  assert.equal(components.some(component => component['/'] === '/'), false,
+    'the domain root may not be claimed');
 });
 
 test('the appID is TEAMID.bundleid, and the bundle id follows APNS_BUNDLE_ID', () => {
@@ -235,13 +247,16 @@ test('the document carries no credential and no customer data', async () => {
     buildApp(configuredEnv({ ASC_KEY_P8_BASE64: 'c2VjcmV0', SESSION_SECRET: 'hunter2' })),
     '/.well-known/apple-app-site-association'
   );
-  for (const forbidden of ['secret', 'hunter2', 'c2VjcmV0', 'token=', 'password']) {
+  for (const forbidden of ['secret', 'hunter2', 'c2VjcmV0', 'token=', 'password=']) {
     assert.equal(response.body.toLowerCase().includes(forbidden.toLowerCase()), false,
       `${forbidden} must never appear in a publicly fetched document`);
   }
   // `token` DOES appear, as the name of the claimed query parameter. That is
   // the parameter's name, not anybody's token, and it is required by Apple.
   assert.equal(response.body.includes('"token"'), true);
+  // `password` appears as part of the claimed path, not as a value. The
+  // assertion above bans `password=`, which is what a leak would look like.
+  assert.equal(response.body.includes('/reset-password'), true);
 });
 
 // ── The ordering in server.js, which is the actual fix ──────────────────────

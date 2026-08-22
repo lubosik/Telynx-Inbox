@@ -172,6 +172,8 @@ function makeUserStore(seed = []) {
     async countActiveAdministrators() {
       return state.users.filter(row => row.is_active && ['owner', 'admin'].includes(row.role)).length;
     },
+    /** Deactivation revokes push registrations; recorded so a test can assert it. */
+    async revokePushDevices(id) { (state.revokedDevices ||= []).push(Number(id)); return 1; },
     async bumpEpoch(id) { state.epochBumps.push(Number(id)); return state.epochBumps.length; },
     async listRoles() { return ROLE_CATALOGUE.map(role => ({ ...role })); },
     async listPermissionKeys() { return ['automation.cancel', 'analytics.read', 'user.manage.owner']; },

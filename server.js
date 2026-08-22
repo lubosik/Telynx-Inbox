@@ -200,6 +200,36 @@ app.get('/accept-invite', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'accept-invite.html'));
 });
 
+// ── The password reset page (no auth) ─────────────────────────────────────
+// `/reset-password?token=...` is the other Universal Link this app claims in
+// lib/apple-site-association.js. On an iPhone with the app installed iOS hands
+// it to ResetPasswordView and this never runs; everywhere else, and before the
+// app is installed, this is what answers the claimed path. A claimed path that
+// nothing answers opens the app and does nothing, which is worse than not
+// claiming it.
+//
+// UNLIKE THE INVITATION PAGE, THIS ONE FINISHES THE JOB. public/accept-invite
+// .html deliberately refuses to accept an invitation in the browser and sends
+// the invitee to the app. A forgotten password is the one moment somebody
+// cannot get into the app at all, so "finish this in the app" would be a closed
+// loop: the page posts to POST /auth/password-reset/confirm itself.
+//
+// PLACEMENT: alongside /accept-invite, after the /.well-known mount, before
+// express.static and before the catch-all, and deliberately not under /api so
+// the policy enforcer never sees it. Whoever opens this link has no session and
+// must not need one.
+//
+// The token is NOT read, logged or validated here. It is a live single-use
+// credential; the page inspects its shape in the browser only to avoid showing
+// a form that cannot succeed, and POST /auth/password-reset/confirm remains the
+// only thing that verifies it.
+app.get('/reset-password', (req, res) => {
+  // Keyed to a single-use reset token, so no intermediary should hold a copy
+  // and no shared device should re-serve it from cache.
+  res.set('Cache-Control', 'no-store, private');
+  res.sendFile(path.join(__dirname, 'public', 'reset-password.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

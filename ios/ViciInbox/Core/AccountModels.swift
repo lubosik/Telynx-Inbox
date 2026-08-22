@@ -34,11 +34,39 @@ struct AuthUser: Codable, Identifiable, Hashable {
     let role: String?
     let permissions: [String]?
 
+    /// `must_change_password`, reported by `GET /api/users/me`.
+    ///
+    /// The server sets it when an Admin creates an account directly, when an
+    /// Admin resets somebody's password, and on every redeemed invitation. Such
+    /// an account signs in successfully and is then refused by every endpoint
+    /// except `GET /api/users/me` and `POST /api/users/me/password`
+    /// (`PASSWORD_CHANGE_EXEMPT` in `lib/route-policy.js`). Reading it is what
+    /// lets the app show the one screen that clears the lock rather than an
+    /// inbox that silently fails to load.
+    ///
+    /// Absent means false: an older backend that does not send the key has no
+    /// lock to report.
+    let mustChangePassword: Bool?
+
+    /// The shared team login, either as the account itself or as a pre-existing
+    /// cookie issued to it. It has no personal password, so
+    /// `POST /api/users/me/password` always refuses it and the change-password
+    /// screen says so instead of making a round trip that cannot succeed.
+    let isLegacyShared: Bool?
+    let viaLegacySession: Bool?
+
     var name: String { displayName ?? email ?? "Signed in" }
     var permissionSet: Set<String> { Set(permissions ?? []) }
 
+    /// True only when the server said so.
+    var requiresPasswordChange: Bool { mustChangePassword ?? false }
+
+    /// Whether this session is the shared team login in either of its forms.
+    var isSharedTeamLogin: Bool { (isLegacyShared ?? false) || (viaLegacySession ?? false) }
+
     private enum CodingKeys: String, CodingKey {
         case id, displayName, email, role, permissions
+        case mustChangePassword, isLegacyShared, viaLegacySession
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +84,9 @@ struct AuthUser: Codable, Identifiable, Hashable {
         email = try? container.decodeIfPresent(String.self, forKey: .email)
         role = try? container.decodeIfPresent(String.self, forKey: .role)
         permissions = try? container.decodeIfPresent([String].self, forKey: .permissions)
+        mustChangePassword = try? container.decodeIfPresent(Bool.self, forKey: .mustChangePassword)
+        isLegacyShared = try? container.decodeIfPresent(Bool.self, forKey: .isLegacyShared)
+        viaLegacySession = try? container.decodeIfPresent(Bool.self, forKey: .viaLegacySession)
     }
 }
 
@@ -762,6 +793,192 @@ enum InvitationAcceptError: Error, Equatable {
             return false
         case .passwordTooWeak, .tooManyAttempts, .serverFailure, .network:
             return true
+        }
+    }
+}
+
+// MARK: - Resetting a forgotten password
+
+/// The failures `POST /auth/password-reset/request` may be told about.
+///
+/// THE ABSENCE OF CASES IS THE POINT. That endpoint answers the same generic
+/// 202, with the same body and the same wall-clock time, whether the address
+/// belongs to an active account, a deactivated one, the shared identity, or
+/// nobody at all. It is public, and anything more specific would enumerate who
+/// works here. So there is no `.noAccount`, no `.inactive`, and no case a
+/// screen could use to say more than the server did.
+///
+/// The two server cases here are provably independent of the address:
+/// `INVALID_EMAIL` is a shape check that runs before any lookup, and
+/// `TOO_MANY_ATTEMPTS` is the per-network throttle in front of the handler.
+/// Neither can differ between two well-formed addresses. Every other outcome,
+/// including a 5xx, resolves normally and shows the generic confirmation.
+enum PasswordResetRequestError: Error, Equatable {
+    case invalidEmail(String?)
+    case throttled(String?)
+    case unreachable
+
+    var message: String {
+        switch self {
+        case .invalidEmail(let serverMessage):
+            return serverMessage ?? "Enter the email address you sign in with."
+        case .throttled(let serverMessage):
+            return serverMessage ?? "Too many attempts from this network. Wait a few minutes and try again."
+        case .unreachable:
+            return "Could not reach the server. Check your connection and try again."
+        }
+    }
+}
+
+/// The single answer the request endpoint gives everybody, mirrored from
+/// `GENERIC_REQUEST_MESSAGE` in `lib/password-reset.js`.
+///
+/// A constant rather than a literal at the call site, for the same reason it is
+/// a constant on the server: no future branch can reword itself into a signal.
+enum PasswordResetCopy {
+    static let genericConfirmation =
+        "If an account exists for that address, a reset link is on its way. Check your inbox and your junk folder."
+
+    /// Stated in the email and enforced in SQL by `complete_sms_password_reset`.
+    static let expiryMinutes = 60
+}
+
+/// Every failure `POST /auth/password-reset/confirm` can produce.
+///
+/// Four distinct link states get four distinct sentences, exactly as
+/// `CONFIRM_ERRORS` in `lib/password-reset.js` does. Collapsing them into one
+/// "that link is not valid" would send somebody whose link expired ten minutes
+/// ago hunting for a typo that is not there. None of them is an existence
+/// oracle: reaching any of them requires already holding a token.
+enum PasswordResetConfirmError: Error, Equatable {
+    /// 404 RESET_NOT_FOUND
+    case notFound(String?)
+    /// 409 RESET_USED
+    case alreadyUsed(String?)
+    /// 409 RESET_CANCELLED
+    case superseded(String?)
+    /// 410 RESET_EXPIRED
+    case expired(String?)
+    /// 403 RESET_NOT_ALLOWED
+    case notAllowed(String?)
+    /// 400 PASSWORD_TOO_WEAK. The token is checked for strength BEFORE it is
+    /// spent, so this one leaves the link usable.
+    case passwordTooWeak(String?)
+    /// 429 from the shared sign-in limiter.
+    case throttled(String?)
+    /// 500 PASSWORD_RESET_FAILED, or any other unrecognised failure.
+    case serverFailure(String?)
+    case network
+
+    static func from(code: String?, serverMessage: String?) -> PasswordResetConfirmError {
+        switch code {
+        case "RESET_NOT_FOUND":     return .notFound(serverMessage)
+        case "RESET_USED":          return .alreadyUsed(serverMessage)
+        case "RESET_CANCELLED":     return .superseded(serverMessage)
+        case "RESET_EXPIRED":       return .expired(serverMessage)
+        case "RESET_NOT_ALLOWED":   return .notAllowed(serverMessage)
+        case "PASSWORD_TOO_WEAK":   return .passwordTooWeak(serverMessage)
+        case "TOO_MANY_ATTEMPTS":   return .throttled(serverMessage)
+        case "PASSWORD_RESET_FAILED": return .serverFailure(nil)
+        default:                    return .serverFailure(serverMessage)
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .notFound(let serverMessage):
+            return serverMessage ?? "That reset link is not valid."
+        case .alreadyUsed(let serverMessage):
+            return serverMessage ?? "That reset link has already been used. Ask for a new one."
+        case .superseded(let serverMessage):
+            return serverMessage ?? "That reset link was replaced by a newer one. Use the most recent email."
+        case .expired(let serverMessage):
+            return serverMessage ?? "That reset link has expired. Ask for a new one."
+        case .notAllowed(let serverMessage):
+            return serverMessage ?? "That account cannot be reset here. Ask an admin."
+        case .passwordTooWeak(let serverMessage):
+            return serverMessage ?? "Password must be at least \(PasswordPolicy.minimumLength) characters."
+        case .throttled(let serverMessage):
+            return serverMessage ?? "Too many attempts from this network. Wait a few minutes and try again."
+        case .serverFailure(let serverMessage):
+            return serverMessage ?? "That password could not be changed. Try again in a moment."
+        case .network:
+            return "Could not reach the server. Check your connection and try again."
+        }
+    }
+
+    /// Whether the link in hand could still work. A dead link must not be
+    /// offered a retry button; it must be offered a new link.
+    var linkIsSpent: Bool {
+        switch self {
+        case .notFound, .alreadyUsed, .superseded, .expired, .notAllowed:
+            return true
+        case .passwordTooWeak, .throttled, .serverFailure, .network:
+            return false
+        }
+    }
+
+    /// True only for the one cause a fresh link cannot fix. `RESET_NOT_ALLOWED`
+    /// means the account has no password to reset here at all, so the next
+    /// action is a person rather than another email.
+    var needsAnAdmin: Bool {
+        if case .notAllowed = self { return true }
+        return false
+    }
+}
+
+// MARK: - Changing a password you still know
+
+/// Every failure `POST /api/users/me/password` can produce, with the codes
+/// taken from the handler in `routes/users.js`.
+enum PasswordChangeError: Error, Equatable {
+    /// 401 CURRENT_PASSWORD_INCORRECT
+    case currentPasswordIncorrect(String?)
+    /// 400 PASSWORD_TOO_WEAK
+    case passwordTooWeak(String?)
+    /// 400 PASSWORD_UNCHANGED
+    case unchanged(String?)
+    /// 400 PASSWORD_NOT_SET
+    case noPasswordYet(String?)
+    /// 400 LEGACY_SESSION_NO_PASSWORD
+    case sharedTeamLogin(String?)
+    /// 401 NO_ACTOR or 401 ACCOUNT_NOT_FOUND
+    case sessionInvalid(String?)
+    /// 500 USER_REQUEST_FAILED, or anything else unrecognised.
+    case serverFailure(String?)
+    case network
+
+    static func from(code: String?, serverMessage: String?) -> PasswordChangeError {
+        switch code {
+        case "CURRENT_PASSWORD_INCORRECT": return .currentPasswordIncorrect(serverMessage)
+        case "PASSWORD_TOO_WEAK":          return .passwordTooWeak(serverMessage)
+        case "PASSWORD_UNCHANGED":         return .unchanged(serverMessage)
+        case "PASSWORD_NOT_SET":           return .noPasswordYet(serverMessage)
+        case "LEGACY_SESSION_NO_PASSWORD": return .sharedTeamLogin(serverMessage)
+        case "NO_ACTOR", "ACCOUNT_NOT_FOUND": return .sessionInvalid(nil)
+        case "USER_REQUEST_FAILED":        return .serverFailure(nil)
+        default:                           return .serverFailure(serverMessage)
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .currentPasswordIncorrect(let serverMessage):
+            return serverMessage ?? "That current password is not right."
+        case .passwordTooWeak(let serverMessage):
+            return serverMessage ?? "Password must be at least \(PasswordPolicy.minimumLength) characters."
+        case .unchanged(let serverMessage):
+            return serverMessage ?? "Choose a password you have not used here before."
+        case .noPasswordYet(let serverMessage):
+            return serverMessage ?? "This account has no password yet. Ask an admin to send you an invitation."
+        case .sharedTeamLogin(let serverMessage):
+            return serverMessage ?? "The shared team login has no personal password. Ask an admin for your own account."
+        case .sessionInvalid:
+            return "This session is no longer valid. Sign out from the account menu, then sign in again."
+        case .serverFailure(let serverMessage):
+            return serverMessage ?? "That change could not be saved. Try again in a moment."
+        case .network:
+            return "Could not reach the server. Check your connection and try again."
         }
     }
 }

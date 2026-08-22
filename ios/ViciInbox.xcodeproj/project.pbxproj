@@ -27,12 +27,14 @@
 		407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */; };
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
+		BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
 		E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73E82F33DD342C8486B83C84 /* GrowthView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
 		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
+		D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
 		A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1885CD5B99B42947AAC096CC /* TeamView.swift */; };
 		825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A571897E3D65CD158FDBD81 /* Theme.swift */; };
@@ -66,12 +68,14 @@
 		3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenuView.swift; sourceTree = "<group>"; };
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
 		73E82F33DD342C8486B83C84 /* GrowthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
+		6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetPasswordView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		1885CD5B99B42947AAC096CC /* TeamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamView.swift; sourceTree = "<group>"; };
 		2A571897E3D65CD158FDBD81 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -159,12 +163,14 @@
 				3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */,
 				07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */,
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
+				02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */,
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
 				73E82F33DD342C8486B83C84 /* GrowthView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
 				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
+				6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
 				1885CD5B99B42947AAC096CC /* TeamView.swift */,
 				2A571897E3D65CD158FDBD81 /* Theme.swift */,
@@ -290,12 +296,14 @@
 				407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */,
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
+				BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
 				E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
 				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
+				D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
 				A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */,
 				825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */,
