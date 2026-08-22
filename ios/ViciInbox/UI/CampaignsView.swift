@@ -316,7 +316,7 @@ struct CampaignDetailView: View {
 
             actionSection(campaign)
 
-            Section("Recipients") {
+            Section {
                 if model.recipients.isEmpty {
                     Text("No recipients")
                         .foregroundStyle(.secondary)
@@ -329,6 +329,8 @@ struct CampaignDetailView: View {
                         }
                 }
                 if model.isLoadingMore { ProgressView().frame(maxWidth: .infinity) }
+            } header: {
+                Text("Recipients")
             } footer: {
                 Text("Showing \(model.recipients.count.formatted()) of \(model.recipientTotal.formatted()). Inclusion explains why the person entered the draft. Eligibility explains whether current safety checks allow a future send.")
             }
@@ -355,7 +357,7 @@ struct CampaignDetailView: View {
         let canCancel = session.can(Permission.campaignsCancel)
 
         if canManage || canApprove || canLaunch || canCancel {
-            Section("Actions") {
+            Section {
                 if campaign.status.isEditable && canManage {
                     Button {
                         prepareEditor()
@@ -406,6 +408,8 @@ struct CampaignDetailView: View {
                 }
 
                 if model.isActing { ProgressView().frame(maxWidth: .infinity) }
+            } header: {
+                Text("Actions")
             } footer: {
                 Text("Team approval and provider permission are separate. Approval never sends a campaign.")
             }
@@ -450,7 +454,7 @@ private struct CampaignFinancialSection: View {
     let financial: CampaignFinancialOverview
 
     var body: some View {
-        Section("Revenue Attribution") {
+        Section {
             VStack(alignment: .leading, spacing: 4) {
                 Text(AnalyticsFormatting.money(financial.revenue.attributed,
                                                currency: financial.currency))
@@ -494,6 +498,8 @@ private struct CampaignFinancialSection: View {
             } label: {
                 Label("View Order Evidence", systemImage: "doc.text.magnifyingglass")
             }
+        } header: {
+            Text("Revenue Attribution")
         } footer: {
             Text("Attributed Revenue includes Direct and Strong evidence. Influenced stays separate. Tap through to inspect gross value, refunds, net value and the reason for every order.")
         }
@@ -631,7 +637,7 @@ private struct CampaignPerformanceSection: View {
     let performance: CampaignPerformance
 
     var body: some View {
-        Section("Campaign Results") {
+        Section {
             LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize
                       ? [GridItem(.flexible())]
                       : [GridItem(.flexible()), GridItem(.flexible())],
@@ -659,6 +665,8 @@ private struct CampaignPerformanceSection: View {
                     .font(.footnote)
                     .foregroundStyle(ViciTheme.warning)
             }
+        } header: {
+            Text("Campaign Results")
         } footer: {
             Text("Provider accepted is not the same as delivered. Delivered counts only trusted delivery events.")
         }
@@ -670,7 +678,7 @@ private struct CampaignEligibilitySection: View {
     let dryRun: CampaignDryRun
 
     var body: some View {
-        Section("Eligibility Preview") {
+        Section {
             LazyVGrid(columns: dynamicTypeSize.isAccessibilitySize
                       ? [GridItem(.flexible())]
                       : [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
@@ -701,6 +709,8 @@ private struct CampaignEligibilitySection: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        } header: {
+            Text("Eligibility Preview")
         } footer: {
             Text("This is a read-only preview. Approval is an internal decision and does not grant provider permission. Safety checks run again at send time.")
         }
@@ -1057,13 +1067,15 @@ struct CampaignEditorView: View {
     }
 
     private var manualNumbersStep: some View {
-        Section("Enter Numbers") {
+        Section {
             TextEditor(text: $model.recipientsText)
                 .font(.body.monospaced())
                 .frame(minHeight: 180)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .accessibilityLabel("Campaign recipient phone numbers")
+        } header: {
+            Text("Enter Numbers")
         } footer: {
             Text("Enter one person per line as +15551234567 or Name, +15551234567. Duplicate numbers are removed. Eligibility is checked after the draft is saved.")
         }
@@ -1079,7 +1091,7 @@ struct CampaignEditorView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Selected Audience") {
+            Section {
                 ForEach(Array(model.audienceInputs.prefix(50)), id: \.self) { recipient in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -1107,6 +1119,8 @@ struct CampaignEditorView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("Selected Audience")
             } footer: {
                 Text("This is the requested audience, not the final eligible audience. No message is queued or sent from this screen.")
             }

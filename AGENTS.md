@@ -210,6 +210,16 @@ Portable checks available without Xcode:
 # Two such errors reached CI before this note was written.
 swiftc -frontend -parse ios/ViciInbox/App/*.swift ios/ViciInbox/Core/*.swift ios/ViciInbox/Voice/*.swift ios/ViciInbox/UI/*.swift
 
+# SwiftUI view files get NO local type-check at all. `-parse` accepts them and
+# the Foundation typecheck below cannot include them, so the `iOS Build`
+# workflow is their only gate. Assume any new SwiftUI file is unverified until
+# CI is green. One trap that has already cost a red build: `Section` has no
+# `Section(_ title:) { } footer: { }` overload. A string title composes only
+# with content; the moment you need a footer, write
+# `Section { } header: { Text("Title") } footer: { }`. The compiler reports it
+# as "cannot convert value of type 'String' to expected argument type
+# '() -> Content'", which points at the title, not at the missing overload.
+
 # A REAL type-check of the Foundation-only layer. Run this before pushing any
 # change to the models or the API client — it is where most Swift edits land and
 # where -parse is blindest. The UI and Voice layers cannot be checked this way

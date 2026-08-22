@@ -212,12 +212,14 @@ private struct MessagingCallingSettingsView: View {
 
     var body: some View {
         List {
-            Section("Business line") {
+            Section {
                 LabeledContent("Calling", value: session.voiceStatusText)
                 LabeledContent("Number", value: session.callerNumber.isEmpty
                                ? "Not available"
                                : PhoneFormatter.pretty(session.callerNumber))
                 Button("Reconnect calling") { session.refreshConnection() }
+            } header: {
+                Text("Business line")
             } footer: {
                 Text("Reconnect restores the calling connection without signing out or changing stored credentials.")
             }
@@ -283,11 +285,13 @@ private struct HelpSettingsView: View {
                 Text("Replaying the tour does not reset your first-time setup.")
             }
 
-            Section("Sent message status guide") {
+            Section {
                 LabeledContent("Queued", value: "Waiting at Telnyx")
                 LabeledContent("Sent", value: "Carrier received it")
                 LabeledContent("Delivered", value: "Delivery confirmed")
                 LabeledContent("Failed", value: "Not delivered")
+            } header: {
+                Text("Sent message status guide")
             } footer: {
                 Text("Delivered confirms carrier or device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
             }
