@@ -233,10 +233,28 @@ jobs:
           python3 -m venv build/testflight-publish-venv
           build/testflight-publish-venv/bin/pip install --quiet pyjwt cryptography
           printf '%s' "$CHANGELOG" > changelog.txt
+          # A copy for the notification step below. changelog.txt itself is
+          # removed when this step exits.
+          cp changelog.txt release-notes.txt
           trap 'rm -f changelog.txt' EXIT
           ASC_KEY_P8="$(echo "$ASC_KEY_P8_BASE64" | base64 --decode)" \
             build/testflight-publish-venv/bin/python ios/scripts/publish-testflight-build.py \
               "$ASC_APP_ID" "$ASC_BETA_GROUP_ID" changelog.txt "$BUILD_VERSION"
+
+      # Announce the build to testers. Last, and only on success: the publish
+      # step above fails unless this exact build reached VALID and landed in the
+      # beta group, so nothing here can advertise an update that is not
+      # installable. See ios/scripts/notify-release.sh for the targeting rules.
+      - name: Notify testers that a build is available
+        if: success()
+        timeout-minutes: 5
+        env:
+          RELEASE_NOTIFY_URL: ${{ secrets.RELEASE_NOTIFY_URL }}
+          RELEASE_NOTIFY_TOKEN: ${{ secrets.RELEASE_NOTIFY_TOKEN }}
+        run: |
+          bash ios/scripts/notify-release.sh \
+            "${{ inputs.publish_build != '' && inputs.publish_build || github.run_number }}" \
+            release-notes.txt
 
       - name: Remove the API key
         if: always()
