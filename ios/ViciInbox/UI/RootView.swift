@@ -2,8 +2,11 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var onboarding: OnboardingCoordinator
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @ObservedObject private var inviteLinks = InviteLinkRouter.shared
     @State private var showingReauthentication = false
+    @State private var showingPremiumWelcome = false
 
     /// The mailed link this screen has taken ownership of. Drained out of
     /// `InviteLinkRouter` rather than read from it directly, so the router can
@@ -68,7 +71,22 @@ struct RootView: View {
                 // loads and nothing says why.
                 ChangePasswordView(mode: .forced)
             } else {
-                MainTabView()
+                ZStack {
+                    MainTabView()
+                    if showingPremiumWelcome, let request = session.welcomeRequest {
+                        PremiumWelcomeView(firstName: request.firstName) {
+                            finishPremiumWelcome()
+                        }
+                        .transition(.opacity)
+                        .zIndex(200)
+                        .task(id: request.id) {
+                            guard !voiceOverEnabled else { return }
+                            try? await Task.sleep(nanoseconds: 1_800_000_000)
+                            guard !Task.isCancelled else { return }
+                            finishPremiumWelcome()
+                        }
+                    }
+                }
                     // A 401 that could not be recovered shows this and nothing
                     // else. The app is not signed out, no credential is
                     // cleared, push stays registered, and the SIP socket is
@@ -104,8 +122,18 @@ struct RootView: View {
         // sign-in stops a later sign-out from offering that address to whoever
         // picks the phone up next.
         .onChange(of: session.isSignedIn) { signedIn in
-            if signedIn { signInPrefillEmail = "" }
+            if signedIn {
+                signInPrefillEmail = ""
+                presentNextExperienceIfReady()
+            } else {
+                showingPremiumWelcome = false
+            }
         }
+        .onChange(of: session.mustChangePassword) { required in
+            if !required { presentNextExperienceIfReady() }
+        }
+        .onChange(of: session.welcomeRequest) { _ in presentNextExperienceIfReady() }
+        .onChange(of: session.currentUser?.id) { _ in presentNextExperienceIfReady() }
     }
 
     /// Takes ownership of a queued link, whichever of the two it is.
@@ -118,6 +146,24 @@ struct RootView: View {
         guard let queued = inviteLinks.pendingLink else { return }
         pendingLink = queued
         inviteLinks.consumePendingLink()
+    }
+
+    private func presentNextExperienceIfReady() {
+        guard session.isSignedIn,
+              !session.mustChangePassword,
+              !isCallOnScreen else { return }
+        if session.welcomeRequest != nil {
+            showingPremiumWelcome = true
+        } else if !showingPremiumWelcome {
+            onboarding.considerAutomaticTour(for: session.currentUser)
+        }
+    }
+
+    private func finishPremiumWelcome() {
+        guard showingPremiumWelcome else { return }
+        showingPremiumWelcome = false
+        session.consumeWelcomeRequest()
+        onboarding.considerAutomaticTour(for: session.currentUser)
     }
 }
 
@@ -176,8 +222,10 @@ struct MainTabView: View {
     // Owned here rather than inside the Calls tab so the badge is right before
     // the operator ever opens it.
     @StateObject private var callsModel = CallHistoryModel()
+    @StateObject private var campaignReviewCount = CampaignReviewCountModel()
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var onboarding: OnboardingCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
     /// Hidden UI is not security. The server rejects the Analytics endpoints
@@ -197,6 +245,7 @@ struct MainTabView: View {
 
             GrowthView()
                 .tabItem { Label("Growth", systemImage: "bolt.fill") }
+                .badge(campaignReviewCount.count)
                 .tag(Tab.growth)
 
             CallsView(model: callsModel)
@@ -216,6 +265,15 @@ struct MainTabView: View {
         .onChange(of: showsAnalytics) { visible in
             if !visible && selection == .analytics { selection = .inbox }
         }
+        .overlay {
+            if onboarding.isPresented {
+                OnboardingOverlay(visibleTabs: visibleOnboardingTabs)
+            }
+        }
+        .onChange(of: onboarding.currentStep?.target) { target in
+            applyOnboardingTarget(target)
+        }
+        .onAppear { applyOnboardingTarget(onboarding.currentStep?.target) }
         // Both halves of the deep link. `onAppear` is required as well as
         // `onChange`: on a cold launch from a notification tap, `didReceive`
         // runs before this view exists, so `onChange` never fires. Same pattern
@@ -231,8 +289,23 @@ struct MainTabView: View {
         // is up, so this also runs each time a call finishes — which is exactly
         // when a new missed call would have appeared.
         .task { await callsModel.load() }
+        .task(id: session.can(Permission.campaignsApprove)) {
+            await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+        }
+        .onChange(of: notifications.campaignRefreshSequence) { _ in
+            Task {
+                await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+            }
+        }
         .onChange(of: scenePhase) { phase in
-            if phase == .active { Task { await callsModel.load() } }
+            if phase == .active {
+                Task {
+                    await callsModel.load()
+                    await campaignReviewCount.load(
+                        enabled: session.can(Permission.campaignsApprove)
+                    )
+                }
+            }
         }
     }
 
@@ -254,11 +327,17 @@ struct MainTabView: View {
             selection = .inbox
         case "contacts":
             selection = .contacts
-        case "automations", "activity", "growth", "campaigns":
+        case "automations", "activity", "growth":
             // "automations" stays accepted: a push payload is composed by the
             // server and a device running the previous build is still out
             // there, so a new key is always a two-release change.
             selection = .growth
+        case "campaigns":
+            selection = .growth
+            // GrowthView owns the segment and nested NavigationStack. Leave the
+            // route queued until that view has selected Campaigns and, when the
+            // payload carries an ID, opened the exact campaign.
+            return
         case "calls":
             selection = .calls
         default:
@@ -266,100 +345,24 @@ struct MainTabView: View {
         }
         notifications.consumePendingScreen()
     }
-}
 
-/// Settings is now pushed from the account menu rather than presented as its
-/// own sheet, so it no longer wraps itself in a NavigationView or carries a
-/// Done button — the sheet around it owns both.
-///
-/// Two things that used to live here have moved up into that menu:
-///
-///   * Activity and Team. They were buried in the middle of this list, between
-///     read-only diagnostics, and the owner's report was that nobody could
-///     find them. They are one tap from every tab now, and duplicating them
-///     here would only put them back in the haystack.
-///   * Sign out. It has exactly one call site in the app, and moving it kept
-///     it that way. `signOut()` disables Telnyx push and wipes the Keychain
-///     the VoIP answer path reads, so the number of ways to reach it matters
-///     more than the convenience of reaching it twice.
-struct SettingsView: View {
-    @EnvironmentObject private var session: SessionModel
-    @ObservedObject private var notifications = MessageNotificationManager.shared
+    private var visibleOnboardingTabs: [OnboardingTarget] {
+        var tabs: [OnboardingTarget] = [.inbox, .contacts, .growth, .calls]
+        if showsAnalytics { tabs.append(.analytics) }
+        return tabs
+    }
 
-    var body: some View {
-        List {
-            if let user = session.currentUser {
-                Section("Signed in") {
-                    LabeledContent("Name", value: user.name)
-                    if let email = user.email, !email.isEmpty {
-                        LabeledContent("Email", value: email)
-                    }
-                    LabeledContent("Role", value: RoleCatalog.label(user.role))
-                }
-            }
-
-            Section("Connection") {
-                LabeledContent("Status", value: session.voiceStatusText)
-                LabeledContent("Number", value: session.callerNumber.isEmpty
-                               ? "—" : PhoneFormatter.pretty(session.callerNumber))
-                LabeledContent("Server", value: AppConfig.serverURL.host ?? "—")
-                LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
-                LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
-                LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
-            }
-
-            Section {
-                LabeledContent("Status", value: notifications.statusText)
-                LabeledContent("APNs environment", value: notifications.environment.capitalized)
-                if notifications.authorizationStatus == .denied {
-                    Button("Open iPhone Settings") { notifications.openSystemSettings() }
-                } else if !notifications.isRegisteredWithBackend {
-                    Button("Enable notifications") {
-                        Task { await notifications.enableAndSync() }
-                    }
-                }
-                if let error = notifications.lastError {
-                    Text(error).font(.caption).foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("Message notifications")
-            } footer: {
-                Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
-            }
-
-            Section {
-                LabeledContent("Queued", value: "Waiting at Telnyx")
-                LabeledContent("Sent", value: "Carrier received it")
-                LabeledContent("Delivered", value: "Delivery confirmed")
-                LabeledContent("Failed", value: "Not delivered")
-            } header: {
-                Text("Sent message status guide")
-            } footer: {
-                Text("This guide explains the status shown beneath messages you send. Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
-            }
-
-            Section {
-                LabeledContent("Example", value: "6 min")
-            } header: {
-                Text("Inbox conversation times")
-            } footer: {
-                Text("The time at the right of each conversation shows how long ago the latest message in that thread was sent or received. It updates as time passes.")
-            }
-
-            Section {
-                Button("Reconnect") { session.refreshConnection() }
-            } footer: {
-                Text("Reconnect re-establishes the calling socket. It does not sign you out and it does not touch this iPhone's stored credentials. Sign out is on the account menu.")
-            }
-
-            Section {
-                LabeledContent("Version",
-                               value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-            } footer: {
-                Text("For incoming-call tests, leave the app normally with Home or the side gesture. Do not swipe it away from the app switcher; iOS can suppress relaunch after a force-quit.")
-            }
+    private func applyOnboardingTarget(_ target: OnboardingTarget?) {
+        guard let target else { return }
+        switch target {
+        case .inbox: selection = .inbox
+        case .contacts: selection = .contacts
+        case .growth, .campaigns: selection = .growth
+        case .calls: selection = .calls
+        case .analytics, .revenueAttribution:
+            if showsAnalytics { selection = .analytics }
+        case .account:
+            break
         }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }

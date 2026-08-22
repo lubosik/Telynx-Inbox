@@ -140,6 +140,12 @@ INSERT INTO sms_permissions (key, resource, action, description, is_destructive)
   ('call.recording.play',     'call.recording','play',    'Play an archived call recording.', false),
   ('call.recording.control',  'call.recording','control', 'Start or stop recording on a live call.', false),
   ('analytics.read',          'analytics',     'read',    'View revenue analytics and attribution drill-downs.', false),
+  ('campaigns.read',          'campaign',      'read',    'Read campaigns, review counts and recipient previews.', false),
+  ('campaigns.manage',        'campaign',      'manage',  'Create and edit campaign drafts and submit them for review.', true),
+  ('campaigns.approve',       'campaign',      'approve', 'Approve or reject a frozen campaign revision.', true),
+  ('campaigns.launch',        'campaign',      'launch',  'Schedule an approved campaign for durable delivery.', true),
+  ('campaigns.cancel',        'campaign',      'cancel',  'Cancel a campaign and every recipient that has not started sending.', true),
+  ('campaigns.configure',     'campaign',      'configure','Change provider approval and live-send eligibility.', true),
   ('intelligence.read',       'intelligence',  'read',    'Read and request per-contact conversation intelligence.', false),
   ('intelligence.manage',     'intelligence',  'manage',  'View and dismiss intelligence campaign suggestions.', false),
   ('intelligence.send',       'intelligence',  'send',    'Send an intelligence campaign to customers.', true),
@@ -196,6 +202,7 @@ SELECT 'agent', key FROM sms_permissions WHERE key IN (
   'call.recording.play',
   'call.recording.control',
   'intelligence.read',
+  'campaigns.read',
   'sync.read',
   'device.register'
 )

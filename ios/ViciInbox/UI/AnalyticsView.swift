@@ -90,6 +90,10 @@ struct AnalyticsView: View {
 
         if overview.availability.revenueAttribution {
             RevenueImpactCard(overview: overview, query: model.query)
+            let measuredDrivers = (overview.revenueDrivers ?? []).filter(\.hasMeasuredValue)
+            if !measuredDrivers.isEmpty {
+                RevenueDriversCard(drivers: measuredDrivers, currency: overview.currency)
+            }
         } else {
             AnalyticsCard(emphasized: true) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -126,7 +130,9 @@ struct AnalyticsView: View {
         if overview.availability.messaging {
             MessagingCard(metrics: overview.messaging,
                           series: overview.activitySeries,
-                          trend: overview.trends.messagesOutboundPercent)
+                          trend: overview.trends.messagesOutboundPercent,
+                          granularity: overview.activityGranularity,
+                          timeZoneIdentifier: overview.range.timeZone)
         }
 
         if overview.availability.calls {
@@ -142,6 +148,42 @@ struct AnalyticsView: View {
                            title: "No analytics data yet",
                            detail: "Activity will appear here once verified data is available for this period.")
                     .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+private struct RevenueDriversCard: View {
+    let drivers: [AnalyticsRevenueDriver]
+    let currency: String
+
+    var body: some View {
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Revenue Drivers", symbol: "point.3.connected.trianglepath.dotted")
+            ForEach(Array(drivers.enumerated()), id: \.element.id) { index, driver in
+                if index > 0 { Divider() }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(driver.label).font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(AnalyticsFormatting.money(driver.attributedRevenue, currency: currency))
+                            .font(.headline.monospacedDigit())
+                    }
+                    Text("\(driver.attributedOrders.formatted()) attributed order\(driver.attributedOrders == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if driver.influencedRevenue.value != 0 || driver.influencedOrders > 0 {
+                        Text("Influenced: \(AnalyticsFormatting.money(driver.influencedRevenue, currency: currency)) from \(driver.influencedOrders.formatted()) order\(driver.influencedOrders == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if driver.refundedRevenue.value != 0 {
+                        Text("Refunds deducted: \(AnalyticsFormatting.money(driver.refundedRevenue, currency: currency))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -238,7 +280,7 @@ private struct RevenueImpactCard: View {
                                 .lineLimit(1)
                             Text("Attributed Revenue")
                                 .font(.headline)
-                            Text("Direct + strong evidence")
+                            Text("Revenue linked to app activity with strong evidence")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -279,7 +321,7 @@ private struct RevenueImpactCard: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Influenced Revenue")
                                     .font(.subheadline.weight(.semibold))
-                                Text("60% influenced — shown separately")
+                                Text("60% influenced, shown separately")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -302,7 +344,7 @@ private struct RevenueImpactCard: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Unattributed — correctly excluded")
+                                Text("Unattributed, correctly excluded")
                                     .font(.subheadline.weight(.semibold))
                                 Text("Reviewed payments without enough evidence")
                                     .font(.caption)
@@ -325,8 +367,36 @@ private struct RevenueImpactCard: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                NavigationLink {
+                    AttributionMethodologyView()
+                } label: {
+                    Label("How attribution works", systemImage: "questionmark.circle")
+                        .font(.subheadline.weight(.semibold))
+                }
             }
         }
+    }
+}
+
+private struct AttributionMethodologyView: View {
+    var body: some View {
+        List {
+            Section("Direct") {
+                Text("We can clearly connect the app action to the payment.")
+            }
+            Section("Strong") {
+                Text("The timing and order data strongly link the app action to the payment.")
+            }
+            Section("Influenced") {
+                Text("The app likely helped, but we cannot prove it caused the purchase.")
+            }
+            Section("Unattributed") {
+                Text("There is not enough evidence to fairly credit the app. These orders stay out of attributed revenue.")
+            }
+        }
+        .navigationTitle("How Attribution Works")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -362,13 +432,22 @@ private struct PaymentRecoveryCard: View {
     var body: some View {
         AnalyticsCard {
             AnalyticsSectionHeader(title: "Payment Recovery", symbol: "creditcard.fill")
+
+            LazyVGrid(columns: AnalyticsLayout.columns(for: dynamicTypeSize), spacing: 16) {
+                AnalyticsPrimaryMetric(
+                    value: AnalyticsFormatting.money(metrics.recoveredRevenue, currency: currency),
+                    label: "Revenue recovered"
+                )
+                AnalyticsPrimaryMetric(value: metrics.ordersRecovered.formatted(),
+                                       label: "Orders recovered")
+            }
+
+            Divider()
+
             LazyVGrid(columns: AnalyticsLayout.columns(for: dynamicTypeSize), spacing: 16) {
                 AnalyticsMetric(value: metrics.remindersSent.formatted(), label: "Reminders")
                 AnalyticsMetric(value: metrics.remindersDelivered.formatted(), label: "Delivered reminders")
                 AnalyticsMetric(value: metrics.uniqueCustomersReminded.formatted(), label: "Customers reminded")
-                AnalyticsMetric(value: metrics.ordersRecovered.formatted(), label: "Orders recovered")
-                AnalyticsMetric(value: AnalyticsFormatting.money(metrics.recoveredRevenue, currency: currency),
-                                label: "Revenue recovered")
                 AnalyticsMetric(value: AnalyticsFormatting.percent(metrics.recoveryRate), label: "Recovery rate")
                 AnalyticsMetric(value: AnalyticsFormatting.duration(metrics.medianRecoverySeconds),
                                 label: "Median recovery")
@@ -376,6 +455,25 @@ private struct PaymentRecoveryCard: View {
                                 label: "Direct / strong")
             }
         }
+    }
+}
+
+private struct AnalyticsPrimaryMetric: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.title2.bold().monospacedDigit())
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -487,6 +585,8 @@ private struct MessagingCard: View {
     let metrics: MessagingMetrics
     let series: [AnalyticsActivityPoint]
     let trend: Double?
+    let granularity: String?
+    let timeZoneIdentifier: String
 
     var body: some View {
         AnalyticsCard {
@@ -498,24 +598,28 @@ private struct MessagingCard: View {
             }
             if let trend { AnalyticsTrend(value: trend, suffix: "sent vs previous") }
 
-            if !series.isEmpty {
-                Chart(series) { point in
+            if !chartPoints.isEmpty {
+                Chart(chartPoints) { point in
                     BarMark(x: .value("Date", point.date),
                             y: .value("Messages", point.outboundMessages))
                         .foregroundStyle(by: .value("Direction", "Sent"))
                         .position(by: .value("Direction", "Sent"))
+                        .accessibilityLabel("Sent messages on \(axisLabel(for: point.date))")
+                        .accessibilityValue(point.outboundMessages.formatted())
                     BarMark(x: .value("Date", point.date),
                             y: .value("Messages", point.inboundMessages))
                         .foregroundStyle(by: .value("Direction", "Received"))
                         .position(by: .value("Direction", "Received"))
+                        .accessibilityLabel("Received messages on \(axisLabel(for: point.date))")
+                        .accessibilityValue(point.inboundMessages.formatted())
                 }
                 .chartForegroundStyleScale(["Sent": ViciTheme.tint, "Received": ViciTheme.avatarFill])
                 .chartLegend(position: .bottom, alignment: .leading, spacing: 12)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                    AxisMarks(values: visibleAxisDates) { value in
                         AxisValueLabel {
-                            if let date = value.as(String.self) {
-                                Text(String(date.dropFirst(5)))
+                            if let date = value.as(Date.self) {
+                                Text(axisLabel(for: date))
                             }
                         }
                     }
@@ -537,6 +641,61 @@ private struct MessagingCard: View {
             }
         }
     }
+
+    private var chartPoints: [MessageChartPoint] {
+        series.compactMap { point in
+            guard let date = bucketDate(for: point) else { return nil }
+            return MessageChartPoint(date: date,
+                                     outboundMessages: point.outboundMessages,
+                                     inboundMessages: point.inboundMessages)
+        }
+        .sorted { $0.date < $1.date }
+    }
+
+    /// Swift Charts may render every String category even when `desiredCount`
+    /// is set. Explicit dates guarantee a readable four-to-seven label range.
+    private var visibleAxisDates: [Date] {
+        let dates = chartPoints.map(\.date)
+        guard dates.count > 7 else { return dates }
+        let desired = 6
+        let last = dates.count - 1
+        var indices = Set<Int>()
+        for slot in 0..<desired {
+            indices.insert(Int((Double(last) * Double(slot) / Double(desired - 1)).rounded()))
+        }
+        return indices.sorted().map { dates[$0] }
+    }
+
+    private func bucketDate(for point: AnalyticsActivityPoint) -> Date? {
+        if let bucketStart = point.bucketStart,
+           let parsed = ServerDate.parse(bucketStart) { return parsed }
+
+        let parts = point.date.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return ServerDate.parse(point.date) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: timeZoneIdentifier) ?? .current
+        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12))
+    }
+
+    private func axisLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: timeZoneIdentifier) ?? .current
+        switch granularity?.lowercased() {
+        case "hour": formatter.dateFormat = "h a"
+        case "month": formatter.dateFormat = "MMM yy"
+        case "week": formatter.dateFormat = "MMM d"
+        default: formatter.dateFormat = "MMM d"
+        }
+        return formatter.string(from: date)
+    }
+}
+
+private struct MessageChartPoint: Identifiable {
+    let date: Date
+    let outboundMessages: Int
+    let inboundMessages: Int
+    var id: Date { date }
 }
 
 private struct CallsAnalyticsCard: View {
@@ -875,7 +1034,7 @@ private struct AttributionDetailView: View {
             Section("Attribution") {
                 LabeledContent("Confidence", value: record.confidenceLabel.isEmpty ? record.confidenceLevel.title : record.confidenceLabel)
                 LabeledContent("Workflow", value: AnalyticsFormatting.humanized(record.workflow ?? record.category ?? "other"))
-                Text(record.reason).font(.subheadline)
+                Text(record.safeExplanation).font(.subheadline)
             }
             Section("Timing") {
                 if let actionAt = record.actionAt, let date = ServerDate.parse(actionAt) {
@@ -898,7 +1057,7 @@ private struct AttributionDetailView: View {
                         .foregroundStyle(ViciTheme.success)
                 }
                 if record.supportingEvidence.isEmpty {
-                    Text("No qualifying evidence — correctly left unattributed.")
+                    Text("No qualifying evidence, correctly left unattributed.")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -915,7 +1074,7 @@ private struct AttributionDetailView: View {
     }
 }
 
-private enum AnalyticsFormatting {
+enum AnalyticsFormatting {
     static func money(_ amount: FlexibleDecimal, currency: String) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -923,16 +1082,16 @@ private enum AnalyticsFormatting {
         formatter.locale = .current
         formatter.minimumFractionDigits = amount.value.rounded(scale: 0) == amount.value ? 0 : 2
         formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSDecimalNumber(decimal: amount.value)) ?? "—"
+        return formatter.string(from: NSDecimalNumber(decimal: amount.value)) ?? "Not available"
     }
 
     static func percent(_ value: Double?) -> String {
-        guard let value, value.isFinite else { return "—" }
+        guard let value, value.isFinite else { return "Not available" }
         return "\(value.formatted(.number.precision(.fractionLength(0...1))))%"
     }
 
     static func duration(_ seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite, seconds >= 0 else { return "—" }
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return "Not available" }
         let whole = Int(seconds.rounded())
         if whole < 60 { return "\(whole)s" }
         if whole < 3_600 { return "\(whole / 60)m \(whole % 60)s" }

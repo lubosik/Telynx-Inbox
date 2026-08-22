@@ -711,40 +711,30 @@ name — `enforce-policy.js` compares permissions only. The single exception is
 last-administrator guard counts; a new administrative role must be added there or
 it will not count towards preventing a lockout.
 
-## Future campaign and autonomous-workflow permissions
+## Campaign and autonomous-workflow permissions
 
-**Reserved, deliberately not implemented.**
-
-`lib/audit/event-types.js` declares six `campaign.*` audit event types with
-`reserved: true`, and the audit writer throws on any attempt to emit one. That
-reservation exists so the `category` CHECK constraint on `sms_audit_log` already
-permits `'campaigns'` — widening a CHECK on a table nobody can UPDATE is not
-something to leave to a future rush.
-
-Do not confuse those six with the two **live** `campaign.suggestion.*` types.
-`campaign.suggestion.sent` and `campaign.suggestion.dismissed` are emitted today
-by `routes/intelligence.js` for AI-drafted single messages a human approves. They
-carry category `'campaigns'` because that is the tab they belong on, and they are
-gated by `intelligence.send` and `intelligence.manage` — not by anything named
-`campaign.*`. The reserved six describe a campaigns feature that does not exist.
-
-The permission side has **no** equivalent reservation, and that asymmetry is
-intentional. There are no `campaign.*` keys in `sms_permissions`, because a
-permission that exists and gates nothing is worse than one that does not exist:
-it will be granted to somebody, and then quietly widened when the feature
-arrives, and nobody will re-review the grant.
-
-When campaigns land, the shape is expected to be roughly:
+The campaign review foundation is implemented with explicit permissions:
 
 ```
-campaign.read      view campaigns and their performance
-campaign.write     create and edit a campaign
-campaign.approve   approve a campaign for sending
-campaign.launch    send it   (destructive)
-campaign.cancel    stop one mid-flight
+campaigns.read       view campaigns, previews and operational performance
+campaigns.manage     create/edit drafts and submit them for review
+campaigns.approve    approve or reject a frozen campaign revision
+campaigns.launch     schedule an approved campaign (destructive)
+campaigns.cancel     cancel queued/claimed recipients (destructive)
+campaigns.configure  change provider/live-send eligibility (Owner only)
 ```
 
-with the approve/launch split being the point of the whole thing.
+The approve/launch split is deliberate. Owner/Admin/legacy accounts receive
+read/manage/approve/launch/cancel; Support Agent receives only
+`campaigns.read`; only Owner receives `campaigns.configure`. Route-policy
+enforcement is authoritative, so hiding controls in SwiftUI is only a usability
+layer.
+
+Draft, review, approval, scheduling and cancellation audit types are active.
+`campaign.launched` remains reserved because there is no live delivery worker in
+this release. Existing `campaign.suggestion.*` single-message actions remain
+separate and continue to use `intelligence.manage` / `intelligence.send`.
+
 `docs/analytics/REVENUE-ATTRIBUTION-METHODOLOGY.md` already records the rule that
 matters here: Suggested, Approval Required and Autonomous execution modes belong
 to the future automation system, and **Autonomous must never be the default**.
@@ -753,9 +743,10 @@ question "may this person send a campaign" and the question "may this person let
 the system send campaigns without a human" are not the same question, and one
 key cannot answer both.
 
-Whatever is added must go into `sms_permissions` and `lib/route-policy.js`
-together. The boot-time catalogue check and the bijection test will fail the
-build if only one of the two is done, which is the intended behaviour.
+Any future worker/reconciler or autonomous mode needs its own separately
+reviewed permission and must be added to `sms_permissions` and
+`lib/route-policy.js` together. The boot-time catalogue check and route-policy
+bijection test fail the build if only one side is changed.
 
 ## Files
 

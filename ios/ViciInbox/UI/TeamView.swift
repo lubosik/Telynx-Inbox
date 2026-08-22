@@ -177,7 +177,7 @@ private struct TeamMemberView: View {
         List {
             Section {
                 LabeledContent("Name", value: member.name)
-                LabeledContent("Email", value: member.email ?? "—")
+                LabeledContent("Email", value: member.email ?? "Not available")
                 LabeledContent("Role", value: model.roleLabel(member.role))
                 LabeledContent("Status", value: member.active ? "Active" : "Deactivated")
                 if let lastSeen = member.lastSeenDate {
@@ -451,7 +451,7 @@ private struct InvitationResultSection: View {
             return "The invitation exists, but this server returned no link or token for it. Ask them to check with an administrator before this expires."
         }
         let shown = created.isBareToken
-            ? "The token above is all the server returned — no acceptance link could be built."
+            ? "The token above is all the server returned. No acceptance link could be built."
             : "The link above is shown once and cannot be retrieved later."
         switch created.emailOutcome {
         case .sent:

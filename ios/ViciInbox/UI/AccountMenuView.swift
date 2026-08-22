@@ -25,6 +25,7 @@ extension View {
 
 private struct AccountToolbarModifier: ViewModifier {
     @State private var showingAccount = false
+    @EnvironmentObject private var onboarding: OnboardingCoordinator
 
     func body(content: Content) -> some View {
         content
@@ -34,6 +35,9 @@ private struct AccountToolbarModifier: ViewModifier {
                 }
             }
             .sheet(isPresented: $showingAccount) { AccountMenuSheet() }
+            .onChange(of: onboarding.isPresented) { presented in
+                if presented { showingAccount = false }
+            }
     }
 }
 

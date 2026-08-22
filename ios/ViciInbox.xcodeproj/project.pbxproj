@@ -9,9 +9,12 @@
 /* Begin PBXBuildFile section */
 		999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */; };
 		48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 447E27040259063DAA9CB1EF /* AppDelegate.swift */; };
+		94D46EF07D803F2804B076B0 /* AppearanceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AA41C3F1B9DE7661CCF7B7A /* AppearanceModel.swift */; };
+		068944F0A909036593638CC1 /* CampaignViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC255F15C17C3B975CFB2BC4 /* CampaignViewModels.swift */; };
 		82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39972EB378BFE723E62921A0 /* FeatureModels.swift */; };
 		3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */; };
 		A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */; };
+		8C8081511BC03481914DB0FC /* OnboardingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */; };
 		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
@@ -19,7 +22,9 @@
 		515447AE1672E23D1520326C /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B52032187A64C7FB48FAA0BF /* AccountModels.swift */; };
 		9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */; };
 		672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F149B900F4E19E4142123D9 /* AppConfig.swift */; };
+		04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */; };
 		7649D086E62D19440F809802 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285C11288F042740FCF4F46E /* CredentialStore.swift */; };
+		7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */; };
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
@@ -27,15 +32,19 @@
 		407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */; };
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
+		7A5C3535A4F4507AC9EC531F /* CampaignsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */; };
 		BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
 		E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73E82F33DD342C8486B83C84 /* GrowthView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
+		2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59F0347583693CB980746A9 /* OnboardingOverlay.swift */; };
+		98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */; };
 		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
 		D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
+		74DD34D116DB7C41A94E4999 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */; };
 		A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1885CD5B99B42947AAC096CC /* TeamView.swift */; };
 		825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A571897E3D65CD158FDBD81 /* Theme.swift */; };
 		54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */; };
@@ -50,9 +59,12 @@
 		38A007151ABE87CC01A5B6E9 /* Vici Inbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Vici Inbox.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsViewModel.swift; sourceTree = "<group>"; };
 		447E27040259063DAA9CB1EF /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		5AA41C3F1B9DE7661CCF7B7A /* AppearanceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceModel.swift; sourceTree = "<group>"; };
+		CC255F15C17C3B975CFB2BC4 /* CampaignViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignViewModels.swift; sourceTree = "<group>"; };
 		39972EB378BFE723E62921A0 /* FeatureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureModels.swift; sourceTree = "<group>"; };
 		847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteLinkRouter.swift; sourceTree = "<group>"; };
 		5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotificationManager.swift; sourceTree = "<group>"; };
+		E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingCoordinator.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamActivityModels.swift; sourceTree = "<group>"; };
 		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
@@ -60,7 +72,9 @@
 		B52032187A64C7FB48FAA0BF /* AccountModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
 		AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
 		0F149B900F4E19E4142123D9 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignModels.swift; sourceTree = "<group>"; };
 		285C11288F042740FCF4F46E /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperienceModels.swift; sourceTree = "<group>"; };
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
@@ -68,15 +82,19 @@
 		3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenuView.swift; sourceTree = "<group>"; };
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
+		A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignsView.swift; sourceTree = "<group>"; };
 		02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
 		73E82F33DD342C8486B83C84 /* GrowthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		E59F0347583693CB980746A9 /* OnboardingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOverlay.swift; sourceTree = "<group>"; };
+		BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumWelcomeView.swift; sourceTree = "<group>"; };
 		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetPasswordView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1885CD5B99B42947AAC096CC /* TeamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamView.swift; sourceTree = "<group>"; };
 		2A571897E3D65CD158FDBD81 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceViews.swift; sourceTree = "<group>"; };
@@ -131,9 +149,12 @@
 			children = (
 				3C6E1436420A1ADBDA22757E /* AnalyticsViewModel.swift */,
 				447E27040259063DAA9CB1EF /* AppDelegate.swift */,
+				5AA41C3F1B9DE7661CCF7B7A /* AppearanceModel.swift */,
+				CC255F15C17C3B975CFB2BC4 /* CampaignViewModels.swift */,
 				39972EB378BFE723E62921A0 /* FeatureModels.swift */,
 				847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */,
 				5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */,
+				E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */,
 				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
 				81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */,
 				B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */,
@@ -148,7 +169,9 @@
 				B52032187A64C7FB48FAA0BF /* AccountModels.swift */,
 				AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */,
 				0F149B900F4E19E4142123D9 /* AppConfig.swift */,
+				0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */,
 				285C11288F042740FCF4F46E /* CredentialStore.swift */,
+				6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */,
 				19325CE8AEB5A75468A51A38 /* Log.swift */,
 				D20048ACF33742E9925F16EA /* MobileModels.swift */,
 				52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */,
@@ -163,15 +186,19 @@
 				3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */,
 				07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */,
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
+				A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */,
 				02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */,
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
 				73E82F33DD342C8486B83C84 /* GrowthView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
+				E59F0347583693CB980746A9 /* OnboardingOverlay.swift */,
+				BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */,
 				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
 				6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
+				DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */,
 				1885CD5B99B42947AAC096CC /* TeamView.swift */,
 				2A571897E3D65CD158FDBD81 /* Theme.swift */,
 				1A4F82F82C68A3486C884196 /* WorkspaceViews.swift */,
@@ -278,9 +305,12 @@
 			files = (
 				999A028D4380B7760C1380FF /* AnalyticsViewModel.swift in Sources */,
 				48EBD487BB2D3EAF525F86CC /* AppDelegate.swift in Sources */,
+				94D46EF07D803F2804B076B0 /* AppearanceModel.swift in Sources */,
+				068944F0A909036593638CC1 /* CampaignViewModels.swift in Sources */,
 				82CD25F30A8D43F6125DC26B /* FeatureModels.swift in Sources */,
 				3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */,
 				A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */,
+				8C8081511BC03481914DB0FC /* OnboardingCoordinator.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */,
 				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
@@ -288,7 +318,9 @@
 				515447AE1672E23D1520326C /* AccountModels.swift in Sources */,
 				9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */,
 				672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */,
+				04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */,
 				7649D086E62D19440F809802 /* CredentialStore.swift in Sources */,
+				7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */,
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
@@ -296,15 +328,19 @@
 				407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */,
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
+				7A5C3535A4F4507AC9EC531F /* CampaignsView.swift in Sources */,
 				BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
 				E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
+				2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */,
+				98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */,
 				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
 				D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
+				74DD34D116DB7C41A94E4999 /* SettingsView.swift in Sources */,
 				A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */,
 				825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */,
 				54C9934EDDD806AEFB40BDB7 /* WorkspaceViews.swift in Sources */,

@@ -19,6 +19,28 @@ function isValidPhone(phone) {
   return digits.length >= 10 && digits.length <= 15;
 }
 
+/**
+ * HighLevel exposes both a contact-wide DND boolean and a channel-specific SMS
+ * status. A missing field is unknown, never false. Only a response carrying
+ * both explicit values receives a freshness timestamp; partial payloads make
+ * campaign eligibility fail closed until a complete contact sync succeeds.
+ */
+function mapGHLDndState(contact, observedAt = new Date()) {
+  const globalDnd = typeof contact?.dnd === 'boolean' ? contact.dnd : null;
+  const rawSms = contact?.dndSettings?.sms?.status ?? contact?.dndSettings?.SMS?.status;
+  const smsStatus = ['active', 'inactive', 'permanent'].includes(String(rawSms || '').toLowerCase())
+    ? String(rawSms).toLowerCase()
+    : null;
+  const observed = observedAt instanceof Date ? observedAt : new Date(observedAt);
+  return {
+    ghl_dnd: globalDnd,
+    ghl_sms_dnd_status: smsStatus,
+    ghl_dnd_synced_at: globalDnd !== null && smsStatus !== null && Number.isFinite(observed.getTime())
+      ? observed.toISOString()
+      : null
+  };
+}
+
 async function fetchAllContacts() {
   const contacts = [];
   let startAfter = null;
@@ -113,12 +135,14 @@ async function runSync() {
     const phoneContacts = allContacts.filter(c => isValidPhone(c.phone));
     console.log(`${allContacts.length} total contacts | ${phoneContacts.length} have valid phone numbers`);
 
+    const dndObservedAt = new Date();
     const upserts = phoneContacts.map(c => ({
       phone: c.phone,
       name: [c.firstName, c.lastName].filter(Boolean).join(' ') || null,
       ghl_contact_id: c.id,
       first_seen: c.dateAdded || new Date().toISOString(),
-      last_seen: c.dateUpdated || c.dateAdded || new Date().toISOString()
+      last_seen: c.dateUpdated || c.dateAdded || new Date().toISOString(),
+      ...mapGHLDndState(c, dndObservedAt)
     }));
 
     // Batch upsert contacts in groups of 50
@@ -204,7 +228,7 @@ async function runSync() {
   return result;
 }
 
-module.exports = { runSync };
+module.exports = { mapGHLDndState, runSync };
 
 if (require.main === module) {
   runSync().then(r => {

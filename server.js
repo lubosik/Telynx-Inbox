@@ -62,6 +62,7 @@ app.use(rejectMiscasedApiPaths);
 app.use('/webhook/telnyx',              express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce',         express.raw({ type: 'application/json' }));
 app.use('/webhook/woocommerce-customer', express.raw({ type: 'application/json' }));
+app.use('/webhook/woocommerce-product', express.raw({ type: 'application/json' }));
 // Voice Call Control webhook — must be raw before the global express.json() runs
 app.use('/webhooks/voice',              express.raw({ type: 'application/json' }));
 
@@ -160,6 +161,7 @@ app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
+app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')());
 app.use('/api/users',         requireAuth, require('./routes/users')());
 app.use('/api/invitations',   requireAuth, require('./routes/invitations')());
 app.use('/api/audit',         requireAuth, require('./routes/audit')());

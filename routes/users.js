@@ -6,6 +6,7 @@
  *   POST   /api/users                     user.manage
  *   GET    /api/users/me                  any authenticated actor
  *   PATCH  /api/users/me                  any authenticated actor
+ *   POST   /api/users/me/onboarding       any authenticated named actor
  *   POST   /api/users/me/password         any authenticated actor
  *   POST   /api/users/me/email            any authenticated actor
  *   POST   /api/users/me/email/cancel     any authenticated actor
@@ -208,6 +209,27 @@ function createUserStore({ client } = {}) {
           .maybeSingle(),
         'getById'
       );
+    },
+
+    async getOnboarding(id) {
+      return unwrap(
+        await db()
+          .from('sms_users')
+          .select('onboarding_status, onboarding_version, onboarding_decided_at')
+          .eq('id', id)
+          .maybeSingle(),
+        'getOnboarding'
+      );
+    },
+
+    async decideOnboarding(id, status, version) {
+      const result = await db().rpc('decide_sms_user_onboarding', {
+        p_user_id: id,
+        p_status: status,
+        p_version: version
+      });
+      const data = unwrap(result, 'decideOnboarding');
+      return Array.isArray(data) ? (data[0] || null) : data;
     },
 
     async findByEmail(email) {
@@ -516,6 +538,22 @@ function publicUser(row) {
   };
 }
 
+/** Server-owned first-run state. Missing state is omitted and therefore never
+ *  makes an older account look new in the iOS client. */
+function publicOnboarding(row) {
+  if (!row) return null;
+  const status = row.onboarding_status;
+  const version = Number(row.onboarding_version);
+  if (!['not_started', 'completed', 'skipped', 'ineligible'].includes(status)
+      || !Number.isInteger(version) || version < 1) return null;
+  return {
+    status,
+    version,
+    eligible: status === 'not_started',
+    decidedAt: row.onboarding_decided_at || null
+  };
+}
+
 function fail(res, status, code, message, extra = {}) {
   return res.status(status).json({ error: message, code, ...extra });
 }
@@ -765,6 +803,17 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
   router.get('/me', async (req, res) => {
     const actor = req.actor;
     if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+    let onboarding = null;
+    if (!actor.viaLegacySession && !actor.isLegacyShared && typeof users.getOnboarding === 'function') {
+      try {
+        onboarding = publicOnboarding(await users.getOnboarding(actor.id));
+      } catch (error) {
+        // Fail closed and preserve account access during an additive rolling
+        // deploy. No state is safer than accidentally touring every existing
+        // user when the migration is not available yet.
+        console.warn('[USERS] onboarding state unavailable:', error?.code || 'read_failed');
+      }
+    }
     res.set('Cache-Control', 'no-store, private');
     return res.json({
       id: actor.id,
@@ -774,8 +823,55 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
       isLegacyShared: actor.isLegacyShared,
       viaLegacySession: actor.viaLegacySession,
       mustChangePassword: actor.mustChangePassword,
-      permissions: [...actor.permissions].sort()
+      permissions: [...actor.permissions].sort(),
+      ...(onboarding ? { onboarding } : {})
     });
+  });
+
+  // ── POST /api/users/me/onboarding ────────────────────────────────────────
+  // This route can decide only the authenticated actor's first-run state. The
+  // optional userId in the body is an optimistic identity check for clients;
+  // it is never used as the update target.
+  router.post('/me/onboarding', async (req, res) => {
+    const actor = req.actor;
+    if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+    if (actor.viaLegacySession || actor.isLegacyShared || actor.id === null || actor.id === undefined) {
+      return fail(res, 409, 'ONBOARDING_NOT_ELIGIBLE', 'The shared team login does not have a personal tour state.');
+    }
+
+    const status = String(req.body?.status || '').trim();
+    const version = Number(req.body?.version);
+    const bodyUserId = req.body?.userId;
+    if (!['completed', 'skipped'].includes(status)) {
+      return fail(res, 400, 'INVALID_ONBOARDING_STATUS', 'Status must be completed or skipped.');
+    }
+    if (!Number.isInteger(version) || version < 1) {
+      return fail(res, 400, 'INVALID_ONBOARDING_VERSION', 'Onboarding version must be a positive integer.');
+    }
+    if (bodyUserId !== undefined && String(bodyUserId) !== String(actor.id)) {
+      return fail(res, 409, 'ONBOARDING_USER_MISMATCH', 'The signed-in account changed. Reload and try again.');
+    }
+    if (typeof users.decideOnboarding !== 'function') {
+      return fail(res, 503, 'ONBOARDING_UNAVAILABLE', 'Tour state is not available yet.');
+    }
+
+    try {
+      const row = await users.decideOnboarding(actor.id, status, version);
+      const onboarding = publicOnboarding(row);
+      if (!onboarding) {
+        return fail(res, 503, 'ONBOARDING_UNAVAILABLE', 'Tour state is not available yet.');
+      }
+      if (onboarding.version !== version) {
+        return fail(res, 409, 'ONBOARDING_VERSION_CHANGED', 'This tour version is no longer current.', { onboarding });
+      }
+      if (onboarding.status !== status) {
+        return fail(res, 409, 'ONBOARDING_ALREADY_DECIDED', 'This tour has already been completed or skipped.', { onboarding });
+      }
+      res.set('Cache-Control', 'no-store, private');
+      return res.json({ success: true, onboarding });
+    } catch (error) {
+      return sendStoreError(res, error, 'decideOnboarding');
+    }
   });
 
   // ── POST /api/users/me/password ───────────────────────────────────────────
@@ -1777,6 +1873,7 @@ module.exports = createUsersRouter;
 module.exports.createUserStore = createUserStore;
 module.exports.createEmailChangeStore = createEmailChangeStore;
 module.exports.publicUser = publicUser;
+module.exports.publicOnboarding = publicOnboarding;
 module.exports.confirmationErrorFrom = confirmationErrorFrom;
 module.exports.confirmUrlFor = confirmUrlFor;
 module.exports.ADMINISTRATIVE_ROLES = ADMINISTRATIVE_ROLES;

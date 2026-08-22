@@ -54,12 +54,13 @@ for a capability the owner rejected invites someone to grant it.
 
 ## Audit
 
-`lib/audit/event-types.js` already reserves `campaign.created`, `.edited`,
-`.approved`, `.scheduled`, `.launched` and `.cancelled`. They currently THROW if
-emitted, so nothing can quietly start writing campaign activity before the
-feature exists. Un-reserve them as each call site is built, not in one batch.
+`lib/audit/event-types.js` activates `campaign.created`, `.edited`,
+`.review_submitted`, `.rejected`, `.approved`, `.scheduled` and `.cancelled`
+alongside their call sites. `campaign.launched` remains reserved and still
+throws: this foundation intentionally has no live delivery worker.
 
-`campaign.approved` and `campaign.launched` are marked `consentBearing`. That is
+`campaign.approved` is marked `consentBearing`. A future
+`campaign.launched` event must be too. That is
 not decoration: an approval is the human act that authorises a bulk send, and if
 the record of it cannot be written the send must not proceed. See the ordering
 note in `lib/audit/log.js` — a missing table fails open, a table that exists and
@@ -69,10 +70,23 @@ Approval and launch must be separately recorded even when they happen in one
 click, because "who approved this" and "when did it actually go" are different
 questions and an investigation asks both.
 
-## Not yet decided
+## Decisions implemented in the foundation
 
-- Whether approving a campaign schedules it or sends it immediately.
-- Whether an approved audience is frozen at approval time or recomputed at send
-  time. These differ for anyone who orders, or opts out, in between. Opt-outs
-  must be re-checked at send time regardless of what is decided here.
-- Whether a second Admin's approval is required above some audience size.
+- Approval and scheduling are separate actions. Approval never sends.
+- The selected audience and rendered message are frozen at approval, with
+  stable hashes stored on the approval row.
+- Suppression is evaluated again when a recipient is claimed for sending, so a
+  later STOP, missing consent, or active/unknown/stale HighLevel SMS DND can
+  still prevent delivery.
+- Final approval requires the actual immutable `campaign.approved` audit row;
+  application call ordering alone is not accepted as proof.
+- A claim is protected by a workspace/phone lock and commercial-contact
+  reservation. A future worker must cross the dispatch-start fence with the
+  exact claim token, use the returned provider idempotency key, and heartbeat
+  only while the attempt remains live. An expired in-flight attempt requires
+  provider reconciliation and is never automatically retried.
+- Live scheduling requires the environment gate plus explicit provider and
+  workspace database approval. All three default off.
+
+Whether a second Admin is required above a future audience-size threshold is
+still undecided.

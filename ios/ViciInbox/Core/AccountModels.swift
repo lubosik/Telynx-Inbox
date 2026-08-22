@@ -14,6 +14,7 @@ import Foundation
 /// operator, never a security boundary — the server enforces every one of them
 /// independently on the request itself.
 enum Permission {
+    static let automationRead   = "automation.read"
     static let automationCancel = "automation.cancel"
     static let analyticsRead    = "analytics.read"
     static let auditRead        = "audit.read"
@@ -25,6 +26,11 @@ enum Permission {
     static let userManageOwner  = "user.manage.owner"
     static let syncRun          = "sync.run"
     static let catchupSend      = "catchup.send"
+    static let campaignsRead    = "campaigns.read"
+    static let campaignsManage  = "campaigns.manage"
+    static let campaignsApprove = "campaigns.approve"
+    static let campaignsLaunch  = "campaigns.launch"
+    static let campaignsCancel  = "campaigns.cancel"
 }
 
 struct AuthUser: Codable, Identifiable, Hashable {
@@ -54,6 +60,7 @@ struct AuthUser: Codable, Identifiable, Hashable {
     /// screen says so instead of making a round trip that cannot succeed.
     let isLegacyShared: Bool?
     let viaLegacySession: Bool?
+    let onboarding: AccountOnboardingState?
 
     var name: String { displayName ?? email ?? "Signed in" }
     var permissionSet: Set<String> { Set(permissions ?? []) }
@@ -66,7 +73,7 @@ struct AuthUser: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, displayName, email, role, permissions
-        case mustChangePassword, isLegacyShared, viaLegacySession
+        case mustChangePassword, isLegacyShared, viaLegacySession, onboarding
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +94,7 @@ struct AuthUser: Codable, Identifiable, Hashable {
         mustChangePassword = try? container.decodeIfPresent(Bool.self, forKey: .mustChangePassword)
         isLegacyShared = try? container.decodeIfPresent(Bool.self, forKey: .isLegacyShared)
         viaLegacySession = try? container.decodeIfPresent(Bool.self, forKey: .viaLegacySession)
+        onboarding = try? container.decodeIfPresent(AccountOnboardingState.self, forKey: .onboarding)
     }
 }
 
@@ -281,9 +289,9 @@ struct AuditActor: Decodable, Identifiable, Hashable {
 /// The audit categories the server accepts as a filter.
 enum AuditCategory: String, CaseIterable, Identifiable {
     // Must stay in step with CATEGORIES in lib/audit/event-types.js. `campaigns`
-    // is live — campaign.suggestion.sent and .dismissed write real rows — even
-    // though the six campaign.* lifecycle types are still reserved. Omitting it
-    // makes those rows unreachable from the app.
+    // is live for suggestions and the draft/review lifecycle. Only
+    // campaign.launched remains reserved until a real delivery worker exists.
+    // Omitting the category makes those rows unreachable from the app.
     case all, messages, calls, automations, campaigns, contacts, team, settings, security
 
     var id: String { rawValue }
@@ -635,7 +643,7 @@ indirect enum JSONValue: Codable, Hashable {
 
     var displayText: String {
         switch self {
-        case .string(let value): return value.isEmpty ? "—" : value
+        case .string(let value): return value.isEmpty ? "Not available" : value
         case .bool(let value):   return value ? "Yes" : "No"
         case .number(let value):
             return value == value.rounded()
@@ -646,7 +654,7 @@ indirect enum JSONValue: Codable, Hashable {
             return values.keys.sorted()
                 .compactMap { key in values[key].map { "\(key): \($0.displayText)" } }
                 .joined(separator: ", ")
-        case .null: return "—"
+        case .null: return "Not available"
         }
     }
 }

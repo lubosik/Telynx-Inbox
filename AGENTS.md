@@ -62,6 +62,18 @@ client.
 - `docs/analytics/`: revenue-claim methodology, implementation architecture,
   and the provisional historical audit. Read the methodology before changing
   attribution rules or displaying revenue.
+- `docs/campaigns/`, `lib/campaigns/`, `routes/campaigns.js`: campaign research,
+  deterministic opportunity and attribution policies, draft/review APIs, and
+  the fail-closed delivery foundation. `scripts/campaigns-migration.sql` must
+  be applied before the backend routes. Drafting and dry runs are safe while
+  live delivery is disabled; they are not permission to send.
+- `scripts/dry-run-campaign-cadence.js`: read-only, aggregate-only historical
+  cadence analysis. It prints no customer or product identity and never writes.
+  `scripts/dry-run-campaign-opportunities.js` accepts only a local fixture and
+  prepares draft outputs without importing a database or provider client.
+- `scripts/onboarding-migration.sql` and `docs/onboarding/`: server-owned,
+  role-aware first-time tour state. Existing accounts are deliberately
+  ineligible; future named accounts start at `not_started`.
 - `scripts/analytics-migration.sql`: additive analytics schema. Apply once
   before deploying Analytics code; it does not mutate existing source rows.
 - `scripts/backfill-analytics.js`, `scripts/backfill-sentiment.js`: read-only by
@@ -89,9 +101,11 @@ client.
   seeded human has `password_hash NULL`, so applying it alone changes nobody's
   access. Apply before deploying the matching code.
 - `docs/team/ACTIVITY-CENTER.md` and `lib/audit/`: the append-only audit trail
-  (`sms_audit_log`, `/api/audit`). 36 event types, 6 of them reserved
-  `campaign.*` that the writer throws on. The nine `team.*` types are live and
-  instrumented in `routes/users.js` and `routes/invitations.js`. Note the name
+  (`sms_audit_log`, `/api/audit`). Campaign draft, review, approval, scheduling,
+  rejection, and cancellation types are active; `campaign.launched` remains
+  reserved until a separately reviewed delivery worker exists. The `team.*`
+  types are live and instrumented in `routes/users.js` and
+  `routes/invitations.js`. Note the name
   collision: `routes/activity.js` and `/api/activity/*` are the scheduled-SMS
   queue behind the iOS tab labelled "Automations", not the audit trail. Do not
   rename the live route.
@@ -135,7 +149,7 @@ npm run build
 find . -path './node_modules' -prune -o -path './.git' -prune -o -type f -name '*.js' -exec node --check {} \;
 ```
 
-`npm test` runs focused, offline Node unit tests under `test/` (279 at present).
+`npm test` runs the offline Node unit and integration-shape tests under `test/`.
 Two of them are shape guards rather than behaviour tests, and both exist because
 the shape they ban already caused an outage:
 
@@ -203,7 +217,8 @@ swiftc -frontend -parse ios/ViciInbox/App/*.swift ios/ViciInbox/Core/*.swift ios
 # so a full compile still belongs to the `iOS Build` workflow.
 swiftc -typecheck \
   ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
-  ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/AppConfig.swift \
+  ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
+  ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
   ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift
 plutil -lint ios/ExportOptions.plist ios/ViciInbox/Resources/Info.plist ios/ViciInbox/Resources/ViciInbox.entitlements
@@ -253,6 +268,17 @@ build proves compilation only.
   of the Unattributed bucket. Verified staff/internal/test identities are a
   separate exclusion class and must be removed from all Analytics metrics rather
   than relabelled as Unattributed.
+- Promotional campaign delivery has two independent brakes:
+  `CAMPAIGNS_LIVE_SEND_ENABLED=true` in the backend environment and both
+  `provider_approved=true` plus `live_send_enabled=true` in
+  `sms_campaign_settings`. Keep every gate off until written provider approval
+  covers the exact Vici products, registered use case, number/profile, and
+  representative copy. Never infer promotional consent from an order, contact,
+  phone number, or transactional message. A recipient also needs evidenced
+  positive consent, known-current HighLevel SMS DND clearance, STOP clearance,
+  quiet hours, cadence limits, and the frozen approved revision. There is no
+  campaign delivery worker in the current release; do not describe a recorded
+  schedule as a send.
 - Authorisation is server-side only. Nothing authority-bearing goes in the
   session cookie: it carries `{ v, authenticated, uid, se }` and the role,
   active state and permissions are read from the database every request. Apply

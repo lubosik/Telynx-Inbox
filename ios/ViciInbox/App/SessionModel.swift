@@ -32,6 +32,7 @@ final class SessionModel: ObservableObject {
     /// cleared, push stays registered, and the SIP socket is left alone, so an
     /// incoming call still rings and can still be answered.
     @Published private(set) var isAuthenticationLost = false
+    @Published private(set) var welcomeRequest: WelcomeRequest?
 
     var callerNumber: String { CredentialStore.get(.callerNumber) ?? "" }
 
@@ -174,6 +175,12 @@ final class SessionModel: ObservableObject {
         isSignedIn = true
         isAuthenticationLost = false
         await reloadCurrentUser()
+        if let user = currentUser, !user.isSharedTeamLogin {
+            welcomeRequest = WelcomeRequest(
+                userID: user.id,
+                firstName: Self.firstName(from: user.name)
+            )
+        }
         await MessageNotificationManager.shared.enableAndSync()
         // Resolve microphone access now. If it is still undetermined when a
         // call is answered from the lock screen, iOS cannot prompt and the
@@ -209,6 +216,16 @@ final class SessionModel: ObservableObject {
         // next person to sign in on this phone, before their own account had
         // even been read.
         mustChangePassword = false
+        welcomeRequest = nil
+    }
+
+    func consumeWelcomeRequest() {
+        welcomeRequest = nil
+    }
+
+    private static func firstName(from displayName: String) -> String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? ""
     }
 
     /// Called when the app returns to the foreground — re-establishes the SIP
