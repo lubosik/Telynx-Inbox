@@ -255,8 +255,11 @@ private struct DiagnosticsView: View {
                 LabeledContent("Push notifications", value: notifications.statusText)
             }
 
+            // The backend host is deliberately not shown. The three rows above
+            // already answer the only question a person here is asking — is it
+            // connected — and the hostname is infrastructure detail that every
+            // signed-in account, Support agents included, would otherwise see.
             Section("Technical details") {
-                LabeledContent("Server", value: AppConfig.serverURL.host ?? "Not available")
                 LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
                 LabeledContent("VoIP registration", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
                 LabeledContent("VoIP environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment.capitalized)
