@@ -76,12 +76,19 @@ struct MainTabView: View {
 
     /// Tabs are an enum rather than bare integers.
     ///
-    /// The Analytics tab is now conditional on `analytics.read`. With the old
-    /// `.tag(0)`…`.tag(4)` literals, hiding a tab silently renumbers the rest
+    /// The Analytics tab is conditional on `analytics.read`. With the old
+    /// `.tag(0)`…`.tag(4)` literals, hiding a tab silently renumbered the rest
     /// and `AnalyticsView(isSelected: selection == 4)` would end up bound to
-    /// whichever tab happened to land on index 4.
+    /// whichever tab happened to land on index 4. Because the tag is the case
+    /// itself and not its position, a hidden tab cannot take another tab's
+    /// identity — which is why `growth` is added here rather than as a literal.
+    ///
+    /// Five is the ceiling: iPhone shows five tabs and folds a sixth into a
+    /// "More" list. Anything else belongs behind the account button.
     enum Tab: Int, Hashable {
-        case inbox, contacts, automations, calls, analytics
+        /// Was `automations`. The tab now holds Automations and Campaigns
+        /// behind a segmented control, so the name follows the label.
+        case inbox, contacts, growth, calls, analytics
     }
 
     @State private var selection: Tab = .inbox
@@ -108,9 +115,9 @@ struct MainTabView: View {
                 .tabItem { Label("Contacts", systemImage: "person.2.fill") }
                 .tag(Tab.contacts)
 
-            ActivityView()
-                .tabItem { Label("Automations", systemImage: "bolt.fill") }
-                .tag(Tab.automations)
+            GrowthView()
+                .tabItem { Label("Growth", systemImage: "bolt.fill") }
+                .tag(Tab.growth)
 
             CallsView(model: callsModel)
                 .tabItem { Label("Calls", systemImage: "phone.fill") }
@@ -167,8 +174,11 @@ struct MainTabView: View {
             selection = .inbox
         case "contacts":
             selection = .contacts
-        case "automations", "activity":
-            selection = .automations
+        case "automations", "activity", "growth", "campaigns":
+            // "automations" stays accepted: a push payload is composed by the
+            // server and a device running the previous build is still out
+            // there, so a new key is always a two-release change.
+            selection = .growth
         case "calls":
             selection = .calls
         default:
@@ -178,126 +188,98 @@ struct MainTabView: View {
     }
 }
 
+/// Settings is now pushed from the account menu rather than presented as its
+/// own sheet, so it no longer wraps itself in a NavigationView or carries a
+/// Done button — the sheet around it owns both.
+///
+/// Two things that used to live here have moved up into that menu:
+///
+///   * Activity and Team. They were buried in the middle of this list, between
+///     read-only diagnostics, and the owner's report was that nobody could
+///     find them. They are one tap from every tab now, and duplicating them
+///     here would only put them back in the haystack.
+///   * Sign out. It has exactly one call site in the app, and moving it kept
+///     it that way. `signOut()` disables Telnyx push and wipes the Keychain
+///     the VoIP answer path reads, so the number of ways to reach it matters
+///     more than the convenience of reaching it twice.
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
-    @State private var isSigningOut = false
 
     var body: some View {
-        NavigationView {
-            List {
-                if let user = session.currentUser {
-                    Section("Signed in") {
-                        LabeledContent("Name", value: user.name)
-                        if let email = user.email, !email.isEmpty {
-                            LabeledContent("Email", value: email)
-                        }
-                        LabeledContent("Role", value: RoleCatalog.label(user.role))
+        List {
+            if let user = session.currentUser {
+                Section("Signed in") {
+                    LabeledContent("Name", value: user.name)
+                    if let email = user.email, !email.isEmpty {
+                        LabeledContent("Email", value: email)
                     }
-                }
-
-                // Not a sixth tab: the TabView already carries five, and a
-                // sixth collapses into the "More" overflow on smaller iPhones.
-                if session.can(Permission.auditRead) || session.can(Permission.userManage) {
-                    Section {
-                        if session.can(Permission.auditRead) {
-                            NavigationLink {
-                                ActivityLogView()
-                            } label: {
-                                Label("Activity", systemImage: "clock.arrow.circlepath")
-                            }
-                        }
-                        if session.can(Permission.userManage) {
-                            NavigationLink {
-                                TeamView()
-                            } label: {
-                                Label("Team", systemImage: "person.2.badge.gearshape")
-                            }
-                        }
-                    } header: {
-                        Text("Team")
-                    } footer: {
-                        Text("Activity records who did what across messages, calls, automations, and settings. Team manages who has access and what their role allows.")
-                    }
-                }
-
-                Section("Connection") {
-                    LabeledContent("Status", value: session.voiceStatusText)
-                    LabeledContent("Number", value: session.callerNumber.isEmpty
-                                   ? "—" : PhoneFormatter.pretty(session.callerNumber))
-                    LabeledContent("Server", value: AppConfig.serverURL.host ?? "—")
-                    LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
-                    LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
-                    LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
-                }
-
-                Section {
-                    LabeledContent("Status", value: notifications.statusText)
-                    LabeledContent("APNs environment", value: notifications.environment.capitalized)
-                    if notifications.authorizationStatus == .denied {
-                        Button("Open iPhone Settings") { notifications.openSystemSettings() }
-                    } else if !notifications.isRegisteredWithBackend {
-                        Button("Enable notifications") {
-                            Task { await notifications.enableAndSync() }
-                        }
-                    }
-                    if let error = notifications.lastError {
-                        Text(error).font(.caption).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Message notifications")
-                } footer: {
-                    Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
-                }
-
-                Section {
-                    LabeledContent("Queued", value: "Waiting at Telnyx")
-                    LabeledContent("Sent", value: "Carrier received it")
-                    LabeledContent("Delivered", value: "Delivery confirmed")
-                    LabeledContent("Failed", value: "Not delivered")
-                } header: {
-                    Text("Sent message status guide")
-                } footer: {
-                    Text("This guide explains the status shown beneath messages you send. Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
-                }
-
-                Section {
-                    LabeledContent("Example", value: "6 min")
-                } header: {
-                    Text("Inbox conversation times")
-                } footer: {
-                    Text("The time at the right of each conversation shows how long ago the latest message in that thread was sent or received. It updates as time passes.")
-                }
-
-                Section {
-                    Button("Reconnect") { session.refreshConnection() }
-                    Button("Sign out", role: .destructive) {
-                        // Sign-out waits for the push-disable acknowledgement,
-                        // so guard against a double tap.
-                        isSigningOut = true
-                        Task { @MainActor in
-                            await session.signOut()
-                            isSigningOut = false
-                        }
-                    }
-                    .disabled(isSigningOut)
-                }
-
-                Section {
-                    LabeledContent("Version",
-                                   value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
-                } footer: {
-                    Text("For incoming-call tests, leave the app normally with Home or the side gesture. Do not swipe it away from the app switcher; iOS can suppress relaunch after a force-quit.")
+                    LabeledContent("Role", value: RoleCatalog.label(user.role))
                 }
             }
-            .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+
+            Section("Connection") {
+                LabeledContent("Status", value: session.voiceStatusText)
+                LabeledContent("Number", value: session.callerNumber.isEmpty
+                               ? "—" : PhoneFormatter.pretty(session.callerNumber))
+                LabeledContent("Server", value: AppConfig.serverURL.host ?? "—")
+                LabeledContent("VoIP token", value: TelnyxVoiceManager.shared.pushDiagnostics.hasToken ? "Received" : "Waiting")
+                LabeledContent("Push login", value: TelnyxVoiceManager.shared.pushDiagnostics.registeredLogin ? "Registered" : "Not confirmed")
+                LabeledContent("Push environment", value: TelnyxVoiceManager.shared.pushDiagnostics.environment)
+            }
+
+            Section {
+                LabeledContent("Status", value: notifications.statusText)
+                LabeledContent("APNs environment", value: notifications.environment.capitalized)
+                if notifications.authorizationStatus == .denied {
+                    Button("Open iPhone Settings") { notifications.openSystemSettings() }
+                } else if !notifications.isRegisteredWithBackend {
+                    Button("Enable notifications") {
+                        Task { await notifications.enableAndSync() }
+                    }
                 }
+                if let error = notifications.lastError {
+                    Text(error).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Message notifications")
+            } footer: {
+                Text("Message alerts use standard Apple notifications. Incoming calls use the separate VoIP connection above.")
+            }
+
+            Section {
+                LabeledContent("Queued", value: "Waiting at Telnyx")
+                LabeledContent("Sent", value: "Carrier received it")
+                LabeledContent("Delivered", value: "Delivery confirmed")
+                LabeledContent("Failed", value: "Not delivered")
+            } header: {
+                Text("Sent message status guide")
+            } footer: {
+                Text("This guide explains the status shown beneath messages you send. Delivered confirms carrier/device delivery, not that the recipient read it. SMS and MMS do not provide read receipts.")
+            }
+
+            Section {
+                LabeledContent("Example", value: "6 min")
+            } header: {
+                Text("Inbox conversation times")
+            } footer: {
+                Text("The time at the right of each conversation shows how long ago the latest message in that thread was sent or received. It updates as time passes.")
+            }
+
+            Section {
+                Button("Reconnect") { session.refreshConnection() }
+            } footer: {
+                Text("Reconnect re-establishes the calling socket. It does not sign you out and it does not touch this iPhone's stored credentials. Sign out is on the account menu.")
+            }
+
+            Section {
+                LabeledContent("Version",
+                               value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+            } footer: {
+                Text("For incoming-call tests, leave the app normally with Home or the side gesture. Do not swipe it away from the app switcher; iOS can suppress relaunch after a force-quit.")
             }
         }
-        .navigationViewStyle(.stack)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

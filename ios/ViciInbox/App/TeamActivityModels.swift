@@ -150,24 +150,51 @@ final class EntityHistoryModel: ObservableObject {
     }
 }
 
+/// Who is asking, from the Team screen's point of view.
+///
+/// A struct rather than two loose arguments because the peer-Owner rule needs
+/// both halves — which account is acting, and whether it may touch the Owner
+/// role at all — and passing them separately is how one call site ends up
+/// checking only one of them.
+struct TeamActor {
+    /// Nil for the legacy shared-password session, which has no named identity.
+    let id: String?
+    /// `user.manage.owner`. Note `SessionModel.can` fails open for an unknown
+    /// account, so this is optimistic for the shared login. That is deliberate
+    /// and matches the rest of the app: the server refuses with 403
+    /// `OWNER_ROLE_REQUIRES_OWNER`, which now reads as a sentence.
+    let canManageOwners: Bool
+}
+
 /// Team membership: who is on the account, what they can do, and pending
 /// invitations.
 @MainActor
 final class TeamModel: ObservableObject {
     @Published private(set) var members: [TeamMember] = []
+    /// The server's own role catalogue, from the same `GET /api/users` payload
+    /// as the members. Display names come from here, never from a string
+    /// literal — the product calls the `agent` role "Support Agent", and the
+    /// only place that mapping is authoritative is `sms_roles`.
+    @Published private(set) var roles: [TeamRole] = []
     @Published private(set) var invitations: [Invitation] = []
     @Published private(set) var isLoading = false
     @Published private(set) var busyMemberID: String?
     @Published var errorMessage: String?
-    /// The one-time invite link, shown after a successful invitation. There is
-    /// no email sender, so dismissing this without copying it loses the link.
-    @Published var newInvitation: Invitation?
+    /// The result of the last successful invitation. It carries the one-time
+    /// link and, when the backend reports it, whether an email actually went.
+    /// Both are shown once and cannot be retrieved again.
+    @Published var newInvitation: InvitationCreation?
 
     func load() async {
         isLoading = members.isEmpty
         defer { isLoading = false }
         do {
-            members = try await APIClient.shared.fetchTeam()
+            let directory = try await APIClient.shared.fetchTeam()
+            members = directory.members
+            // Only overwrite a catalogue we already have if the server sent
+            // one. An older backend that omits `roles` must not blank the
+            // labels back to raw keys mid-session.
+            if !directory.roles.isEmpty { roles = directory.roles }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -177,30 +204,102 @@ final class TeamModel: ObservableObject {
         invitations = (try? await APIClient.shared.fetchInvitations()) ?? invitations
     }
 
-    /// Roles offered by the invite picker: the seeds this client knows about,
-    /// merged with every role the server actually reports, so an unfamiliar
-    /// role is still selectable and still round-trips.
-    var availableRoles: [String] {
-        var seen = RoleCatalog.seeds
-        for role in members.compactMap(\.role) where !seen.contains(role) { seen.append(role) }
-        for role in invitations.compactMap(\.role) where !seen.contains(role) { seen.append(role) }
-        return seen
+    // MARK: - Roles
+
+    /// The product's name for a role key.
+    ///
+    /// Server catalogue first, this client's small table second, raw key last.
+    /// Never a literal at the call site.
+    func roleLabel(_ key: String?) -> String {
+        guard let key, !key.isEmpty else { return "No role" }
+        if let role = roles.first(where: { $0.key.caseInsensitiveCompare(key) == .orderedSame }) {
+            return role.label
+        }
+        return RoleCatalog.label(key)
+    }
+
+    var pendingInvitations: [Invitation] { invitations.filter(\.isPending) }
+
+    /// Roles this actor may actually assign.
+    ///
+    /// Owner is offered only to an actor holding `user.manage.owner`, matching
+    /// `ownerTransitionError` on the server. Promoting somebody to Owner is a
+    /// supported action and a second Owner is allowed, so Owner is present in
+    /// the list rather than filtered out of it.
+    func assignableRoles(for actor: TeamActor) -> [String] {
+        var keys: [String] = []
+        if !roles.isEmpty {
+            keys = roles
+                .filter(\.assignable)
+                .sorted { ($0.rank ?? 0) > ($1.rank ?? 0) }
+                .map(\.key)
+        } else {
+            // No catalogue yet. Fall back to what this client knows plus what
+            // it can see in use, so the picker is never empty.
+            keys = RoleCatalog.seeds
+            for role in members.compactMap(\.role) where !keys.contains(role) { keys.append(role) }
+            for role in invitations.compactMap(\.role) where !keys.contains(role) { keys.append(role) }
+        }
+        if !actor.canManageOwners {
+            keys.removeAll { RoleCatalog.isOwner($0) }
+        }
+        return keys
     }
 
     var activeAdminCount: Int {
         members.filter { $0.active && RoleCatalog.isAdminish($0.role) }.count
     }
 
-    /// Why a destructive change to this member is not offered, or nil when it
-    /// is allowed. The server enforces the same rule with a 409; this exists so
-    /// the last admin is told before tapping rather than after.
-    func blockingReason(for member: TeamMember, currentUserID: String?) -> String? {
-        guard member.active, RoleCatalog.isAdminish(member.role), activeAdminCount <= 1 else { return nil }
-        if let currentUserID, member.id == currentUserID {
-            return "You are the last active admin. Promote someone else before changing your own role."
-        }
-        return "This is the last active admin. Promote someone else first."
+    // MARK: - What this actor may not do to this member
+
+    /// Why a role change or deactivation is not offered for this member, or nil
+    /// when it is allowed.
+    ///
+    /// Two independent rules, checked in the order the server checks them:
+    ///
+    ///   1. The peer-Owner rule. The product owner's words: "an owner can edit
+    ///      the role of an admin or support agent, but it cannot edit the role
+    ///      or deactivate another owner." Promotion TO Owner is untouched —
+    ///      this looks at the role the target holds already — and acting on
+    ///      yourself is untouched.
+    ///   2. The last-administrator rule, which the server returns as a 409
+    ///      `CANNOT_DEACTIVATE_LAST_OWNER`.
+    ///
+    /// The controls are disabled with this sentence beside them rather than
+    /// hidden, so the rule is legible instead of looking like a broken screen.
+    /// None of this is a control: the server enforces both independently.
+    func restriction(on member: TeamMember, actor: TeamActor) -> String? {
+        if let reason = peerOwnerRestriction(on: member, actor: actor) { return reason }
+        return lastAdministratorRestriction(on: member, actor: actor)
     }
+
+    /// Nil unless the target is an Owner other than the person acting.
+    func peerOwnerRestriction(on member: TeamMember, actor: TeamActor) -> String? {
+        guard member.isOwner else { return nil }
+        if let actorID = actor.id, !actorID.isEmpty, actorID == member.id { return nil }
+        let label = roleLabel(member.role)
+        if actor.canManageOwners {
+            return "\(member.name) is \(article(for: label)) \(label). "
+                + "An Owner cannot change another Owner's role or deactivate them. "
+                + "They have to make that change themselves, or step down first."
+        }
+        return "\(member.name) is \(article(for: label)) \(label). "
+            + "Only an Owner can change an Owner's role or deactivate them."
+    }
+
+    private func lastAdministratorRestriction(on member: TeamMember, actor: TeamActor) -> String? {
+        guard member.active, RoleCatalog.isAdminish(member.role), activeAdminCount <= 1 else { return nil }
+        if let actorID = actor.id, actorID == member.id {
+            return "You are the last active administrator. Promote someone else before changing your own role."
+        }
+        return "This is the last active administrator. Promote someone else first."
+    }
+
+    private func article(for label: String) -> String {
+        "AEIOU".contains(label.uppercased().prefix(1)) ? "an" : "a"
+    }
+
+    // MARK: - Mutations
 
     func changeRole(of member: TeamMember, to role: String) async -> Bool {
         guard busyMemberID == nil else { return false }
@@ -232,10 +331,15 @@ final class TeamModel: ObservableObject {
         }
     }
 
-    func invite(email: String, role: String) async -> Bool {
+    /// `POST /api/invitations` requires a name as well as an email. Sending
+    /// only the email is what made every invitation fail with a validation
+    /// error the admin had no field to correct.
+    func invite(name: String, email: String, role: String) async -> Bool {
         do {
-            let invitation = try await APIClient.shared.createInvitation(email: email, role: role)
-            newInvitation = invitation
+            let created = try await APIClient.shared.createInvitation(displayName: name,
+                                                                      email: email,
+                                                                      role: role)
+            newInvitation = created
             await load()
             errorMessage = nil
             return true

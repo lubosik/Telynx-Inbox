@@ -387,16 +387,21 @@ function createAuthRouter({ authz, client, invitationStore, limiter } = {}) {
       const passwordHash = await hashPassword(password);
       // `req` carries the IP, user-agent and request id onto the activation audit
     // row. The invitee still wins as the actor; this is provenance, not identity.
-    const userId = await invitations.redeem(tokenHash, passwordHash, req);
+      const { userId, email } = await invitations.redeem(tokenHash, passwordHash, req);
       await record(req, { method: 'invitation', outcome: 'success', code: 'OK', userId });
       return res.status(201).json({
         success: true,
         userId,
-        // redeem_sms_invitation sets must_change_password, so the account is
-        // limited to GET /api/users/me and POST /api/users/me/password until
-        // the password is set again by the person who will actually use it.
-        mustChangePassword: true,
-        note: 'Account created. Sign in with this email and password, then set a new password.'
+        // Returned so the sign-in form can prefill it. The invitee has just
+        // proven they hold a token issued to this address, so echoing it back
+        // to them discloses nothing they did not arrive with.
+        email,
+        // redeem_sms_invitation no longer forces a change: the invitee chose
+        // this password themselves on the accept page, seconds ago, and nobody
+        // else has seen it. The admin-set paths still set the flag in code.
+        // See scripts/invitation-password-fix-migration.sql.
+        mustChangePassword: false,
+        note: 'Account created. You can sign in with this email and password now.'
       });
     } catch (error) {
       const mapped = redemptionErrorFrom(error);

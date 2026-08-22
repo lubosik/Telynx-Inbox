@@ -22,9 +22,11 @@
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
+		407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */; };
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
+		E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73E82F33DD342C8486B83C84 /* GrowthView.swift */; };
 		4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC49736FA59417D73D0A9D08 /* InCallView.swift */; };
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
@@ -57,9 +59,11 @@
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenuView.swift; sourceTree = "<group>"; };
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
+		73E82F33DD342C8486B83C84 /* GrowthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrowthView.swift; sourceTree = "<group>"; };
 		DC49736FA59417D73D0A9D08 /* InCallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InCallView.swift; sourceTree = "<group>"; };
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
@@ -146,9 +150,11 @@
 		697370045E04810A74DEA8E0 /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */,
 				07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */,
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
+				73E82F33DD342C8486B83C84 /* GrowthView.swift */,
 				DC49736FA59417D73D0A9D08 /* InCallView.swift */,
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
@@ -273,9 +279,11 @@
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
+				407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */,
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,
+				E4CE47A676BBC2265CE7636F /* GrowthView.swift in Sources */,
 				4CC9EC71E0D96C7A1A57FDAF /* InCallView.swift in Sources */,
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,

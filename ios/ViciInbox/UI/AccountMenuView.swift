@@ -1,0 +1,244 @@
+import SwiftUI
+
+/// The account button and the sheet behind it.
+///
+/// Activity and Team used to live two levels down, inside Settings, and the
+/// owner's report was that nobody could find them. They are now one tap from
+/// the top bar of every tab, alongside Settings and Sign out.
+///
+/// The tab bar carries five tabs, which is the most iPhone shows before iOS
+/// collapses the rest into a "More" list. This sheet is how the app grows
+/// without a sixth.
+
+// MARK: - Toolbar entry point
+
+extension View {
+    /// Puts the account button on this screen's navigation bar.
+    ///
+    /// Applied to the root of every tab so the control is in the same place
+    /// wherever the operator happens to be. Leading rather than trailing
+    /// because three of the five tabs already own a trailing action.
+    func accountToolbar() -> some View {
+        modifier(AccountToolbarModifier())
+    }
+}
+
+private struct AccountToolbarModifier: ViewModifier {
+    @State private var showingAccount = false
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    AccountAvatarButton { showingAccount = true }
+                }
+            }
+            .sheet(isPresented: $showingAccount) { AccountMenuSheet() }
+    }
+}
+
+/// A circular button showing the signed-in person's initials.
+struct AccountAvatarButton: View {
+    @EnvironmentObject private var session: SessionModel
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(ViciTheme.avatarFill)
+                if let initials = AccountIdentity.initials(for: session.currentUser) {
+                    Text(initials)
+                        .font(.caption.bold())
+                        .foregroundStyle(ViciTheme.onAvatar)
+                } else {
+                    // The legacy shared-password session has no named identity,
+                    // so there are no initials to show. A generic glyph is
+                    // honest; inventing a placeholder like "VI" is not.
+                    Image(systemName: "person.fill")
+                        .font(.caption)
+                        .foregroundStyle(ViciTheme.onAvatar)
+                }
+            }
+            .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Account")
+        .accessibilityHint("Activity, Team, Settings, and Sign out")
+    }
+}
+
+/// Initials and display text for whoever is signed in.
+enum AccountIdentity {
+    /// Nil when there is no named account, rather than a fabricated fallback.
+    static func initials(for user: AuthUser?) -> String? {
+        guard let source = user?.displayName ?? user?.email, !source.isEmpty else { return nil }
+        // An email address has no surname to take a second letter from, so it
+        // contributes one initial rather than two arbitrary characters.
+        let words = source.split(whereSeparator: { $0 == " " || $0 == "." || $0 == "_" })
+        let letters = words.prefix(2).compactMap { $0.first { $0.isLetter } }
+        guard !letters.isEmpty else { return nil }
+        return String(letters).uppercased()
+    }
+
+    static func name(for user: AuthUser?) -> String {
+        user?.name ?? "Shared team login"
+    }
+
+    static func subtitle(for user: AuthUser?) -> String {
+        guard let user else {
+            return "Signed in with the shared team password"
+        }
+        if let email = user.email, !email.isEmpty { return email }
+        return RoleCatalog.label(user.role)
+    }
+}
+
+// MARK: - The sheet
+
+struct AccountMenuSheet: View {
+    @EnvironmentObject private var session: SessionModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var isSigningOut = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section { AccountHeader(user: session.currentUser) }
+
+                Section {
+                    // Permission gating, unchanged: Activity needs
+                    // `audit.read`, Team needs `user.manage`. Hiding a row is a
+                    // courtesy to the operator, never a control — the server
+                    // rejects both endpoints for a role that lacks them.
+                    if session.can(Permission.auditRead) {
+                        AccountMenuLink(
+                            title: "Activity",
+                            detail: "Who did what across messages, calls, automations, and settings.",
+                            systemImage: "clock.arrow.circlepath"
+                        ) { ActivityLogView() }
+                    }
+
+                    if session.can(Permission.userManage) {
+                        AccountMenuLink(
+                            title: "Team",
+                            detail: "Who has access, what their role allows, and pending invitations.",
+                            systemImage: "person.2.badge.gearshape"
+                        ) { TeamView() }
+                    }
+
+                    AccountMenuLink(
+                        title: "Settings",
+                        detail: "Connection, notifications, and how the app behaves.",
+                        systemImage: "gearshape"
+                    ) { SettingsView() }
+                }
+
+                Section {
+                    // The ONLY call site of `SessionModel.signOut()` in the
+                    // app, and it is an explicit tap on a destructive button.
+                    //
+                    // `signOut()` disables Telnyx push and wipes the Keychain,
+                    // and the VoIP answer path reads the SIP credentials from
+                    // that Keychain synchronously. Nothing automatic may reach
+                    // this: not a 401, not a failed session restore, not
+                    // ACCOUNT_DISABLED, not SESSION_STALE. Those all stop at
+                    // the "signed out — tap to sign in" banner instead.
+                    Button(role: .destructive) {
+                        // Sign-out waits for the push-disable acknowledgement,
+                        // so guard against a double tap.
+                        isSigningOut = true
+                        Task { @MainActor in
+                            await session.signOut()
+                            isSigningOut = false
+                            dismiss()
+                        }
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.system(size: 18))
+                                .frame(width: 28)
+                            Text("Sign out").font(.body.weight(.semibold))
+                            Spacer()
+                            if isSigningOut { ProgressView() }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .disabled(isSigningOut)
+                } footer: {
+                    Text("Signing out removes this iPhone's calling credentials, so it stops ringing for incoming calls until you sign in again.")
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct AccountHeader: View {
+    let user: AuthUser?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(ViciTheme.avatarFill)
+                if let initials = AccountIdentity.initials(for: user) {
+                    Text(initials).font(.title3.bold()).foregroundStyle(ViciTheme.onAvatar)
+                } else {
+                    Image(systemName: "person.fill").font(.title3).foregroundStyle(ViciTheme.onAvatar)
+                }
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(AccountIdentity.name(for: user)).font(.headline)
+                Text(AccountIdentity.subtitle(for: user))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if let user, let email = user.email, !email.isEmpty {
+                    Text(RoleCatalog.label(user.role))
+                        .font(.caption2)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill))
+                        .clipShape(Capsule())
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// A deliberately large row. These were previously buried inside a Settings
+/// list among a dozen read-only diagnostic rows.
+private struct AccountMenuLink<Destination: View>: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    @ViewBuilder let destination: () -> Destination
+
+    var body: some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 14) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18))
+                    .foregroundStyle(ViciTheme.tint)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.body.weight(.semibold))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+}

@@ -919,10 +919,14 @@ function makeInvitationStore(rows = []) {
         if (row.accepted_at) throw new Error('INVITATION_USED');
         if (new Date(row.expires_at).getTime() <= Date.now()) throw new Error('INVITATION_EXPIRED');
         const userId = 500 + state.users.length;
-        state.users.push({ id: userId, email: row.email, password_hash: passwordHash, must_change_password: true });
+        // Mirrors redeem_sms_invitation in scripts/rbac-migration.sql, which sets
+        // must_change_password = false — the invitee chose this password themselves.
+        state.users.push({ id: userId, email: row.email, password_hash: passwordHash, must_change_password: false });
         row.accepted_at = new Date().toISOString();
         row.accepted_user_id = userId;
-        return userId;
+        // { userId, email } — the real store echoes the address back so the
+        // sign-in form can prefill it.
+        return { userId, email: row.email };
       });
     },
     async noteAttempt(tokenHash) { state.attempts.push(tokenHash); }
@@ -999,10 +1003,18 @@ test('two simultaneous redemptions of one invitation yield exactly one account',
   assert.equal(store.state.users.length, 1, 'exactly one account may be created');
   assert.equal(responses.find(res => res.statusCode === 409).payload.code, 'INVITATION_USED');
 
-  // The invitee never sets their own final password this way, so they are
-  // forced to rotate on first sign-in.
-  assert.equal(responses.find(res => res.statusCode === 201).payload.mustChangePassword, true);
-  assert.equal(store.state.users[0].must_change_password, true);
+  // The invitee DOES set their own final password here — they typed it into
+  // the accept-invite page moments ago and nobody else has ever seen it. An
+  // immediate forced rotation protected nothing and turned joining into a
+  // two-step chore. The admin-set paths (POST /api/users, /reset-password)
+  // still set the flag, because there the password WAS seen by someone else.
+  assert.equal(responses.find(res => res.statusCode === 201).payload.mustChangePassword, false);
+  assert.equal(store.state.users[0].must_change_password, false);
+
+  // The address is echoed back so the sign-in form can prefill it. Without it
+  // the invitee is asked to recall which address they were invited on, in the
+  // one flow where they have no account to recover from.
+  assert.equal(responses.find(res => res.statusCode === 201).payload.email, 'newbie@example.com');
   assert.ok(store.state.users[0].password_hash.startsWith('scrypt$1$'));
 });
 

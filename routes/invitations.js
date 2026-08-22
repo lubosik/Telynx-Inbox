@@ -18,9 +18,23 @@
  *   anywhere, so a database dump hands over neither a working invitation nor a
  *   head start on guessing one. Invitations are identified in the UI by email
  *   address; the prefix is only there to tell two hashes apart in a log line.
- *   There is no email sender in this service, so the Admin passes the link
- *   along themselves; the response says so rather than letting them assume an
- *   email went out.
+ *
+ * EMAIL
+ *   The invitation is now emailed to the invitee through lib/email.js, which
+ *   sends via Maton's authorised Gmail connection as support@vicipeptides.com.
+ *   That
+ *   send is BEST-EFFORT and strictly after the row is committed: the token is
+ *   shown exactly once, so a mail failure that rolled the request back would
+ *   destroy a working credential nobody had seen. The response therefore always
+ *   carries the link, and `emailSent` / `emailReason` say plainly whether the
+ *   message actually left. It must never claim a send that did not happen —
+ *   with no MATON_API_KEY configured, which is the state on deploy day, every
+ *   response says `emailSent: false, emailReason: 'not_configured'` and the
+ *   admin passes the link on by hand exactly as before.
+ *
+ *   A RESEND CANNOT REBUILD A LINK. Only the sha256 of the token is stored, by
+ *   design, so POST /api/invitations/:id/resend can only mail a link the caller
+ *   hands back to it. See the handler for why that is not a workaround.
  *
  * CONCURRENCY
  *   Redemption goes through the redeem_sms_invitation SQL function, which does
@@ -46,6 +60,8 @@
 const express = require('express');
 const crypto = require('crypto');
 const { logAuditSafely } = require('../lib/audit/log');
+const { sendEmail, appUrl, isEmailConfigured } = require('../lib/email');
+const { invitationEmail } = require('../lib/email-templates');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TOKEN_BYTES = 32;
@@ -188,6 +204,28 @@ function createInvitationStore({ client } = {}) {
       );
     },
 
+    /**
+     * Does `rawTokenHash` belong to invitation `id`?
+     *
+     * Deliberately a predicate rather than a getter. `getById` does not select
+     * `token_hash` and must not start to: a resend handler that could READ the
+     * stored hash would be one refactor away from putting it in a response or a
+     * log. This compares server-side and returns a boolean, so the hash never
+     * enters this process's memory as a value anybody can pass on.
+     */
+    async matchesToken(id, tokenHash) {
+      const rows = unwrap(
+        await db()
+          .from('sms_invitations')
+          .select('id')
+          .eq('id', id)
+          .eq('token_hash', tokenHash)
+          .limit(1),
+        'matchesToken'
+      );
+      return Array.isArray(rows) && rows.length === 1;
+    },
+
     async findOpenByEmail(email) {
       const escaped = String(email).replace(/([\\%_])/g, '\\$1');
       const rows = unwrap(
@@ -253,7 +291,26 @@ function createInvitationStore({ client } = {}) {
       // only evidence of WHERE a new sign-in identity was activated from, and
       // an unauthenticated endpoint is exactly where that matters most.
       await auditRedemption(db(), userId, tokenHash, req);
-      return userId;
+
+      // The email is echoed back so the accept-invite page can hand it to the
+      // sign-in form. Without it the invitee is told "account created" and then
+      // asked to remember which address they were invited on — the one piece of
+      // information they are least likely to have to hand, in the one flow
+      // where they have no account to recover from. Best-effort: a failure here
+      // must not undo a redemption that has already committed.
+      let email = null;
+      try {
+        const row = await db()
+          .from('sms_users')
+          .select('email')
+          .eq('id', userId)
+          .maybeSingle();
+        if (!row.error) email = row.data?.email || null;
+      } catch (err) {
+        console.warn('[INVITE] Could not read the email for the accepted invitation:', err.message);
+      }
+
+      return { userId, email };
     },
 
     /**
@@ -321,14 +378,89 @@ function actorName(req) {
 }
 
 /**
- * @param {{store?: object, userStore?: object, now?: () => number, audit?: Function}} [options]
+ * The workspace as a person should read it. Not configurable: it is the product
+ * name, it appears in a subject line, and an env var here would be one more
+ * thing to get wrong on a deploy for no benefit.
  */
-function createInvitationsRouter({ store, userStore, now = () => Date.now(), audit } = {}) {
+const WORKSPACE_NAME = 'Vici Inbox';
+
+/** ${APP_URL}/accept-invite?token=... , or null when APP_URL is unset. */
+function acceptUrlFor(rawToken) {
+  const base = appUrl();
+  return base ? `${base}/accept-invite?token=${encodeURIComponent(rawToken)}` : null;
+}
+
+/**
+ * Build and send one invitation email.
+ *
+ * Resolves to the shape the HTTP response reports verbatim. It cannot throw:
+ * lib/email.js does not, and the template is pure. Callers therefore need no
+ * try/catch and, more importantly, cannot accidentally turn a mail problem
+ * into a failed invitation.
+ *
+ * The `no_app_url` case is real and worth its own reason rather than a generic
+ * failure: with APP_URL unset there is no link to put in the message, and an
+ * invitation email with no way to accept it is worse than no email at all.
+ *
+ * @returns {Promise<{sent: boolean, reason?: string}>}
+ */
+async function sendInvitationEmail(invitation, { rawToken, inviterName, roleDisplayName, isResend = false, send = sendEmail } = {}) {
+  const acceptUrl = acceptUrlFor(rawToken);
+  if (!acceptUrl) {
+    console.warn('[INVITE] Not emailing an invitation: APP_URL is not set, so the accept link cannot be built');
+    return { sent: false, reason: 'no_app_url' };
+  }
+
+  const message = invitationEmail({
+    inviteeName: invitation.display_name,
+    inviterName,
+    workspaceName: WORKSPACE_NAME,
+    roleKey: invitation.role_key,
+    roleDisplayName,
+    acceptUrl,
+    expiresAt: invitation.expires_at,
+    isResend
+  });
+
+  // `message` holds a live credential inside `text`/`html`. It is handed
+  // straight to the provider and never logged, here or in lib/email.js.
+  const result = await send({
+    to: invitation.email,
+    subject: message.subject,
+    text: message.text,
+    html: message.html
+  });
+  return { sent: result.sent === true, reason: result.sent === true ? undefined : (result.reason || 'unknown') };
+}
+
+/**
+ * @param {{
+ *   store?: object,
+ *   userStore?: object,
+ *   now?: () => number,
+ *   audit?: Function,
+ *   sendMail?: Function,
+ *   emailConfigured?: () => boolean
+ * }} [options]
+ */
+function createInvitationsRouter({
+  store,
+  userStore,
+  now = () => Date.now(),
+  audit,
+  sendMail,
+  emailConfigured
+} = {}) {
   const invitations = store || createInvitationStore({});
   const users = userStore || require('./users').createUserStore({});
   // Injectable so the unit tests can assert on the rows without a database.
   // The default can never throw; see lib/audit/log.js.
   const logAudit = audit || logAuditSafely;
+  // Injectable for the same reason, and for one more: a test must be able to
+  // drive a provider failure without a network and without setting credentials
+  // into process.env. The default can never throw either; see lib/email.js.
+  const mail = sendMail || sendEmail;
+  const mailConfigured = emailConfigured || isEmailConfigured;
   const router = express.Router();
 
   // ── GET /api/invitations ──────────────────────────────────────────────────
@@ -409,14 +541,32 @@ function createInvitationsRouter({ store, userStore, now = () => Date.now(), aud
         }
       });
 
-      const base = String(process.env.APP_URL || '').replace(/\/+$/, '');
+      // Best-effort, and deliberately last. The row is committed and the audit
+      // written by this point, so the worst a mail failure can do is cost the
+      // admin a copy and paste. It is awaited rather than fired and forgotten
+      // because the response has to tell the truth about what happened, and a
+      // floating promise would have the handler guess.
+      const delivery = await sendInvitationEmail(created, {
+        rawToken,
+        inviterName: actorName(req),
+        roleDisplayName: roleRow.display_name || role,
+        send: mail
+      });
+
       return res.status(201).json({
         invitation: publicInvitation(created),
         // Shown once. Not stored, not logged, not recoverable.
         token: rawToken,
-        acceptUrl: base ? `${base}/accept-invite?token=${encodeURIComponent(rawToken)}` : null,
+        acceptUrl: acceptUrlFor(rawToken),
         acceptEndpoint: 'POST /auth/invitation/accept { token, password }',
-        note: 'This token is shown once and is not recoverable. No email is sent from this service — pass the link to them over a channel you trust.'
+        // The UI branches on this to choose between "we emailed them" and
+        // "copy this link and send it yourself". It is never optimistic:
+        // `true` means the provider accepted the message.
+        emailSent: delivery.sent,
+        emailReason: delivery.sent ? null : delivery.reason,
+        note: delivery.sent
+          ? `An invitation email was sent to ${email}. This token is shown once and is not recoverable; keep the link until they accept, because it cannot be re-sent without it.`
+          : 'No email was sent. This token is shown once and is not recoverable — pass the link to them over a channel you trust.'
       });
     } catch (error) {
       // The partial unique index is the real guarantee; this is the friendly
@@ -425,6 +575,145 @@ function createInvitationsRouter({ store, userStore, now = () => Date.now(), aud
         return fail(res, 409, 'INVITATION_ALREADY_OPEN', 'There is already an open invitation for that address.');
       }
       return sendStoreError(res, error, 'create');
+    }
+  });
+
+  // ── POST /api/invitations/:id/resend ──────────────────────────────────────
+  /**
+   * Email an OPEN invitation again. It mints nothing and extends nothing: the
+   * stored row is not written to at all, so the token and `expires_at` are
+   * exactly what they were before the call.
+   *
+   * WHY THIS TAKES A TOKEN IN THE BODY
+   *   Only sha256(token) is stored. That is the whole point of the token
+   *   design — a database dump must not hand over a working invitation — and it
+   *   means the server genuinely cannot reconstruct an accept link on its own.
+   *   There were three ways to build a resend and two of them are wrong:
+   *
+   *     * Mint a fresh token. Forbidden by the brief, and rightly: it silently
+   *       invalidates the link the admin may have already sent, so "resend"
+   *       would break the delivery that was already in flight.
+   *     * Store the raw token so it can be re-read. That deletes the security
+   *       property the hashing exists to provide, for a convenience feature.
+   *     * Have the caller supply the token it was given at creation. The link
+   *       is already in the admin's hands — it is in the creation response and
+   *       on screen in the UI — so this asks for nothing they do not have, and
+   *       the server verifies it against the stored hash before mailing
+   *       anything.
+   *
+   *   The third is implemented. When no token is supplied the endpoint says so
+   *   with TOKEN_NOT_RECOVERABLE and refuses, rather than sending a broken
+   *   email or quietly issuing a new credential.
+   */
+  router.post('/:id/resend', async (req, res) => {
+    const id = String(req.params.id || '');
+    if (!UUID_PATTERN.test(id)) return fail(res, 400, 'INVALID_INVITATION_ID', 'That invitation id is not valid.');
+
+    const rawToken = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+
+    try {
+      const existing = await invitations.getById(id);
+      if (!existing) return fail(res, 404, 'INVITATION_NOT_FOUND', 'No such invitation.');
+      if (existing.accepted_at) {
+        return fail(res, 409, 'INVITATION_USED', 'That invitation was already accepted. There is nothing to resend.');
+      }
+      if (existing.revoked_at) {
+        return fail(res, 409, 'INVITATION_REVOKED', 'That invitation was revoked. Create a new one instead.');
+      }
+      if (new Date(existing.expires_at).getTime() <= now()) {
+        // Resending would produce a link that fails the moment it is clicked.
+        // Extending the expiry to avoid that is exactly what this endpoint is
+        // forbidden to do, so the honest answer is to refuse.
+        return fail(
+          res, 410, 'INVITATION_EXPIRED',
+          'That invitation has expired. Revoke it and invite them again — a resend cannot extend an expiry.'
+        );
+      }
+      if (!rawToken) {
+        return fail(
+          res, 409, 'TOKEN_NOT_RECOVERABLE',
+          'Only a hash of the invitation token is stored, so the link cannot be rebuilt here. '
+          + 'Send the original link from the invitation you created, or revoke this invitation and issue a new one.'
+        );
+      }
+      if (!(await invitations.matchesToken(id, hashToken(rawToken)))) {
+        return fail(res, 400, 'TOKEN_MISMATCH', 'That token does not belong to this invitation.');
+      }
+      if (!mailConfigured()) {
+        // Said before doing rather than after: an admin pressing Resend on a
+        // service with no mail provider deserves a reason, not a silent no-op
+        // dressed up as success.
+        return fail(
+          res, 503, 'EMAIL_NOT_CONFIGURED',
+          'Email sending is not configured on this service, so nothing was sent. Pass the link on yourself.'
+        );
+      }
+
+      let roleDisplay = existing.role_key;
+      try {
+        const roles = await users.listRoles();
+        roleDisplay = roles.find(entry => entry.key === existing.role_key)?.display_name || existing.role_key;
+      } catch (error) {
+        // Same tradeoff as the revoke handler below: a slightly blunter role
+        // name beats failing a send because the catalogue was briefly unread.
+        console.warn('[INVITE] Role catalogue unavailable for a resend:', error?.code || error?.message || 'unknown');
+      }
+
+      const delivery = await sendInvitationEmail(existing, {
+        rawToken,
+        inviterName: actorName(req),
+        roleDisplayName: roleDisplay,
+        isResend: true,
+        send: mail
+      });
+
+      if (!delivery.sent) {
+        // Nothing was granted, revoked or changed, so there is nothing to
+        // audit. A failed send is an operational event, not an access event.
+        return fail(
+          res, 502, 'EMAIL_SEND_FAILED',
+          'The invitation is still valid but the email could not be sent. Pass the link on yourself.',
+          { emailSent: false, emailReason: delivery.reason }
+        );
+      }
+
+      // `team.member.invited`, not a new `team.invitation.resent` type.
+      // lib/audit/event-types.js is a closed catalogue mirrored by a CHECK
+      // constraint on sms_audit_log, so a new type is a migration, and an
+      // undeclared one is rejected at write time. A resend is the same fact as
+      // an invite — this person was invited to this role, again — so it reuses
+      // the type and distinguishes itself in the summary.
+      //
+      // The metadata keys are exactly the allowlist for this type in
+      // lib/audit/redact.js. Anything else is silently dropped there, so adding
+      // `token_reissued: false` would only put a claim in the code that never
+      // reaches the row. That guarantee lives in the summary instead, where it
+      // is actually stored and read.
+      await logAudit({
+        eventType: 'team.member.invited',
+        req,
+        entityId: existing.id,
+        summary: `${actorName(req)} re-sent the invitation email to ${existing.email} for ${roleDisplay}, `
+          + `with the original link and the original expiry of ${new Date(existing.expires_at).toISOString()}`,
+        metadata: {
+          invitation_id: existing.id,
+          email: existing.email,
+          role: existing.role_key,
+          role_display_name: roleDisplay,
+          expires_at: existing.expires_at
+        }
+      });
+
+      return res.json({
+        success: true,
+        invitationId: existing.id,
+        emailSent: true,
+        emailReason: null,
+        expiresAt: existing.expires_at,
+        note: 'The same link was sent again. No new token was issued and the expiry is unchanged.'
+      });
+    } catch (error) {
+      return sendStoreError(res, error, 'resend');
     }
   });
 

@@ -533,18 +533,33 @@ actor APIClient {
 
     // MARK: - Team
 
-    func fetchTeam() async throws -> [TeamMember] {
+    /// `GET /api/users` -> `{ users: [...], roles: [...] }`.
+    ///
+    /// The role catalogue rides along with the member list rather than being a
+    /// second request, so the Team screen can never end up in the state where
+    /// it knows who is on the account but has to print `agent` because a
+    /// separate lookup failed.
+    func fetchTeam() async throws -> TeamDirectory {
         let (data, response) = try await get("/api/users")
         try validate(data: data, response: response)
-        if let list = try? decoder.decode([TeamMember].self, from: data) { return list }
         // The server names each list after its resource — `{ users: [...] }` —
         // rather than using a generic `items` envelope. Decoding only the
         // generic shape throws, and the screen renders empty with no error
         // that points at the cause.
-        struct Named: Decodable { let users: [TeamMember] }
-        if let named = try? decoder.decode(Named.self, from: data) { return named.users }
+        //
+        // `roles` is optional here on purpose: a backend that predates the
+        // catalogue must still return a usable member list.
+        struct Named: Decodable { let users: [TeamMember]; let roles: [TeamRole]? }
+        if let named = try? decoder.decode(Named.self, from: data) {
+            return TeamDirectory(members: named.users, roles: named.roles ?? [])
+        }
+        if let list = try? decoder.decode([TeamMember].self, from: data) {
+            return TeamDirectory(members: list, roles: [])
+        }
         struct Wrapped: Decodable { let items: [TeamMember] }
-        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.items }
+        if let wrapped = try? decoder.decode(Wrapped.self, from: data) {
+            return TeamDirectory(members: wrapped.items, roles: [])
+        }
         throw APIError.decoding
     }
 
@@ -578,16 +593,21 @@ actor APIClient {
         throw APIError.decoding
     }
 
-    /// Creation is the only time `inviteToken` / `inviteUrl` are returned.
-    /// There is no email sender configured, so the caller must show the link
-    /// once and let the admin copy it.
-    func createInvitation(email: String, role: String) async throws -> Invitation {
+    /// `POST /api/invitations` requires `displayName` and answers 400
+    /// `INVALID_DISPLAY_NAME` without it. The client used to send only `email`
+    /// and `role`, so every invitation failed with a validation error the admin
+    /// had no field to fix.
+    ///
+    /// Creation is the only time the raw token and acceptance link exist. They
+    /// are returned as siblings of the invitation, not inside it, and are never
+    /// recoverable afterwards, so the caller must show them once.
+    func createInvitation(displayName: String, email: String, role: String) async throws -> InvitationCreation {
         let (data, response) = try await post("/api/invitations",
-                                              body: ["email": email, "role": role])
+                                              body: ["displayName": displayName,
+                                                     "email": email,
+                                                     "role": role])
         try validate(data: data, response: response)
-        if let invitation = try? decoder.decode(Invitation.self, from: data) { return invitation }
-        struct Wrapped: Decodable { let invitation: Invitation }
-        if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.invitation }
+        if let created = try? decoder.decode(InvitationCreation.self, from: data) { return created }
         throw APIError.decoding
     }
 
@@ -679,8 +699,22 @@ actor APIClient {
             }
             return "\(role) accounts cannot do this."
         case "CANNOT_DEACTIVATE_LAST_OWNER":
-            return "This is the last active admin. Add or promote another admin first, then try again."
+            return "This is the last active Owner or Admin. Promote somebody else first, then try again."
+        case "CANNOT_MODIFY_PEER_OWNER":
+            // The peer-Owner guard. The client disables these controls already,
+            // so reaching this means two admins were acting at once, or a role
+            // changed underneath the screen. Prefer the server's own sentence
+            // if it sent one — it knows which of the two rules it applied.
+            if let message = json["error"] as? String, !message.isEmpty { return message }
+            return "An Owner cannot change another Owner's role or deactivate them. Ask them to make this change from their own account."
+        case "OWNER_ROLE_REQUIRES_OWNER":
+            if let message = json["error"] as? String, !message.isEmpty { return message }
+            return "Only an Owner can grant or remove the Owner role."
+        case "INVALID_DISPLAY_NAME":
+            return "Enter a name between 1 and 120 characters."
         default:
+            // An unrecognised code is not an excuse for a generic failure. The
+            // server writes these messages for a person to read, so show it.
             break
         }
         if let message = json["error"] as? String, !message.isEmpty { return message }

@@ -77,7 +77,13 @@ struct ContactsView: View {
             }
             .navigationTitle("Contacts")
             .searchable(text: $search, prompt: "Name, phone, or email")
-            .toolbar { Button { showingCreate = true } label: { Image(systemName: "person.badge.plus") } }
+            .accountToolbar()
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showingCreate = true } label: { Image(systemName: "person.badge.plus") }
+                        .accessibilityLabel("New contact")
+                }
+            }
             .sheet(isPresented: $showingCreate) {
                 ContactEditor(title: "New Contact") { first, last, phone, email, notes in
                     let saved = await model.create(firstName: first, lastName: last, phone: phone, email: email, notes: notes)
@@ -264,7 +270,19 @@ private struct ContactEditor: View {
     }
 }
 
-struct ActivityView: View {
+/// The live scheduled-SMS queue, previously the whole "Automations" tab.
+///
+/// It no longer owns a NavigationStack, a title or a toolbar: it is now the
+/// first segment of `GrowthView`, which provides all three. Nesting a second
+/// NavigationStack inside that one would break every push from this screen.
+/// The live scheduled-SMS queue, previously the whole "Automations" tab.
+///
+/// It no longer owns a NavigationStack, a title or a toolbar: it is now the
+/// first segment of `GrowthView`, which provides all three. Nesting a second
+/// NavigationStack inside that one would break every push from this screen,
+/// and the audit-trail shortcut that used to live in this toolbar has moved up
+/// to `GrowthView` so it cannot linger after a segment switch.
+struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
     @EnvironmentObject private var session: SessionModel
     @State private var cancelTarget: ActivityRecord?
@@ -278,120 +296,104 @@ struct ActivityView: View {
     private let flows = ["all", "failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "confirmed-new", "confirmed-returning", "shipped-msg1"]
 
     var body: some View {
-        NavigationStack {
-            List {
-                if let stats = model.stats {
-                    Section("Today") {
-                        HStack {
-                            Stat(value: stats.pending, label: "Pending", color: ViciTheme.warning)
-                            Stat(value: stats.sentToday, label: "Sent", color: ViciTheme.success)
-                            Stat(value: stats.failedToday, label: "Failed", color: ViciTheme.destructive)
-                            Stat(value: stats.cancelledToday, label: "Cancelled", color: .secondary)
-                        }.padding(.vertical, 6)
-                    }
-                }
-                Section {
-                    Picker("Flow", selection: $model.flow) {
-                        ForEach(flows, id: \.self) { Text(flowLabel($0)).tag($0) }
-                    }
-                }
-                Section {
-                    if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
-                    ForEach(model.queue) { item in
-                        // Visible button rather than swipe-only: a hidden
-                        // gesture is undiscoverable, and stopping a message
-                        // before it reaches a customer is time-sensitive.
-                        // The swipe stays for anyone used to it.
-                        HStack(alignment: .top, spacing: 12) {
-                            // ActivityRow already stretches to fill, so it takes
-                            // the slack and the button keeps its intrinsic width.
-                            // The row itself opens this message's own history:
-                            // scheduled by the hold flow at 09:12, cancelled by
-                            // Dominic at 14:32.
-                            NavigationLink {
-                                EntityHistoryView(entityType: "scheduled_message",
-                                                  entityID: item.id,
-                                                  title: "Message history")
-                            } label: {
-                                ActivityRow(item: item, date: item.sendAt)
-                            }
-                            Button {
-                                cancelTarget = item
-                            } label: {
-                                if model.cancellingID == item.id {
-                                    ProgressView()
-                                } else {
-                                    Text("Cancel")
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
-                                }
-                            }
-                            // Borderless keeps the button's tap target separate
-                            // from the row's, which List would otherwise merge.
-                            .buttonStyle(.borderless)
-                            .disabled(!canCancel || model.cancellingID != nil)
-                            .accessibilityLabel("Cancel scheduled \(item.flowType ?? "automation")")
-                            .accessibilityHint(canCancel
-                                               ? "Stops this queued automation"
-                                               : "Your role cannot cancel automations")
-                        }
-                        // The swipe shortcut is attached only when the action is
-                        // actually permitted; a swipe that always fails is worse
-                        // than no swipe. The disabled button above carries the
-                        // explanation.
-                        .swipeActions {
-                            if canCancel {
-                                Button("Cancel", role: .destructive) { cancelTarget = item }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Queued automations")
-                } footer: {
-                    if canCancel {
-                        Text("Tap a queued message to see everything that has happened to it.")
-                    } else {
-                        Text("Your role can see the queue but cannot cancel automations. Ask an admin if a queued message needs stopping. Tap a message to see its history.")
-                    }
-                }
-                Section("Recent sends") {
-                    if model.recent.isEmpty { Text("No recent sends").foregroundStyle(.secondary) }
-                    ForEach(model.recent) { item in ActivityRow(item: item, date: item.sentAt) }
+        List {
+            if let stats = model.stats {
+                Section("Today") {
+                    HStack {
+                        Stat(value: stats.pending, label: "Pending", color: ViciTheme.warning)
+                        Stat(value: stats.sentToday, label: "Sent", color: ViciTheme.success)
+                        Stat(value: stats.failedToday, label: "Failed", color: ViciTheme.destructive)
+                        Stat(value: stats.cancelledToday, label: "Cancelled", color: .secondary)
+                    }.padding(.vertical, 6)
                 }
             }
-            .navigationTitle("Automations")
-            .toolbar {
-                if session.can(Permission.auditRead) {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+            Section {
+                Picker("Flow", selection: $model.flow) {
+                    ForEach(flows, id: \.self) { Text(flowLabel($0)).tag($0) }
+                }
+            }
+            Section {
+                if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
+                ForEach(model.queue) { item in
+                    // Visible button rather than swipe-only: a hidden
+                    // gesture is undiscoverable, and stopping a message
+                    // before it reaches a customer is time-sensitive.
+                    // The swipe stays for anyone used to it.
+                    HStack(alignment: .top, spacing: 12) {
+                        // ActivityRow already stretches to fill, so it takes
+                        // the slack and the button keeps its intrinsic width.
+                        // The row itself opens this message's own history:
+                        // scheduled by the hold flow at 09:12, cancelled by
+                        // Dominic at 14:32.
                         NavigationLink {
-                            ActivityLogView(category: .automations)
+                            EntityHistoryView(entityType: "scheduled_message",
+                                              entityID: item.id,
+                                              title: "Message history")
                         } label: {
-                            Image(systemName: "clock.arrow.circlepath")
+                            ActivityRow(item: item, date: item.sendAt)
                         }
-                        .accessibilityLabel("Automation activity")
+                        Button {
+                            cancelTarget = item
+                        } label: {
+                            if model.cancellingID == item.id {
+                                ProgressView()
+                            } else {
+                                Text("Cancel")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
+                            }
+                        }
+                        // Borderless keeps the button's tap target separate
+                        // from the row's, which List would otherwise merge.
+                        .buttonStyle(.borderless)
+                        .disabled(!canCancel || model.cancellingID != nil)
+                        .accessibilityLabel("Cancel scheduled \(item.flowType ?? "automation")")
+                        .accessibilityHint(canCancel
+                                           ? "Stops this queued automation"
+                                           : "Your role cannot cancel automations")
+                    }
+                    // The swipe shortcut is attached only when the action is
+                    // actually permitted; a swipe that always fails is worse
+                    // than no swipe. The disabled button above carries the
+                    // explanation.
+                    .swipeActions {
+                        if canCancel {
+                            Button("Cancel", role: .destructive) { cancelTarget = item }
+                        }
                     }
                 }
-            }
-            .refreshable { await model.load() }
-            .task { if model.stats == nil { await model.load() } }
-            .onChange(of: model.flow) { _ in Task { await model.load() } }
-            .confirmationDialog("Cancel this scheduled message?", isPresented: Binding(
-                get: { cancelTarget != nil }, set: { if !$0 { cancelTarget = nil } }
-            ), titleVisibility: .visible) {
-                Button("Cancel scheduled message", role: .destructive) {
-                    if let item = cancelTarget { Task { await model.cancel(item); cancelTarget = nil } }
+            } header: {
+                Text("Queued automations")
+            } footer: {
+                if canCancel {
+                    Text("Tap a queued message to see everything that has happened to it.")
+                } else {
+                    Text("Your role can see the queue but cannot cancel automations. Ask an admin if a queued message needs stopping. Tap a message to see its history.")
                 }
-                Button("Keep it", role: .cancel) { cancelTarget = nil }
-            } message: { Text("This stops only this queued automation. It does not disable the flow.") }
-            .alert("Activity error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: { Text(model.errorMessage ?? "Unknown error") }
+            }
+            Section("Recent sends") {
+                if model.recent.isEmpty { Text("No recent sends").foregroundStyle(.secondary) }
+                ForEach(model.recent) { item in ActivityRow(item: item, date: item.sentAt) }
+            }
         }
+        .refreshable { await model.load() }
+        .task { if model.stats == nil { await model.load() } }
+        .onChange(of: model.flow) { _ in Task { await model.load() } }
+        .confirmationDialog("Cancel this scheduled message?", isPresented: Binding(
+            get: { cancelTarget != nil }, set: { if !$0 { cancelTarget = nil } }
+        ), titleVisibility: .visible) {
+            Button("Cancel scheduled message", role: .destructive) {
+                if let item = cancelTarget { Task { await model.cancel(item); cancelTarget = nil } }
+            }
+            Button("Keep it", role: .cancel) { cancelTarget = nil }
+        } message: { Text("This stops only this queued automation. It does not disable the flow.") }
+        .alert("Activity error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.errorMessage ?? "Unknown error") }
     }
 
     private func flowLabel(_ flow: String) -> String { flow == "all" ? "All flows" : flow.replacingOccurrences(of: "-", with: " ").capitalized }
 }
-
 private struct Stat: View {
     let value: Int; let label: String; let color: Color
     var body: some View { VStack { Text(String(value)).font(.title3.bold()).foregroundColor(color); Text(label).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity) }
@@ -422,7 +424,9 @@ struct CallsView: View {
                     Text("Keypad").tag(0); Text("History").tag(1)
                 }.pickerStyle(.segmented).padding()
                 if section == 0 { DialerView() } else { CallHistoryView(model: model) }
-            }.navigationTitle("Calls")
+            }
+            .navigationTitle("Calls")
+            .accountToolbar()
         }
     }
 }

@@ -160,6 +160,12 @@ function downscaleImage(file) {
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
+// Set once by <App/>. It lives at module scope because api() is a free
+// function called from every screen in this file, and any one of those calls
+// can be the one that discovers the account is locked into a password change.
+let passwordChangeRequiredHandler = null;
+function setPasswordChangeRequiredHandler(fn) { passwordChangeRequiredHandler = fn; }
+
 async function api(method, path, body) {
   const opts = { method, credentials: 'include', headers: {} };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
@@ -173,6 +179,15 @@ async function api(method, path, body) {
     const err = new Error(e.error || r.statusText);
     err.code = e.code || null;
     err.status = r.status;
+    // must_change_password locks every endpoint except GET /api/users/me and
+    // POST /api/users/me/password (lib/route-policy.js PASSWORD_CHANGE_EXEMPT).
+    // Most call sites in this file swallow failures with `catch {}`, so without
+    // this the whole UI silently renders empty. Hand the app the one screen
+    // that can clear the lock, then rethrow unchanged so every existing caller
+    // behaves exactly as it did before.
+    if (r.status === 403 && err.code === 'PASSWORD_CHANGE_REQUIRED' && passwordChangeRequiredHandler) {
+      try { passwordChangeRequiredHandler(); } catch {}
+    }
     throw err;
   }
   return r.json();
@@ -188,6 +203,59 @@ function ToastContainer({ toasts }) {
   );
 }
 
+// ─── Passwords ───────────────────────────────────────────────────────────────
+
+// Mirrors validatePasswordStrength() in lib/password.js, which is
+// deliberately length-first: no character-class rules. These are duplicated
+// here only so the rules can be stated before somebody types, never to decide
+// the outcome — the server is the authority and rejects anything missed here.
+const MIN_PASSWORD_LENGTH = 12;
+const MAX_PASSWORD_LENGTH = 200;
+
+function passwordProblem(password) {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return `Password must be at most ${MAX_PASSWORD_LENGTH} characters.`;
+  }
+  if (!/\S/.test(password)) return 'Password must not be only whitespace.';
+  return null;
+}
+
+// Stated up front, not after a rejected attempt.
+function PasswordRules() {
+  return (
+    <div style={{ color: 'var(--text3)', fontSize: '0.75rem', lineHeight: 1.5, margin: '-0.375rem 0 0.875rem' }}>
+      At least {MIN_PASSWORD_LENGTH} characters, up to {MAX_PASSWORD_LENGTH}. No capital,
+      digit or symbol is required — length is what counts. It cannot be only spaces.
+    </div>
+  );
+}
+
+// The shell every signed-out screen shares, so the invitation and
+// password-change screens sit in the same card as the sign-in form.
+function AuthShell({ subtitle, children }) {
+  return (
+    <div className="login-screen">
+      <div className="login-card">
+        <div className="login-logo">VICI<small>// SMS</small></div>
+        <div className="login-subtitle">{subtitle}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// No .btn-secondary exists in styles.css and this agent does not own that
+// file, so the secondary action is styled inline against the same variables.
+const SECONDARY_BUTTON_STYLE = {
+  width: '100%', padding: '0.8125rem', background: 'transparent',
+  color: 'var(--text2)', border: '1px solid var(--border-bright)',
+  borderRadius: '10px', fontSize: '0.875rem', fontWeight: 600,
+  cursor: 'pointer', letterSpacing: '0.08em', marginTop: '0.625rem'
+};
+
 // ─── Login ───────────────────────────────────────────────────────────────────
 
 // Email is optional on purpose. Blank takes the shared-access-code path that
@@ -196,8 +264,12 @@ function ToastContainer({ toasts }) {
 // Agent can reach the web UI at all. Without this field, retiring the shared
 // login (LEGACY_SHARED_LOGIN=disabled) would lock the browser out completely
 // with no way back in.
-function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState('');
+//
+// `initialEmail` and `notice` are how the invitation screen hands somebody
+// over after they have activated their account: the address is already known,
+// and being told why they were moved here beats a silent redirect.
+function LoginScreen({ onLogin, initialEmail = '', notice = '' }) {
+  const [email, setEmail] = useState(initialEmail);
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -205,11 +277,14 @@ function LoginScreen({ onLogin }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (loading) return;
     setLoading(true); setError('');
     const trimmed = email.trim();
     try {
-      await api('POST', '/auth/login', trimmed ? { email: trimmed, password: pw } : { password: pw });
-      onLogin();
+      // The body carries `actor` and `mustChangePassword`; the caller needs
+      // both to decide whether the inbox or the change-password screen is next.
+      const result = await api('POST', '/auth/login', trimmed ? { email: trimmed, password: pw } : { password: pw });
+      onLogin(result);
     } catch (err) {
       // The server distinguishes a bad credential from a locked account and
       // from the shared login being switched off. Saying "incorrect password"
@@ -225,40 +300,337 @@ function LoginScreen({ onLogin }) {
   }
 
   return (
-    <div className="login-screen">
-      <div className="login-card">
-        <div className="login-logo">VICI<small>// SMS</small></div>
-        <div className="login-subtitle">Secure Inbox Access</div>
-        <form onSubmit={handleSubmit}>
-          <div className="input-wrap">
-            <input
-              type="email"
-              placeholder="Email (leave blank for the shared code)"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              autoComplete="username"
-              autoFocus
-            />
-          </div>
-          <div className="input-wrap">
-            <input
-              type={show ? 'text' : 'password'}
-              placeholder={email.trim() ? 'Password' : 'Access code'}
-              value={pw}
-              onChange={e => setPw(e.target.value)}
-              autoComplete="current-password"
-            />
-            <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
-              {show ? '◉' : '○'}
-            </button>
-          </div>
-          <button className="btn-primary" type="submit" disabled={loading || !pw}>
-            {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'AUTHENTICATE'}
+    <AuthShell subtitle="Secure Inbox Access">
+      {notice && (
+        <div style={{
+          color: 'var(--accent)', background: 'var(--accent-dim)',
+          border: '1px solid var(--border-bright)', borderRadius: '10px',
+          padding: '0.75rem 0.875rem', fontSize: '0.8125rem',
+          lineHeight: 1.5, marginBottom: '1.25rem'
+        }}>
+          {notice}
+        </div>
+      )}
+      <form onSubmit={handleSubmit}>
+        <div className="input-wrap">
+          <input
+            type="email"
+            placeholder="Email (leave blank for the shared code)"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="username"
+            autoFocus={!initialEmail}
+          />
+        </div>
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder={email.trim() ? 'Password' : 'Access code'}
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            autoComplete="current-password"
+          />
+          <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
+            {show ? '◉' : '○'}
           </button>
-          <div className="error-msg">{error}</div>
-        </form>
+        </div>
+        <button className="btn-primary" type="submit" disabled={loading || !pw}>
+          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'AUTHENTICATE'}
+        </button>
+        <div className="error-msg">{error}</div>
+      </form>
+    </AuthShell>
+  );
+}
+
+// ─── Accept an invitation ────────────────────────────────────────────────────
+
+// Reached at ${APP_URL}/accept-invite?token=<raw token>. Express serves
+// index.html for any unmatched path, so this file is what has to notice the
+// URL. There is no router: the screen is picked from window.location, the same
+// way the existing ?thread= deep link is read.
+//
+// The invitee has no session, so this must render before any auth check.
+function readInviteRoute() {
+  let pathname = '/';
+  let search = '';
+  try {
+    pathname = window.location.pathname || '/';
+    search = window.location.search || '';
+  } catch { return null; }
+  const normalised = pathname.replace(/\/+$/, '').toLowerCase() || '/';
+  if (normalised !== '/accept-invite') return null;
+
+  let raw = null;
+  try { raw = new URLSearchParams(search).get('token'); } catch { raw = null; }
+  const token = typeof raw === 'string' ? raw.trim() : '';
+
+  // routes/auth.js rejects anything outside 16..512 characters with
+  // INVITATION_NOT_FOUND. Saying so now beats presenting a form that cannot
+  // possibly succeed. The token itself is never rendered or logged.
+  let problem = null;
+  if (!token) problem = 'missing';
+  else if (token.length < 16 || token.length > 512 || /\s/.test(token)) problem = 'malformed';
+
+  return { token, problem };
+}
+
+function AcceptInviteScreen({ token, problem, onSignIn }) {
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(null); // { email } once the account exists
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+    setError('');
+
+    const problemText = passwordProblem(pw);
+    if (problemText) { setError(problemText); return; }
+    if (pw !== confirm) { setError('Those two passwords do not match.'); return; }
+
+    setLoading(true);
+    try {
+      const result = await api('POST', '/auth/invitation/accept', { token, password: pw });
+      // The response carries { success, userId, mustChangePassword, note } and
+      // today no email address, so the prefill is best-effort rather than
+      // assumed. If the server starts returning one, it is used automatically.
+      setDone({ email: (result && (result.email || (result.user && result.user.email))) || '' });
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'INVITATION_NOT_FOUND') {
+        setError('This invitation link is not valid. Ask whoever invited you to send a new one.');
+      } else if (code === 'INVITATION_EXPIRED') {
+        setError('This invitation has expired. Ask whoever invited you for a fresh link.');
+      } else if (code === 'INVITATION_REVOKED') {
+        setError('This invitation was revoked. Ask whoever invited you to send a new one.');
+      } else if (code === 'INVITATION_USED') {
+        setError('This invitation has already been used. If that was you, sign in below instead.');
+      } else if (code === 'EMAIL_ALREADY_EXISTS') {
+        setError('An account already exists for this address. Sign in below instead.');
+      } else if (code === 'PASSWORD_TOO_WEAK') {
+        setError(err.message || `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      } else if (code === 'TOO_MANY_ATTEMPTS') {
+        setError('Too many attempts from this network. Wait a few minutes and try again.');
+      } else if (code === 'INVITATION_ACCEPT_FAILED') {
+        setError('Something went wrong setting up the account. Try again in a moment.');
+      } else if (!err || !err.status) {
+        setError('Could not reach the server. Check your connection and try again.');
+      } else {
+        setError((err && err.message) || 'That invitation could not be accepted.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // A link with no usable token: say so immediately, and still offer a way on.
+  if (problem) {
+    return (
+      <AuthShell subtitle="Invitation">
+        <div className="error-msg" style={{ marginTop: 0, marginBottom: '1.25rem' }}>
+          {problem === 'missing'
+            ? 'This invitation link is missing its token. It was probably shortened or cut off in the message it arrived in. Ask whoever invited you to send the full link again.'
+            : 'This invitation link is malformed, so it cannot be used. Ask whoever invited you to send the full link again.'}
+        </div>
+        <button type="button" className="btn-primary" onClick={() => onSignIn('')}>
+          GO TO SIGN IN
+        </button>
+      </AuthShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <AuthShell subtitle="Account ready">
+        <div style={{ color: 'var(--text2)', fontSize: '0.875rem', lineHeight: 1.6, marginBottom: '1rem' }}>
+          Your account has been created and your password is set.
+        </div>
+        <div style={{ color: 'var(--text3)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+          Sign in with{done.email ? ` ${done.email} and` : ' your email address and'} the password
+          you just chose. For security, you will be asked to set the password once more
+          on that first sign-in.
+        </div>
+        <button type="button" className="btn-primary" onClick={() => onSignIn(done.email)}>
+          CONTINUE TO SIGN IN
+        </button>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell subtitle="Accept your invitation">
+      <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+        Choose a password to finish setting up your account.
       </div>
-    </div>
+      <form onSubmit={handleSubmit}>
+        <PasswordRules />
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="New password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            autoComplete="new-password"
+            autoFocus
+          />
+          <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
+            {show ? '◉' : '○'}
+          </button>
+        </div>
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="Confirm password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+        <button className="btn-primary" type="submit" disabled={loading || !pw || !confirm}>
+          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'CREATE ACCOUNT'}
+        </button>
+        <div className="error-msg">{error}</div>
+        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => onSignIn('')} disabled={loading}>
+          I ALREADY HAVE AN ACCOUNT
+        </button>
+      </form>
+    </AuthShell>
+  );
+}
+
+// ─── Forced password change ──────────────────────────────────────────────────
+
+// must_change_password is set when an Admin creates an account directly, when
+// an Admin resets somebody's password, and on every redeemed invitation. Such
+// an account can sign in and then gets 403 PASSWORD_CHANGE_REQUIRED from every
+// endpoint except GET /api/users/me and POST /api/users/me/password. Without
+// this screen the browser dead-ends on an empty inbox.
+function ChangePasswordScreen({ actor, onDone, onSignOut }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  // The shared team login has no personal password, so POST
+  // /api/users/me/password always refuses it. Say that here rather than after
+  // a pointless round trip.
+  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+    setError('');
+
+    const problemText = passwordProblem(next);
+    if (problemText) { setError(problemText); return; }
+    if (next !== confirm) { setError('Those two passwords do not match.'); return; }
+    if (current === next) { setError('Choose a password you have not used here before.'); return; }
+
+    setLoading(true);
+    try {
+      await api('POST', '/api/users/me/password', { currentPassword: current, newPassword: next });
+      onDone();
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'CURRENT_PASSWORD_INCORRECT') {
+        setError('That current password is not right.');
+      } else if (code === 'PASSWORD_TOO_WEAK') {
+        setError(err.message || `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      } else if (code === 'PASSWORD_UNCHANGED') {
+        setError('Choose a password you have not used here before.');
+      } else if (code === 'PASSWORD_NOT_SET') {
+        setError('This account has no password yet. Ask an admin to send you an invitation link.');
+      } else if (code === 'LEGACY_SESSION_NO_PASSWORD') {
+        setError('The shared team login has no personal password. Ask an admin for your own account.');
+      } else if (code === 'ACCOUNT_NOT_FOUND' || code === 'NO_ACTOR') {
+        setError('Your session is no longer valid. Sign out and sign in again.');
+      } else if (code === 'USER_REQUEST_FAILED') {
+        setError('That change could not be saved. Try again in a moment.');
+      } else if (!err || !err.status) {
+        setError('Could not reach the server. Check your connection and try again.');
+      } else {
+        setError((err && err.message) || 'That password could not be changed.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    try { await onSignOut(); } finally { setSigningOut(false); }
+  }
+
+  if (sharedSession) {
+    return (
+      <AuthShell subtitle="Password change required">
+        <div className="error-msg" style={{ marginTop: 0, marginBottom: '1.25rem' }}>
+          This session is the shared team login, which has no personal password to
+          change. Ask an admin for your own account, then sign in with your email address.
+        </div>
+        <button type="button" className="btn-primary" onClick={handleSignOut} disabled={signingOut}>
+          {signingOut ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'SIGN OUT'}
+        </button>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell subtitle="Set a new password">
+      <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+        {actor && actor.email ? `Signed in as ${actor.email}. ` : ''}
+        Your password must be changed before you can use the inbox.
+      </div>
+      <form onSubmit={handleSubmit}>
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="Current password"
+            value={current}
+            onChange={e => setCurrent(e.target.value)}
+            autoComplete="current-password"
+            autoFocus
+          />
+          <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
+            {show ? '◉' : '○'}
+          </button>
+        </div>
+        <PasswordRules />
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="New password"
+            value={next}
+            onChange={e => setNext(e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="input-wrap">
+          <input
+            type={show ? 'text' : 'password'}
+            placeholder="Confirm new password"
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            autoComplete="new-password"
+          />
+        </div>
+        <button className="btn-primary" type="submit" disabled={loading || !current || !next || !confirm}>
+          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'SET PASSWORD'}
+        </button>
+        <div className="error-msg">{error}</div>
+        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={handleSignOut} disabled={loading || signingOut}>
+          {signingOut ? 'SIGNING OUT…' : 'SIGN OUT'}
+        </button>
+      </form>
+    </AuthShell>
   );
 }
 
@@ -2302,7 +2674,13 @@ function VoiceTab({ callLogs, dialNumber, setDialNumber, onCall, voiceReady, con
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
-  const [auth, setAuth] = useState({ checking: true, ok: false });
+  // `mustChange` gates the inbox behind ChangePasswordScreen; `actor` is the
+  // identity the server returns under `actor` on /auth/login and /auth/check.
+  const [auth, setAuth] = useState({ checking: true, ok: false, mustChange: false, actor: null });
+  // Read once, at mount, from window.location. Null for every normal visit.
+  const [inviteRoute, setInviteRoute] = useState(readInviteRoute);
+  const [loginPrefill, setLoginPrefill] = useState('');
+  const [loginNotice, setLoginNotice] = useState('');
   const [conversations, setConversations] = useState([]);
   const [activePhone, setActivePhone] = useState(null);
   const [messages, setMessages] = useState({});
@@ -2358,10 +2736,38 @@ function App() {
   }
 
   useEffect(() => {
+    // An invitee has no session. Skip the check entirely rather than flashing
+    // the INITIALISING spinner at somebody the answer cannot apply to.
+    if (inviteRoute) {
+      setAuth({ checking: false, ok: false, mustChange: false, actor: null });
+      return;
+    }
     api('GET', '/auth/check')
-      .then(d => setAuth({ checking: false, ok: d.authenticated }))
-      .catch(() => setAuth({ checking: false, ok: false }));
+      .then(d => {
+        const actor = (d && (d.actor || d.user)) || null;
+        setAuth({
+          checking: false,
+          ok: !!(d && d.authenticated),
+          mustChange: !!(actor && actor.mustChangePassword),
+          actor
+        });
+      })
+      .catch(() => setAuth({ checking: false, ok: false, mustChange: false, actor: null }));
+  }, [inviteRoute]);
+
+  // Any screen can be the one that trips the lock. Route to the screen that
+  // clears it instead of surfacing a raw 403.
+  useEffect(() => {
+    setPasswordChangeRequiredHandler(() => {
+      setAuth(a => (a.mustChange ? a : { ...a, checking: false, ok: true, mustChange: true }));
+    });
+    return () => setPasswordChangeRequiredHandler(null);
   }, []);
+
+  // Everything below this line — SSE, polling, conversation loading — must
+  // stay off until the account is actually allowed to call the API. While
+  // mustChange is true every one of those requests returns 403.
+  const appReady = auth.ok && !auth.mustChange;
 
   const loadConversations = useCallback(async () => {
     try {
@@ -2378,7 +2784,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!auth.ok) return;
+    if (!appReady) return;
     loadConversations();
     requestNotificationPermission();
     connectSSE();
@@ -2397,26 +2803,26 @@ function App() {
         telnyxClientRef.current = null;
       }
     };
-  }, [auth.ok]);
+  }, [appReady]);
 
   // Apply notification deep-link once conversations are available
   useEffect(() => {
-    if (!auth.ok || conversations.length === 0 || deepLinkApplied.current || !deepLinkPhone.current) return;
+    if (!appReady || conversations.length === 0 || deepLinkApplied.current || !deepLinkPhone.current) return;
     deepLinkApplied.current = true;
     goToMessages(deepLinkPhone.current);
     window.history.replaceState({}, '', '/');
-  }, [auth.ok, conversations]);
+  }, [appReady, conversations]);
 
   // Preserve old incoming-call deep links as a read-only route to History.
   // The browser never registers SIP; native iOS is the only call endpoint.
   useEffect(() => {
-    if (!auth.ok) return;
+    if (!appReady) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('call') === 'incoming') {
       setMainTab('voice');
       window.history.replaceState({}, '', '/');
     }
-  }, [auth.ok]);
+  }, [appReady]);
 
   function connectSSE() {
     if (sseRef.current) sseRef.current.close();
@@ -2907,7 +3313,11 @@ function App() {
 
   async function handleLogout() {
     await api('POST', '/auth/logout').catch(() => {});
-    setAuth({ checking: false, ok: false });
+    // Clears mustChange too, so signing out of the forced-change screen lands
+    // on a clean sign-in form rather than back on the same locked screen.
+    setLoginPrefill('');
+    setLoginNotice('');
+    setAuth({ checking: false, ok: false, mustChange: false, actor: null });
   }
 
   async function runCatchup() {
@@ -2965,7 +3375,7 @@ function App() {
   const [pushLoading, setPushLoading] = useState(false);
 
   useEffect(() => {
-    if (!auth.ok) return;
+    if (!appReady) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       setPushState('unsupported'); return;
     }
@@ -3028,7 +3438,7 @@ function App() {
         setPushState('prompt');
       }
     }).catch(() => setPushState('unsupported'));
-  }, [auth.ok]);
+  }, [appReady]);
 
   async function togglePush() {
     if (pushLoading) return;
@@ -3084,6 +3494,31 @@ function App() {
     : pushState === 'unsupported' ? 'Push notifications not supported'
     : 'Enable push notifications';
 
+  // ── Top-level screen selection ────────────────────────────────────────────
+  // Order matters. /accept-invite wins over everything because the person
+  // following that link has no session and must not be shown a sign-in form
+  // they cannot yet use.
+  if (inviteRoute) {
+    return (
+      <AcceptInviteScreen
+        token={inviteRoute.token}
+        problem={inviteRoute.problem}
+        onSignIn={(email) => {
+          // Take the raw token out of the address bar and out of the back
+          // button before handing over to sign-in.
+          try { window.history.replaceState({}, '', '/'); } catch {}
+          setLoginPrefill(email || '');
+          setLoginNotice(
+            email
+              ? `Your account is ready. Sign in as ${email} with the password you just set.`
+              : 'Sign in with your email address and password.'
+          );
+          setInviteRoute(null);
+        }}
+      />
+    );
+  }
+
   if (auth.checking) {
     return (
       <div className="loading-screen">
@@ -3092,7 +3527,40 @@ function App() {
       </div>
     );
   }
-  if (!auth.ok) return <LoginScreen onLogin={() => setAuth({ checking: false, ok: true })} />;
+
+  if (!auth.ok) {
+    return (
+      <LoginScreen
+        initialEmail={loginPrefill}
+        notice={loginNotice}
+        onLogin={(result) => {
+          const actor = (result && (result.actor || result.user)) || null;
+          const mustChange = !!(result && (
+            result.mustChangePassword === true ||
+            (actor && actor.mustChangePassword === true)
+          ));
+          setLoginNotice('');
+          setAuth({ checking: false, ok: true, mustChange, actor });
+        }}
+      />
+    );
+  }
+
+  if (auth.mustChange) {
+    return (
+      <ChangePasswordScreen
+        actor={auth.actor}
+        onSignOut={handleLogout}
+        onDone={() => setAuth(a => ({
+          ...a,
+          checking: false,
+          ok: true,
+          mustChange: false,
+          actor: a.actor ? { ...a.actor, mustChangePassword: false } : a.actor
+        }))}
+      />
+    );
+  }
 
   return (
     <div className="app">

@@ -6,7 +6,6 @@ struct AnalyticsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AnalyticsViewModel()
     @State private var showingCustomRange = false
-    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -28,14 +27,7 @@ struct AnalyticsView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Analytics")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
-            }
+            .accountToolbar()
             .refreshable { await model.load(force: true) }
             .task(id: isSelected) {
                 guard isSelected else { return }
@@ -50,7 +42,6 @@ struct AnalyticsView: View {
                     Task { await model.applyCustomRange(start: start, end: end) }
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
         }
     }
 

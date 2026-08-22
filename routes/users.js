@@ -15,6 +15,12 @@
  * permission cannot express:
  *
  *   * Only an Owner may grant or revoke Owner.
+ *   * An Owner may not act on ANOTHER Owner. Promoting somebody TO Owner still
+ *     works and acting on yourself still works, but changing a peer Owner's
+ *     role, active state, permission overrides or password is a 409
+ *     CANNOT_MODIFY_PEER_OWNER. `user.manage.owner` answers "may this actor
+ *     touch the Owner role at all", which an Owner always may; it cannot
+ *     express "but not that particular person". See peerOwnerError().
  *   * The last active Admin/Owner may not be demoted or deactivated. That is
  *     a clean 409, handled here, so a lockout never surfaces as a 500.
  *   * The shared-password identity is immutable through the API. Changing what
@@ -302,6 +308,59 @@ function createUsersRouter({ store, authz, audit } = {}) {
   }
 
   /**
+   * An Owner may not exercise authority over ANOTHER Owner.
+   *
+   * `ownerTransitionError` above asks one question — does the ACTOR hold
+   * `user.manage.owner`? — and an Owner always does. That made Owner a role
+   * that could dismantle itself: any Owner could demote, deactivate or reset
+   * the password of a peer Owner, and the loser of that exchange had no
+   * recourse because their sessions were revoked in the same request. The
+   * product owner's rule is explicit: "an owner can edit the role of an admin
+   * or support agent, but it cannot edit the role or deactivate another owner."
+   *
+   * So this asks the second question — WHO is the target? — and it is
+   * deliberately about identity, not permission:
+   *
+   *   * Promotion TO Owner is untouched. `targetRole` is the role the target
+   *     holds ALREADY, so an admin or agent being raised to Owner never
+   *     matches. Making a second person an Owner is a supported action and the
+   *     product owner asked for it by name.
+   *   * Acting on yourself is untouched. An Owner may step down or hand over,
+   *     and `wouldStrandWorkspace` still refuses if they are the last
+   *     administrative account, so "step down" can never become "lock everyone
+   *     out".
+   *   * An Admin is caught by `ownerTransitionError` first and still sees the
+   *     403 it has always returned. This one only ever fires for an actor who
+   *     genuinely holds Owner authority, which is why it is a 409 (a conflict
+   *     with the state of the target) rather than a 403 (a missing grant).
+   *
+   * `targetRole` must be the role snapshotted BEFORE this request mutates
+   * anything. Passing a post-update row would let a demotion in the same
+   * request talk its way past the guard.
+   *
+   * @param {{id?: number|string}} actor
+   * @param {{id: number|string, role: string}} target  role as it was on arrival
+   * @returns {null|{status:number, code:string, message:string}}
+   */
+  function peerOwnerError(actor, target) {
+    if (!target || target.role !== 'owner') return null;
+    const actorId = actor?.id;
+    // The legacy shared identity has no uid at all. It is Admin-equivalent and
+    // never reaches here, but a null id must not be allowed to compare equal to
+    // a real one, so it is excluded explicitly rather than by coercion.
+    const isSelf = actorId !== null && actorId !== undefined
+      && Number(actorId) === Number(target.id);
+    if (isSelf) return null;
+    return {
+      status: 409,
+      code: 'CANNOT_MODIFY_PEER_OWNER',
+      message: 'This person is an Owner. An Owner cannot change the role, the active state, '
+        + 'the permissions or the password of another Owner. They must make that change '
+        + 'themselves, or step down first.'
+    };
+  }
+
+  /**
    * Refuse any change that would leave the workspace with no active Owner or
    * Admin. Enforced here rather than by a database constraint so that the
    * caller gets a 409 they can act on instead of a 500 they cannot.
@@ -524,8 +583,12 @@ function createUsersRouter({ store, authz, audit } = {}) {
         if (!roleRow || roleRow.is_assignable !== true) {
           return fail(res, 400, 'ROLE_NOT_ASSIGNABLE', 'That role cannot be assigned to a person.');
         }
-        const ownerProblem = ownerTransitionError(actor, { fromRole: target.role, toRole: becomingRole });
+        // `previousRole`, not `target.role`: both are the pre-mutation value
+        // here, but only the snapshot is guaranteed to stay that way.
+        const ownerProblem = ownerTransitionError(actor, { fromRole: previousRole, toRole: becomingRole });
         if (ownerProblem) return fail(res, ownerProblem.status, ownerProblem.code, ownerProblem.message);
+        const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+        if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
         if (becomingRole !== target.role) {
           patch.role = becomingRole;
           sessionAffecting = true;
@@ -540,6 +603,15 @@ function createUsersRouter({ store, authz, audit } = {}) {
             'Deactivate a person with POST /api/users/:id/deactivate so the reason is recorded.'
           );
         }
+        // Reactivating a peer Owner restores an authority-bearing sign-in, so
+        // it is the same class of action as deactivating one and is refused on
+        // the same grounds. Note the consequence: a deactivated Owner cannot be
+        // brought back by another Owner. In practice one cannot arise through
+        // this API any more — the deactivate handler now refuses a peer Owner
+        // outright — so this only guards rows that predate the guard, and the
+        // remedy for those is a deliberate database change, not a mis-click.
+        const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+        if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
         becomingActive = true;
         if (target.is_active !== true) {
           patch.is_active = true;
@@ -560,6 +632,18 @@ function createUsersRouter({ store, authz, audit } = {}) {
       const grants = Array.isArray(req.body?.grants) ? req.body.grants : [];
       const revokeGrants = Array.isArray(req.body?.revokeGrants) ? req.body.revokeGrants : [];
       if (grants.length > 0 || revokeGrants.length > 0) {
+        // A per-user override changes what somebody can do just as surely as a
+        // role does, so the Owner guards apply to it. Both run before the first
+        // upsertGrant below: a refusal must leave the target untouched, and the
+        // grant loop is the only mutation in this handler that happens before
+        // users.update().
+        const ownerProblem = ownerTransitionError(actor, { fromRole: previousRole, toRole: previousRole });
+        if (ownerProblem) {
+          return fail(res, ownerProblem.status, ownerProblem.code, 'Only an Owner may change an Owner\'s permissions.');
+        }
+        const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+        if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
+
         const known = new Set(await users.listPermissionKeys());
         for (const grant of grants) {
           const key = String(grant?.permissionKey || '');
@@ -679,6 +763,7 @@ function createUsersRouter({ store, authz, audit } = {}) {
 
   // ── POST /api/users/:id/deactivate ────────────────────────────────────────
   router.post('/:id/deactivate', async (req, res) => {
+    const actor = req.actor;
     const id = parseUserId(req.params.id);
     if (id === null) return fail(res, 400, 'INVALID_USER_ID', 'That user id is not valid.');
 
@@ -691,20 +776,35 @@ function createUsersRouter({ store, authz, audit } = {}) {
           'The shared team login cannot be deactivated here. Set LEGACY_SHARED_LOGIN=disabled instead.'
         );
       }
+
+      // Snapshotted before any guard runs, and reused by the audit row at the
+      // foot of this handler. Reading `target.role` twice invites the bug this
+      // file already fixed once: `users.update()` is not guaranteed to return a
+      // different object from `target`, so a second read can see the new value.
+      const previousRole = target.role;
+      const targetName = target.display_name || target.email;
+      const targetEmail = target.email;
+
+      // Deactivation ends every session the target has. It had NO Owner guard
+      // at all, which meant an Admin could switch an Owner off — the role
+      // hierarchy held for "change their role" and not for the strictly more
+      // severe "revoke all their access". Both guards belong here.
+      const ownerProblem = ownerTransitionError(actor, { fromRole: previousRole, toRole: previousRole });
+      if (ownerProblem) {
+        return fail(res, ownerProblem.status, ownerProblem.code, 'Only an Owner may deactivate an Owner.');
+      }
+      const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+      if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
+
       if (target.is_active !== true) {
         return res.json({ user: publicUser(target), alreadyInactive: true });
       }
-      if (await wouldStrandWorkspace(target, { becomingActive: false, becomingRole: target.role })) {
+      if (await wouldStrandWorkspace(target, { becomingActive: false, becomingRole: previousRole })) {
         return fail(
           res, 409, 'CANNOT_DEACTIVATE_LAST_OWNER',
           'This is the last active Owner or Admin. Promote somebody else first.'
         );
       }
-
-      // Snapshotted before the update for the same reason as in PATCH above.
-      const previousRole = target.role;
-      const targetName = target.display_name || target.email;
-      const targetEmail = target.email;
 
       const updated = await users.update(id, {
         is_active: false,
@@ -751,10 +851,21 @@ function createUsersRouter({ store, authz, audit } = {}) {
           'The shared team login uses INBOX_PASSWORD, which is not reset from here.'
         );
       }
-      const ownerProblem = ownerTransitionError(actor, { fromRole: target.role, toRole: target.role });
+      // Snapshotted before the update below, which rewrites password fields on
+      // this same row and, depending on the store, may hand back the very same
+      // object. Every use after this point reads the snapshot.
+      const previousRole = target.role;
+
+      const ownerProblem = ownerTransitionError(actor, { fromRole: previousRole, toRole: previousRole });
       if (ownerProblem) {
         return fail(res, ownerProblem.status, ownerProblem.code, 'Only an Owner may reset an Owner password.');
       }
+      // A password reset hands the target's account to whoever performed it:
+      // it mints a temporary credential, shows it to the actor, and revokes the
+      // owner's live sessions. It is a takeover, so it is refused between peers
+      // for the same reason a demotion is.
+      const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+      if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
 
       const temporaryPassword = generateTemporaryPassword();
       await users.update(id, {
@@ -772,7 +883,7 @@ function createUsersRouter({ store, authz, audit } = {}) {
       // deliberately no previous_state/new_state here: every field that would
       // describe the change is password-shaped, and the state screen in
       // lib/audit/log.js would drop it anyway.
-      const roleDisplay = await createRoleNamer(users)(target.role);
+      const roleDisplay = await createRoleNamer(users)(previousRole);
       await logAudit({
         eventType: 'team.member.password_reset',
         req,
@@ -781,7 +892,7 @@ function createUsersRouter({ store, authz, audit } = {}) {
         metadata: {
           user_id: id,
           email: target.email,
-          role: target.role,
+          role: previousRole,
           role_display_name: roleDisplay,
           reset_method: 'admin_temporary_password',
           must_rotate_on_next_sign_in: true,
