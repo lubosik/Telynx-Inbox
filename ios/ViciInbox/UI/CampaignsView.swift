@@ -823,9 +823,19 @@ private struct CampaignStatusBadge: View {
     }
 }
 
+/// Every text entry point in the wizard, so one Done button can clear whichever
+/// is focused without each step tracking its own state.
+private enum CampaignWizardField: Hashable {
+    case title
+    case contactSearch
+    case recipients
+    case message
+}
+
 struct CampaignEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model: CampaignEditorModel
+    @FocusState private var focusedField: CampaignWizardField?
     let onSaved: () -> Void
 
     init(campaign: CampaignRecord? = nil,
@@ -858,9 +868,17 @@ struct CampaignEditorView: View {
 
                 stepContent
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(model.existingID == nil ? "New Campaign" : "Edit Campaign")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Sits in the keyboard accessory bar, so it is the one control
+                // the keyboard can never cover. The bottom bar holding Next is
+                // hidden while the keyboard is up; this is how you get back to it.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    KeyboardDoneButton { focusedField = nil }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button(model.savedCampaign == nil ? "Cancel" : "Done") { dismiss() }
                 }
@@ -905,6 +923,7 @@ struct CampaignEditorView: View {
                 await model.loadContacts()
             }
             .onChange(of: model.step) { step in
+                focusedField = nil
                 if step == .audience && model.contactResults.isEmpty {
                     Task { await model.loadContacts() }
                 }
@@ -947,6 +966,9 @@ struct CampaignEditorView: View {
             }
             Section("Campaign name or purpose") {
                 TextField("Example: August customer update", text: $model.title)
+                    .focused($focusedField, equals: .title)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
                 HStack {
                     Spacer()
                     Text("\(model.titleCount)/160")
@@ -1008,6 +1030,9 @@ struct CampaignEditorView: View {
         Group {
             Section {
                 TextField("Search name, phone or email", text: $model.contactSearch)
+                    .focused($focusedField, equals: .contactSearch)
+                    .submitLabel(.done)
+                    .onSubmit { focusedField = nil }
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 LabeledContent("Selected", value: model.selectedContacts.count.formatted())
@@ -1069,6 +1094,7 @@ struct CampaignEditorView: View {
     private var manualNumbersStep: some View {
         Section {
             TextEditor(text: $model.recipientsText)
+                .focused($focusedField, equals: .recipients)
                 .font(.body.monospaced())
                 .frame(minHeight: 180)
                 .textInputAutocapitalization(.words)
@@ -1131,6 +1157,7 @@ struct CampaignEditorView: View {
         Section("Message") {
             TextEditor(text: $model.message)
                 .frame(minHeight: 220)
+                .focused($focusedField, equals: .message)
                 .accessibilityLabel("Campaign message")
             HStack {
                 Text("SMS length and carrier segmentation may vary.")
@@ -1238,19 +1265,27 @@ private struct CampaignReasonSheet: View {
     let action: (String) async -> Void
     @State private var reason = ""
     @State private var isWorking = false
+    @FocusState private var reasonFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextEditor(text: $reason).frame(minHeight: 120)
+                    TextEditor(text: $reason)
+                        .frame(minHeight: 120)
+                        .focused($reasonFocused)
                 } footer: {
                     Text(prompt)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    KeyboardDoneButton { reasonFocused = false }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Back") { dismiss() }
                 }
