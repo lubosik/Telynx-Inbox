@@ -19,6 +19,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var isWorking = false
     @State private var error: String?
+    @State private var showingForgotPassword = false
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case email, password }
@@ -91,6 +92,16 @@ struct LoginView: View {
                     .tint(ViciTheme.tint)
                     .controlSize(.large)
                     .disabled(password.isEmpty || isWorking)
+
+                    // The way back in for a named account. Before this the only
+                    // recovery was asking an admin to reset the password, and
+                    // /reset-password was a claimed universal link with nothing
+                    // in the app behind it.
+                    Button("Forgot password") { showingForgotPassword = true }
+                        .font(.footnote)
+                        .tint(ViciTheme.tint)
+                        .disabled(isWorking)
+                        .padding(.top, 2)
                 }
                 .padding(.horizontal, 32)
 
@@ -99,6 +110,9 @@ struct LoginView: View {
             }
         }
         .onAppear { focused = email.isEmpty ? .email : .password }
+        .sheet(isPresented: $showingForgotPassword) {
+            ForgotPasswordView(prefilledEmail: email)
+        }
     }
 
     /// The Vici Peptides lockup: Didone-style serif wordmark over small

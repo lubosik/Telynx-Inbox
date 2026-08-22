@@ -228,7 +228,7 @@ function PasswordRules() {
   return (
     <div style={{ color: 'var(--text3)', fontSize: '0.75rem', lineHeight: 1.5, margin: '-0.375rem 0 0.875rem' }}>
       At least {MIN_PASSWORD_LENGTH} characters, up to {MAX_PASSWORD_LENGTH}. No capital,
-      digit or symbol is required — length is what counts. It cannot be only spaces.
+      digit or symbol is required. Length is what counts, and it cannot be only spaces.
     </div>
   );
 }
@@ -264,7 +264,7 @@ const SECONDARY_BUTTON_STYLE = {
 // Agent can reach the web UI at all. Without this field, retiring the shared
 // login (LEGACY_SHARED_LOGIN=disabled) would lock the browser out completely
 // with no way back in.
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onForgotPassword }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
@@ -324,6 +324,132 @@ function LoginScreen({ onLogin }) {
           {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'AUTHENTICATE'}
         </button>
         <div className="error-msg">{error}</div>
+        {/* A named account can get itself back in without asking an admin. The
+            shared access code cannot be reset here and never could: it lives in
+            Railway, not on an account, so the screen behind this button says so
+            rather than pretending otherwise. */}
+        <button
+          type="button"
+          style={SECONDARY_BUTTON_STYLE}
+          onClick={() => onForgotPassword(email.trim())}
+          disabled={loading}
+        >
+          FORGOT PASSWORD
+        </button>
+      </form>
+    </AuthShell>
+  );
+}
+
+// ─── Forgot password ─────────────────────────────────────────────────────────
+
+// POST /auth/password-reset/request answers the same generic 202 for every
+// address, whether it belongs to an active account, a deactivated one, the
+// shared identity, or nobody at all. That is deliberate: the endpoint is public
+// and would otherwise enumerate who works here.
+//
+// SO THIS SCREEN SHOWS ONE CONFIRMATION AND ONLY ONE. It never says "no account
+// found", never renders a different layout for a different outcome, and never
+// branches on anything that could depend on the address. Two answers are
+// surfaced verbatim and both are provably address-independent: INVALID_EMAIL is
+// a shape check that runs before any lookup, and TOO_MANY_ATTEMPTS is a
+// per-network throttle in front of the handler. Neither can differ between two
+// well-formed addresses, so neither gives the oracle back.
+function ForgotPasswordScreen({ initialEmail, onBack }) {
+  const [email, setEmail] = useState(initialEmail || '');
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Held as a constant for the same reason lib/password-reset.js holds it as
+  // one: no future edit can turn a branch of this screen into a signal.
+  const GENERIC_CONFIRMATION =
+    'If an account exists for that address, a reset link is on its way. '
+    + 'Check your inbox and your junk folder. The link works once and expires after 60 minutes.';
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+    setError('');
+
+    const address = email.trim();
+    if (!address || address.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      setError('Enter the email address you sign in with.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api('POST', '/auth/password-reset/request', { email: address });
+      setSent(true);
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'INVALID_EMAIL') {
+        setError(err.message || 'Enter the email address you sign in with.');
+      } else if (code === 'TOO_MANY_ATTEMPTS') {
+        setError(err.message || 'Too many attempts from this network. Wait a few minutes and try again.');
+      } else if (!err || !err.status) {
+        setError('Could not reach the server. Check your connection and try again.');
+      } else {
+        // Any other failure is one the server could only have produced after it
+        // started looking at the address, so it gets the generic answer too.
+        setSent(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <AuthShell subtitle="Check your email">
+        <div style={{ color: 'var(--text2)', fontSize: '0.875rem', lineHeight: 1.65, marginBottom: '1.25rem' }}>
+          {GENERIC_CONFIRMATION}
+        </div>
+        <div style={{ color: 'var(--text3)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+          Open the link on this device or on your iPhone. Nothing changes until you
+          set a new password there.
+        </div>
+        <button type="button" className="btn-primary" onClick={onBack}>BACK TO SIGN IN</button>
+        <button
+          type="button"
+          style={SECONDARY_BUTTON_STYLE}
+          onClick={() => { setSent(false); setError(''); }}
+        >
+          SEND IT AGAIN
+        </button>
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell subtitle="Reset your password">
+      <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+        Enter the email address you sign in with. We will send a link that lets you
+        set a new password.
+      </div>
+      <form onSubmit={handleSubmit}>
+        <div className="input-wrap">
+          <input
+            type="email"
+            placeholder="Email address"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="username"
+            autoFocus
+          />
+        </div>
+        <button className="btn-primary" type="submit" disabled={loading || !email.trim()}>
+          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'SEND RESET LINK'}
+        </button>
+        <div className="error-msg">{error}</div>
+        <div style={{ color: 'var(--text3)', fontSize: '0.75rem', lineHeight: 1.55, marginTop: '0.25rem' }}>
+          Signing in with the shared access code instead of an email address? That
+          code has no reset link. Ask an admin for your own account.
+        </div>
+        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={onBack} disabled={loading}>
+          BACK TO SIGN IN
+        </button>
       </form>
     </AuthShell>
   );
@@ -336,19 +462,17 @@ function LoginScreen({ onLogin }) {
 // an account can sign in and then gets 403 PASSWORD_CHANGE_REQUIRED from every
 // endpoint except GET /api/users/me and POST /api/users/me/password. Without
 // this screen the browser dead-ends on an empty inbox.
-function ChangePasswordScreen({ actor, onDone, onSignOut }) {
+// The form itself, shared by the two places a password is changed: the forced
+// rotation below, and the voluntary change in the account panel. One copy means
+// one set of error mappings, and every server code is handled in exactly one
+// place rather than drifting between two screens.
+function ChangePasswordFields({ submitLabel, onDone, footer, autoFocus }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-
-  // The shared team login has no personal password, so POST
-  // /api/users/me/password always refuses it. Say that here rather than after
-  // a pointless round trip.
-  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -390,6 +514,62 @@ function ChangePasswordScreen({ actor, onDone, onSignOut }) {
     }
   }
 
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="input-wrap">
+        <input
+          type={show ? 'text' : 'password'}
+          placeholder="Current password"
+          value={current}
+          onChange={e => setCurrent(e.target.value)}
+          autoComplete="current-password"
+          autoFocus={autoFocus !== false}
+        />
+        <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
+          {show ? '◉' : '○'}
+        </button>
+      </div>
+      <PasswordRules />
+      <div className="input-wrap">
+        <input
+          type={show ? 'text' : 'password'}
+          placeholder="New password"
+          value={next}
+          onChange={e => setNext(e.target.value)}
+          autoComplete="new-password"
+        />
+      </div>
+      <div className="input-wrap">
+        <input
+          type={show ? 'text' : 'password'}
+          placeholder="Confirm new password"
+          value={confirm}
+          onChange={e => setConfirm(e.target.value)}
+          autoComplete="new-password"
+        />
+      </div>
+      <button className="btn-primary" type="submit" disabled={loading || !current || !next || !confirm}>
+        {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : (submitLabel || 'SET PASSWORD')}
+      </button>
+      <div className="error-msg">{error}</div>
+      {typeof footer === 'function' ? footer(loading) : footer}
+    </form>
+  );
+}
+
+// ─── Forced password change ──────────────────────────────────────────────────
+
+// The rotation the server insists on. Reached from App when the account is
+// flagged, and only then; the voluntary route into the same form is
+// AccountPanel below.
+function ChangePasswordScreen({ actor, onDone, onSignOut }) {
+  const [signingOut, setSigningOut] = useState(false);
+
+  // The shared team login has no personal password, so POST
+  // /api/users/me/password always refuses it. Say that here rather than after
+  // a pointless round trip.
+  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
+
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
@@ -416,48 +596,88 @@ function ChangePasswordScreen({ actor, onDone, onSignOut }) {
         {actor && actor.email ? `Signed in as ${actor.email}. ` : ''}
         Your password must be changed before you can use the inbox.
       </div>
-      <form onSubmit={handleSubmit}>
-        <div className="input-wrap">
-          <input
-            type={show ? 'text' : 'password'}
-            placeholder="Current password"
-            value={current}
-            onChange={e => setCurrent(e.target.value)}
-            autoComplete="current-password"
-            autoFocus
-          />
-          <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
-            {show ? '◉' : '○'}
+      <ChangePasswordFields
+        submitLabel="SET PASSWORD"
+        onDone={onDone}
+        footer={loading => (
+          <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={handleSignOut} disabled={loading || signingOut}>
+            {signingOut ? 'SIGNING OUT…' : 'SIGN OUT'}
           </button>
-        </div>
-        <PasswordRules />
-        <div className="input-wrap">
-          <input
-            type={show ? 'text' : 'password'}
-            placeholder="New password"
-            value={next}
-            onChange={e => setNext(e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
-        <div className="input-wrap">
-          <input
-            type={show ? 'text' : 'password'}
-            placeholder="Confirm new password"
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
-        <button className="btn-primary" type="submit" disabled={loading || !current || !next || !confirm}>
-          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'SET PASSWORD'}
-        </button>
-        <div className="error-msg">{error}</div>
-        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={handleSignOut} disabled={loading || signingOut}>
-          {signingOut ? 'SIGNING OUT…' : 'SIGN OUT'}
-        </button>
-      </form>
+        )}
+      />
     </AuthShell>
+  );
+}
+
+// ─── Account panel ───────────────────────────────────────────────────────────
+
+// Where a signed-in person goes to change their password on purpose, rather
+// than because the server made them. Before this existed the only route to
+// POST /api/users/me/password in the browser was the forced-rotation screen,
+// which nobody can reach voluntarily, so somebody who suspected their password
+// was known had no way to change it without asking an admin to reset it.
+function AccountPanel({ actor, onClose, onChanged }) {
+  const [changed, setChanged] = useState(false);
+  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-name">Account</div>
+            <div className="modal-email">
+              {actor && actor.email ? actor.email : 'Shared team login'}
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose} title="Close">✕</button>
+        </div>
+
+        <div className="modal-body">
+          {sharedSession ? (
+            <div>
+              <div style={{ color: 'var(--text2)', fontSize: '0.875rem', lineHeight: 1.65, marginBottom: '1rem' }}>
+                You are signed in with the shared team login. It has no personal
+                password to change here. Its access code lives in the server
+                configuration, and changing it is an admin job.
+              </div>
+              <div style={{ color: 'var(--text3)', fontSize: '0.8125rem', lineHeight: 1.6 }}>
+                Ask an admin for your own account. You will get an invitation by
+                email, and after that this panel can change your password.
+              </div>
+            </div>
+          ) : changed ? (
+            <div>
+              <div style={{ color: 'var(--accent)', fontSize: '0.875rem', lineHeight: 1.65, marginBottom: '1rem' }}>
+                Your password has been changed.
+              </div>
+              <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
+                Every other device that was signed in as you has been signed out.
+                This browser stays signed in. Your iPhone will ask for the new
+                password the next time it reconnects.
+              </div>
+              <button type="button" className="btn-primary" onClick={onClose}>DONE</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1rem' }}>
+                Change your password. You will need the one you use now. Every other
+                signed-in device is signed out when it changes.
+              </div>
+              <ChangePasswordFields
+                submitLabel="CHANGE PASSWORD"
+                onDone={() => { setChanged(true); if (onChanged) onChanged(); }}
+                footer={loading => (
+                  <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={onClose} disabled={loading}>
+                    CANCEL
+                  </button>
+                )}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2504,6 +2724,10 @@ function App() {
   // `mustChange` gates the inbox behind ChangePasswordScreen; `actor` is the
   // identity the server returns under `actor` on /auth/login and /auth/check.
   const [auth, setAuth] = useState({ checking: true, ok: false, mustChange: false, actor: null });
+  // Signed-out: the reset-request screen instead of the sign-in form. Signed
+  // in: the account panel, which is the voluntary route to a password change.
+  const [forgotPassword, setForgotPassword] = useState(null); // null | { email }
+  const [showAccount, setShowAccount] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [activePhone, setActivePhone] = useState(null);
   const [messages, setMessages] = useState({});
@@ -3326,8 +3550,17 @@ function App() {
   }
 
   if (!auth.ok) {
+    if (forgotPassword) {
+      return (
+        <ForgotPasswordScreen
+          initialEmail={forgotPassword.email}
+          onBack={() => setForgotPassword(null)}
+        />
+      );
+    }
     return (
       <LoginScreen
+        onForgotPassword={(email) => setForgotPassword({ email })}
         onLogin={(result) => {
           const actor = (result && (result.actor || result.user)) || null;
           const mustChange = !!(result && (
@@ -3439,9 +3672,24 @@ function App() {
           <button className="hdr-btn hdr-btn-catchup" disabled={catchingUp} onClick={runCatchup} title="Send catch-up SMS to processing/shipped orders that never got automated messages">
             {catchingUp ? '…' : '✉ CATCHUP'}
           </button>
+          <button
+            className="hdr-btn"
+            onClick={() => setShowAccount(true)}
+            title="Your account and password"
+          >
+            ⚙ ACCOUNT
+          </button>
           <button className="hdr-btn" onClick={handleLogout}>EXIT</button>
         </div>
       </div>
+
+      {showAccount && (
+        <AccountPanel
+          actor={auth.actor}
+          onClose={() => setShowAccount(false)}
+          onChanged={() => addToast('Password changed. Other devices have been signed out.')}
+        />
+      )}
 
       {/* ── Main content ── */}
       <div className="main-content">

@@ -1,6 +1,16 @@
 'use strict';
 /**
- * routes/auth.js — sign in, sign out, session check, invitation acceptance.
+ * routes/auth.js — sign in, sign out, session check, invitation acceptance,
+ * email-change confirmation.
+ *
+ * THE TWO PUBLIC TOKEN ROUTES
+ *   POST /auth/invitation/accept and POST /auth/email-change/confirm are the
+ *   only endpoints here that are neither a sign-in nor a session read. Both are
+ *   public because the caller has no session by construction, both accept a
+ *   token as their only credential, both compare it by sha256 against a stored
+ *   digest, and both share `loginLimiter`. Their state transitions happen
+ *   inside SQL functions that take a row lock, so concurrent redemption of one
+ *   token yields exactly one effect.
  *
  * DUAL PATH LOGIN
  *   { email, password }  -> a named account.
@@ -38,6 +48,38 @@ const rateLimit = require('express-rate-limit');
 
 const { hashPassword, verifyPassword, verifyAgainstDummy, validatePasswordStrength } = require('../lib/password');
 const { hashToken, redemptionErrorFrom } = require('./invitations');
+// The email-change store and its error mapping live with the rest of that
+// feature in routes/users.js. Only the CONFIRM half is here, because it has to
+// be public — the person opening the link has no session and may be on a
+// device that never had one — and everything public in this service is mounted
+// under /auth. Same arrangement as the invitation accept route above.
+const { createEmailChangeStore, confirmationErrorFrom, EMAIL_CHANGED_EVENT } = require('./users');
+const { logAuditSafely } = require('../lib/audit/log');
+const { eventDefinition } = require('../lib/audit/event-types');
+// Self-service password reset. Both halves are public by necessity: somebody
+// who has forgotten their password has no session, which is the whole point.
+// The behaviour lives in lib/password-reset.js so that this shared file takes
+// only the two handlers. `hashToken` is aliased because routes/invitations.js
+// exports a function of the same name above; they are the same construction
+// over different secrets and must never be crossed.
+const {
+  CONFIRM_ERRORS: RESET_CONFIRM_ERRORS,
+  EMAIL_PATTERN: RESET_EMAIL_PATTERN,
+  EXPIRY_MINUTES: RESET_EXPIRY_MINUTES,
+  GENERIC_REQUEST_MESSAGE,
+  MAX_TOKEN_LENGTH: MAX_RESET_TOKEN_LENGTH,
+  MIN_RESPONSE_MS: RESET_MIN_RESPONSE_MS,
+  MIN_TOKEN_LENGTH: MIN_RESET_TOKEN_LENGTH,
+  REQUEST_EVENT_CODES,
+  REQUEST_OUTCOMES,
+  confirmErrorFrom,
+  createPasswordResetStore,
+  hashToken: hashResetToken,
+  requestPasswordReset,
+  settleAfter
+} = require('../lib/password-reset');
+const { sendEmail, appUrl } = require('../lib/email');
+const { passwordResetEmail } = require('../lib/email-templates');
 
 const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -134,9 +176,19 @@ async function syncLegacySharedRole({ client, authz } = {}) {
 }
 
 /**
- * @param {{authz?: object, client?: object, invitationStore?: object, limiter?: Function}} [options]
+ * @param {object} [options]
+ * @param {object} [options.authz]
+ * @param {object} [options.client]
+ * @param {object} [options.invitationStore]
+ * @param {object} [options.emailChangeStore]
+ * @param {Function} [options.audit]    audit writer, injected offline
+ * @param {Function} [options.limiter]
+ * @param {object} [options.passwordReset]  one bag rather than four separate
+ *   options, to keep this signature short: `{ store, sendMail, baseUrl,
+ *   minResponseMs, sleep, now }`. Every field is optional and the defaults are
+ *   the live ones.
  */
-function createAuthRouter({ authz, client, invitationStore, limiter } = {}) {
+function createAuthRouter({ authz, client, invitationStore, emailChangeStore, audit, limiter, passwordReset } = {}) {
   const auth = authz || require('../lib/authz').sharedAuthz();
   let injected = client || null;
   function db() {
@@ -144,6 +196,51 @@ function createAuthRouter({ authz, client, invitationStore, limiter } = {}) {
     return injected;
   }
   const invitations = invitationStore || require('./invitations').createInvitationStore({ client });
+  const emailChanges = emailChangeStore || createEmailChangeStore({ client });
+  const logAudit = audit || logAuditSafely;
+
+  /**
+   * Everything the two password-reset handlers need, resolved once.
+   *
+   * `baseUrl` is read per request rather than captured here when it is not
+   * injected: APP_URL is a Railway variable and a module-level constant would
+   * freeze whatever was in the environment at require time, which is the bug
+   * lib/email.js documents for its own configuration.
+   */
+  const resets = {
+    store: passwordReset?.store || createPasswordResetStore({ client }),
+    sendMail: passwordReset?.sendMail || sendEmail,
+    baseUrl: () => (passwordReset?.baseUrl !== undefined ? passwordReset.baseUrl : appUrl()),
+    minResponseMs: Number.isFinite(Number(passwordReset?.minResponseMs))
+      ? Number(passwordReset.minResponseMs)
+      : RESET_MIN_RESPONSE_MS,
+    sleep: passwordReset?.sleep,
+    now: passwordReset?.now
+  };
+
+  /**
+   * Write an audit row, but only for an event type the catalogue knows.
+   *
+   * The twin of `auditIfRegistered` in routes/users.js, and here for the same
+   * reason: `logAudit` throws on an unregistered type, and
+   * `team.member.email_changed` is not in lib/audit/event-types.js yet. That
+   * file is owned elsewhere. The call site below is complete and starts writing
+   * rows the moment the type is registered; until then it logs one warning
+   * naming the missing type rather than failing a confirmation that has already
+   * committed in the database.
+   */
+  async function auditIfRegistered(input) {
+    if (!eventDefinition(input.eventType)) {
+      console.warn(
+        `[AUTH] Not audited: "${input.eventType}" is not registered in `
+        + 'lib/audit/event-types.js. Add it there (and its metadata keys to '
+        + 'METADATA_ALLOWLIST in lib/audit/redact.js) to turn this row on.'
+      );
+      return { audited: false, reason: 'event_type_unregistered' };
+    }
+    await logAudit(input);
+    return { audited: true };
+  }
 
   const router = express.Router();
 
@@ -421,6 +518,296 @@ function createAuthRouter({ authz, client, invitationStore, limiter } = {}) {
       }
       console.error('[AUTH] Invitation acceptance failed:', error?.code || 'internal_error');
       return res.status(500).json({ error: 'That invitation could not be accepted.', code: 'INVITATION_ACCEPT_FAILED' });
+    }
+  });
+
+  // ── POST /auth/email-change/confirm ───────────────────────────────────────
+  // Public by necessity, exactly like the invitation accept route above and
+  // rate limited by the same limiter: the person opening the link may not be
+  // signed in, may be on a phone that has never had a session, and in the case
+  // this whole flow exists to catch is proving control of a mailbox rather than
+  // of an account. The token is the only credential accepted and it is compared
+  // by hash — the raw value is never stored, so there is nothing to compare
+  // against except a digest.
+  //
+  // This does NOT sign anybody in, for the same reason acceptance does not:
+  // whoever opens the link is not necessarily at a device that should end up
+  // holding a session for that account.
+  //
+  // NOTE FOR WHOEVER OWNS public/ AND server.js: the link in the email is
+  // `${APP_URL}/confirm-email-change?token=...`, and there is no page at that
+  // path yet. server.js serves /accept-invite explicitly and everything else
+  // falls through to the SPA. A GET of the confirm URL therefore returns
+  // index.html and nothing calls this endpoint. The API half is complete and
+  // testable; the landing page that POSTs the token to it is not this file's to
+  // add. See the report accompanying this change.
+  router.post('/email-change/confirm', loginLimiter, async (req, res) => {
+    const token = req.body?.token;
+
+    // Same shape check and same answer as an unknown token. A malformed value
+    // and a well-formed value that matches nothing must be indistinguishable,
+    // otherwise the length check itself is an oracle for the token format.
+    if (typeof token !== 'string' || token.length < 16 || token.length > 512) {
+      await record(req, { method: 'email_change', outcome: 'failure', code: 'EMAIL_CHANGE_NOT_FOUND' });
+      return res.status(404).json({ error: 'That confirmation link is not valid.', code: 'EMAIL_CHANGE_NOT_FOUND' });
+    }
+
+    const tokenHash = hashToken(token);
+    try {
+      // One RPC. It locks the row, validates it, rewrites the address and bumps
+      // the session epoch in a single transaction, so two clicks a millisecond
+      // apart produce exactly one change and the loser gets EMAIL_CHANGE_USED.
+      // Do not turn this into a read-then-write here.
+      const result = await emailChanges.confirm(tokenHash);
+      const userId = result?.user_id ?? null;
+
+      // The epoch moved inside the transaction; this drops the permission cache
+      // that is keyed on it. Doing one without the other leaves a stale entry
+      // answering for up to the cache TTL.
+      if (userId !== null) auth.invalidate(userId);
+
+      await record(req, { method: 'email_change', outcome: 'success', code: 'OK', userId });
+      await auditIfRegistered({
+        // The person holding the mailbox is the actor. They have just proven
+        // control of the new address, which is the entire point of the step.
+        actor: { type: 'user', id: userId, displayName: result?.new_email || 'Team member' },
+        req,
+        eventType: EMAIL_CHANGED_EVENT,
+        entityId: userId,
+        summary: 'A team member confirmed a new email address and their other sessions were ended',
+        previousState: { email: result?.previous_email },
+        newState: { email: result?.new_email },
+        changedFields: ['email'],
+        metadata: {
+          user_id: userId,
+          email: result?.new_email,
+          previous_email: result?.previous_email,
+          via: 'self_service_confirmed',
+          confirmed: true,
+          logins_revoked: true
+        }
+      });
+
+      return res.json({
+        success: true,
+        // Echoed back so a sign-in form can prefill it. Whoever is reading this
+        // response just proved they hold the mailbox it names, so it discloses
+        // nothing they did not arrive with. The PREVIOUS address is deliberately
+        // not echoed: on the hijack path that would hand an attacker the address
+        // of the account they just failed to take.
+        email: result?.new_email ?? null,
+        note: 'Your email address is confirmed. Sign in with it. Any other device you were '
+          + 'signed in on will ask you to sign in again.'
+      });
+    } catch (error) {
+      const mapped = confirmationErrorFrom(error);
+      if (mapped) {
+        await record(req, { method: 'email_change', outcome: 'failure', code: mapped.code });
+        return res.status(mapped.status).json({ error: mapped.message, code: mapped.code });
+      }
+      // Neither the token nor its hash reaches this line, and must not.
+      console.error('[AUTH] Email change confirmation failed:', error?.code || 'internal_error');
+      return res.status(500).json({
+        error: 'That email change could not be confirmed.',
+        code: 'EMAIL_CHANGE_CONFIRM_FAILED'
+      });
+    }
+  });
+
+  // ── Self-service password reset ───────────────────────────────────────────
+  // Public by necessity, on both halves: somebody who has forgotten their
+  // password has no session. The behaviour is in lib/password-reset.js; these
+  // two handlers are the HTTP surface and the auth-event trail.
+
+  /**
+   * One `team.member.password_reset` row for a completed self-service reset.
+   *
+   * Entirely wrapped, exactly like auditRedemption in routes/invitations.js: by
+   * the time this runs the password has already been rewritten inside a
+   * committed SQL transaction, so nothing here may throw. A failure degrades to
+   * a warning and a missing audit row, never to a person who cannot finish
+   * resetting their password.
+   *
+   * NOTHING TOKEN-SHAPED OR PASSWORD-SHAPED GOES IN. Not the raw token, not its
+   * sha256, not the hash, not the new password. The row records that a reset
+   * happened, to whom, and by what method.
+   *
+   * `reset_method` is what distinguishes this from the admin-issued temporary
+   * password written by POST /api/users/:id/reset-password, which shares the
+   * event type. Both answer the same forensic question — who reset whose
+   * password, and when — and the metadata says which of the two paths it was.
+   */
+  async function auditPasswordReset(req, userId) {
+    try {
+      const person = await resets.store.describeUser(userId);
+      const name = person?.display_name || person?.email || `user ${userId}`;
+      await logAudit({
+        // The account holder is the actor: they proved they hold the token.
+        // `req` supplies the IP, user-agent and request id only — resolveActor
+        // in lib/audit/log.js prefers this explicit actor over req.actor, and
+        // this endpoint is unauthenticated so there is no req.actor anyway.
+        // Those three fields are the only evidence of WHERE a password was
+        // reset from, which is exactly what matters if a link is ever used by
+        // somebody it was not sent to.
+        actor: { type: 'user', id: userId, displayName: name, role: person?.role || null },
+        req,
+        eventType: 'team.member.password_reset',
+        entityId: userId,
+        summary: `${name} reset their own password with an emailed link and ended their other sessions`,
+        metadata: {
+          user_id: userId,
+          email: person?.email || null,
+          role: person?.role || null,
+          reset_method: 'self_service_reset_link',
+          must_rotate_on_next_sign_in: false,
+          logins_revoked: true
+        }
+      });
+    } catch (error) {
+      console.warn('[AUTH] Password reset not audited:', error?.code || error?.message || 'unknown');
+    }
+  }
+
+  // ── POST /auth/password-reset/request ─────────────────────────────────────
+  // ONE ANSWER FOR EVERY CASE. Same status, same body, same wall-clock time,
+  // whether the address belongs to an active account, a deactivated one, the
+  // shared identity, or nobody at all. An account whose reset "worked" and one
+  // that does not exist must be indistinguishable from outside, or this
+  // endpoint becomes a public enumerator of who works here.
+  //
+  // The three ingredients of that:
+  //   * the body is the GENERIC_REQUEST_MESSAGE constant, never a branch;
+  //   * requestPasswordReset never rejects, so a storage failure cannot turn
+  //     into a 503 that only ever appears for real accounts;
+  //   * settleAfter pads every branch to the same floor, and the email is
+  //     dispatched without being awaited so a provider round trip never lands
+  //     on the account-exists branch alone.
+  // The real outcome goes to sms_auth_events, which is private.
+  router.post('/password-reset/request', loginLimiter, async (req, res) => {
+    res.set('Cache-Control', 'no-store, private');
+    const startedAt = Date.now();
+
+    const rawEmail = req.body?.email;
+    const email = typeof rawEmail === 'string' ? rawEmail.trim() : '';
+
+    // Shape only. This is not an existence signal: every well-formed address
+    // gets the same 202 below, whether or not anybody holds it.
+    if (!email || email.length > 320 || !RESET_EMAIL_PATTERN.test(email)) {
+      await record(req, {
+        method: 'password_reset_request',
+        outcome: 'failure',
+        code: 'INVALID_EMAIL',
+        emailAttempted: email || null
+      });
+      return res.status(400).json({
+        error: 'Enter the email address you sign in with.',
+        code: 'INVALID_EMAIL'
+      });
+    }
+
+    const context = requestContext(req);
+    let outcome = REQUEST_OUTCOMES.STORE_FAILED;
+    let userId = null;
+    try {
+      const result = await requestPasswordReset({
+        store: resets.store,
+        email,
+        sendMail: resets.sendMail,
+        buildEmail: reset => passwordResetEmail({
+          recipientName: reset.recipientName,
+          workspaceName: 'Vici Inbox',
+          resetUrl: reset.resetUrl,
+          expiresAt: reset.expiresAt,
+          expiryMinutes: RESET_EXPIRY_MINUTES
+        }),
+        baseUrl: resets.baseUrl(),
+        ip: context.ip,
+        userAgent: context.userAgent,
+        now: resets.now
+      });
+      outcome = result.outcome;
+      userId = result.userId;
+    } catch (error) {
+      // requestPasswordReset is documented never to reject. If that ever stops
+      // being true, the answer is still the generic one.
+      console.error('[AUTH] Password reset request failed:', error?.code || 'internal_error');
+    }
+
+    await record(req, {
+      method: 'password_reset_request',
+      outcome: outcome === REQUEST_OUTCOMES.SENT ? 'success' : 'failure',
+      code: REQUEST_EVENT_CODES[outcome] || 'RESET_REQUEST_FAILED',
+      emailAttempted: email,
+      userId
+    });
+
+    await settleAfter(startedAt, resets.minResponseMs, { sleep: resets.sleep });
+    return res.status(202).json({ success: true, message: GENERIC_REQUEST_MESSAGE });
+  });
+
+  // ── POST /auth/password-reset/confirm ─────────────────────────────────────
+  // Public by necessity. The token is the only credential accepted and it is
+  // compared by hash. This does NOT sign anybody in: they now know their
+  // password, and signing them in here would mean a link forwarded to the
+  // wrong person is a session rather than a dead end.
+  router.post('/password-reset/confirm', loginLimiter, async (req, res) => {
+    res.set('Cache-Control', 'no-store, private');
+    const token = req.body?.token;
+    const password = req.body?.password;
+
+    if (typeof token !== 'string'
+      || token.length < MIN_RESET_TOKEN_LENGTH
+      || token.length > MAX_RESET_TOKEN_LENGTH) {
+      await record(req, { method: 'password_reset', outcome: 'failure', code: 'RESET_NOT_FOUND' });
+      return res.status(404).json({
+        error: RESET_CONFIRM_ERRORS.RESET_NOT_FOUND.message,
+        code: 'RESET_NOT_FOUND'
+      });
+    }
+
+    // STRENGTH IS CHECKED BEFORE THE TOKEN IS TOUCHED, deliberately. The token
+    // is single use. Spending it on a password the policy then rejects would
+    // leave somebody with a burnt link and no new password, needing a second
+    // email to fix a typo. Nothing is read or written until this passes.
+    const strengthProblem = validatePasswordStrength(password);
+    if (strengthProblem) {
+      return res.status(400).json({ error: strengthProblem, code: 'PASSWORD_TOO_WEAK' });
+    }
+
+    const tokenHash = hashResetToken(token);
+    try {
+      const passwordHash = await hashPassword(password);
+      // One atomic call: sets the hash, bumps the session epoch, clears
+      // must_change_password and the lockout, and marks the row used. Two
+      // concurrent confirmations of one token yield exactly one change.
+      const userId = await resets.store.complete(tokenHash, passwordHash);
+
+      await record(req, { method: 'password_reset', outcome: 'success', code: 'OK', userId });
+      // The permission cache is keyed by user id AND session epoch, so the
+      // bumped epoch already misses every cached entry. Invalidating is belt
+      // and braces and costs one Map scan.
+      auth.invalidate(userId);
+      await auditPasswordReset(req, userId);
+
+      return res.json({
+        success: true,
+        note: 'Your password has been changed. Sign in with it. '
+          + 'Any other device you were signed in on will ask you to sign in again.'
+      });
+    } catch (error) {
+      const mapped = confirmErrorFrom(error);
+      await resets.store.noteAttempt(tokenHash);
+      if (mapped) {
+        await record(req, { method: 'password_reset', outcome: 'failure', code: mapped.code });
+        return res.status(mapped.status).json({ error: mapped.message, code: mapped.code });
+      }
+      // Neither the token nor its hash nor the password reaches this line, and
+      // none of them must.
+      console.error('[AUTH] Password reset confirmation failed:', error?.code || 'internal_error');
+      return res.status(500).json({
+        error: 'That password could not be changed.',
+        code: 'PASSWORD_RESET_FAILED'
+      });
     }
   });
 

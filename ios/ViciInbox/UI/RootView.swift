@@ -5,11 +5,15 @@ struct RootView: View {
     @ObservedObject private var inviteLinks = InviteLinkRouter.shared
     @State private var showingReauthentication = false
 
-    /// The invitation link this screen has taken ownership of. Drained out of
+    /// The mailed link this screen has taken ownership of. Drained out of
     /// `InviteLinkRouter` rather than read from it directly, so the router can
     /// be cleared immediately and a later `onAppear` cannot reopen a screen the
-    /// invitee already finished with.
-    @State private var pendingInvitation: InviteLinkRouter.PendingInvitation?
+    /// person already finished with.
+    ///
+    /// Two kinds arrive here, an invitation and a password reset, and both are
+    /// shown before the sign-in gate for the same reason: neither person can
+    /// sign in yet.
+    @State private var pendingLink: InviteLinkRouter.PendingLink?
 
     /// Handed to `LoginView` after an invitation is accepted. The server echoes
     /// the invitee's address back on success, and prefilling it is the whole
@@ -28,10 +32,21 @@ struct RootView: View {
             // Before the sign-in gate, like LoginView, because the invitee has
             // no session and the account they would sign in with does not
             // exist yet. Everything below this line is unchanged.
-            if let pendingInvitation, !isCallOnScreen {
-                AcceptInvitationView(invitation: pendingInvitation) { email in
-                    signInPrefillEmail = email
-                    self.pendingInvitation = nil
+            if let pendingLink, !isCallOnScreen {
+                switch pendingLink.destination {
+                case .invitation:
+                    AcceptInvitationView(invitation: pendingLink) { email in
+                        signInPrefillEmail = email
+                        self.pendingLink = nil
+                    }
+                case .passwordReset:
+                    // Also before the gate. Somebody resetting a password has
+                    // forgotten the only credential they had, so asking them to
+                    // sign in first would be a closed loop.
+                    ResetPasswordView(link: pendingLink) { email in
+                        signInPrefillEmail = email
+                        self.pendingLink = nil
+                    }
                 }
             } else if session.isCheckingSession {
                 ProgressView().controlSize(.large)
@@ -45,6 +60,13 @@ struct RootView: View {
             } else if let call = session.activeCall, call.phase != .idle {
                 InCallView(call: call)
                     .transition(.move(edge: .bottom))
+            } else if session.mustChangePassword {
+                // Below the call branch on purpose: nothing outranks a ringing
+                // phone. Above MainTabView because while the flag is set the
+                // server answers 403 PASSWORD_CHANGE_REQUIRED to every endpoint
+                // the tabs use, so showing them would be an app where nothing
+                // loads and nothing says why.
+                ChangePasswordView(mode: .forced)
             } else {
                 MainTabView()
                     // A 401 that could not be recovered shows this and nothing
@@ -66,6 +88,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.25), value: session.activeCall?.id)
         .animation(.default, value: session.isSignedIn)
+        .animation(.default, value: session.mustChangePassword)
         .animation(.easeInOut(duration: 0.2), value: session.isAuthenticationLost)
         .onChange(of: session.isAuthenticationLost) { lost in
             if !lost { showingReauthentication = false }
@@ -74,25 +97,27 @@ struct RootView: View {
         // both. A new teammate taps their invitation exactly once, on a freshly
         // installed app, so the cold launch is the normal case: the link is
         // delivered before this view exists and `onChange` never fires for it.
-        .onAppear { applyPendingInvitation() }
-        .onChange(of: inviteLinks.pendingInvitation) { _ in applyPendingInvitation() }
-        // The prefill belongs to one invitation, not to the device. Dropping it
-        // on sign-in stops a later sign-out from offering the invitee's address
-        // to whoever picks the phone up next.
+        // A reset link opened from Mail behaves the same way.
+        .onAppear { applyPendingLink() }
+        .onChange(of: inviteLinks.pendingLink) { _ in applyPendingLink() }
+        // The prefill belongs to one link, not to the device. Dropping it on
+        // sign-in stops a later sign-out from offering that address to whoever
+        // picks the phone up next.
         .onChange(of: session.isSignedIn) { signedIn in
             if signedIn { signInPrefillEmail = "" }
         }
     }
 
-    /// Takes ownership of a queued invitation link.
+    /// Takes ownership of a queued link, whichever of the two it is.
     ///
     /// The router is cleared as soon as the value is copied, so returning to
     /// this screen later does not reopen an invitation that was already
-    /// accepted or dismissed. The token is not logged and not persisted.
-    private func applyPendingInvitation() {
-        guard let queued = inviteLinks.pendingInvitation else { return }
-        pendingInvitation = queued
-        inviteLinks.consumePendingInvitation()
+    /// accepted, or a reset that was already completed. The token is not logged
+    /// and not persisted.
+    private func applyPendingLink() {
+        guard let queued = inviteLinks.pendingLink else { return }
+        pendingLink = queued
+        inviteLinks.consumePendingLink()
     }
 }
 

@@ -5,10 +5,31 @@
  *   GET    /api/users                     user.read
  *   POST   /api/users                     user.manage
  *   GET    /api/users/me                  any authenticated actor
+ *   PATCH  /api/users/me                  any authenticated actor
  *   POST   /api/users/me/password         any authenticated actor
+ *   POST   /api/users/me/email            any authenticated actor
+ *   POST   /api/users/me/email/cancel     any authenticated actor
  *   PATCH  /api/users/:id                 user.manage
  *   POST   /api/users/:id/deactivate      user.manage
+ *   POST   /api/users/:id/reactivate      user.manage
  *   POST   /api/users/:id/reset-password  user.manage
+ *
+ * The confirm half of the email change is POST /auth/email-change/confirm in
+ * routes/auth.js, which must be public: the person opening the link has no
+ * session and may be on a device that never had one. It shares this file's
+ * `createEmailChangeStore` and `confirmationErrorFrom`.
+ *
+ * SELF-SERVICE VERSUS ADMINISTRATIVE
+ *   The two email paths are deliberately different, and the difference is not
+ *   an oversight:
+ *     * You changing your own address must be confirmed at the new address.
+ *       An unconfirmed self-service change is account takeover — a borrowed
+ *       session becomes permanent ownership.
+ *     * An Admin changing somebody else's address is applied immediately. It
+ *       is a correction, usually of a typo that is stopping an invitation from
+ *       arriving, and requiring confirmation from a mailbox that does not work
+ *       would make the one case it exists for impossible. It is audited and
+ *       BOTH addresses are notified instead.
  *
  * The permission for each path lives in lib/route-policy.js and is enforced
  * before any handler here runs. The guards in this file are the ones a
@@ -60,10 +81,95 @@ const {
   validatePasswordStrength
 } = require('../lib/password');
 const { logAuditSafely } = require('../lib/audit/log');
+const { eventDefinition } = require('../lib/audit/event-types');
+const { sendEmail, appUrl } = require('../lib/email');
+const {
+  emailChangeConfirmationEmail,
+  emailChangeNoticeEmail,
+  emailChangedByAdminEmail,
+  emailChangeAddressInUseEmail
+} = require('../lib/email-templates');
+// Reused, not re-implemented. routes/invitations.js already owns "hash a
+// bearer token with sha256 and store only the digest plus a prefix OF THE
+// DIGEST", it is the pattern this feature was asked to copy, and a second
+// hasher is a second thing that can drift.
+const { hashToken, generateToken, TOKEN_PREFIX_LENGTH } = require('./invitations');
 
 const ADMINISTRATIVE_ROLES = ['owner', 'admin'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TEMPORARY_PASSWORD_BYTES = 15; // 20 base64url characters
+
+/**
+ * How long a pending email change stays confirmable.
+ *
+ * 24 hours. Long enough that a request made at the end of a shift can be
+ * confirmed the next morning on a phone that was left at home, short enough
+ * that a link sitting in a mailbox somebody else later gains access to has
+ * almost always expired. It is stated in the confirmation email, stated in the
+ * heads-up to the old address, and enforced by `expires_at` inside
+ * confirm_sms_email_change — the copy is a courtesy, the database is the rule.
+ */
+const EMAIL_CHANGE_TTL_HOURS = 24;
+
+/** The product name as a person reads it, matching routes/invitations.js. */
+const WORKSPACE_NAME = 'Vici Inbox';
+
+/**
+ * Audit event types this file WANTS to emit but which do not exist in
+ * lib/audit/event-types.js.
+ *
+ * That file is owned elsewhere and `logAudit` THROWS on an unregistered type,
+ * so emitting one would be a guaranteed failure dressed up as instrumentation.
+ * The call sites below are fully written and go through `auditIfRegistered`,
+ * which consults the catalogue first: the moment these two types are added
+ * there — and their metadata keys are added to METADATA_ALLOWLIST in
+ * lib/audit/redact.js, or every field is dropped — the rows start being
+ * written with no further change here.
+ *
+ * Until then each attempt logs one warning naming the missing type, so the gap
+ * is visible in the service log rather than silent.
+ *
+ *   team.member.profile_updated  — display name / phone, self-service.
+ *   team.member.email_changed    — an address actually moved, by either path.
+ */
+const PROFILE_UPDATED_EVENT = 'team.member.profile_updated';
+const EMAIL_CHANGED_EVENT = 'team.member.email_changed';
+const EMAIL_CHANGE_REQUESTED_EVENT = 'team.member.email_change_requested';
+
+/**
+ * The RAISE strings in confirm_sms_email_change mapped onto HTTP. Each refusal
+ * gets its own code, because "expired" and "already used" call for completely
+ * different next steps and a single generic failure would hide which one
+ * happened.
+ */
+const CONFIRMATION_ERRORS = Object.freeze({
+  EMAIL_CHANGE_NOT_FOUND:      { status: 404, message: 'That confirmation link is not valid.' },
+  EMAIL_CHANGE_USED:           { status: 409, message: 'That confirmation link has already been used.' },
+  EMAIL_CHANGE_CANCELLED:      { status: 409, message: 'That email change was cancelled.' },
+  EMAIL_CHANGE_EXPIRED:        { status: 410, message: 'That confirmation link has expired. Start the change again.' },
+  EMAIL_CHANGE_USER_NOT_FOUND: { status: 404, message: 'That confirmation link is not valid.' },
+  EMAIL_CHANGE_USER_INACTIVE:  { status: 409, message: 'That account is disabled, so its address cannot be changed.' },
+  LEGACY_USER_IMMUTABLE:       { status: 409, message: 'The shared team login cannot change its address.' },
+  EMAIL_ALREADY_EXISTS:        { status: 409, message: 'Somebody else has taken that address since the link was sent.' }
+});
+
+/**
+ * Match a database RAISE onto one of the codes above.
+ *
+ * Longest key first: 'EMAIL_CHANGE_USER_NOT_FOUND' contains no other key as a
+ * substring, but 'EMAIL_CHANGE_USED' and 'EMAIL_CHANGE_USER_INACTIVE' share a
+ * prefix and an unordered scan could report the wrong one.
+ *
+ * @returns {null|{code: string, status: number, message: string}}
+ */
+function confirmationErrorFrom(error) {
+  const message = String(error?.message || '');
+  const codes = Object.keys(CONFIRMATION_ERRORS).sort((a, b) => b.length - a.length);
+  for (const code of codes) {
+    if (message.includes(code)) return { code, ...CONFIRMATION_ERRORS[code] };
+  }
+  return null;
+}
 
 function createUserStore({ client } = {}) {
   let injected = client || null;
@@ -113,6 +219,33 @@ function createUserStore({ client } = {}) {
       return (rows && rows.length === 1) ? rows[0] : null;
     },
 
+    /**
+     * Is `email` already spoken for, ignoring `exceptUserId`?
+     *
+     * Distinct from findByEmail(), which returns null when it sees two matches
+     * and is therefore the wrong shape for a uniqueness check: "the answer is
+     * ambiguous" must read as TAKEN here, never as available. It also has to
+     * ignore the caller's own row, so that re-submitting the address you
+     * already hold is a plain no-op rather than a collision with yourself.
+     *
+     * Case-insensitive, matching the unique index on lower(email) that the
+     * database enforces. `%` and `_` are escaped so an address containing
+     * either cannot widen the pattern into a wildcard search.
+     *
+     * @returns {Promise<boolean>}
+     */
+    async emailIsTaken(email, exceptUserId = null) {
+      const escaped = String(email).replace(/([\\%_])/g, '\\$1');
+      const rows = unwrap(
+        await db().from('sms_users').select('id').ilike('email', escaped).limit(5),
+        'emailIsTaken'
+      ) || [];
+      const except = exceptUserId === null || exceptUserId === undefined
+        ? null
+        : Number(exceptUserId);
+      return rows.some(row => except === null || Number(row.id) !== except);
+    },
+
     async create(row) {
       return unwrap(
         await db()
@@ -148,6 +281,54 @@ function createUserStore({ client } = {}) {
         throw Object.assign(new Error(result.error.message), { code: 'USER_STORE_FAILED', context: 'countActiveAdministrators' });
       }
       return result.count || 0;
+    },
+
+    /**
+     * Stop this person's phones receiving customer notifications.
+     *
+     * Deactivating used to end sessions and nothing else, so a removed
+     * teammate's iPhone kept showing message alerts with sender names and body
+     * previews. lib/apns-notify.js now also filters them out at delivery, but
+     * that is the backstop: the right thing is to remove the registration, so
+     * the device stops being a recipient at all rather than being skipped on
+     * every send forever.
+     *
+     * Best-effort by design. Push storage is secondary to the account state,
+     * and failing to revoke a device must not prevent the deactivation itself
+     * from committing. A failure is logged loudly and the delivery filter still
+     * covers it.
+     */
+    async revokePushDevices(id) {
+      const userId = String(id);
+      let revoked = 0;
+
+      try {
+        const dedicated = await db()
+          .from('ios_push_devices')
+          .delete()
+          .eq('user_id', userId)
+          .select('id');
+        if (!dedicated.error) revoked += (dedicated.data || []).length;
+      } catch (err) {
+        console.warn('[USERS] Could not revoke dedicated push devices:', err.message);
+      }
+
+      // The compatibility table stores ownership inside the jsonb payload, so
+      // it is matched on the arrow operator rather than a column.
+      try {
+        const compatibility = await db()
+          .from('push_subscriptions')
+          .delete()
+          .eq('subscription->>userId', userId)
+          .select('id');
+        if (!compatibility.error) revoked += (compatibility.data || []).length;
+        else console.warn('[USERS] Could not revoke compatibility push devices:', compatibility.error.message);
+      } catch (err) {
+        console.warn('[USERS] Could not revoke compatibility push devices:', err.message);
+      }
+
+      if (revoked > 0) console.log(`[USERS] Revoked ${revoked} push device(s) for user ${userId}`);
+      return revoked;
     },
 
     async bumpEpoch(id) {
@@ -205,6 +386,117 @@ function createUserStore({ client } = {}) {
   };
 }
 
+/**
+ * Pending email changes — scripts/email-change-migration.sql.
+ *
+ * Exported, because the CONFIRM half of this flow lives in routes/auth.js: it
+ * has to be public (the person clicking the link has no session, and may be
+ * signing in from a device that never had one) and everything public in this
+ * service is mounted under /auth. Sharing the store rather than duplicating it
+ * is the same arrangement routes/auth.js already has with
+ * routes/invitations.js.
+ *
+ * `token_hash` is NEVER selected by anything in here except as a filter. There
+ * is deliberately no getter for it: a handler that could read the stored digest
+ * would be one careless refactor away from putting it in a response body or a
+ * log line, and it is a live credential's only remaining trace.
+ */
+function createEmailChangeStore({ client } = {}) {
+  let injected = client || null;
+  function db() {
+    if (!injected) injected = require('../db').supabase;
+    return injected;
+  }
+
+  function unwrap(result, context) {
+    if (result.error) {
+      throw Object.assign(new Error(result.error.message), { code: 'EMAIL_CHANGE_STORE_FAILED', context });
+    }
+    return result.data;
+  }
+
+  return {
+    /**
+     * The one request for this person that is neither confirmed nor cancelled,
+     * or null. `expires_at` is returned rather than filtered on: an expired row
+     * is still OPEN as far as the partial unique index is concerned, and the
+     * caller has to cancel it before it can insert a replacement.
+     */
+    async openForUser(userId) {
+      const rows = unwrap(
+        await db()
+          .from('sms_email_changes')
+          .select('id, user_id, new_email, token_prefix, requested_at, expires_at')
+          .eq('user_id', userId)
+          .is('confirmed_at', null)
+          .is('cancelled_at', null)
+          .limit(1),
+        'openForUser'
+      );
+      return (rows && rows[0]) || null;
+    },
+
+    /**
+     * Close every open request for this person.
+     *
+     * Used both by the explicit cancel endpoint and as the supersede step
+     * before a new request is inserted, so that asking twice replaces the first
+     * link instead of colliding with the partial unique index.
+     *
+     * @returns {Promise<number>} how many rows were closed
+     */
+    async cancelOpenForUser(userId) {
+      const result = await db()
+        .from('sms_email_changes')
+        .update({ cancelled_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .is('confirmed_at', null)
+        .is('cancelled_at', null)
+        .select('id');
+      if (result.error) {
+        throw Object.assign(new Error(result.error.message), {
+          code: 'EMAIL_CHANGE_STORE_FAILED', context: 'cancelOpenForUser'
+        });
+      }
+      return (result.data || []).length;
+    },
+
+    /** token_prefix is returned; token_hash is not, and must never be. */
+    async create(row) {
+      return unwrap(
+        await db()
+          .from('sms_email_changes')
+          .insert(row)
+          .select('id, user_id, new_email, token_prefix, requested_at, expires_at')
+          .single(),
+        'create'
+      );
+    },
+
+    /**
+     * Confirm one pending change, atomically.
+     *
+     * Straight through to the SQL function, which locks the row, validates it,
+     * rewrites sms_users.email and bumps session_epoch in a single transaction.
+     * There is no read-then-write here on purpose: two clicks on the same link
+     * a millisecond apart must produce exactly one change, and Node cannot make
+     * that promise.
+     *
+     * @param {string} tokenHash
+     * @returns {Promise<{change_id: string, user_id: number, previous_email: string,
+     *                    new_email: string, session_epoch: number, confirmed_at: string}>}
+     * @throws with the RAISE text in `message`; see confirmationErrorFrom().
+     */
+    async confirm(tokenHash) {
+      const result = await db().rpc('confirm_sms_email_change', { p_token_hash: tokenHash });
+      if (result.error) {
+        throw Object.assign(new Error(result.error.message), { code: 'EMAIL_CHANGE_CONFIRM_FAILED' });
+      }
+      return result.data;
+    }
+  };
+}
+
 /** The only serialiser. password_hash is reduced to a boolean and dropped. */
 function publicUser(row) {
   if (!row) return null;
@@ -249,6 +541,51 @@ function actorName(req) {
 }
 
 /**
+ * `${APP_URL}/confirm-email-change?token=...`, or null when APP_URL is unset.
+ *
+ * Mirrors acceptUrlFor() in routes/invitations.js, including the trailing-slash
+ * strip that lib/email.js:appUrl() performs. Unlike the invitation link this is
+ * NOT a Universal Link: lib/apple-site-association.js claims /accept-invite and
+ * nothing else, so this URL opens in a browser everywhere. See the note in the
+ * handler about the landing page that has to answer it.
+ */
+function confirmUrlFor(rawToken) {
+  const base = appUrl();
+  return base ? `${base}/confirm-email-change?token=${encodeURIComponent(rawToken)}` : null;
+}
+
+/**
+ * Send one templated message and reduce the result to the shape a response
+ * body reports verbatim.
+ *
+ * Cannot throw: lib/email.js resolves on every path including a missing
+ * provider key, and the templates are pure. That matters because every caller
+ * below is sending AFTER a decision has already been made, and a mail failure
+ * must never turn a completed operation into a 500.
+ *
+ * `message` may contain a live confirmation token. It is handed to the provider
+ * and never logged, here or in lib/email.js.
+ *
+ * @param {Function} send  lib/email.js sendEmail, or a test double
+ * @param {{subject: string, text: string, html: string}} message
+ * @param {string} to
+ * @returns {Promise<{sent: boolean, reason?: string}>}
+ */
+async function deliverMessage(send, message, to) {
+  const recipient = String(to || '').trim();
+  if (!recipient) return { sent: false, reason: 'no_recipient' };
+  const result = await send({
+    to: recipient,
+    subject: message.subject,
+    text: message.text,
+    html: message.html
+  });
+  return result?.sent === true
+    ? { sent: true }
+    : { sent: false, reason: result?.reason || 'unknown' };
+}
+
+/**
  * Resolve role keys to their human-readable catalogue names for audit
  * summaries: 'Support Agent', not 'agent'.
  *
@@ -275,15 +612,51 @@ function createRoleNamer(users) {
 }
 
 /**
- * @param {{store?: object, authz?: object, audit?: Function}} [options]
+ * @param {object} [options]
+ * @param {object} [options.store]             user store
+ * @param {object} [options.emailChangeStore]  pending email-change store
+ * @param {object} [options.authz]
+ * @param {Function} [options.audit]           audit writer
+ * @param {Function} [options.sendMail]        lib/email.js sendEmail, injected offline
  */
-function createUsersRouter({ store, authz, audit } = {}) {
+function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } = {}) {
   const users = store || createUserStore({});
+  const emailChanges = emailChangeStore || createEmailChangeStore({});
   const auth = authz || require('../lib/authz').sharedAuthz();
   // Injectable so the unit tests can assert on the rows without a database.
   // The default can never throw; see lib/audit/log.js.
   const logAudit = audit || logAuditSafely;
+  // lib/email.js never throws and never rejects; see its header. Injected so
+  // the tests can assert on what would have been sent without a network.
+  const send = sendMail || sendEmail;
   const router = express.Router();
+
+  /**
+   * Write an audit row, but only for an event type the catalogue knows.
+   *
+   * `logAudit` throws on an unregistered type — see lib/audit/log.js — so
+   * calling it with one is not "best effort", it is a guaranteed failure that
+   * `logAuditSafely` would swallow into a warning nobody reads. This checks
+   * first and says exactly which type is missing.
+   *
+   * Every registered type goes straight through, so this is a no-op for the
+   * `team.*` events that already exist. See PROFILE_UPDATED_EVENT and
+   * EMAIL_CHANGED_EVENT for the two that do not.
+   *
+   * @returns {Promise<{audited: boolean, reason?: string}>}
+   */
+  async function auditIfRegistered(input) {
+    if (!eventDefinition(input.eventType)) {
+      console.warn(
+        `[USERS] Not audited: "${input.eventType}" is not registered in `
+        + 'lib/audit/event-types.js. Add it there (and its metadata keys to '
+        + 'METADATA_ALLOWLIST in lib/audit/redact.js) to turn this row on.'
+      );
+      return { audited: false, reason: 'event_type_unregistered' };
+    }
+    await logAudit(input);
+    return { audited: true };
+  }
 
   /** Bump the epoch and drop the cache together. Doing one without the other
    *  leaves a stale grant live for up to the cache TTL. */
@@ -456,6 +829,299 @@ function createUsersRouter({ store, authz, audit } = {}) {
     }
   });
 
+  // ── PATCH /api/users/me ───────────────────────────────────────────────────
+  // Your own display name and phone number. No permission: a Support Agent may
+  // correct the spelling of their own name without asking an Admin, and this
+  // endpoint can change nothing else. Role, active state, permissions, email
+  // and password all live behind their own handlers.
+  //
+  // MUST be registered before the parameterised PATCH handler further down.
+  // Express matches in registration order and a `:id` pattern would happily
+  // swallow the literal `me`. The policy table already resolves the literal
+  // first, so such a request would arrive authorised as `permission: null` and
+  // then be executed by the `user.manage` handler. It would fail closed —
+  // parseUserId('me') is null and returns 400 — but "fails closed by accident"
+  // is not a design.
+  //
+  // Do not spell the parameterised route out in a comment here. The audit-flag
+  // check in test/route-policy.test.js locates a handler by searching this file
+  // as TEXT, so a comment quoting `router.<verb>('/<param>')` is found before
+  // the real handler and the audit coverage assertion reads the wrong body.
+  router.patch('/me', async (req, res) => {
+    const actor = req.actor;
+    if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+
+    // Two people share this identity. Neither of them gets to rename what the
+    // other one sees, and the row is load-bearing at boot besides:
+    // syncLegacySharedRole() exits the process if it cannot find it.
+    if (actor.viaLegacySession || actor.isLegacyShared) {
+      return fail(
+        res, 409, 'LEGACY_USER_IMMUTABLE',
+        'The shared team login is used by more than one person and cannot be renamed here. '
+        + 'Ask an admin for your own account.'
+      );
+    }
+
+    const patch = {};
+    if (req.body?.displayName !== undefined) {
+      const displayName = String(req.body.displayName).trim();
+      if (displayName.length < 1 || displayName.length > 120) {
+        return fail(res, 400, 'INVALID_DISPLAY_NAME', 'Enter a name between 1 and 120 characters.');
+      }
+      patch.display_name = displayName;
+    }
+    if (req.body?.phone !== undefined) {
+      patch.phone = req.body.phone ? String(req.body.phone).trim() : null;
+    }
+    if (Object.keys(patch).length === 0) {
+      return fail(
+        res, 400, 'NOTHING_TO_UPDATE',
+        'Send displayName, phone, or both. Your email address is changed with POST /api/users/me/email.'
+      );
+    }
+
+    try {
+      const row = await users.getById(actor.id);
+      if (!row) return fail(res, 401, 'ACCOUNT_NOT_FOUND', 'Unauthorised');
+      // Belt and braces. `actor.isLegacyShared` is derived from this same
+      // column, but the check above reads a session-derived actor and this one
+      // reads the row that is about to be written.
+      if (row.is_legacy_shared) {
+        return fail(
+          res, 409, 'LEGACY_USER_IMMUTABLE',
+          'The shared team login cannot be edited here.'
+        );
+      }
+
+      const previous = { display_name: row.display_name, phone: row.phone || null };
+      const updated = await users.update(actor.id, patch);
+
+      // Nothing here changes what this person can do, so no session is revoked
+      // and no epoch is bumped. A rename that signed somebody out mid-shift
+      // would be a worse bug than the typo they were fixing.
+      const changedFields = Object.keys(patch);
+      const audited = await auditIfRegistered({
+        eventType: PROFILE_UPDATED_EVENT,
+        req,
+        entityId: actor.id,
+        summary: `${actorName(req)} updated their own profile (${changedFields.join(', ')})`,
+        previousState: previous,
+        newState: { display_name: updated.display_name, phone: updated.phone || null },
+        changedFields,
+        metadata: {
+          user_id: actor.id,
+          email: updated.email,
+          role: updated.role,
+          changed_fields: changedFields,
+          via: 'self_service'
+        }
+      });
+
+      return res.json({ user: publicUser(updated), audited: audited.audited });
+    } catch (error) {
+      return sendStoreError(res, error, 'updateOwnProfile');
+    }
+  });
+
+  // ── POST /api/users/me/email ──────────────────────────────────────────────
+  // Ask to move your account onto a different address. NOTHING CHANGES HERE.
+  //
+  // An email address is half a credential and the whole of an account-recovery
+  // path, so an unconfirmed change is an account takeover: a borrowed session
+  // becomes permanent ownership. The address only moves once somebody has
+  // proven they can read mail at the new one, which is what
+  // POST /auth/email-change/confirm is for.
+  //
+  // THIS ENDPOINT IS NOT AN ACCOUNT-EXISTENCE ORACLE. Any authenticated actor
+  // can call it, including a Support Agent who cannot call GET /api/users, so a
+  // 409 "that address already exists" would hand them a way to enumerate every
+  // address in the workspace one guess at a time. Both branches therefore
+  // return the same status, the same message and the same body shape:
+  //
+  //   available  -> confirmation link to the new address + heads-up to the old
+  //   taken      -> "this address is already in use here" to the new address,
+  //                 which is a real message to a real interested party,
+  //                 + the same heads-up to the old
+  //
+  // Two sends either way, so `confirmationEmail`/`noticeEmail` report what
+  // genuinely happened on both paths and neither is a lie. The remaining
+  // difference is one INSERT, which is noise beside a provider round trip.
+  router.post('/me/email', async (req, res) => {
+    const actor = req.actor;
+    if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+    if (actor.viaLegacySession || actor.isLegacyShared) {
+      return fail(
+        res, 409, 'LEGACY_USER_IMMUTABLE',
+        'The shared team login has no personal address. Ask an admin for your own account.'
+      );
+    }
+
+    const newEmail = String(req.body?.newEmail || '').trim();
+    const currentPassword = req.body?.currentPassword;
+    if (!EMAIL_PATTERN.test(newEmail) || newEmail.length > 254) {
+      return fail(res, 400, 'INVALID_EMAIL', 'Enter a valid email address.');
+    }
+
+    try {
+      const row = await users.getById(actor.id);
+      if (!row) return fail(res, 401, 'ACCOUNT_NOT_FOUND', 'Unauthorised');
+      if (row.is_legacy_shared) {
+        return fail(res, 409, 'LEGACY_USER_IMMUTABLE', 'The shared team login cannot change its address.');
+      }
+      if (!row.password_hash) {
+        return fail(
+          res, 400, 'PASSWORD_NOT_SET',
+          'This account has no password yet, so there is nothing to check the request against. '
+          + 'Ask an admin to send an invitation.'
+        );
+      }
+      // The password is verified BEFORE the address is looked at, so a caller
+      // who cannot prove who they are learns nothing about any address at all.
+      // Reuses lib/password's verifier — the same one POST /me/password and
+      // POST /auth/login use. A second implementation is a second place for a
+      // timing bug to live.
+      if (!(await verifyPassword(String(currentPassword ?? ''), row.password_hash))) {
+        return fail(res, 401, 'CURRENT_PASSWORD_INCORRECT', 'That current password is not right.');
+      }
+
+      // Their own current address. Not a collision and not a secret from them,
+      // so this one is answered plainly.
+      if (String(row.email || '').toLowerCase() === newEmail.toLowerCase()) {
+        return fail(res, 400, 'EMAIL_UNCHANGED', 'That is already your email address.');
+      }
+
+      const expiresAt = new Date(Date.now() + EMAIL_CHANGE_TTL_HOURS * 3600 * 1000).toISOString();
+      const taken = await users.emailIsTaken(newEmail, actor.id);
+
+      let confirmationMessage;
+      if (taken) {
+        // No row, no token, no link. The message below tells the mailbox owner
+        // what happened without telling the caller anything.
+        confirmationMessage = emailChangeAddressInUseEmail({
+          newEmail,
+          workspaceName: WORKSPACE_NAME
+        });
+      } else {
+        // Supersede any request already open for this person. The partial
+        // unique index in scripts/email-change-migration.sql permits exactly
+        // one, and the older link must stop working the moment a newer one is
+        // issued — two live links to two different addresses is the state this
+        // whole flow exists to prevent.
+        await emailChanges.cancelOpenForUser(actor.id);
+
+        const rawToken = generateToken();
+        const tokenHash = hashToken(rawToken);
+        const confirmUrl = confirmUrlFor(rawToken);
+        if (!confirmUrl) {
+          // With APP_URL unset there is no link to send, and a pending change
+          // nobody can confirm is worse than no pending change: it blocks the
+          // next attempt behind the partial unique index. Refuse before writing.
+          console.error('[USERS] Refusing an email change: APP_URL is not set, so no confirmation link can be built');
+          return fail(
+            res, 503, 'EMAIL_CHANGE_UNAVAILABLE',
+            'Email changes are not available on this server yet. Ask an admin to change it for you.'
+          );
+        }
+
+        await emailChanges.create({
+          user_id: actor.id,
+          new_email: newEmail,
+          // Only the digest. The raw token exists in `rawToken` for the length
+          // of this handler and in the recipient's mailbox, nowhere else.
+          token_hash: tokenHash,
+          token_prefix: tokenHash.slice(0, TOKEN_PREFIX_LENGTH),
+          expires_at: expiresAt,
+          requested_ip: req.ip || null,
+          requested_user_agent: (req.get ? req.get('user-agent') : null) || null
+        });
+
+        confirmationMessage = emailChangeConfirmationEmail({
+          recipientName: row.display_name,
+          newEmail,
+          confirmUrl,
+          expiresAt,
+          workspaceName: WORKSPACE_NAME
+        });
+      }
+
+      // To the NEW address. Carries the live link on the available path and no
+      // link at all on the taken path.
+      const confirmationEmail = await deliverMessage(send, confirmationMessage, newEmail);
+      // To the OLD address, always, on both paths. This is the message that
+      // makes a hijack visible to the person being hijacked, so it is sent even
+      // when the request went nowhere.
+      const noticeEmail = await deliverMessage(send, emailChangeNoticeEmail({
+        recipientName: row.display_name,
+        newEmail,
+        expiresAt,
+        workspaceName: WORKSPACE_NAME
+      }), row.email);
+
+      // Recorded even though nothing has changed yet, and recorded on BOTH
+      // branches. An attempt that is never confirmed is precisely the case
+      // worth having: a hijacker on a borrowed session requests a move to their
+      // own address, the victim ignores the heads-up email, and without this
+      // there is no trace anywhere that it happened. The audit log is
+      // Admin-only, so recording which branch ran leaks nothing to the caller.
+      const audited = await auditIfRegistered({
+        eventType: EMAIL_CHANGE_REQUESTED_EVENT,
+        req,
+        entityId: String(actor.id),
+        summary: `${actorName(req)} asked to move their account to a different email address`,
+        metadata: {
+          user_id: actor.id,
+          email: actor.email,
+          requested_email: newEmail,
+          via: 'self',
+          address_available: !taken
+        }
+      });
+
+      return res.json({
+        success: true,
+        // Identical on both branches, by design. See the header comment.
+        message: 'If that address can be used, a confirmation link is on its way to it. '
+          + 'Nothing changes on your account until that link is opened.',
+        expiresInHours: EMAIL_CHANGE_TTL_HOURS,
+        // Honest, and honest on both paths: two messages are attempted either
+        // way, so reporting the truth about each cannot reveal which path ran.
+        confirmationEmail,
+        noticeEmail,
+        audited: audited.audited === true
+      });
+    } catch (error) {
+      return sendStoreError(res, error, 'requestEmailChange');
+    }
+  });
+
+  // ── POST /api/users/me/email/cancel ───────────────────────────────────────
+  // Abandon an open request. Deliberately idempotent and deliberately silent
+  // about whether there was one: the same 200 either way, so this cannot be
+  // used to probe whether somebody has a change in flight.
+  router.post('/me/email/cancel', async (req, res) => {
+    const actor = req.actor;
+    if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+    if (actor.viaLegacySession || actor.isLegacyShared) {
+      return fail(
+        res, 409, 'LEGACY_USER_IMMUTABLE',
+        'The shared team login has no personal address.'
+      );
+    }
+
+    try {
+      const cancelled = await emailChanges.cancelOpenForUser(actor.id);
+      return res.json({
+        success: true,
+        cancelled: cancelled > 0,
+        message: cancelled > 0
+          ? 'That email change was cancelled. The confirmation link no longer works.'
+          : 'There was no email change waiting to be confirmed.'
+      });
+    } catch (error) {
+      return sendStoreError(res, error, 'cancelEmailChange');
+    }
+  });
+
   // ── POST /api/users ───────────────────────────────────────────────────────
   router.post('/', async (req, res) => {
     const actor = req.actor;
@@ -573,6 +1239,42 @@ function createUsersRouter({ store, authz, audit } = {}) {
       }
       if (req.body?.phone !== undefined) {
         patch.phone = req.body.phone ? String(req.body.phone).trim() : null;
+      }
+
+      // An Admin correcting somebody else's address does NOT go through the
+      // confirmation dance. It is an administrative correction — usually a typo
+      // that is stopping an invitation from arriving — and requiring the person
+      // to confirm from a mailbox they cannot reach would make the one case
+      // this exists for impossible.
+      //
+      // What it does NOT skip: this is still an identity change, so it bumps
+      // the session epoch, it is audited, and BOTH addresses are told. The
+      // person losing the address finds out even if they never touch the app
+      // again, which is the only defence against an Admin quietly moving an
+      // account onto an address they control.
+      //
+      // No enumeration concern here, unlike the self-service path: reaching
+      // this handler at all requires `user.manage`, and anybody holding it can
+      // simply call GET /api/users and read every address in the workspace.
+      if (req.body?.email !== undefined) {
+        const nextEmail = String(req.body.email).trim();
+        if (!EMAIL_PATTERN.test(nextEmail) || nextEmail.length > 254) {
+          return fail(res, 400, 'INVALID_EMAIL', 'Enter a valid email address.');
+        }
+        // The peer-Owner guard applies to an address exactly as it applies to a
+        // role: moving an Owner onto an address you control is a takeover with
+        // extra steps. Checked before the collision lookup so a refused request
+        // cannot be used to probe the address book either.
+        const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+        if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
+
+        if (nextEmail.toLowerCase() !== String(targetEmail || '').toLowerCase()) {
+          if (await users.emailIsTaken(nextEmail, id)) {
+            return fail(res, 409, 'EMAIL_ALREADY_EXISTS', 'Somebody already has that email address.');
+          }
+          patch.email = nextEmail;
+          sessionAffecting = true;
+        }
       }
 
       let becomingRole = target.role;
@@ -726,6 +1428,58 @@ function createUsersRouter({ store, authz, audit } = {}) {
         });
       }
 
+      // An address change has three consequences beyond the row itself, and all
+      // three run only once the write has landed.
+      let emailNotifications;
+      if (patch.email) {
+        // 1. Any self-service request this person had in flight is void. Their
+        //    pending link points at an address that is no longer theirs to move
+        //    from, and leaving it open would let it fire later and undo an
+        //    administrative correction nobody would think to re-check.
+        try {
+          await emailChanges.cancelOpenForUser(id);
+        } catch (error) {
+          console.warn('[USERS] Could not cancel a pending self-service email change:', error?.code || 'unknown');
+        }
+
+        // 2. Both mailboxes are told. The old address is the one that matters:
+        //    it is the only warning the person gets if this was not legitimate.
+        const message = emailChangedByAdminEmail({
+          recipientName: updated.display_name || targetName,
+          previousEmail: targetEmail,
+          newEmail: patch.email,
+          actorName: actorName(req),
+          workspaceName: WORKSPACE_NAME
+        });
+        emailNotifications = {
+          previousAddress: await deliverMessage(send, message, targetEmail),
+          newAddress: await deliverMessage(send, message, patch.email)
+        };
+
+        // 3. Audited. See EMAIL_CHANGED_EVENT: the type is not in the audit
+        //    catalogue yet, so this currently logs a warning naming it instead
+        //    of writing a row. The call site is complete and lights up the
+        //    moment the type is registered.
+        await auditIfRegistered({
+          eventType: EMAIL_CHANGED_EVENT,
+          req,
+          entityId: id,
+          summary: `${actorName(req)} changed the email address for ${targetName} and ended their sessions`,
+          previousState: { email: targetEmail },
+          newState: { email: patch.email },
+          changedFields: ['email'],
+          metadata: {
+            user_id: id,
+            email: patch.email,
+            previous_email: targetEmail,
+            role: previousRole,
+            via: 'admin_correction',
+            confirmed: false,
+            logins_revoked: true
+          }
+        });
+      }
+
       // One row per override. There are only ever a handful in a request, and
       // "who was given automation.cancel, and why" is the question these exist
       // to answer — a single rolled-up row would not answer it.
@@ -755,7 +1509,14 @@ function createUsersRouter({ store, authz, audit } = {}) {
         });
       }
 
-      return res.json({ user: publicUser(updated), sessionsRevoked: sessionAffecting });
+      return res.json({
+        user: publicUser(updated),
+        sessionsRevoked: sessionAffecting,
+        // Present only when an address moved, and honest about each recipient.
+        // An admin who is told "changed" but not "and we could not tell them"
+        // has no way to know they need to pick up the phone.
+        ...(emailNotifications ? { emailNotifications } : {})
+      });
     } catch (error) {
       return sendStoreError(res, error, 'update');
     }
@@ -811,6 +1572,13 @@ function createUsersRouter({ store, authz, audit } = {}) {
         deactivated_at: new Date().toISOString()
       });
       await revokeSessions(id);
+      // Ending their sessions is not enough on its own. Push registrations live
+      // outside the session, so without this a removed teammate's iPhone keeps
+      // showing customer messages, sender name and preview included, until the
+      // APNs token expires or they delete the app. lib/apns-notify.js also
+      // filters deactivated owners at delivery; this removes the registration
+      // so the device stops being a recipient rather than being skipped forever.
+      const devicesRevoked = await users.revokePushDevices(id);
 
       const roleDisplay = await createRoleNamer(users)(previousRole);
       await logAudit({
@@ -830,9 +1598,99 @@ function createUsersRouter({ store, authz, audit } = {}) {
         }
       });
 
-      return res.json({ user: publicUser(updated), sessionsRevoked: true });
+      return res.json({
+        user: publicUser(updated),
+        sessionsRevoked: true,
+        devicesRevoked
+      });
     } catch (error) {
       return sendStoreError(res, error, 'deactivate');
+    }
+  });
+
+  // ── POST /api/users/:id/reactivate ────────────────────────────────────────
+  // The counterpart to /deactivate, and the reason removal is a deactivation
+  // rather than a delete: the owner's instruction was "deactivate, keep
+  // history", explicitly so the Activity Center keeps reading "Sarah cancelled
+  // Payment Reminder" instead of "Unknown". Rows are never deleted, so bringing
+  // somebody back is a single flag and their whole history is still attributed
+  // to them.
+  //
+  // PATCH /api/users/:id with `{ isActive: true }` already does this and keeps
+  // working; it is how the existing iOS build reactivates. This exists so that
+  // the pair reads symmetrically — /deactivate has a sibling — and so a client
+  // does not have to know that `isActive: false` is refused while
+  // `isActive: true` is not. Both paths run the same guards and write the same
+  // `team.member.reactivated` row.
+  router.post('/:id/reactivate', async (req, res) => {
+    const actor = req.actor;
+    const id = parseUserId(req.params.id);
+    if (id === null) return fail(res, 400, 'INVALID_USER_ID', 'That user id is not valid.');
+
+    try {
+      const target = await users.getById(id);
+      if (!target) return fail(res, 404, 'USER_NOT_FOUND', 'No such user.');
+      if (target.is_legacy_shared) {
+        return fail(
+          res, 409, 'LEGACY_USER_IMMUTABLE',
+          'The shared team login cannot be reactivated here. Set LEGACY_SHARED_LOGIN=enabled instead.'
+        );
+      }
+
+      // Snapshotted before anything mutates, for the same reason every other
+      // handler in this file does it: users.update() may hand back the very
+      // object `target` points at.
+      const previousRole = target.role;
+      const targetName = target.display_name || target.email;
+      const targetEmail = target.email;
+
+      // Restoring an authority-bearing sign-in is the same class of action as
+      // revoking one, so it carries the same two guards. Note the consequence,
+      // which PATCH already documents: a deactivated Owner cannot be brought
+      // back by another Owner. One can no longer be created through this API,
+      // so this only guards rows that predate the guard, and the remedy for
+      // those is a deliberate database change rather than a mis-click.
+      const ownerProblem = ownerTransitionError(actor, { fromRole: previousRole, toRole: previousRole });
+      if (ownerProblem) {
+        return fail(res, ownerProblem.status, ownerProblem.code, 'Only an Owner may reactivate an Owner.');
+      }
+      const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+      if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
+
+      if (target.is_active === true) {
+        return res.json({ user: publicUser(target), alreadyActive: true });
+      }
+
+      // `deactivated_at: null` is not optional. sms_users carries
+      // CHECK (is_active = (deactivated_at IS NULL)), so setting one without
+      // the other is a constraint violation, not a partially applied change.
+      const updated = await users.update(id, { is_active: true, deactivated_at: null });
+      // Their sessions were already revoked when they were deactivated. This
+      // bump is for the cached permission set: auth.invalidate() runs with it,
+      // and a stale cache would otherwise keep answering for the TTL.
+      await revokeSessions(id);
+
+      const roleDisplay = await createRoleNamer(users)(previousRole);
+      await auditIfRegistered({
+        eventType: 'team.member.reactivated',
+        req,
+        entityId: id,
+        summary: `${actorName(req)} reactivated ${targetName} as ${roleDisplay}`,
+        previousState: { is_active: false },
+        newState: { is_active: true },
+        changedFields: ['is_active'],
+        metadata: {
+          user_id: id,
+          email: targetEmail,
+          role: previousRole,
+          role_display_name: roleDisplay,
+          logins_revoked: true
+        }
+      });
+
+      return res.json({ user: publicUser(updated), sessionsRevoked: true });
+    } catch (error) {
+      return sendStoreError(res, error, 'reactivate');
     }
   });
 
@@ -917,5 +1775,12 @@ function createUsersRouter({ store, authz, audit } = {}) {
 
 module.exports = createUsersRouter;
 module.exports.createUserStore = createUserStore;
+module.exports.createEmailChangeStore = createEmailChangeStore;
 module.exports.publicUser = publicUser;
+module.exports.confirmationErrorFrom = confirmationErrorFrom;
+module.exports.confirmUrlFor = confirmUrlFor;
 module.exports.ADMINISTRATIVE_ROLES = ADMINISTRATIVE_ROLES;
+module.exports.CONFIRMATION_ERRORS = CONFIRMATION_ERRORS;
+module.exports.EMAIL_CHANGE_TTL_HOURS = EMAIL_CHANGE_TTL_HOURS;
+module.exports.EMAIL_CHANGED_EVENT = EMAIL_CHANGED_EVENT;
+module.exports.PROFILE_UPDATED_EVENT = PROFILE_UPDATED_EVENT;

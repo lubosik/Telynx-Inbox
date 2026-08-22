@@ -63,7 +63,7 @@ struct AccountAvatarButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Account")
-        .accessibilityHint("Activity, Team, Settings, and Sign out")
+        .accessibilityHint("Activity, Team, Password, Settings, and Sign out")
     }
 }
 
@@ -125,6 +125,18 @@ struct AccountMenuSheet: View {
                             systemImage: "person.2.badge.gearshape"
                         ) { TeamView() }
                     }
+
+                    // Voluntary, and reachable without anything having gone
+                    // wrong first. The forced-rotation screen in RootView shows
+                    // the same form when the server insists, but nobody can
+                    // reach that one on purpose, so before this row existed
+                    // there was no way to change a password from the phone at
+                    // all.
+                    AccountMenuLink(
+                        title: "Password",
+                        detail: "Change the password you sign in with.",
+                        systemImage: "key.fill"
+                    ) { ChangePasswordView(mode: .voluntary) }
 
                     AccountMenuLink(
                         title: "Settings",

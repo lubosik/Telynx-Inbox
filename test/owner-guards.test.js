@@ -99,6 +99,8 @@ function makeUserStore(seed = team()) {
     async countActiveAdministrators() {
       return state.users.filter(row => row.is_active && ['owner', 'admin'].includes(row.role)).length;
     },
+    /** Deactivation revokes push registrations; recorded so a test can assert it. */
+    async revokePushDevices(id) { (state.revokedDevices ||= []).push(Number(id)); return 1; },
     async bumpEpoch(id) { state.epochBumps.push(Number(id)); return state.epochBumps.length; },
     async listRoles() { return ROLE_CATALOGUE.map(role => ({ ...role })); },
     async listPermissionKeys() { return ['automation.cancel', 'analytics.read', 'user.manage.owner']; },
@@ -234,6 +236,25 @@ test('an Owner cannot demote another Owner all the way to agent either', async (
     res, store, auditRows, before, targetId: 8,
     status: 409, code: 'CANNOT_MODIFY_PEER_OWNER'
   });
+});
+
+test('removing someone stops their phone receiving customer messages', async () => {
+  // Ending their sessions was never enough. Push registrations live outside the
+  // session, so before this a removed teammate's iPhone kept showing customer
+  // message alerts, sender name and body preview included, until the APNs token
+  // expired or they deleted the app. Their access was revoked; their
+  // notifications were not.
+  const { store, router } = fixture();
+
+  const res = await call(router, 'POST', '/:id/deactivate', makeRequest({
+    params: { id: '4' }, actor: OWNER
+  }));
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.sessionsRevoked, true, 'sessions must end');
+  assert.deepEqual(store.state.revokedDevices, [4],
+    'their push devices must be revoked too, or the phone keeps buzzing');
+  assert.ok(res.payload.devicesRevoked > 0, 'and the response says what was revoked');
 });
 
 test('an Owner cannot deactivate another Owner, and no session is revoked', async () => {

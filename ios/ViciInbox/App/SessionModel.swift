@@ -18,6 +18,15 @@ final class SessionModel: ObservableObject {
     @Published private(set) var currentUser: AuthUser?
     @Published private(set) var permissions: Set<String> = []
 
+    /// The server's `must_change_password` flag, read from `/api/users/me`.
+    ///
+    /// While it is true the server answers 403 PASSWORD_CHANGE_REQUIRED to
+    /// every endpoint except that one and the password change itself, so the
+    /// app shows `ChangePasswordView(mode: .forced)` instead of a tab bar full
+    /// of screens that cannot load. It is only ever set from the server's
+    /// answer; nothing here guesses at it.
+    @Published private(set) var mustChangePassword = false
+
     /// Set when a request 401'd and a silent re-login also failed. It drives a
     /// "signed out — tap to sign in" banner and nothing else: no credential is
     /// cleared, push stays registered, and the SIP socket is left alone, so an
@@ -61,6 +70,33 @@ final class SessionModel: ObservableObject {
         let user = await APIClient.shared.loadCurrentUser()
         currentUser = user
         permissions = user?.permissionSet ?? []
+        mustChangePassword = user?.requiresPasswordChange ?? false
+    }
+
+    /// Re-reads the account after a password change so the forced-rotation gate
+    /// clears from the server's answer rather than from a client assumption.
+    ///
+    /// Nothing destructive happens here: no sign-out, no credential wipe, no
+    /// push unregistration. Changing a password ends every OTHER session; this
+    /// one was re-stamped with the new epoch by the server and stays live.
+    ///
+    /// The second half only runs when a forced rotation has just been lifted,
+    /// and it matters. While `must_change_password` was set the server answered
+    /// 403 to `/api/voice/token` and to push registration, so `completeSignIn`
+    /// finished with no SIP credentials in the Keychain and a phone that could
+    /// not ring. Clearing the lock has to redo exactly the setup that was
+    /// refused, in the same order that method does it. A voluntary change skips
+    /// this: nothing was ever refused, and needlessly forcing the calling
+    /// socket to re-establish is the last thing to do to a working phone.
+    func notePasswordChanged() async {
+        let wasLocked = mustChangePassword
+        await reloadCurrentUser()
+        guard wasLocked, !mustChangePassword else { return }
+
+        _ = try? await APIClient.shared.fetchSIPCredentials()
+        await MessageNotificationManager.shared.enableAndSync()
+        await voice.requestMicrophonePermissionIfNeeded()
+        await voice.connectIfPossible(force: true)
     }
 
     // MARK: - Authentication signals
@@ -169,6 +205,10 @@ final class SessionModel: ObservableObject {
         isAuthenticationLost = false
         currentUser = nil
         permissions = []
+        // Left set, this would put the forced-rotation screen in front of the
+        // next person to sign in on this phone, before their own account had
+        // even been read.
+        mustChangePassword = false
     }
 
     /// Called when the app returns to the foreground — re-establishes the SIP

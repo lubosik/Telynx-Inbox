@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// The screen a new teammate lands on after tapping their invitation link.
 ///
@@ -15,7 +14,7 @@ import UIKit
 ///
 /// The token is never displayed, never logged, and never stored.
 struct AcceptInvitationView: View {
-    let invitation: InviteLinkRouter.PendingInvitation
+    let invitation: InviteLinkRouter.PendingLink
     /// Leaves this screen. The string is an email to prefill on the sign-in
     /// form, or empty for a plain sign-in.
     let onFinish: (String) -> Void
@@ -230,25 +229,26 @@ struct AcceptInvitationView: View {
 
             // Reported from the row the server actually created. When the flag
             // is set, every endpoint except the account and password-change
-            // ones answers 403 PASSWORD_CHANGE_REQUIRED, and this app has no
-            // password-change screen. Saying so beats a sign-in that appears to
-            // work and then shows an empty inbox.
+            // ones answers 403 PASSWORD_CHANGE_REQUIRED.
+            //
+            // This used to send the invitee to the website, because the app had
+            // no password-change screen and a sign-in here would have looked
+            // like it worked and then shown an empty inbox. It has one now:
+            // `RootView` puts `ChangePasswordView(mode: .forced)` in front of
+            // the tab bar while the flag is set, so signing in here is the
+            // whole answer.
             if result.requiresPasswordChange {
                 VStack(spacing: 10) {
-                    Text("One more step. This account is set to change its password on first sign-in, and that screen is on the website rather than in this app. Open the website, sign in there once, set the password, then come back and sign in here.")
+                    Text("One more step. This account is set to change its password the first time it signs in, so the app will ask for a new one as soon as you sign in below.")
                         .font(.caption)
-                        .foregroundStyle(ViciTheme.destructive)
+                        .foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
 
-                    Button("Open the website") { openWebSignIn() }
+                    Button("Continue to sign in") { onFinish(result.prefillEmail) }
                         .buttonStyle(.borderedProminent)
                         .tint(ViciTheme.tint)
                         .controlSize(.large)
-
-                    Button("Continue to sign in here") { onFinish(result.prefillEmail) }
-                        .font(.footnote)
-                        .tint(ViciTheme.tint)
                 }
             } else {
                 Button("Continue to sign in") { onFinish(result.prefillEmail) }
@@ -257,12 +257,6 @@ struct AcceptInvitationView: View {
                     .controlSize(.large)
             }
         }
-    }
-
-    /// The website's sign-in page, which owns the password-change screen this
-    /// app does not implement. Nothing from the invitation is attached.
-    private func openWebSignIn() {
-        UIApplication.shared.open(AppConfig.serverURL)
     }
 
     // MARK: - Submit

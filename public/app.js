@@ -303,7 +303,7 @@ function PasswordRules() {
       lineHeight: 1.5,
       margin: '-0.375rem 0 0.875rem'
     }
-  }, "At least ", MIN_PASSWORD_LENGTH, " characters, up to ", MAX_PASSWORD_LENGTH, ". No capital, digit or symbol is required \u2014 length is what counts. It cannot be only spaces.");
+  }, "At least ", MIN_PASSWORD_LENGTH, " characters, up to ", MAX_PASSWORD_LENGTH, ". No capital, digit or symbol is required. Length is what counts, and it cannot be only spaces.");
 }
 
 // The shell every signed-out screen shares, so the password-change screen
@@ -348,7 +348,8 @@ const SECONDARY_BUTTON_STYLE = {
 // login (LEGACY_SHARED_LOGIN=disabled) would lock the browser out completely
 // with no way back in.
 function LoginScreen({
-  onLogin
+  onLogin,
+  onForgotPassword
 }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
@@ -417,7 +418,146 @@ function LoginScreen({
     }
   }) : 'AUTHENTICATE'), /*#__PURE__*/React.createElement("div", {
     className: "error-msg"
-  }, error)));
+  }, error), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    style: SECONDARY_BUTTON_STYLE,
+    onClick: () => onForgotPassword(email.trim()),
+    disabled: loading
+  }, "FORGOT PASSWORD")));
+}
+
+// ─── Forgot password ─────────────────────────────────────────────────────────
+
+// POST /auth/password-reset/request answers the same generic 202 for every
+// address, whether it belongs to an active account, a deactivated one, the
+// shared identity, or nobody at all. That is deliberate: the endpoint is public
+// and would otherwise enumerate who works here.
+//
+// SO THIS SCREEN SHOWS ONE CONFIRMATION AND ONLY ONE. It never says "no account
+// found", never renders a different layout for a different outcome, and never
+// branches on anything that could depend on the address. Two answers are
+// surfaced verbatim and both are provably address-independent: INVALID_EMAIL is
+// a shape check that runs before any lookup, and TOO_MANY_ATTEMPTS is a
+// per-network throttle in front of the handler. Neither can differ between two
+// well-formed addresses, so neither gives the oracle back.
+function ForgotPasswordScreen({
+  initialEmail,
+  onBack
+}) {
+  const [email, setEmail] = useState(initialEmail || '');
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Held as a constant for the same reason lib/password-reset.js holds it as
+  // one: no future edit can turn a branch of this screen into a signal.
+  const GENERIC_CONFIRMATION = 'If an account exists for that address, a reset link is on its way. ' + 'Check your inbox and your junk folder. The link works once and expires after 60 minutes.';
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (loading) return;
+    setError('');
+    const address = email.trim();
+    if (!address || address.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      setError('Enter the email address you sign in with.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await api('POST', '/auth/password-reset/request', {
+        email: address
+      });
+      setSent(true);
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'INVALID_EMAIL') {
+        setError(err.message || 'Enter the email address you sign in with.');
+      } else if (code === 'TOO_MANY_ATTEMPTS') {
+        setError(err.message || 'Too many attempts from this network. Wait a few minutes and try again.');
+      } else if (!err || !err.status) {
+        setError('Could not reach the server. Check your connection and try again.');
+      } else {
+        // Any other failure is one the server could only have produced after it
+        // started looking at the address, so it gets the generic answer too.
+        setSent(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  if (sent) {
+    return /*#__PURE__*/React.createElement(AuthShell, {
+      subtitle: "Check your email"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: 'var(--text2)',
+        fontSize: '0.875rem',
+        lineHeight: 1.65,
+        marginBottom: '1.25rem'
+      }
+    }, GENERIC_CONFIRMATION), /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: 'var(--text3)',
+        fontSize: '0.8125rem',
+        lineHeight: 1.6,
+        marginBottom: '1.25rem'
+      }
+    }, "Open the link on this device or on your iPhone. Nothing changes until you set a new password there."), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "btn-primary",
+      onClick: onBack
+    }, "BACK TO SIGN IN"), /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      style: SECONDARY_BUTTON_STYLE,
+      onClick: () => {
+        setSent(false);
+        setError('');
+      }
+    }, "SEND IT AGAIN"));
+  }
+  return /*#__PURE__*/React.createElement(AuthShell, {
+    subtitle: "Reset your password"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text2)',
+      fontSize: '0.8125rem',
+      lineHeight: 1.6,
+      marginBottom: '1.25rem'
+    }
+  }, "Enter the email address you sign in with. We will send a link that lets you set a new password."), /*#__PURE__*/React.createElement("form", {
+    onSubmit: handleSubmit
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "input-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "email",
+    placeholder: "Email address",
+    value: email,
+    onChange: e => setEmail(e.target.value),
+    autoComplete: "username",
+    autoFocus: true
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    type: "submit",
+    disabled: loading || !email.trim()
+  }, loading ? /*#__PURE__*/React.createElement("span", {
+    className: "spinner",
+    style: {
+      borderTopColor: '#030712'
+    }
+  }) : 'SEND RESET LINK'), /*#__PURE__*/React.createElement("div", {
+    className: "error-msg"
+  }, error), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text3)',
+      fontSize: '0.75rem',
+      lineHeight: 1.55,
+      marginTop: '0.25rem'
+    }
+  }, "Signing in with the shared access code instead of an email address? That code has no reset link. Ask an admin for your own account."), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    style: SECONDARY_BUTTON_STYLE,
+    onClick: onBack,
+    disabled: loading
+  }, "BACK TO SIGN IN")));
 }
 
 // ─── Forced password change ──────────────────────────────────────────────────
@@ -427,10 +567,15 @@ function LoginScreen({
 // an account can sign in and then gets 403 PASSWORD_CHANGE_REQUIRED from every
 // endpoint except GET /api/users/me and POST /api/users/me/password. Without
 // this screen the browser dead-ends on an empty inbox.
-function ChangePasswordScreen({
-  actor,
+// The form itself, shared by the two places a password is changed: the forced
+// rotation below, and the voluntary change in the account panel. One copy means
+// one set of error mappings, and every server code is handled in exactly one
+// place rather than drifting between two screens.
+function ChangePasswordFields({
+  submitLabel,
   onDone,
-  onSignOut
+  footer,
+  autoFocus
 }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -438,12 +583,6 @@ function ChangePasswordScreen({
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-
-  // The shared team login has no personal password, so POST
-  // /api/users/me/password always refuses it. Say that here rather than after
-  // a pointless round trip.
-  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
   async function handleSubmit(e) {
     e.preventDefault();
     if (loading) return;
@@ -493,6 +632,67 @@ function ChangePasswordScreen({
       setLoading(false);
     }
   }
+  return /*#__PURE__*/React.createElement("form", {
+    onSubmit: handleSubmit
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "input-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: show ? 'text' : 'password',
+    placeholder: "Current password",
+    value: current,
+    onChange: e => setCurrent(e.target.value),
+    autoComplete: "current-password",
+    autoFocus: autoFocus !== false
+  }), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "eye-btn",
+    onClick: () => setShow(s => !s)
+  }, show ? '◉' : '○')), /*#__PURE__*/React.createElement(PasswordRules, null), /*#__PURE__*/React.createElement("div", {
+    className: "input-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: show ? 'text' : 'password',
+    placeholder: "New password",
+    value: next,
+    onChange: e => setNext(e.target.value),
+    autoComplete: "new-password"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "input-wrap"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: show ? 'text' : 'password',
+    placeholder: "Confirm new password",
+    value: confirm,
+    onChange: e => setConfirm(e.target.value),
+    autoComplete: "new-password"
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary",
+    type: "submit",
+    disabled: loading || !current || !next || !confirm
+  }, loading ? /*#__PURE__*/React.createElement("span", {
+    className: "spinner",
+    style: {
+      borderTopColor: '#030712'
+    }
+  }) : submitLabel || 'SET PASSWORD'), /*#__PURE__*/React.createElement("div", {
+    className: "error-msg"
+  }, error), typeof footer === 'function' ? footer(loading) : footer);
+}
+
+// ─── Forced password change ──────────────────────────────────────────────────
+
+// The rotation the server insists on. Reached from App when the account is
+// flagged, and only then; the voluntary route into the same form is
+// AccountPanel below.
+function ChangePasswordScreen({
+  actor,
+  onDone,
+  onSignOut
+}) {
+  const [signingOut, setSigningOut] = useState(false);
+
+  // The shared team login has no personal password, so POST
+  // /api/users/me/password always refuses it. Say that here rather than after
+  // a pointless round trip.
+  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
   async function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
@@ -532,54 +732,101 @@ function ChangePasswordScreen({
       lineHeight: 1.6,
       marginBottom: '1.25rem'
     }
-  }, actor && actor.email ? `Signed in as ${actor.email}. ` : '', "Your password must be changed before you can use the inbox."), /*#__PURE__*/React.createElement("form", {
-    onSubmit: handleSubmit
+  }, actor && actor.email ? `Signed in as ${actor.email}. ` : '', "Your password must be changed before you can use the inbox."), /*#__PURE__*/React.createElement(ChangePasswordFields, {
+    submitLabel: "SET PASSWORD",
+    onDone: onDone,
+    footer: loading => /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      style: SECONDARY_BUTTON_STYLE,
+      onClick: handleSignOut,
+      disabled: loading || signingOut
+    }, signingOut ? 'SIGNING OUT…' : 'SIGN OUT')
+  }));
+}
+
+// ─── Account panel ───────────────────────────────────────────────────────────
+
+// Where a signed-in person goes to change their password on purpose, rather
+// than because the server made them. Before this existed the only route to
+// POST /api/users/me/password in the browser was the forced-rotation screen,
+// which nobody can reach voluntarily, so somebody who suspected their password
+// was known had no way to change it without asking an admin to reset it.
+function AccountPanel({
+  actor,
+  onClose,
+  onChanged
+}) {
+  const [changed, setChanged] = useState(false);
+  const sharedSession = !!(actor && (actor.isLegacyShared || actor.viaLegacySession));
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-overlay",
+    onClick: onClose
   }, /*#__PURE__*/React.createElement("div", {
-    className: "input-wrap"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: show ? 'text' : 'password',
-    placeholder: "Current password",
-    value: current,
-    onChange: e => setCurrent(e.target.value),
-    autoComplete: "current-password",
-    autoFocus: true
-  }), /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "eye-btn",
-    onClick: () => setShow(s => !s)
-  }, show ? '◉' : '○')), /*#__PURE__*/React.createElement(PasswordRules, null), /*#__PURE__*/React.createElement("div", {
-    className: "input-wrap"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: show ? 'text' : 'password',
-    placeholder: "New password",
-    value: next,
-    onChange: e => setNext(e.target.value),
-    autoComplete: "new-password"
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "input-wrap"
-  }, /*#__PURE__*/React.createElement("input", {
-    type: show ? 'text' : 'password',
-    placeholder: "Confirm new password",
-    value: confirm,
-    onChange: e => setConfirm(e.target.value),
-    autoComplete: "new-password"
-  })), /*#__PURE__*/React.createElement("button", {
-    className: "btn-primary",
-    type: "submit",
-    disabled: loading || !current || !next || !confirm
-  }, loading ? /*#__PURE__*/React.createElement("span", {
-    className: "spinner",
+    className: "modal-card",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-header"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "modal-name"
+  }, "Account"), /*#__PURE__*/React.createElement("div", {
+    className: "modal-email"
+  }, actor && actor.email ? actor.email : 'Shared team login')), /*#__PURE__*/React.createElement("button", {
+    className: "modal-close",
+    onClick: onClose,
+    title: "Close"
+  }, "\u2715")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, sharedSession ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
-      borderTopColor: '#030712'
+      color: 'var(--text2)',
+      fontSize: '0.875rem',
+      lineHeight: 1.65,
+      marginBottom: '1rem'
     }
-  }) : 'SET PASSWORD'), /*#__PURE__*/React.createElement("div", {
-    className: "error-msg"
-  }, error), /*#__PURE__*/React.createElement("button", {
+  }, "You are signed in with the shared team login. It has no personal password to change here. Its access code lives in the server configuration, and changing it is an admin job."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text3)',
+      fontSize: '0.8125rem',
+      lineHeight: 1.6
+    }
+  }, "Ask an admin for your own account. You will get an invitation by email, and after that this panel can change your password.")) : changed ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--accent)',
+      fontSize: '0.875rem',
+      lineHeight: 1.65,
+      marginBottom: '1rem'
+    }
+  }, "Your password has been changed."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text2)',
+      fontSize: '0.8125rem',
+      lineHeight: 1.6,
+      marginBottom: '1.25rem'
+    }
+  }, "Every other device that was signed in as you has been signed out. This browser stays signed in. Your iPhone will ask for the new password the next time it reconnects."), /*#__PURE__*/React.createElement("button", {
     type: "button",
-    style: SECONDARY_BUTTON_STYLE,
-    onClick: handleSignOut,
-    disabled: loading || signingOut
-  }, signingOut ? 'SIGNING OUT…' : 'SIGN OUT')));
+    className: "btn-primary",
+    onClick: onClose
+  }, "DONE")) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: 'var(--text2)',
+      fontSize: '0.8125rem',
+      lineHeight: 1.6,
+      marginBottom: '1rem'
+    }
+  }, "Change your password. You will need the one you use now. Every other signed-in device is signed out when it changes."), /*#__PURE__*/React.createElement(ChangePasswordFields, {
+    submitLabel: "CHANGE PASSWORD",
+    onDone: () => {
+      setChanged(true);
+      if (onChanged) onChanged();
+    },
+    footer: loading => /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      style: SECONDARY_BUTTON_STYLE,
+      onClick: onClose,
+      disabled: loading
+    }, "CANCEL")
+  })))));
 }
 
 // ─── Order Card (inside modal) ────────────────────────────────────────────────
@@ -3874,6 +4121,10 @@ function App() {
     mustChange: false,
     actor: null
   });
+  // Signed-out: the reset-request screen instead of the sign-in form. Signed
+  // in: the account panel, which is the voluntary route to a password change.
+  const [forgotPassword, setForgotPassword] = useState(null); // null | { email }
+  const [showAccount, setShowAccount] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [activePhone, setActivePhone] = useState(null);
   const [messages, setMessages] = useState({});
@@ -4853,7 +5104,16 @@ function App() {
     }), /*#__PURE__*/React.createElement("span", null, "INITIALISING"));
   }
   if (!auth.ok) {
+    if (forgotPassword) {
+      return /*#__PURE__*/React.createElement(ForgotPasswordScreen, {
+        initialEmail: forgotPassword.email,
+        onBack: () => setForgotPassword(null)
+      });
+    }
     return /*#__PURE__*/React.createElement(LoginScreen, {
+      onForgotPassword: email => setForgotPassword({
+        email
+      }),
       onLogin: result => {
         const actor = result && (result.actor || result.user) || null;
         const mustChange = !!(result && (result.mustChangePassword === true || actor && actor.mustChangePassword === true));
@@ -4958,8 +5218,16 @@ function App() {
     title: "Send catch-up SMS to processing/shipped orders that never got automated messages"
   }, catchingUp ? '…' : '✉ CATCHUP'), /*#__PURE__*/React.createElement("button", {
     className: "hdr-btn",
+    onClick: () => setShowAccount(true),
+    title: "Your account and password"
+  }, "\u2699 ACCOUNT"), /*#__PURE__*/React.createElement("button", {
+    className: "hdr-btn",
     onClick: handleLogout
-  }, "EXIT"))), /*#__PURE__*/React.createElement("div", {
+  }, "EXIT"))), showAccount && /*#__PURE__*/React.createElement(AccountPanel, {
+    actor: auth.actor,
+    onClose: () => setShowAccount(false),
+    onChanged: () => addToast('Password changed. Other devices have been signed out.')
+  }), /*#__PURE__*/React.createElement("div", {
     className: "main-content"
   }, mainTab === 'contacts' && /*#__PURE__*/React.createElement(ContactsView, {
     conversations: conversations,
