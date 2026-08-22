@@ -41,6 +41,17 @@ function requestParams(query = {}) {
   };
 }
 
+function campaignRequestParams(query = {}) {
+  const params = requestParams({ ...query, period: 'all', start: undefined, end: undefined });
+  return {
+    page: params.page,
+    pageSize: params.pageSize,
+    confidence: params.confidence,
+    scope: params.scope,
+    includeInvalidated: params.includeInvalidated
+  };
+}
+
 function sendError(res, error) {
   if (error instanceof AnalyticsRequestError || /analytics range|valid date|Custom start/i.test(error?.message || '')) {
     return res.status(400).json({ error: error.message, code: 'INVALID_ANALYTICS_REQUEST' });
@@ -50,6 +61,15 @@ function sendError(res, error) {
       error: 'Analytics is not available until its additive database migration is applied.',
       code: 'ANALYTICS_NOT_READY'
     });
+  }
+  if (error?.code === 'CAMPAIGNS_NOT_READY') {
+    return res.status(503).json({
+      error: 'Campaign analytics is not available until its additive database migration is applied.',
+      code: 'CAMPAIGNS_NOT_READY'
+    });
+  }
+  if (error?.code === 'CAMPAIGN_NOT_FOUND') {
+    return res.status(404).json({ error: 'Campaign not found.', code: 'CAMPAIGN_NOT_FOUND' });
   }
   console.error('[ANALYTICS] Request failed:', error?.code || 'internal_error');
   return res.status(500).json({ error: 'Analytics could not be loaded.', code: 'ANALYTICS_LOAD_FAILED' });
@@ -79,9 +99,30 @@ function createAnalyticsRouter({ service } = {}) {
     }
   });
 
+  router.get('/campaigns/:id', async (req, res) => {
+    try {
+      const result = await analyticsService.campaignOverview(req.params.id);
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(result);
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  router.get('/campaigns/:id/attributions', async (req, res) => {
+    try {
+      const result = await analyticsService.campaignAttributions(req.params.id, campaignRequestParams(req.query));
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(result);
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
   return router;
 }
 
 module.exports = createAnalyticsRouter;
 module.exports.requestParams = requestParams;
+module.exports.campaignRequestParams = campaignRequestParams;
 module.exports.sendError = sendError;

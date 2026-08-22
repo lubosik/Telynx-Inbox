@@ -18,6 +18,11 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     /// A top-level `screen` value from a tapped notification, e.g. the release
     /// announcement's `"analytics"`. Consumed by MainTabView.
     @Published private(set) var pendingScreen: String?
+    /// Optional exact campaign destination. Current coalesced review alerts may
+    /// omit it; single-campaign alerts can add either `campaignId` or the legacy
+    /// snake-case spelling without requiring another client release.
+    @Published private(set) var pendingCampaignID: String?
+    @Published private(set) var campaignRefreshSequence = 0
     @Published private(set) var inboxRefreshSequence = 0
 
     private let installationDefaultsKey = "vici.apns.installation-id"
@@ -110,6 +115,16 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     }
 
     func consumePendingScreen() {
+        pendingScreen = nil
+    }
+
+    func queueCampaign(id: String?) {
+        pendingCampaignID = id?.trimmingCharacters(in: .whitespacesAndNewlines)
+        campaignRefreshSequence &+= 1
+    }
+
+    func consumePendingCampaignRoute() {
+        pendingCampaignID = nil
         pendingScreen = nil
     }
 
@@ -216,6 +231,10 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         inboxRefreshSequence &+= 1
     }
 
+    private func noteCampaignActivity() {
+        campaignRefreshSequence &+= 1
+    }
+
     private var installationID: String {
         if let existing = UserDefaults.standard.string(forKey: installationDefaultsKey) {
             return existing
@@ -232,8 +251,13 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // The inbox may already be onscreen, but an audible banner is still
         // valuable for a shared business inbox.
+        let screen = notification.request.content.userInfo["screen"] as? String
         Task { @MainActor in
-            MessageNotificationManager.shared.noteIncomingMessage()
+            if screen?.lowercased() == "campaigns" {
+                MessageNotificationManager.shared.noteCampaignActivity()
+            } else {
+                MessageNotificationManager.shared.noteIncomingMessage()
+            }
         }
         completionHandler([.banner, .list, .sound, .badge])
     }
@@ -247,8 +271,11 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         // it is handled alongside `phone` rather than instead of it. The two are
         // independent: a payload may carry either, both, or neither.
         let screen = userInfo["screen"] as? String
+        let campaignID = (userInfo["campaignId"] as? String)
+            ?? (userInfo["campaign_id"] as? String)
 
-        guard (phone?.isEmpty == false) || (screen?.isEmpty == false) else {
+        guard (phone?.isEmpty == false) || (screen?.isEmpty == false) ||
+                (campaignID?.isEmpty == false) else {
             completionHandler()
             return
         }
@@ -259,8 +286,13 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
                 manager.noteIncomingMessage()
                 manager.queueConversation(phone: phone)
             }
+            if screen?.lowercased() == "campaigns" || campaignID?.isEmpty == false {
+                manager.queueCampaign(id: campaignID)
+            }
             if let screen, !screen.isEmpty {
                 manager.queueScreen(screen)
+            } else if campaignID?.isEmpty == false {
+                manager.queueScreen("campaigns")
             }
             completionHandler()
         }

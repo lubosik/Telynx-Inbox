@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const createAnalyticsRouter = require('../routes/analytics');
+const { campaignRequestParams } = require('../routes/analytics');
 const { AnalyticsNotReadyError } = require('../lib/analytics/aggregate');
 
 function routeHandler(router, pathName) {
@@ -68,6 +69,40 @@ test('attribution drill-down defaults to Direct plus Strong and validates explic
   assert.equal(badResponse.statusCode, 400);
 });
 
+test('campaign analytics routes are non-cacheable and preserve confidence scopes', async () => {
+  let received;
+  const router = createAnalyticsRouter({ service: {
+    campaignOverview: async id => ({ campaign: { id }, revenue: {} }),
+    campaignAttributions: async (id, params) => { received = { id, params }; return { items: [] }; }
+  } });
+  const overview = responseRecorder();
+  await routeHandler(router, '/campaigns/:id')({ params: { id: 'c1' }, query: {} }, overview);
+  assert.equal(overview.statusCode, 200);
+  assert.equal(overview.headers['Cache-Control'], 'no-store, private');
+
+  const details = responseRecorder();
+  await routeHandler(router, '/campaigns/:id/attributions')({
+    params: { id: 'c1' }, query: { scope: 'influenced', page: '2' }
+  }, details);
+  assert.equal(details.statusCode, 200);
+  assert.equal(received.id, 'c1');
+  assert.equal(received.params.scope, 'influenced');
+  assert.equal(received.params.page, '2');
+  assert.equal(campaignRequestParams({}).scope, 'attributed');
+});
+
+test('campaign analytics reports missing migration and missing campaign without leaking details', async () => {
+  for (const [code, expectedStatus] of [['CAMPAIGNS_NOT_READY', 503], ['CAMPAIGN_NOT_FOUND', 404]]) {
+    const router = createAnalyticsRouter({ service: {
+      campaignOverview: async () => { throw Object.assign(new Error('private detail'), { code }); }
+    } });
+    const res = responseRecorder();
+    await routeHandler(router, '/campaigns/:id')({ params: { id: 'c1' }, query: {} }, res);
+    assert.equal(res.statusCode, expectedStatus);
+    assert.equal(JSON.stringify(res.payload).includes('private detail'), false);
+  }
+});
+
 test('missing migration returns 503 rather than believable zero metrics', async () => {
   const router = createAnalyticsRouter({
     service: { overview: async () => { throw new AnalyticsNotReadyError(); } }
@@ -124,7 +159,10 @@ test('both analytics endpoints remain behind the session and role boundary', () 
 
   // The property that actually matters: revenue is admin-only.
   const { ROUTE_POLICY } = require('../lib/route-policy');
-  for (const path of ['/api/analytics/overview', '/api/analytics/attributions']) {
+  for (const path of [
+    '/api/analytics/overview', '/api/analytics/attributions',
+    '/api/analytics/campaigns/:id', '/api/analytics/campaigns/:id/attributions'
+  ]) {
     const entry = ROUTE_POLICY.find(row => row.path === path && row.method === 'GET');
     assert.ok(entry, `${path} has a policy entry`);
     assert.equal(entry.permission, 'analytics.read');

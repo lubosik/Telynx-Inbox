@@ -10,6 +10,7 @@ const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
 const { normaliseTelnyxStatus, updateMessageStatus } = require('../lib/message-status');
 const { classifyAndStoreSentiment } = require('../lib/analytics/sentiment');
 const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = require('../lib/analytics/events');
+const { isOptOutRequest } = require('../lib/opt-out-language');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -94,8 +95,10 @@ module.exports = (broadcastSSE) => {
       if (existing) { console.log('Duplicate message, skipping:', messageId); return; }
 
       // STOP / opt-out detection — check before anything else
-      const stopPattern = /^(stop|stopall|stop all|unsubscribe|cancel|end|quit|opt[\s-]?out|stop the messages|stop texting|stop messaging|no more texts|no more messages|these emails|stop these emails)$/i;
-      if (stopPattern.test(text.trim())) {
+      const trustedOptOutClassification = analyticsSignatureValid
+        ? payload?.autoresponse_type
+        : null;
+      if (isOptOutRequest(text, trustedOptOutClassification)) {
         console.log(`[OPT-OUT] Received STOP from ...${fromPhone.slice(-4)}`);
         // The suppression work must survive a failure to AUDIT the suppression.
         //

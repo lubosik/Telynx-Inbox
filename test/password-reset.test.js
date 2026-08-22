@@ -507,9 +507,10 @@ test('two concurrent confirmations of one token yield exactly one password chang
   const rawToken = await requestAndCollect(bag);
   const before = bag.store.state.users.find(row => row.id === 4).session_epoch;
 
+  const OTHER_PASSWORD = 'a completely different one';
   const [first, second] = await Promise.all([
     call(bag.router, 'POST', CONFIRM_PATH, { token: rawToken, password: STRONG_PASSWORD }),
-    call(bag.router, 'POST', CONFIRM_PATH, { token: rawToken, password: 'a completely different one' })
+    call(bag.router, 'POST', CONFIRM_PATH, { token: rawToken, password: OTHER_PASSWORD })
   ]);
 
   const statuses = [first.statusCode, second.statusCode].sort();
@@ -523,9 +524,17 @@ test('two concurrent confirmations of one token yield exactly one password chang
   assert.equal(bag.store.state.resets.filter(row => row.used_at).length, 1);
   assert.equal(bag.auditRows.length, 1, 'and exactly one audit row, not two');
 
-  // The winner's password is the one that stuck, and the loser's is not.
-  assert.equal(await verifyPassword(STRONG_PASSWORD, account.password_hash), true);
-  assert.equal(await verifyPassword('a completely different one', account.password_hash), false);
+  // Which request wins is a genuine race — both hash their password before
+  // either reaches the serialised claim, so the second one wins whenever it
+  // finishes scrypt first. Naming a winner in advance made this test flaky.
+  // The invariant that actually matters is that the winner's password is the
+  // one that stuck and the loser's was discarded entirely.
+  const wonWith = first.statusCode === 200 ? STRONG_PASSWORD : OTHER_PASSWORD;
+  const lostWith = first.statusCode === 200 ? OTHER_PASSWORD : STRONG_PASSWORD;
+  assert.equal(await verifyPassword(wonWith, account.password_hash), true,
+    'the password that returned 200 is the stored one');
+  assert.equal(await verifyPassword(lostWith, account.password_hash), false,
+    'the password that returned 409 was never written');
 });
 
 test('a spent token cannot be replayed', async () => {

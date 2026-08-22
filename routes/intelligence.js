@@ -7,6 +7,10 @@ const { broadcast } = require('../lib/broadcaster');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 const { logAuditSafely } = require('../lib/audit/log');
 const { messageFingerprint } = require('../lib/audit/redact');
+const {
+  campaignLiveSendEligibility,
+  evaluateSingleRecipient
+} = require('../lib/campaigns/eligibility');
 
 router.get('/campaigns/overview', async (req, res) => {
   try {
@@ -58,10 +62,30 @@ router.post('/campaigns/:id/dismiss', async (req, res) => {
 });
 
 router.post('/campaigns/:id/send', async (req, res) => {
-  const { data: suggestion } = await supabase
-    .from('sms_campaign_suggestions').select('*').eq('id', req.params.id).single();
-  if (!suggestion) return res.status(404).json({ error: 'Not found' });
   try {
+    // This legacy one-contact suggestion path still sends immediately. It must
+    // not become a bypass around the new Campaign approval/provider brakes.
+    const live = await campaignLiveSendEligibility({ client: supabase });
+    if (!live.allowed) {
+      return res.status(409).json({
+        error: 'Live campaign sending is disabled pending explicit provider approval.',
+        code: 'CAMPAIGN_LIVE_SEND_DISABLED'
+      });
+    }
+
+    const { data: suggestion, error: suggestionError } = await supabase
+      .from('sms_campaign_suggestions').select('*').eq('id', req.params.id).maybeSingle();
+    if (suggestionError) throw suggestionError;
+    if (!suggestion) return res.status(404).json({ error: 'Not found', code: 'SUGGESTION_NOT_FOUND' });
+
+    const recipient = await evaluateSingleRecipient({ client: supabase, phone: suggestion.contact_phone });
+    if (!recipient.eligible) {
+      return res.status(403).json({
+        error: 'This recipient does not have current send eligibility.',
+        code: 'CAMPAIGN_RECIPIENT_SUPPRESSED',
+        reason: recipient.reason
+      });
+    }
     if (await isOptedOut(suggestion.contact_phone)) {
       return res.status(403).json({ error: 'This contact opted out of messages' });
     }
@@ -108,7 +132,8 @@ router.post('/campaigns/:id/send', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[INTELLIGENCE] Suggestion send failed:', err?.code || 'internal_error');
+    res.status(500).json({ error: 'That suggestion could not be sent.', code: 'SUGGESTION_SEND_FAILED' });
   }
 });
 

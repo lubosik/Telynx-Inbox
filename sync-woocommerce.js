@@ -1,6 +1,7 @@
 const { supabase } = require('./db');
 const { normalizePhone, fetchOrders, wooGet, extractTracking } = require('./woocommerce');
 const { searchContactByEmail } = require('./ghl');
+const { wooOrderItems } = require('./lib/woocommerce-order-items');
 
 // fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
 // fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
@@ -45,12 +46,7 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     last_seen: fromWebhook ? new Date().toISOString() : (order.date_modified || order.date_created || new Date().toISOString())
   }, { onConflict: 'phone' });
 
-  const items = (order.line_items || []).map(i => ({
-    name: i.name,
-    quantity: i.quantity,
-    total: i.total,
-    sku: i.sku || null
-  }));
+  const items = wooOrderItems(order);
 
   const tracking = extractTracking(order);
 

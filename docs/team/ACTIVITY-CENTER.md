@@ -175,29 +175,33 @@ It is `logAuditSafely` and awaited only **after** the sends. The customers have
 already been messaged by that point, so a failed audit insert must not turn a
 completed run into a 500 that invites somebody to run it again.
 
-### campaigns — two live, six reserved
+### campaigns — lifecycle auditing is live; launch remains reserved
 
 | event type | entity type | visibility | severity | fires from |
 |---|---|---|---|---|
 | `campaign.suggestion.sent` | `campaign_suggestion` | feed | notice | `routes/intelligence.js`, `POST /api/intelligence/campaigns/:id/send` |
 | `campaign.suggestion.dismissed` | `campaign_suggestion` | detail | info | `routes/intelligence.js`, the dismiss handler |
+| `campaign.created` | `campaign` | feed | info | `routes/campaigns.js`, draft creation |
+| `campaign.edited` | `campaign` | feed | info | `routes/campaigns.js`, draft replacement |
+| `campaign.review_submitted` | `campaign` | feed | notice | `routes/campaigns.js`, review submission |
+| `campaign.rejected` | `campaign` | feed | notice | `routes/campaigns.js`, Admin rejection |
+| `campaign.approved` | `campaign` | feed | notice | `routes/campaigns.js`, two-phase approval |
+| `campaign.scheduled` | `campaign` | feed | notice | `routes/campaigns.js`, approved scheduling |
+| `campaign.cancelled` | `campaign` | feed | notice | `routes/campaigns.js`, cancellation |
 
 A campaign *suggestion* is one AI-drafted message to one contact, approved and
 released by a human. It sits in category `'campaigns'` because that is the tab it
-belongs on, and it is **unrelated** to the reserved types below. Both are
+belongs on, and it is separate from the frozen-audience campaign lifecycle. Both are
 safe-logged after the effect: the SMS has already gone out, and an audit failure
 must not produce a 500 that invites a second send. The drafted body is referenced
 by `messageFingerprint()` — length and digest — never copied.
 
-Reserved: `campaign.created`, `campaign.edited`, `campaign.approved`,
-`campaign.scheduled`, `campaign.launched`, `campaign.cancelled`. All
-`reserved: true`; `buildRow()` throws on any of them, before the insert.
-
-They are declared now so the `category` CHECK constraint already permits
-`'campaigns'`. Widening a CHECK on a table nobody can UPDATE is not a thing to
-leave to a future rush. The writer throwing is what stops a campaign event being
-emitted before the feature that gives it meaning exists. There is deliberately
-no matching `campaign.*` permission reservation; see `docs/team/RBAC.md`.
+`campaign.approved` is consent-bearing: the database revision cannot become
+`approved` unless the exact frozen revision/audience audit row exists. Message
+content is never copied into the audit log; only allowlisted lengths/digests and
+counts are stored. `campaign.launched` alone remains reserved because this
+release deliberately has no live campaign delivery worker. Emitting it would be
+a false operational claim.
 
 ### team
 
@@ -318,12 +322,12 @@ Points worth noticing:
   `summary` is rendered from the display names and is never recomputed.
 - `logins_revoked: true` is a fact about what already happened, not an intention.
   The bump ran before the log.
-- The reserved `campaign.*` types would throw here; `team.*` are ordinary live
-  types and do not.
+- `campaign.launched` would throw here because it is still reserved; the other
+  campaign lifecycle types and every `team.*` type are live.
 
 #### `audit: true` in the route policy is still descriptive only
 
-`lib/route-policy.js` marks 16 entries `audit: true` and `lib/enforce-policy.js`
+`lib/route-policy.js` marks audited mutation entries `audit: true` and `lib/enforce-policy.js`
 copies that onto `req.policy.audit`. **Nothing reads it.** Every row in this table
 is written by an explicit `logAudit()` / `logAuditSafely()` call inside a handler,
 never by the policy layer. That is unchanged, and it is a gap rather than a
@@ -927,14 +931,9 @@ blob never becomes an unreadable wall of JSON.
 
 ### Known client/server contract gaps
 
-Documented because they are in the shipped code, not because they are intended.
 Re-verified against `ios/ViciInbox/Core/AccountModels.swift`,
-`ios/ViciInbox/Core/APIClient.swift` and `routes/audit.js`. Of the three
-originally recorded here: one is fully fixed, one is half fixed, one is
-unchanged. Two more turned up. Check the code before assuming any line of this
-section is current.
-
-**Fixed since this section was first written:**
+`ios/ViciInbox/Core/APIClient.swift` and `routes/audit.js` during the full next
+build. The previously recorded client/server contract gaps are now fixed:
 
 - **Row decoding.** `AuditItem` now declares explicit `CodingKeys` mapping every
   snake_case column (`occurred_at`, `actor_display_name`, `event_type`,
@@ -944,43 +943,19 @@ section is current.
   (`items`, `hasMore`, `nextCursor`) is camelCase because `routes/audit.js`
   builds it in JavaScript, and `AuditPage` matches it — so the two conventions
   coexist in one response and both are now decoded correctly.
-- **`AuditActor` row shape** (the row only — the envelope is still gap 2 below).
+- **`AuditActor` row shape and envelope.**
   It now has a custom `init(from:)` reading
   `actor_user_id`, `actor_display_name` and `actor_role`, accepting the id as
   either `Int` or `String`, and synthesising `id = "name:<displayName>"` when
   there is no user id — so the automation, a webhook and the shared identity stay
-  filterable.
-
-**Still open:**
-
-1. **`category=all` is rejected by the server.** Unchanged.
-   `APIClient.fetchAudit` unconditionally appends
-   `URLQueryItem(name: "category", value: category.rawValue)`, and `.all` has
-   raw value `"all"`, which is not in `CATEGORIES`. `feedParams()` throws
-   `AuditRequestError('Unknown audit category.')` → 400. The default, unfiltered
-   feed load is the case that hits it. The fix is one of: omit the parameter for
-   `.all` on the client, or accept `all` as "no filter" on the server.
-2. **The `/api/audit/actors` envelope still does not match.** The row shape was
-   fixed; the wrapper was not. The server answers
-   `{ actors: [...], scanned_rows, scan_limit }`. `fetchAuditActors()` tries a
-   bare `[AuditActor]`, then `{ items: [AuditActor] }`, then throws
-   `APIError.decoding`. Neither attempt looks for `actors`, so the Person picker
-   still stays empty and disabled.
-3. **The `campaigns` category is unreachable from the app.** `AuditCategory`
-   omits `campaigns`, matching the reservation — but the reservation is no longer
-   the whole story: `campaign.suggestion.sent` and
-   `campaign.suggestion.dismissed` are live and write rows in that category.
-   With no `campaigns` case and no working `all`, those rows cannot be listed
-   from iOS at all. `GET /api/audit/summary` still counts them.
-4. **The same envelope mismatch affects the Team screen.** `GET /api/users`
-   answers `{ users: [...], roles: [...] }` and `GET /api/invitations` answers
-   `{ invitations: [...] }`; `fetchTeam()` and the invitation fetch both try a
-   bare array then `{ items: [...] }`. Out of scope for the audit trail, but it
-   is the same class of bug and worth fixing in one pass.
-
-None of these affect what is written. The write path and the audit rows
-themselves are unaffected; this is a rendering and filtering problem on the read
-side.
+  filterable; `fetchAuditActors()` also accepts the server's `{ actors: [...] }`
+  envelope.
+- **Unfiltered Activity.** `.all` is omitted from the query rather than sent as
+  an invalid server category.
+- **Campaign filtering.** `AuditCategory` includes `campaigns`, so suggestion
+  and campaign lifecycle rows are reachable.
+- **Team/invitation envelopes.** The client decodes `{ users, roles }` and
+  `{ invitations }`, while retaining bounded compatibility fallbacks.
 
 ## Why this did not reuse the analytics event model
 

@@ -166,6 +166,24 @@ actor APIClient {
         return lastKnownUser
     }
 
+    /// Persists a first-run tour decision on the authenticated account.
+    ///
+    /// The account response owns eligibility. This client never infers a new
+    /// account when the optional onboarding envelope is absent, so deploying
+    /// the iOS build before the additive backend endpoint is safe.
+    func updateOnboarding(status: OnboardingStatus,
+                          version: Int,
+                          userID: String) async throws {
+        let (data, response) = try await post("/api/users/me/onboarding", body: [
+            "status": status.rawValue,
+            "version": version,
+            // Included only as an optimistic-concurrency check. The server
+            // must still derive authority from the authenticated actor.
+            "userId": userID
+        ])
+        try validate(data: data, response: response)
+    }
+
     func logout() async {
         _ = try? await post("/auth/logout", body: [:], retryOn401: false)
         lastKnownUser = nil
@@ -315,6 +333,120 @@ actor APIClient {
     func cancelScheduledMessage(id: String) async throws {
         let (data, response) = try await delete("/api/activity/queue/\(encodedPathSegment(id))")
         try validate(data: data, response: response)
+    }
+
+    // MARK: - Campaigns
+
+    func fetchCampaigns(page: Int = 1, pageSize: Int = 25) async throws -> CampaignPage {
+        try await decodedGET("/api/campaigns", queryItems: [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ])
+    }
+
+    func fetchCampaignReviewCount() async throws -> Int {
+        let result: CampaignReviewCount = try await decodedGET("/api/campaigns/review-count")
+        return result.count
+    }
+
+    func fetchCampaign(id: String) async throws -> CampaignDetailResponse {
+        try await decodedGET("/api/campaigns/\(encodedPathSegment(id))")
+    }
+
+    func fetchCampaignRecipients(id: String,
+                                 page: Int = 1,
+                                 pageSize: Int = 100) async throws -> CampaignRecipientPage {
+        try await decodedGET("/api/campaigns/\(encodedPathSegment(id))/recipients", queryItems: [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ])
+    }
+
+    func fetchCampaignPerformance(id: String) async throws -> CampaignPerformance {
+        try await decodedGET("/api/campaigns/\(encodedPathSegment(id))/performance")
+    }
+
+    func fetchCampaignFinancialOverview(id: String) async throws -> CampaignFinancialOverview {
+        try await decodedGET("/api/analytics/campaigns/\(encodedPathSegment(id))")
+    }
+
+    func fetchCampaignAttributions(id: String,
+                                   page: Int = 1,
+                                   pageSize: Int = 25,
+                                   scope: AttributionScope) async throws -> CampaignAttributionPage {
+        try await decodedGET(
+            "/api/analytics/campaigns/\(encodedPathSegment(id))/attributions",
+            queryItems: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: String(pageSize)),
+                URLQueryItem(name: "scope", value: scope.rawValue)
+            ]
+        )
+    }
+
+    func createCampaign(title: String,
+                        message: String,
+                        recipients: [CampaignRecipientInput]) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns", body: [
+            "title": title,
+            "message": message,
+            "workflowCategory": "manual",
+            "recipients": recipients.map(\.requestBody)
+        ])
+    }
+
+    func editCampaign(id: String,
+                      title: String,
+                      message: String,
+                      recipients: [CampaignRecipientInput]) async throws -> CampaignActionResponse {
+        let (data, response) = try await patch("/api/campaigns/\(encodedPathSegment(id))", body: [
+            "title": title,
+            "message": message,
+            "recipients": recipients.map(\.requestBody)
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignActionResponse.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    func submitCampaignForReview(id: String) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/submit-review")
+    }
+
+    func approveCampaign(id: String) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/approve")
+    }
+
+    func rejectCampaign(id: String, reason: String) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/reject",
+                                   body: ["reason": reason])
+    }
+
+    func scheduleCampaign(id: String, scheduledFor: Date) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/schedule", body: [
+            "scheduledFor": ISO8601DateFormatter().string(from: scheduledFor)
+        ])
+    }
+
+    func cancelCampaign(id: String, reason: String?) async throws -> CampaignActionResponse {
+        var body: [String: Any] = [:]
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        return try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/cancel", body: body)
+    }
+
+    func dryRunCampaign(id: String) async throws -> CampaignDryRun {
+        let (data, response) = try await post("/api/campaigns/\(encodedPathSegment(id))/dry-run", body: [:])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignDryRun.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    private func campaignMutation(_ path: String,
+                                  body: [String: Any] = [:]) async throws -> CampaignActionResponse {
+        let (data, response) = try await post(path, body: body)
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignActionResponse.self, from: data) }
+        catch { throw APIError.decoding }
     }
 
     // MARK: - Analytics

@@ -4,12 +4,17 @@ import SwiftUI
 struct ViciInboxApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var session = SessionModel()
+    @StateObject private var appearance = AppearanceModel()
+    @StateObject private var onboarding = OnboardingCoordinator()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
+                .environmentObject(appearance)
+                .environmentObject(onboarding)
+                .preferredColorScheme(appearance.preference.colorScheme)
                 .task { await session.bootstrap() }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active { session.refreshConnection() }

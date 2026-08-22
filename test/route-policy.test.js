@@ -189,6 +189,7 @@ test('the only endpoints open to any authenticated actor act on the caller\'s ow
     'PATCH /api/users/me',
     'POST /api/users/me/email',
     'POST /api/users/me/email/cancel',
+    'POST /api/users/me/onboarding',
     'POST /api/users/me/password'
   ]);
 

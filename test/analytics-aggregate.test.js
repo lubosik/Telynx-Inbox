@@ -2,23 +2,71 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const {
   aggregateCalls,
+  aggregatePeriod,
   applyAttributionFilters,
   aggregateMessaging,
   aggregatePaymentRecovery,
   aggregateRevenue,
+  aggregateRevenueDrivers,
   aggregateSentiment,
   availabilityFor,
   AnalyticsNotReadyError,
   decimalToCents,
   evidenceCodes,
+  fetchCampaignAttributions,
   fetchPaged,
+  filterCampaignAttributions,
   isMissingAnalyticsSchema,
   publicAttribution,
+  publicAttributionExplanation,
+  publicCampaignAttribution,
   sentimentChange,
   sourceCoverage
 } = require('../lib/analytics/aggregate');
+
+test('campaign revenue availability is derived from the versioned policy migration', () => {
+  const source = fs.readFileSync(require.resolve('../lib/analytics/aggregate'), 'utf8');
+  assert.match(source, /CAMPAIGN_ATTRIBUTION_GENERATION_UNAVAILABLE/);
+  assert.match(source, /campaignAttributionGenerationReady/);
+  assert.match(source, /revenueAttribution: generationReady/);
+});
+
+function campaignAttributionClient(sourceRows, forcedError = null) {
+  return {
+    from(table) {
+      assert.equal(table, 'revenue_attributions');
+      const filters = {};
+      return {
+        select(columns) { filters.columns = columns; return this; },
+        eq(column, value) { filters[column] = value; return this; },
+        is(column, value) { filters[`is:${column}`] = value; return this; },
+        in(column, values) { filters[`in:${column}`] = values; return this; },
+        order() { return this; },
+        async range(from, to) {
+          if (forcedError) return { data: null, error: forcedError };
+          let rows = sourceRows.filter(row => row.workspace_id === filters.workspace_id);
+          if (filters.campaign_id !== undefined) rows = rows.filter(row => row.campaign_id === filters.campaign_id);
+          if (Object.hasOwn(filters, 'is:campaign_id')) rows = rows.filter(row => row.campaign_id === filters['is:campaign_id']);
+          if (filters['in:originating_action_id']) {
+            rows = rows.filter(row => filters['in:originating_action_id'].includes(row.originating_action_id));
+          }
+          return { data: rows.slice(from, to + 1), error: null };
+        }
+      };
+    }
+  };
+}
+
+function emptyAnalyticsSource(overrides = {}) {
+  return {
+    messages: [], reminders: [], calls: [], attributions: [],
+    recoveryAttributions: [], sentiments: [],
+    ...overrides
+  };
+}
 
 function attribution(overrides = {}) {
   return {
@@ -60,6 +108,29 @@ test('non-recovery direct revenue is attributed but not mislabeled as recovered'
   ]);
   assert.equal(result.recoveredRevenue, '0.00');
   assert.equal(result.attributedRevenue, '400.00');
+});
+
+test('global revenue drivers show only real classified categories and keep confidence separate', () => {
+  const drivers = aggregateRevenueDrivers([
+    attribution(),
+    attribution({ id: 'manual', order_id: '101', category: 'manual', confidence_level: 'influenced', net_amount: '50.00', gross_amount: '50.00' }),
+    attribution({ id: 'reorder', order_id: '102', category: 'reorder_personal', confidence_level: 'strong', net_amount: '80.00', gross_amount: '100.00', refunded_amount: '20.00' }),
+    attribution({ id: 'restock', order_id: '103', category: 'back_in_stock', confidence_level: 'direct', net_amount: '40.00', gross_amount: '40.00' }),
+    attribution({ id: 'unknown', order_id: '104', category: 'product_enquiry', net_amount: '999.00', gross_amount: '999.00' })
+  ]);
+  assert.deepEqual(drivers.map(item => item.key), ['paymentRecovery', 'campaigns', 'reorders', 'backInStock']);
+  assert.equal(drivers.find(item => item.key === 'campaigns').attributedRevenue, '0.00');
+  assert.equal(drivers.find(item => item.key === 'campaigns').influencedRevenue, '50.00');
+  assert.equal(drivers.find(item => item.key === 'reorders').attributedRevenue, '80.00');
+  assert.equal(drivers.find(item => item.key === 'reorders').refundedRevenue, '20.00');
+  assert.equal(drivers.some(item => item.label === 'product_enquiry'), false);
+});
+
+test('global revenue driver rollup stays empty when no real driver rows exist', () => {
+  assert.deepEqual(aggregateRevenueDrivers([]), []);
+  assert.deepEqual(aggregateRevenueDrivers([
+    attribution({ category: null, confidence_level: 'unattributed' })
+  ]), []);
 });
 
 test('duplicate orders, invalidations, refunds and malformed amounts do not inflate revenue', () => {
@@ -189,6 +260,39 @@ test('large in-memory aggregate remains deterministic and bounded by supplied ro
   assert.equal(result.breakdown.direct.orderCount, 10000);
 });
 
+test('activity series uses hourly zero-filled buckets for Today', () => {
+  const range = {
+    start: new Date('2026-08-22T00:00:00.000Z'),
+    end: new Date('2026-08-22T05:30:00.000Z')
+  };
+  const result = aggregatePeriod(emptyAnalyticsSource({ messages: [
+    { id: 'm1', contact_phone: '+15550000001', direction: 'outbound', created_at: '2026-08-22T02:15:00.000Z' }
+  ] }), range, 'UTC');
+  assert.equal(result.activityGranularity, 'hour');
+  assert.equal(result.activitySeries.length, 6);
+  assert.equal(result.activitySeries[2].date, '2026-08-22T02');
+  assert.equal(result.activitySeries[2].bucketStart, '2026-08-22T02:00:00.000Z');
+  assert.equal(result.activitySeries[2].outboundMessages, 1);
+  assert.equal(result.activitySeries[1].outboundMessages, 0);
+});
+
+test('activity series adapts long ranges without emitting one label bucket per day', () => {
+  const weekly = aggregatePeriod(emptyAnalyticsSource(), {
+    start: new Date('2026-01-01T00:00:00.000Z'),
+    end: new Date('2026-04-01T00:00:00.000Z')
+  }, 'UTC');
+  assert.equal(weekly.activityGranularity, 'week');
+  assert.ok(weekly.activitySeries.length >= 13 && weekly.activitySeries.length <= 14);
+
+  const monthly = aggregatePeriod(emptyAnalyticsSource(), {
+    start: new Date('2026-01-01T00:00:00.000Z'),
+    end: new Date('2027-01-01T00:00:00.000Z')
+  }, 'UTC');
+  assert.equal(monthly.activityGranularity, 'month');
+  assert.equal(monthly.activitySeries.length, 12);
+  assert.deepEqual(monthly.activitySeries.map(point => point.date).slice(0, 2), ['2026-01', '2026-02']);
+});
+
 test('source reads page explicitly and stop after the final partial page', async () => {
   const allRows = Array.from({ length: 2501 }, (_, id) => ({ id }));
   const ranges = [];
@@ -283,6 +387,44 @@ test('attribution detail scope defaults to Direct plus Strong before pagination 
   assert.deepEqual(operations, [['eq', 'confidence_level', 'unattributed']]);
 });
 
+test('campaign attribution filtering separates Direct, Strong, Influenced and Unattributed', () => {
+  const rows = [
+    attribution({ id: 'd', confidence_level: 'direct' }),
+    attribution({ id: 's', order_id: '101', confidence_level: 'strong' }),
+    attribution({ id: 'i', order_id: '102', confidence_level: 'influenced' }),
+    attribution({ id: 'u', order_id: '103', confidence_level: 'unattributed' }),
+    attribution({ id: 'x', order_id: '104', confidence_level: 'direct', invalidated_at: '2026-08-21T00:00:00Z' })
+  ];
+  assert.deepEqual(filterCampaignAttributions(rows, {}).map(row => row.id), ['d', 's']);
+  assert.deepEqual(filterCampaignAttributions(rows, { scope: 'influenced' }).map(row => row.id), ['i']);
+  assert.deepEqual(filterCampaignAttributions(rows, { confidence: 'unattributed' }).map(row => row.id), ['u']);
+  assert.deepEqual(filterCampaignAttributions(rows, { scope: 'all', includeInvalidated: true }).map(row => row.id), ['d', 's', 'i', 'u', 'x']);
+});
+
+test('campaign source reads authoritative campaign links before merging legacy action matches', async () => {
+  const rows = [
+    { id: 'explicit', workspace_id: 'vici', campaign_id: 'c1', campaign_recipient_id: 'r1', originating_action_id: 'not-a-recipient-action' },
+    { id: 'legacy', workspace_id: 'vici', campaign_id: null, originating_action_id: 'provider-m1' },
+    { id: 'other', workspace_id: 'vici', campaign_id: 'c2', originating_action_id: 'provider-m1' }
+  ];
+  const result = await fetchCampaignAttributions(
+    campaignAttributionClient(rows), 'c1',
+    [{ id: 'r1', provider_message_id: 'provider-m1' }], 'vici'
+  );
+  assert.deepEqual(result.rows.map(row => row.id), ['explicit', 'legacy']);
+  assert.equal(result.truncated, false);
+});
+
+test('missing campaign attribution link columns fail not-ready instead of omitting revenue', async () => {
+  await assert.rejects(
+    fetchCampaignAttributions(
+      campaignAttributionClient([], { code: 'PGRST204', message: "Could not find the 'campaign_id' column" }),
+      'c1', [], 'vici'
+    ),
+    error => error?.code === 'CAMPAIGNS_NOT_READY'
+  );
+});
+
 test('detail serialization exposes audit codes but not raw supporting evidence', () => {
   const row = attribution({
     supporting_evidence: {
@@ -299,5 +441,42 @@ test('detail serialization exposes audit codes but not raw supporting evidence',
     'authoritative_payment', 'exact_order_match', 'payment_reminder', 'payment_confirmation'
   ]);
   assert.equal(JSON.stringify(item).includes('do not expose this'), false);
+  assert.equal(item.reason, 'An app interaction and authoritative payment confirmation directly link this order.');
   assert.deepEqual(evidenceCodes(null), []);
+  assert.deepEqual(evidenceCodes({
+    codes: ['trusted_provider_delivery', 'exact_target_product', 'raw_customer_body']
+  }), ['trusted_provider_delivery', 'exact_target_product']);
+});
+
+test('public attribution explanations never expose free-text database reasons', () => {
+  const secret = 'Customer wrote private medical details and phone +15551234567';
+  const item = publicAttribution(attribution({
+    confidence_level: 'influenced',
+    reason: secret,
+    supporting_evidence: { codes: ['trusted_provider_delivery'], rawText: secret }
+  }));
+  assert.equal(item.reason,
+    'The app interaction occurred before the purchase, but the available evidence cannot prove it caused the order.');
+  assert.equal(JSON.stringify(item).includes(secret), false);
+  assert.match(publicAttributionExplanation('unattributed', ['outside_attribution_window']), /outside the approved attribution window/i);
+});
+
+test('campaign drill-down keeps customer PII and raw message evidence out of the response', () => {
+  const item = publicCampaignAttribution(attribution({
+    customer_id: 'customer-private-17',
+    supporting_evidence: {
+      codes: ['trusted_provider_delivery', 'raw_customer_body'],
+      rawText: 'private customer reply',
+      contactPhone: '+15551234567'
+    }
+  }), 'campaign-1');
+  const serialized = JSON.stringify(item);
+  assert.equal(item.campaignId, 'campaign-1');
+  assert.equal('customerId' in item, false);
+  assert.equal('recipientId' in item, false);
+  assert.equal(serialized.includes('customer-private-17'), false);
+  assert.equal(serialized.includes('private customer reply'), false);
+  assert.equal(serialized.includes('+15551234567'), false);
+  assert.equal(serialized.includes('private customer reply'), false);
+  assert.deepEqual(item.supportingEvidence, ['trusted_provider_delivery']);
 });

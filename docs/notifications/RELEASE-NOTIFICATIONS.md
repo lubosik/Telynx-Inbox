@@ -451,6 +451,7 @@ lowercased values onto tabs:
 | `inbox`, `messages` | Inbox |
 | `contacts` | Contacts |
 | `automations`, `activity` | Automations |
+| `campaigns` | Growth → Campaigns; an optional `campaignId` / `campaign_id` opens the exact campaign when the actor holds `campaigns.read` |
 | `calls` | Calls |
 | anything else | ignored |
 
@@ -458,6 +459,18 @@ When the role cannot see Analytics the tap is silently ignored rather than
 redirected: landing somewhere unrelated is more confusing than staying put. The
 pending value is consumed either way, so a stale route cannot fire again on the
 next launch.
+
+### Campaign-review alerts
+
+The next-build campaign orchestrator can prepare coalesced Admin review alerts
+with `screen: "campaigns"`. A single-campaign alert may also carry
+`campaignId`; a coalesced alert intentionally omits it and opens the review
+queue. Foreground campaign alerts refresh the Growth badge without incrementing
+the Inbox unread state. This client-side routing is implemented now, but the
+backend APNs dispatcher is still disabled/unwired: a prepared notification is
+not described as sent until a separately tested dispatcher reports provider
+acceptance. Support Agents are not eligible for review notifications because
+effective `campaigns.approve` permission is required.
 
 ## Three honest limitations
 

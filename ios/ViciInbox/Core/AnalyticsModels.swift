@@ -77,6 +77,25 @@ struct AnalyticsRevenue: Codable, Hashable {
     let breakdown: RevenueBreakdown
 }
 
+struct AnalyticsRevenueDriver: Codable, Hashable, Identifiable {
+    let key: String
+    let label: String
+    let attributedRevenue: FlexibleDecimal
+    let influencedRevenue: FlexibleDecimal
+    let totalRevenueImpact: FlexibleDecimal
+    let grossRevenue: FlexibleDecimal
+    let refundedRevenue: FlexibleDecimal
+    let attributedOrders: Int
+    let influencedOrders: Int
+    let breakdown: RevenueBreakdown
+    var id: String { key }
+
+    var hasMeasuredValue: Bool {
+        attributedRevenue.value != 0 || influencedRevenue.value != 0 ||
+            totalRevenueImpact.value != 0 || attributedOrders > 0 || influencedOrders > 0
+    }
+}
+
 struct PaymentRecoveryMetrics: Codable, Hashable {
     let cohort: String
     let remindersSent: Int
@@ -153,6 +172,9 @@ struct AnalyticsTrends: Codable, Hashable {
 
 struct AnalyticsActivityPoint: Codable, Hashable, Identifiable {
     let date: String
+    /// Additive ISO-8601 bucket boundary from newer servers. `date` remains
+    /// the fallback so this app can roll out before or after the backend.
+    let bucketStart: String?
     let outboundMessages: Int
     let inboundMessages: Int
     let completedCalls: Int
@@ -168,6 +190,9 @@ struct AnalyticsOverview: Codable, Hashable {
     let currency: String
     let range: AnalyticsDateRange
     let revenue: AnalyticsRevenue
+    /// Added after the first Analytics release. Optional keeps the iOS rollout
+    /// compatible with an older backend while never fabricating categories.
+    let revenueDrivers: [AnalyticsRevenueDriver]?
     let paymentRecovery: PaymentRecoveryMetrics
     let messaging: MessagingMetrics
     let responsePerformance: ResponsePerformanceMetrics
@@ -175,6 +200,9 @@ struct AnalyticsOverview: Codable, Hashable {
     let sentiment: SentimentMetrics
     let trends: AnalyticsTrends
     let activitySeries: [AnalyticsActivityPoint]
+    /// hour, day, week or month on newer servers. Nil means the legacy daily
+    /// series and is handled conservatively by the chart.
+    let activityGranularity: String?
     let availability: AnalyticsAvailability
     let warnings: [AnalyticsWarning]
 }
@@ -225,6 +253,42 @@ struct AttributionRecord: Codable, Hashable, Identifiable {
     let supportingEvidence: [String]
     let isRefunded: Bool
     let invalidatedAt: String?
+
+    /// Defence in depth for devices talking to an older backend. The UI never
+    /// renders the free-text `reason` field; explanations are produced only
+    /// from the fixed classification and allowlisted evidence-code DTO.
+    var safeExplanation: String {
+        let evidence = Set(supportingEvidence)
+        if invalidatedAt != nil {
+            return "Later authoritative evidence invalidated this attribution, so it is excluded from active totals."
+        }
+        switch confidenceLevel {
+        case .direct:
+            if evidence.contains("payment_confirmation") && evidence.contains("authoritative_payment") {
+                return "An app interaction and authoritative payment confirmation directly link this order."
+            }
+            if evidence.contains("trusted_provider_delivery") && evidence.contains("exact_target_product") {
+                return "Trusted campaign delivery and an exact matching product conversion directly link this order."
+            }
+            return "Structured communication and order evidence directly link this conversion to the app."
+        case .strong:
+            return "The exact customer or order match and conversion timing strongly link this revenue to the app."
+        case .influenced:
+            return "The app interaction occurred before the purchase, but the available evidence cannot prove it caused the order."
+        case .unattributed:
+            if evidence.contains("outside_attribution_window") {
+                return "The order occurred outside the approved attribution window and remains Unattributed."
+            }
+            if evidence.contains("target_product_not_in_order") || evidence.contains("target_product_evidence_missing") {
+                return "The available product evidence does not match the campaign closely enough to attribute this order."
+            }
+            if evidence.contains("recipient_identity_not_exact") || evidence.contains("customer_id_conflict") ||
+                evidence.contains("contradictory_evidence") {
+                return "Customer or order evidence is incomplete or contradictory, so this revenue remains Unattributed."
+            }
+            return "There is not enough verified evidence to fairly attribute this order to the app."
+        }
+    }
 }
 
 struct AnalyticsPagination: Codable, Hashable {

@@ -213,13 +213,13 @@ private struct FieldChangeRow: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Text(change.before ?? "—")
+                Text(change.before ?? "Not available")
                     .strikethrough(change.before != nil && change.after != nil)
                     .foregroundStyle(.secondary)
                 Image(systemName: "arrow.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text(change.after ?? "—")
+                Text(change.after ?? "Not available")
             }
             .font(.footnote)
             .fixedSize(horizontal: false, vertical: true)

@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS revenue_attributions (
   workflow                 text,
   originating_action_type  text,
   originating_action_id    text,
+  campaign_id              uuid,
+  campaign_recipient_id    uuid,
   action_at                timestamptz,
   conversion_at            timestamptz,
   attribution_window_seconds integer CHECK (attribution_window_seconds IS NULL OR attribution_window_seconds >= 0),
@@ -117,6 +119,60 @@ CREATE INDEX IF NOT EXISTS revenue_attributions_conversion_idx
   ON revenue_attributions (workspace_id, conversion_at DESC);
 CREATE INDEX IF NOT EXISTS revenue_attributions_customer_idx
   ON revenue_attributions (workspace_id, contact_phone, conversion_at DESC);
+-- Analytics and Campaigns can be applied in either order after their shared
+-- RBAC/audit prerequisites. If this table predates campaign columns, converge
+-- it now; attach foreign keys only when the campaign tables already exist.
+-- scripts/campaigns-migration.sql performs the reciprocal conditional attach.
+ALTER TABLE public.revenue_attributions
+  ADD COLUMN IF NOT EXISTS campaign_id uuid,
+  ADD COLUMN IF NOT EXISTS campaign_recipient_id uuid;
+CREATE INDEX IF NOT EXISTS revenue_attributions_campaign_recipient_idx
+  ON revenue_attributions (campaign_id, campaign_recipient_id)
+  WHERE campaign_id IS NOT NULL;
+DO $$
+BEGIN
+  IF to_regclass('public.sms_campaigns') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'public.revenue_attributions'::regclass
+         AND conname = 'revenue_attributions_campaign_fk'
+         AND pg_get_constraintdef(oid) NOT LIKE 'FOREIGN KEY (workspace_id, campaign_id)%'
+     ) THEN
+    ALTER TABLE public.revenue_attributions DROP CONSTRAINT revenue_attributions_campaign_fk;
+  END IF;
+  IF to_regclass('public.sms_campaigns') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'public.revenue_attributions'::regclass
+         AND conname = 'revenue_attributions_campaign_fk'
+     ) THEN
+    ALTER TABLE public.revenue_attributions
+      ADD CONSTRAINT revenue_attributions_campaign_fk
+      FOREIGN KEY (workspace_id, campaign_id)
+      REFERENCES public.sms_campaigns(workspace_id, id) NOT VALID;
+  END IF;
+  IF to_regclass('public.sms_campaign_recipients') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'public.revenue_attributions'::regclass
+         AND conname = 'revenue_attributions_campaign_recipient_fk'
+         AND pg_get_constraintdef(oid) NOT LIKE 'FOREIGN KEY (workspace_id, campaign_recipient_id)%'
+     ) THEN
+    ALTER TABLE public.revenue_attributions DROP CONSTRAINT revenue_attributions_campaign_recipient_fk;
+  END IF;
+  IF to_regclass('public.sms_campaign_recipients') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint
+       WHERE conrelid = 'public.revenue_attributions'::regclass
+         AND conname = 'revenue_attributions_campaign_recipient_fk'
+     ) THEN
+    ALTER TABLE public.revenue_attributions
+      ADD CONSTRAINT revenue_attributions_campaign_recipient_fk
+      FOREIGN KEY (workspace_id, campaign_recipient_id)
+      REFERENCES public.sms_campaign_recipients(workspace_id, id) NOT VALID;
+  END IF;
+END
+$$;
 
 CREATE TABLE IF NOT EXISTS revenue_attribution_history (
   history_id               bigserial PRIMARY KEY,

@@ -236,15 +236,13 @@ test('an absent req.actor falls back to the legacy team actor rather than blocki
 
 // ── Writer rules ───────────────────────────────────────────────────────────
 
-test('reserved campaign event types throw instead of being written', async () => {
+test('campaign.launched remains reserved until a real delivery worker exists', async () => {
   const auditRows = [];
   const client = fakeClient({ auditRows });
-  for (const eventType of ['campaign.created', 'campaign.launched', 'campaign.cancelled']) {
-    await assert.rejects(
-      () => logAudit({ eventType, summary: 'x' }, { client, broadcast: () => {} }),
-      error => error instanceof AuditWriteError && /reserved/i.test(error.message)
-    );
-  }
+  await assert.rejects(
+    () => logAudit({ eventType: 'campaign.launched', summary: 'x' }, { client, broadcast: () => {} }),
+    error => error instanceof AuditWriteError && /reserved/i.test(error.message)
+  );
   assert.equal(auditRows.length, 0);
 });
 

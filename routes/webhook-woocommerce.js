@@ -1,9 +1,10 @@
-const crypto = require('crypto');
 const { supabase } = require('../db');
 const { syncOrder, runWooSync } = require('../sync-woocommerce');
 const { recordWooOrderEvent } = require('../lib/analytics/events');
 const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
+const { verifyWooSignature, wooDeliveryID } = require('../lib/woocommerce-webhook');
+const { recordTrustedProductEvent } = require('../lib/campaigns/product-webhooks');
 
 // SMS flows
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
@@ -60,15 +61,6 @@ async function resolvePhone(order) {
 }
 
 // Message templates moved to flows/confirmed.js and flows/shipped.js
-
-function verifyWooSignature(rawBody, signature, secret) {
-  try {
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('base64');
-    const supplied = Buffer.from(String(signature), 'utf8');
-    const calculated = Buffer.from(expected, 'utf8');
-    return supplied.length === calculated.length && crypto.timingSafeEqual(supplied, calculated);
-  } catch { return false; }
-}
 
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
@@ -231,12 +223,44 @@ module.exports = (broadcastSSE) => {
       // completed. It is deliberately not awaited: a slow/missing analytics
       // schema must never delay payment-flow cancellation or customer SMS.
       void recordWooOrderEvent(order, {
-        deliveryID: req.headers['x-wc-delivery-id'] || null,
+        // Official WooCommerce header first; retain the old alias for webhook
+        // deliveries recorded before this correction.
+        deliveryID: wooDeliveryID(req.headers),
         topic,
         signatureValid
       }).catch(error => console.error('[ANALYTICS] Deferred Woo capture failed:', error.code || 'write_error'));
     } catch (err) {
       console.error('[WEBHOOK] WooCommerce handler error:', err.message, err.stack);
+    }
+  });
+
+  // Product create/update webhooks are campaign opportunity inputs, not an
+  // operational order flow. Unlike the historical order endpoint, they are
+  // fail-closed: no secret or an invalid signature means no database write and
+  // no back-in-stock opportunity.
+  router.post('/woocommerce-product', async (req, res) => {
+    const secret = process.env.WC_WEBHOOK_SECRET;
+    const signature = req.headers['x-wc-webhook-signature'];
+    if (!secret) {
+      console.error('[WOO PRODUCT] WC_WEBHOOK_SECRET is missing; refusing product event.');
+      return res.status(503).json({ error: 'Webhook verification is unavailable.' });
+    }
+    if (!verifyWooSignature(req.body, signature, secret)) {
+      console.warn('[WOO PRODUCT] Invalid webhook signature; event rejected.');
+      return res.status(401).json({ error: 'Invalid webhook signature.' });
+    }
+
+    try {
+      const result = await recordTrustedProductEvent({
+        client: supabase,
+        rawBody: req.body,
+        headers: req.headers,
+        deliveryID: wooDeliveryID(req.headers)
+      });
+      return res.status(200).json({ received: true, restockCandidate: result.restockCandidate });
+    } catch (error) {
+      console.error('[WOO PRODUCT] Trusted event capture failed:', error?.code || 'write_error');
+      return res.status(500).json({ error: 'Product event could not be recorded.' });
     }
   });
 
