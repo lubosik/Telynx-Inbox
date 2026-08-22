@@ -372,7 +372,12 @@ BEGIN
     password_hash, password_set_at, must_change_password
   ) VALUES (
     invitation.email, invitation.display_name, invitation.phone, invitation.role_key,
-    p_password_hash, now(), true
+    -- must_change_password = false: the invitee chose this password themselves
+    -- on the accept-invite page, seconds ago. Nobody else has ever seen it, so
+    -- forcing an immediate second change protects nothing. The admin-set paths
+    -- (POST /api/users, /reset-password) set the flag in application code and
+    -- are unaffected. See scripts/invitation-password-fix-migration.sql.
+    p_password_hash, now(), false
   )
   RETURNING id INTO new_user_id;
 

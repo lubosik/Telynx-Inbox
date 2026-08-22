@@ -7,11 +7,6 @@ struct InboxView: View {
     @State private var search = ""
     @State private var path: [ConversationSummary] = []
     @State private var pendingNotificationPhone: String?
-    /// Settings used to be reachable only from the Analytics tab's toolbar.
-    /// That tab is now hidden from roles without `analytics.read`, which would
-    /// have taken Sign Out, Team, and Activity with it. Inbox is the one tab
-    /// every role has, so the entry point lives here as well.
-    @State private var showingSettings = false
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -48,15 +43,13 @@ struct InboxView: View {
                 MessageThreadView(conversation: conversation, model: model)
             }
             .searchable(text: $search, prompt: "Name or phone")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
-            }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            // Settings, Team, Activity and Sign out all live behind the account
+            // button now, which is on every tab rather than only on the two
+            // that happened to have a gear icon. Inbox previously carried a
+            // duplicate entry point because Analytics is hidden from roles
+            // without `analytics.read`, and that would otherwise have taken
+            // Sign Out with it.
+            .accountToolbar()
             .task {
                 while !Task.isCancelled {
                     await model.load()

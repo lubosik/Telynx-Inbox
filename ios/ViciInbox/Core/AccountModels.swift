@@ -18,6 +18,11 @@ enum Permission {
     static let analyticsRead    = "analytics.read"
     static let auditRead        = "audit.read"
     static let userManage       = "user.manage"
+    /// Granting or revoking the Owner role. Deliberately not held by `admin` or
+    /// `legacy` in scripts/rbac-migration.sql, so only an Owner sees Owner in a
+    /// role picker. The server refuses it independently with 403
+    /// `OWNER_ROLE_REQUIRES_OWNER`.
+    static let userManageOwner  = "user.manage.owner"
     static let syncRun          = "sync.run"
     static let catchupSend      = "catchup.send"
 }
@@ -74,13 +79,27 @@ struct AuthResponse: Decodable {
 
 // MARK: - Roles
 
-/// The role vocabulary is not part of the backend contract this client was
-/// built against; only "Admin" and "Support Agent" are named. These are the
-/// seeds for the invite picker and are merged with whatever roles the server
-/// actually reports from `/api/users`, so a role this client has never heard of
-/// still appears and still round-trips.
+/// Offline fallback for role display names.
+///
+/// The authority is the server's own catalogue: `GET /api/users` answers
+/// `{ users: [...], roles: [...] }` and each role carries a `display_name` read
+/// from `sms_roles`. Prefer `TeamModel.roleLabel(_:)`, which consults that
+/// catalogue first. This enum is only what the client shows before the
+/// catalogue has loaded, or if the server stops sending it — a renamed role
+/// reads correctly from the server and stale here, which is the right way round.
+///
+/// It must never be the reason the interface says "agent" where the product
+/// says "Support Agent".
 enum RoleCatalog {
     static let seeds = ["admin", "agent"]
+
+    /// The one role key with a client-side rule attached: an Owner may not
+    /// change a *different* Owner's role or deactivate them.
+    static let owner = "owner"
+
+    static func isOwner(_ raw: String?) -> Bool {
+        raw?.lowercased() == owner
+    }
 
     static func label(_ raw: String?) -> String {
         guard let raw, !raw.isEmpty else { return "No role" }
@@ -245,6 +264,68 @@ enum AuditCategory: String, CaseIterable, Identifiable {
 
 // MARK: - Team
 
+/// One entry of the server's role catalogue, as returned alongside the member
+/// list by `GET /api/users`.
+///
+/// `routes/users.js` passes `sms_roles` rows straight through from PostgREST,
+/// so the keys are snake_case (`display_name`, `is_assignable`) even though the
+/// `users` array beside them is camelCase. Both spellings are accepted here
+/// because that asymmetry is easy to "tidy up" on the server by accident, and
+/// the cost of guessing wrong is a picker that silently shows raw keys.
+struct TeamRole: Decodable, Identifiable, Hashable {
+    let key: String
+    let displayName: String?
+    let rank: Int?
+    let isAssignable: Bool?
+    let summary: String?
+
+    var id: String { key }
+
+    /// The product's name for this role. Falls back to the client's own table
+    /// and then to the raw key, so an unrecognised role is still legible.
+    var label: String { displayName?.isEmpty == false ? displayName! : RoleCatalog.label(key) }
+
+    /// Absent means assignable. A role the server has not marked either way is
+    /// offered rather than hidden; the server refuses it with
+    /// `ROLE_NOT_ASSIGNABLE` if that guess is wrong.
+    var assignable: Bool { isAssignable ?? true }
+
+    var isOwner: Bool { RoleCatalog.isOwner(key) }
+
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case displayNameSnake = "display_name"
+        case displayNameCamel = "displayName"
+        case rank
+        case isAssignableSnake = "is_assignable"
+        case isAssignableCamel = "isAssignable"
+        case description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = (try? container.decode(String.self, forKey: .key)) ?? ""
+        displayName = (try? container.decodeIfPresent(String.self, forKey: .displayNameSnake))
+            ?? (try? container.decodeIfPresent(String.self, forKey: .displayNameCamel))
+            ?? nil
+        rank = (try? container.decodeIfPresent(Int.self, forKey: .rank)) ?? nil
+        isAssignable = (try? container.decodeIfPresent(Bool.self, forKey: .isAssignableSnake))
+            ?? (try? container.decodeIfPresent(Bool.self, forKey: .isAssignableCamel))
+            ?? nil
+        summary = (try? container.decodeIfPresent(String.self, forKey: .description)) ?? nil
+    }
+}
+
+/// `GET /api/users` answers with both halves of the Team screen in one payload.
+/// Keeping them together means the role catalogue is never a second request
+/// that can fail on its own and leave the picker showing raw keys.
+struct TeamDirectory {
+    let members: [TeamMember]
+    let roles: [TeamRole]
+
+    static let empty = TeamDirectory(members: [], roles: [])
+}
+
 struct TeamMember: Codable, Identifiable, Hashable {
     let id: String
     let displayName: String?
@@ -256,6 +337,7 @@ struct TeamMember: Codable, Identifiable, Hashable {
     var name: String { displayName ?? email ?? "Member" }
     var active: Bool { isActive ?? true }
     var lastSeenDate: Date? { ServerDate.parse(lastSeenAt) }
+    var isOwner: Bool { RoleCatalog.isOwner(role) }
 
     private enum CodingKeys: String, CodingKey {
         case id, displayName, email, role, isActive, lastSeenAt
@@ -274,22 +356,63 @@ struct TeamMember: Codable, Identifiable, Hashable {
     }
 }
 
-struct Invitation: Codable, Identifiable, Hashable {
+/// A pending or historical invitation, as serialised by `publicInvitation()` in
+/// routes/invitations.js.
+///
+/// Two field names here were wrong before this release and both failed
+/// silently. The server sends `invitedAt`, not `createdAt`; and it has never
+/// sent `inviteToken` / `inviteUrl` *inside* this object — on creation the raw
+/// token and link are siblings of it, which is why the invite link never once
+/// appeared on screen. `InvitationCreation` below reads them from where they
+/// actually are. The two optional properties are kept only so a future server
+/// that does nest them still works.
+/// Decodable, not Codable, for the same reason as `AuditActor`: this is only
+/// ever read from the server, and `CodingKeys` carries a `createdAt` alias with
+/// no stored property behind it, so Swift cannot synthesise an encoder.
+/// Declaring `Codable` asks for one and fails to compile.
+struct Invitation: Decodable, Identifiable, Hashable {
     let id: String
     let email: String?
+    let displayName: String?
     let role: String?
-    let createdAt: String?
+    /// `open`, `accepted`, `expired`, or `revoked`. Absent on an older backend.
+    let status: String?
+    let invitedAt: String?
     let expiresAt: String?
     let acceptedAt: String?
-    /// Returned once, only on creation. There is no email sender configured, so
-    /// this is the only time the link can be handed to the invitee.
+    let revokedAt: String?
     let inviteToken: String?
     let inviteUrl: String?
 
-    var isAccepted: Bool { acceptedAt != nil }
+    var name: String { displayName ?? email ?? "Invited member" }
+    var isAccepted: Bool { status?.lowercased() == "accepted" || acceptedAt != nil }
+    var expiresDate: Date? { ServerDate.parse(expiresAt) }
+
+    /// Still worth chasing: not accepted, not revoked, not expired. Falls back
+    /// to the timestamps when the server does not send `status`, so an older
+    /// backend degrades to the previous behaviour rather than to an empty list.
+    var isPending: Bool {
+        if let status = status?.lowercased(), !status.isEmpty { return status == "open" }
+        if acceptedAt != nil || revokedAt != nil { return false }
+        if let expiry = expiresDate { return expiry > Date() }
+        return true
+    }
+
+    /// Why this invitation is no longer actionable, for the pending list's
+    /// secondary line. Nil while it is still open.
+    var statusLabel: String? {
+        switch status?.lowercased() {
+        case "accepted": return "Accepted"
+        case "revoked":  return "Revoked"
+        case "expired":  return "Expired"
+        default:         return nil
+        }
+    }
 
     private enum CodingKeys: String, CodingKey {
-        case id, email, role, createdAt, expiresAt, acceptedAt, inviteToken, inviteUrl
+        case id, email, displayName, role, status
+        case invitedAt, createdAt, expiresAt, acceptedAt, revokedAt
+        case inviteToken, inviteUrl
     }
 
     init(from decoder: Decoder) throws {
@@ -298,12 +421,143 @@ struct Invitation: Codable, Identifiable, Hashable {
         else if let value = try? container.decode(Int.self, forKey: .id) { id = String(value) }
         else { id = UUID().uuidString }
         email = try? container.decodeIfPresent(String.self, forKey: .email)
+        displayName = try? container.decodeIfPresent(String.self, forKey: .displayName)
         role = try? container.decodeIfPresent(String.self, forKey: .role)
-        createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
+        status = try? container.decodeIfPresent(String.self, forKey: .status)
+        // `createdAt` is accepted as an alias so a rename in either direction
+        // cannot blank the date again.
+        invitedAt = (try? container.decodeIfPresent(String.self, forKey: .invitedAt))
+            ?? (try? container.decodeIfPresent(String.self, forKey: .createdAt))
+            ?? nil
         expiresAt = try? container.decodeIfPresent(String.self, forKey: .expiresAt)
         acceptedAt = try? container.decodeIfPresent(String.self, forKey: .acceptedAt)
+        revokedAt = try? container.decodeIfPresent(String.self, forKey: .revokedAt)
         inviteToken = try? container.decodeIfPresent(String.self, forKey: .inviteToken)
         inviteUrl = try? container.decodeIfPresent(String.self, forKey: .inviteUrl)
+    }
+}
+
+/// The answer to `POST /api/invitations`.
+///
+/// Deliberately tolerant, because the endpoint is being changed by another
+/// workstream while this screen is being written. Today the server answers
+/// `{ invitation, token, acceptUrl, note }` with no email sender at all. Once
+/// a provider is configured it is expected to report whether the email
+/// actually went. Every one of those shapes has to render honestly, and the
+/// one thing this must never do is claim an email was sent because a field was
+/// missing.
+struct InvitationCreation: Decodable {
+    let invitation: Invitation?
+    private let token: String?
+    private let acceptUrl: String?
+    private let inviteUrl: String?
+    private let inviteToken: String?
+    private let emailSentFlag: Bool?
+    private let nestedEmail: EmailReport?
+    private let emailReason: String?
+    let emailError: String?
+
+    private struct EmailReport: Decodable {
+        let sent: Bool?
+        let delivered: Bool?
+        let address: String?
+        let to: String?
+        let error: String?
+
+        var didSend: Bool? { sent ?? delivered }
+        var recipient: String? { address ?? to }
+    }
+
+    /// Whether the server says an email went out, as three states rather than
+    /// two. `unknown` exists because "the field is absent" and "the field is
+    /// false" mean different things, and collapsing them is exactly how a UI
+    /// ends up lying to an admin.
+    enum EmailOutcome: Equatable {
+        case sent(String?)
+        case notSent
+        case unknown
+    }
+
+    var emailOutcome: EmailOutcome {
+        let flag = emailSentFlag ?? nestedEmail?.didSend
+        switch flag {
+        case .some(true):  return .sent(nestedEmail?.recipient ?? invitation?.email)
+        case .some(false): return .notSent
+        case .none:        return .unknown
+        }
+    }
+
+    /// The one-time acceptance link, if the server could build one. `APP_URL`
+    /// is not always configured, in which case there is a token but no URL.
+    var link: String? {
+        for candidate in [acceptUrl, inviteUrl, invitation?.inviteUrl] {
+            if let candidate, !candidate.isEmpty { return candidate }
+        }
+        return nil
+    }
+
+    /// The raw token, which is all there is when no link could be built.
+    var rawToken: String? {
+        for candidate in [token, inviteToken, invitation?.inviteToken] {
+            if let candidate, !candidate.isEmpty { return candidate }
+        }
+        return nil
+    }
+
+    /// What to put on the clipboard: the link when there is one, the token
+    /// otherwise. Nil means the server returned neither and there is genuinely
+    /// nothing to hand over.
+    var shareableSecret: String? { link ?? rawToken }
+
+    /// True when the clipboard value is a bare token rather than a URL, so the
+    /// copy can say so instead of calling it a link.
+    var isBareToken: Bool { link == nil && rawToken != nil }
+
+    private enum CodingKeys: String, CodingKey {
+        case invitation, token, acceptUrl, inviteUrl, inviteToken
+        case emailSent, emailWasSent, email, emailError, emailReason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        invitation = try? container.decodeIfPresent(Invitation.self, forKey: .invitation)
+        token = (try? container.decodeIfPresent(String.self, forKey: .token)) ?? nil
+        acceptUrl = (try? container.decodeIfPresent(String.self, forKey: .acceptUrl)) ?? nil
+        inviteUrl = (try? container.decodeIfPresent(String.self, forKey: .inviteUrl)) ?? nil
+        inviteToken = (try? container.decodeIfPresent(String.self, forKey: .inviteToken)) ?? nil
+        emailSentFlag = (try? container.decodeIfPresent(Bool.self, forKey: .emailSent))
+            ?? (try? container.decodeIfPresent(Bool.self, forKey: .emailWasSent))
+            ?? nil
+        // `email` is a String on some shapes (the address) and an object on
+        // others (a delivery report). Only the object carries a claim about
+        // sending, so a plain string is ignored rather than misread as one.
+        nestedEmail = (try? container.decodeIfPresent(EmailReport.self, forKey: .email)) ?? nil
+        emailReason = (try? container.decodeIfPresent(String.self, forKey: .emailReason)) ?? nil
+        emailError = (try? container.decodeIfPresent(String.self, forKey: .emailError))
+            ?? nestedEmail?.error
+    }
+
+    /// Why no email went, as a sentence rather than the machine token the
+    /// server uses. An unrecognised reason is shown verbatim rather than
+    /// swallowed — a strange word on screen is recoverable, a silent "no email"
+    /// with no cause is not.
+    var emailFailureExplanation: String? {
+        if let emailError, !emailError.isEmpty { return emailError }
+        guard let emailReason, !emailReason.isEmpty else { return nil }
+        switch emailReason {
+        case "not_configured":
+            return "No email provider is configured on the server."
+        case "no_app_url":
+            return "The server has no public address configured, so it could not build a link to send."
+        case "provider_error":
+            return "The email provider rejected the message."
+        case "timeout", "network_error":
+            return "The server could not reach the email provider."
+        case "invalid_message", "no_fetch", "unknown":
+            return "The server could not send it."
+        default:
+            return emailReason
+        }
     }
 }
 

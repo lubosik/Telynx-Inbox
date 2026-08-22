@@ -606,7 +606,7 @@ test('redeeming an invitation writes team.member.activated with the invitee as t
   db.supabase.from = client.from.bind(client);
   let userId;
   try {
-    userId = await createInvitationStore({ client }).redeem(hashToken(rawToken), 'scrypt$1$deadbeef$cafebabe');
+    ({ userId } = await createInvitationStore({ client }).redeem(hashToken(rawToken), 'scrypt$1$deadbeef$cafebabe'));
   } finally {
     db.supabase.from = originalFrom;
   }
@@ -640,7 +640,7 @@ test('a failed audit never blocks a redemption: the account is already created',
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
-    const userId = await createInvitationStore({ client }).redeem('a'.repeat(64), 'hash');
+    const { userId } = await createInvitationStore({ client }).redeem('a'.repeat(64), 'hash');
     assert.equal(userId, 777);
   } finally {
     console.warn = originalWarn;
@@ -772,7 +772,7 @@ test('redemption without a req still succeeds, with null request context', async
   const originalFrom = db.supabase.from;
   db.supabase.from = client.from.bind(client);
   try {
-    assert.equal(await createInvitationStore({ client }).redeem('d'.repeat(64), 'hash'), 903);
+    assert.equal((await createInvitationStore({ client }).redeem('d'.repeat(64), 'hash')).userId, 903);
   } finally {
     db.supabase.from = originalFrom;
   }

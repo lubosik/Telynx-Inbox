@@ -919,10 +919,17 @@ function makeInvitationStore(rows = []) {
         if (row.accepted_at) throw new Error('INVITATION_USED');
         if (new Date(row.expires_at).getTime() <= Date.now()) throw new Error('INVITATION_EXPIRED');
         const userId = 500 + state.users.length;
-        state.users.push({ id: userId, email: row.email, password_hash: passwordHash, must_change_password: true });
+        // Mirrors redeem_sms_invitation in scripts/rbac-migration.sql, which sets
+        // must_change_password = false — the invitee chose this password
+        // themselves. __mustChange lets a test stand in for a database where
+        // the fix migration has NOT been applied.
+        const mustChange = row.__mustChange === true;
+        state.users.push({ id: userId, email: row.email, password_hash: passwordHash, must_change_password: mustChange });
         row.accepted_at = new Date().toISOString();
         row.accepted_user_id = userId;
-        return userId;
+        // { userId, email } — the real store echoes the address back so the
+        // sign-in form can prefill it.
+        return { userId, email: row.email, mustChangePassword: mustChange };
       });
     },
     async noteAttempt(tokenHash) { state.attempts.push(tokenHash); }
@@ -999,11 +1006,58 @@ test('two simultaneous redemptions of one invitation yield exactly one account',
   assert.equal(store.state.users.length, 1, 'exactly one account may be created');
   assert.equal(responses.find(res => res.statusCode === 409).payload.code, 'INVITATION_USED');
 
-  // The invitee never sets their own final password this way, so they are
-  // forced to rotate on first sign-in.
-  assert.equal(responses.find(res => res.statusCode === 201).payload.mustChangePassword, true);
-  assert.equal(store.state.users[0].must_change_password, true);
+  // The invitee DOES set their own final password here — they typed it into
+  // the accept-invite page moments ago and nobody else has ever seen it. An
+  // immediate forced rotation protected nothing and turned joining into a
+  // two-step chore. The admin-set paths (POST /api/users, /reset-password)
+  // still set the flag, because there the password WAS seen by someone else.
+  assert.equal(responses.find(res => res.statusCode === 201).payload.mustChangePassword, false);
+  assert.equal(store.state.users[0].must_change_password, false);
+
+  // The address is echoed back so the sign-in form can prefill it. Without it
+  // the invitee is asked to recall which address they were invited on, in the
+  // one flow where they have no account to recover from.
+  assert.equal(responses.find(res => res.statusCode === 201).payload.email, 'newbie@example.com');
   assert.ok(store.state.users[0].password_hash.startsWith('scrypt$1$'));
+});
+
+test('the accept response reports the stored flag rather than assuming it', async () => {
+  // must_change_password is set by a database function, and the application
+  // cannot know which version of that function is deployed. So it reads the
+  // flag back from the row it just created rather than asserting a value.
+  //
+  // Hardcoding `false` would let the app tell an invitee "you can sign in now"
+  // while the database quietly flags the account for rotation — the response
+  // and the truth diverging on the one screen where a brand new person has no
+  // way to judge which of the two to believe.
+  for (const stored of [true, false]) {
+    const rawToken = 'z'.repeat(43);
+    const { authRouter } = invitationsFixture([{
+      id: crypto.randomUUID(),
+      email: 'flagcheck@example.com',
+      display_name: 'Flag Check',
+      role_key: 'agent',
+      token_hash: hashToken(rawToken),
+      token_prefix: hashToken(rawToken).slice(0, 8),
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      accepted_at: null,
+      revoked_at: null,
+      attempt_count: 0,
+      __mustChange: stored
+    }]);
+
+    const accept = handlerFor(authRouter, 'POST', '/invitation/accept');
+    const res = responseRecorder();
+    await accept(makeRequest({
+      method: 'POST', url: '/auth/invitation/accept',
+      body: { token: rawToken, password: 'a-perfectly-fine-password' }
+    }), res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.payload.mustChangePassword, stored,
+      `the response must mirror the stored flag (${stored}), never a hardcoded value`);
+    assert.equal(res.payload.email, 'flagcheck@example.com');
+  }
 });
 
 test('unknown, revoked and expired invitation tokens are each refused', async () => {
