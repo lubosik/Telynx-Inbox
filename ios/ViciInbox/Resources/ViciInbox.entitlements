@@ -7,5 +7,23 @@
 	     TestFlight/App Store builds. -->
 	<key>aps-environment</key>
 	<string>development</string>
+
+	<!-- Universal links. A team invitation arrives as
+	     https://<host>/accept-invite?token=... and must open this app on the
+	     Accept Invitation screen rather than Safari.
+	     Two things outside this file have to agree or the link silently keeps
+	     opening the website:
+	       1. The host must serve /.well-known/apple-app-site-association with
+	          an applinks entry for TEAMID.com.vicipeptides.inbox. That file is
+	          in the web service, not here.
+	       2. The distribution provisioning profile must carry the Associated
+	          Domains capability. The TestFlight workflow signs with a
+	          cloud-managed profile, so the App ID has to have the capability
+	          enabled; a profile without it makes exportArchive fail loudly
+	          rather than ship a broken link. See ios/CI-TESTFLIGHT.md. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:web-production-2551e.up.railway.app</string>
+	</array>
 </dict>
 </plist>

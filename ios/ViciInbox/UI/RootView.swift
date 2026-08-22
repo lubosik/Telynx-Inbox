@@ -2,14 +2,46 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var session: SessionModel
+    @ObservedObject private var inviteLinks = InviteLinkRouter.shared
     @State private var showingReauthentication = false
+
+    /// The invitation link this screen has taken ownership of. Drained out of
+    /// `InviteLinkRouter` rather than read from it directly, so the router can
+    /// be cleared immediately and a later `onAppear` cannot reopen a screen the
+    /// invitee already finished with.
+    @State private var pendingInvitation: InviteLinkRouter.PendingInvitation?
+
+    /// Handed to `LoginView` after an invitation is accepted. The server echoes
+    /// the invitee's address back on success, and prefilling it is the whole
+    /// point of not signing them in automatically.
+    @State private var signInPrefillEmail = ""
+
+    /// An invitation must never sit in front of a ringing or connected call.
+    /// Nothing else on this screen outranks the phone.
+    private var isCallOnScreen: Bool {
+        guard let call = session.activeCall else { return false }
+        return call.phase != .idle
+    }
 
     var body: some View {
         Group {
-            if session.isCheckingSession {
+            // Before the sign-in gate, like LoginView, because the invitee has
+            // no session and the account they would sign in with does not
+            // exist yet. Everything below this line is unchanged.
+            if let pendingInvitation, !isCallOnScreen {
+                AcceptInvitationView(invitation: pendingInvitation) { email in
+                    signInPrefillEmail = email
+                    self.pendingInvitation = nil
+                }
+            } else if session.isCheckingSession {
                 ProgressView().controlSize(.large)
             } else if !session.isSignedIn {
-                LoginView()
+                // `id` forces a fresh LoginView when an invitation has just
+                // supplied an address. Without it SwiftUI can reuse the view
+                // that is already on screen, and the prefill is a `@State`
+                // initial value that a reused view never re-reads.
+                LoginView(prefilledEmail: signInPrefillEmail)
+                    .id(signInPrefillEmail)
             } else if let call = session.activeCall, call.phase != .idle {
                 InCallView(call: call)
                     .transition(.move(edge: .bottom))
@@ -38,6 +70,29 @@ struct RootView: View {
         .onChange(of: session.isAuthenticationLost) { lost in
             if !lost { showingReauthentication = false }
         }
+        // Both halves of the deep link, for the same reason MainTabView needs
+        // both. A new teammate taps their invitation exactly once, on a freshly
+        // installed app, so the cold launch is the normal case: the link is
+        // delivered before this view exists and `onChange` never fires for it.
+        .onAppear { applyPendingInvitation() }
+        .onChange(of: inviteLinks.pendingInvitation) { _ in applyPendingInvitation() }
+        // The prefill belongs to one invitation, not to the device. Dropping it
+        // on sign-in stops a later sign-out from offering the invitee's address
+        // to whoever picks the phone up next.
+        .onChange(of: session.isSignedIn) { signedIn in
+            if signedIn { signInPrefillEmail = "" }
+        }
+    }
+
+    /// Takes ownership of a queued invitation link.
+    ///
+    /// The router is cleared as soon as the value is copied, so returning to
+    /// this screen later does not reopen an invitation that was already
+    /// accepted or dismissed. The token is not logged and not persisted.
+    private func applyPendingInvitation() {
+        guard let queued = inviteLinks.pendingInvitation else { return }
+        pendingInvitation = queued
+        inviteLinks.consumePendingInvitation()
     }
 }
 

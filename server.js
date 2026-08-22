@@ -103,6 +103,21 @@ const sendLimiter = rateLimit({
   message: { error: 'Too many messages, slow down' }
 });
 
+// ── Public well-known documents (no auth) ─────────────────────────────────
+// `/.well-known/apple-app-site-association` is what iOS fetches to decide
+// whether an ${APP_URL}/accept-invite?token=... link may open the native app
+// instead of Safari.
+//
+// THIS MOUNT'S POSITION IS THE FIX. Before this line existed the path fell
+// through to the SPA catch-all at the bottom of this file and Apple received
+// index.html with HTTP 200 — valid-looking, entirely wrong, and silent: no
+// error, no log, universal links simply never worked. It must stay above
+// express.static and above `app.get('/{*splat}')`, and it is deliberately
+// above the `/api` gate and outside its prefix, because Apple fetches it
+// anonymously and a 401 reads to it exactly like a missing document.
+// test/apple-site-association.test.js asserts both orderings against this file.
+app.use('/.well-known', require('./routes/well-known')());
+
 // ── Webhooks (no auth) ────────────────────────────────────────────────────
 app.use('/webhook', require('./routes/webhook')(broadcastSSE));
 app.use('/webhook', require('./routes/webhook-ghl')(broadcastSSE));
@@ -154,6 +169,35 @@ app.use('/webhooks/voice', require('./routes/voice-webhook'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', uptime: Math.floor(process.uptime()), ts: new Date().toISOString() });
+});
+
+// ── The invitation landing page (no auth) ─────────────────────────────────
+// `/accept-invite?token=...` is the Universal Link in the invitation email. On
+// an iPhone with the app installed iOS intercepts it and this never runs; on
+// every other device, and on the first tap before the app exists, it must land
+// on something that explains itself.
+//
+// It is served explicitly rather than left to the SPA catch-all. The React app
+// no longer has an accept-invitation screen — new teammates are not meant to
+// see the web inbox at all — so the catch-all would drop an invitee on a login
+// form with no account and no explanation. public/accept-invite.html is a
+// self-contained page that says they need the iPhone app and points at
+// TestFlight.
+//
+// PLACEMENT: after the /.well-known mount, before express.static and before the
+// catch-all, and deliberately not under /api so the policy enforcer never sees
+// it. The invitee has no session and must not need one. Getting this ordering
+// wrong is the same class of bug that made apple-app-site-association return
+// index.html with HTTP 200; test/apple-site-association.test.js asserts it.
+//
+// The token is NOT read, logged or validated here. It is a live single-use
+// credential, the page only inspects its shape for display, and
+// POST /auth/invitation/accept remains the only thing that verifies it.
+app.get('/accept-invite', (req, res) => {
+  // Keyed to a single-use invitation token, so no intermediary should hold a
+  // copy and no shared device should re-serve it from cache.
+  res.set('Cache-Control', 'no-store, private');
+  res.sendFile(path.join(__dirname, 'public', 'accept-invite.html'));
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

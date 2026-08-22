@@ -233,8 +233,8 @@ function PasswordRules() {
   );
 }
 
-// The shell every signed-out screen shares, so the invitation and
-// password-change screens sit in the same card as the sign-in form.
+// The shell every signed-out screen shares, so the password-change screen
+// sits in the same card as the sign-in form.
 function AuthShell({ subtitle, children }) {
   return (
     <div className="login-screen">
@@ -264,12 +264,8 @@ const SECONDARY_BUTTON_STYLE = {
 // Agent can reach the web UI at all. Without this field, retiring the shared
 // login (LEGACY_SHARED_LOGIN=disabled) would lock the browser out completely
 // with no way back in.
-//
-// `initialEmail` and `notice` are how the invitation screen hands somebody
-// over after they have activated their account: the address is already known,
-// and being told why they were moved here beats a silent redirect.
-function LoginScreen({ onLogin, initialEmail = '', notice = '' }) {
-  const [email, setEmail] = useState(initialEmail);
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -301,16 +297,6 @@ function LoginScreen({ onLogin, initialEmail = '', notice = '' }) {
 
   return (
     <AuthShell subtitle="Secure Inbox Access">
-      {notice && (
-        <div style={{
-          color: 'var(--accent)', background: 'var(--accent-dim)',
-          border: '1px solid var(--border-bright)', borderRadius: '10px',
-          padding: '0.75rem 0.875rem', fontSize: '0.8125rem',
-          lineHeight: 1.5, marginBottom: '1.25rem'
-        }}>
-          {notice}
-        </div>
-      )}
       <form onSubmit={handleSubmit}>
         <div className="input-wrap">
           <input
@@ -319,7 +305,7 @@ function LoginScreen({ onLogin, initialEmail = '', notice = '' }) {
             value={email}
             onChange={e => setEmail(e.target.value)}
             autoComplete="username"
-            autoFocus={!initialEmail}
+            autoFocus
           />
         </div>
         <div className="input-wrap">
@@ -338,165 +324,6 @@ function LoginScreen({ onLogin, initialEmail = '', notice = '' }) {
           {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'AUTHENTICATE'}
         </button>
         <div className="error-msg">{error}</div>
-      </form>
-    </AuthShell>
-  );
-}
-
-// ─── Accept an invitation ────────────────────────────────────────────────────
-
-// Reached at ${APP_URL}/accept-invite?token=<raw token>. Express serves
-// index.html for any unmatched path, so this file is what has to notice the
-// URL. There is no router: the screen is picked from window.location, the same
-// way the existing ?thread= deep link is read.
-//
-// The invitee has no session, so this must render before any auth check.
-function readInviteRoute() {
-  let pathname = '/';
-  let search = '';
-  try {
-    pathname = window.location.pathname || '/';
-    search = window.location.search || '';
-  } catch { return null; }
-  const normalised = pathname.replace(/\/+$/, '').toLowerCase() || '/';
-  if (normalised !== '/accept-invite') return null;
-
-  let raw = null;
-  try { raw = new URLSearchParams(search).get('token'); } catch { raw = null; }
-  const token = typeof raw === 'string' ? raw.trim() : '';
-
-  // routes/auth.js rejects anything outside 16..512 characters with
-  // INVITATION_NOT_FOUND. Saying so now beats presenting a form that cannot
-  // possibly succeed. The token itself is never rendered or logged.
-  let problem = null;
-  if (!token) problem = 'missing';
-  else if (token.length < 16 || token.length > 512 || /\s/.test(token)) problem = 'malformed';
-
-  return { token, problem };
-}
-
-function AcceptInviteScreen({ token, problem, onSignIn }) {
-  const [pw, setPw] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [show, setShow] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(null); // { email } once the account exists
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (loading) return;
-    setError('');
-
-    const problemText = passwordProblem(pw);
-    if (problemText) { setError(problemText); return; }
-    if (pw !== confirm) { setError('Those two passwords do not match.'); return; }
-
-    setLoading(true);
-    try {
-      const result = await api('POST', '/auth/invitation/accept', { token, password: pw });
-      // The response carries { success, userId, mustChangePassword, note } and
-      // today no email address, so the prefill is best-effort rather than
-      // assumed. If the server starts returning one, it is used automatically.
-      setDone({ email: (result && (result.email || (result.user && result.user.email))) || '' });
-    } catch (err) {
-      const code = err && err.code;
-      if (code === 'INVITATION_NOT_FOUND') {
-        setError('This invitation link is not valid. Ask whoever invited you to send a new one.');
-      } else if (code === 'INVITATION_EXPIRED') {
-        setError('This invitation has expired. Ask whoever invited you for a fresh link.');
-      } else if (code === 'INVITATION_REVOKED') {
-        setError('This invitation was revoked. Ask whoever invited you to send a new one.');
-      } else if (code === 'INVITATION_USED') {
-        setError('This invitation has already been used. If that was you, sign in below instead.');
-      } else if (code === 'EMAIL_ALREADY_EXISTS') {
-        setError('An account already exists for this address. Sign in below instead.');
-      } else if (code === 'PASSWORD_TOO_WEAK') {
-        setError(err.message || `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-      } else if (code === 'TOO_MANY_ATTEMPTS') {
-        setError('Too many attempts from this network. Wait a few minutes and try again.');
-      } else if (code === 'INVITATION_ACCEPT_FAILED') {
-        setError('Something went wrong setting up the account. Try again in a moment.');
-      } else if (!err || !err.status) {
-        setError('Could not reach the server. Check your connection and try again.');
-      } else {
-        setError((err && err.message) || 'That invitation could not be accepted.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // A link with no usable token: say so immediately, and still offer a way on.
-  if (problem) {
-    return (
-      <AuthShell subtitle="Invitation">
-        <div className="error-msg" style={{ marginTop: 0, marginBottom: '1.25rem' }}>
-          {problem === 'missing'
-            ? 'This invitation link is missing its token. It was probably shortened or cut off in the message it arrived in. Ask whoever invited you to send the full link again.'
-            : 'This invitation link is malformed, so it cannot be used. Ask whoever invited you to send the full link again.'}
-        </div>
-        <button type="button" className="btn-primary" onClick={() => onSignIn('')}>
-          GO TO SIGN IN
-        </button>
-      </AuthShell>
-    );
-  }
-
-  if (done) {
-    return (
-      <AuthShell subtitle="Account ready">
-        <div style={{ color: 'var(--text2)', fontSize: '0.875rem', lineHeight: 1.6, marginBottom: '1rem' }}>
-          Your account has been created and your password is set.
-        </div>
-        <div style={{ color: 'var(--text3)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-          Sign in with{done.email ? ` ${done.email} and` : ' your email address and'} the password
-          you just chose. For security, you will be asked to set the password once more
-          on that first sign-in.
-        </div>
-        <button type="button" className="btn-primary" onClick={() => onSignIn(done.email)}>
-          CONTINUE TO SIGN IN
-        </button>
-      </AuthShell>
-    );
-  }
-
-  return (
-    <AuthShell subtitle="Accept your invitation">
-      <div style={{ color: 'var(--text2)', fontSize: '0.8125rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-        Choose a password to finish setting up your account.
-      </div>
-      <form onSubmit={handleSubmit}>
-        <PasswordRules />
-        <div className="input-wrap">
-          <input
-            type={show ? 'text' : 'password'}
-            placeholder="New password"
-            value={pw}
-            onChange={e => setPw(e.target.value)}
-            autoComplete="new-password"
-            autoFocus
-          />
-          <button type="button" className="eye-btn" onClick={() => setShow(s => !s)}>
-            {show ? '◉' : '○'}
-          </button>
-        </div>
-        <div className="input-wrap">
-          <input
-            type={show ? 'text' : 'password'}
-            placeholder="Confirm password"
-            value={confirm}
-            onChange={e => setConfirm(e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
-        <button className="btn-primary" type="submit" disabled={loading || !pw || !confirm}>
-          {loading ? <span className="spinner" style={{ borderTopColor: '#030712' }} /> : 'CREATE ACCOUNT'}
-        </button>
-        <div className="error-msg">{error}</div>
-        <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={() => onSignIn('')} disabled={loading}>
-          I ALREADY HAVE AN ACCOUNT
-        </button>
       </form>
     </AuthShell>
   );
@@ -2677,10 +2504,6 @@ function App() {
   // `mustChange` gates the inbox behind ChangePasswordScreen; `actor` is the
   // identity the server returns under `actor` on /auth/login and /auth/check.
   const [auth, setAuth] = useState({ checking: true, ok: false, mustChange: false, actor: null });
-  // Read once, at mount, from window.location. Null for every normal visit.
-  const [inviteRoute, setInviteRoute] = useState(readInviteRoute);
-  const [loginPrefill, setLoginPrefill] = useState('');
-  const [loginNotice, setLoginNotice] = useState('');
   const [conversations, setConversations] = useState([]);
   const [activePhone, setActivePhone] = useState(null);
   const [messages, setMessages] = useState({});
@@ -2736,12 +2559,6 @@ function App() {
   }
 
   useEffect(() => {
-    // An invitee has no session. Skip the check entirely rather than flashing
-    // the INITIALISING spinner at somebody the answer cannot apply to.
-    if (inviteRoute) {
-      setAuth({ checking: false, ok: false, mustChange: false, actor: null });
-      return;
-    }
     api('GET', '/auth/check')
       .then(d => {
         const actor = (d && (d.actor || d.user)) || null;
@@ -2753,7 +2570,7 @@ function App() {
         });
       })
       .catch(() => setAuth({ checking: false, ok: false, mustChange: false, actor: null }));
-  }, [inviteRoute]);
+  }, []);
 
   // Any screen can be the one that trips the lock. Route to the screen that
   // clears it instead of surfacing a raw 403.
@@ -3495,30 +3312,10 @@ function App() {
     : 'Enable push notifications';
 
   // ── Top-level screen selection ────────────────────────────────────────────
-  // Order matters. /accept-invite wins over everything because the person
-  // following that link has no session and must not be shown a sign-in form
-  // they cannot yet use.
-  if (inviteRoute) {
-    return (
-      <AcceptInviteScreen
-        token={inviteRoute.token}
-        problem={inviteRoute.problem}
-        onSignIn={(email) => {
-          // Take the raw token out of the address bar and out of the back
-          // button before handing over to sign-in.
-          try { window.history.replaceState({}, '', '/'); } catch {}
-          setLoginPrefill(email || '');
-          setLoginNotice(
-            email
-              ? `Your account is ready. Sign in as ${email} with the password you just set.`
-              : 'Sign in with your email address and password.'
-          );
-          setInviteRoute(null);
-        }}
-      />
-    );
-  }
-
+  // Three states only: checking, signed out, and a signed-in account whose
+  // password the server insists on rotating first. This bundle has no
+  // invitation screen: /accept-invite is a static page Express serves in place
+  // of the app shell, and an invitation is redeemed in the iPhone app.
   if (auth.checking) {
     return (
       <div className="loading-screen">
@@ -3531,15 +3328,12 @@ function App() {
   if (!auth.ok) {
     return (
       <LoginScreen
-        initialEmail={loginPrefill}
-        notice={loginNotice}
         onLogin={(result) => {
           const actor = (result && (result.actor || result.user)) || null;
           const mustChange = !!(result && (
             result.mustChangePassword === true ||
             (actor && actor.mustChangePassword === true)
           ));
-          setLoginNotice('');
           setAuth({ checking: false, ok: true, mustChange, actor });
         }}
       />

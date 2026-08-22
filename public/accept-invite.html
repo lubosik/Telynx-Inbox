@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#101413">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Vici Inbox invitation</title>
+<!--
+  Standalone by design. No React, no bundle, no fonts, no analytics, no network
+  calls of any kind. A brand new teammate opens this on a phone that does not
+  have the app yet, possibly on a bad connection, and it has to paint instantly.
+
+  This page never accepts the invitation. Acceptance happens in the iPhone app.
+  The whole job here is to bridge the gap between an emailed universal link and
+  a phone that has nothing installed to catch it.
+
+  The token stays in the address bar so the "Open in Vici Inbox" retry keeps
+  working, but it is never rendered into the document and never logged.
+-->
+<style>
+  :root {
+    --ground: #101413;
+    --card: #171d1c;
+    --hairline: rgba(126, 199, 188, 0.16);
+    --hairline-bright: rgba(126, 199, 188, 0.34);
+    --ink: #f2f2f0;
+    --ink-2: #c9c9c6;
+    --ink-3: #8b9693;
+    --tint: #7ec7bc;
+    --tint-dim: rgba(126, 199, 188, 0.1);
+    --danger: #f08b84;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100%;
+    padding: max(2rem, env(safe-area-inset-top)) 1.25rem max(2.5rem, env(safe-area-inset-bottom));
+    display: flex;
+    justify-content: center;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 27rem;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 2.5rem 1.75rem;
+  }
+
+  /* ── Wordmark ────────────────────────────────────────────────────────── */
+  .lockup { text-align: center; margin-bottom: 2.5rem; }
+  .lockup .vici {
+    font-family: Georgia, 'Times New Roman', 'Iowan Old Style', serif;
+    font-size: 2.75rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    /* tracking adds a trailing gap after the last glyph; nudge back to centre */
+    text-indent: 0.18em;
+    color: var(--ink);
+    line-height: 1.1;
+  }
+  .lockup .peptides {
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+    color: var(--ink-2);
+    margin-top: 0.375rem;
+  }
+  .lockup .kicker {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 1.25rem;
+  }
+
+  /* ── Content ─────────────────────────────────────────────────────────── */
+  h1 {
+    font-size: 1.375rem;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.875rem;
+  }
+  p { color: var(--ink-2); margin-bottom: 1.125rem; }
+  p.quiet { color: var(--ink-3); font-size: 0.875rem; }
+  p:last-child { margin-bottom: 0; }
+
+  ol.steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0 0 1.75rem;
+  }
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 2.5rem;
+    margin-bottom: 1.125rem;
+    color: var(--ink-2);
+  }
+  ol.steps li:last-child { margin-bottom: 0; }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0.0625rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background: var(--tint-dim);
+    border: 1px solid var(--hairline-bright);
+    color: var(--tint);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  ol.steps strong { color: var(--ink); font-weight: 650; }
+
+  /* ── Actions ─────────────────────────────────────────────────────────── */
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 3.375rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 14px;
+    font-size: 1rem;
+    font-weight: 650;
+    text-decoration: none;
+    text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary {
+    background: var(--tint);
+    color: #0b100f;
+    border: 1px solid var(--tint);
+  }
+  .btn-primary:active { opacity: 0.82; }
+  .btn-secondary {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-bright);
+  }
+  .btn-secondary:active { background: var(--tint-dim); }
+  .btn + .btn { margin-top: 0.75rem; }
+
+  .under-btn {
+    color: var(--ink-3);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    text-align: center;
+    margin: 0.75rem 0 0;
+  }
+
+  .rule {
+    height: 1px;
+    background: var(--hairline);
+    border: 0;
+    margin: 1.75rem 0;
+  }
+
+  .note {
+    background: rgba(126, 199, 188, 0.06);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 1rem 1.125rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+  .note strong { color: var(--ink); font-weight: 650; }
+  .note p { font-size: inherit; margin-bottom: 0.625rem; }
+  .note p:last-child { margin-bottom: 0; }
+
+  .alert-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    border: 1px solid rgba(240, 139, 132, 0.4);
+    background: rgba(240, 139, 132, 0.1);
+    color: var(--danger);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+
+  [hidden] { display: none !important; }
+
+  @media (min-width: 30rem) {
+    .card { padding: 3rem 2.5rem; }
+    .lockup .vici { font-size: 3.25rem; }
+  }
+</style>
+</head>
+<body>
+<main class="card">
+
+  <div class="lockup">
+    <div class="vici">VICI</div>
+    <div class="peptides">PEPTIDES</div>
+    <div class="kicker">Team invitation</div>
+  </div>
+
+  <!-- Nothing is shown until the script has picked a state, so a broken link
+       can never flash a button that cannot possibly work. -->
+
+  <!-- State A: iPhone, link looks usable. -->
+  <section id="state-ios" hidden>
+    <h1>Finish setting up in the app</h1>
+    <p>
+      Vici Inbox is an iPhone app. Your invitation is accepted inside that app,
+      not in this browser, so there is nothing to fill in on this page.
+    </p>
+
+    <a id="open-in-app" class="btn btn-primary" href="#">Open in Vici Inbox</a>
+    <p class="under-btn">
+      Already installed the app? This opens your invitation in it.
+    </p>
+
+    <hr class="rule">
+
+    <h1>If you do not have the app yet</h1>
+    <ol class="steps">
+      <li>
+        <strong>Install TestFlight</strong> from the App Store. It is Apple's own
+        app for trying apps that are not on the App Store yet, and it is free.
+      </li>
+      <li>
+        <strong>Install Vici Inbox</strong> using the email Apple sent you. Open it,
+        tap the invitation, and TestFlight will install the app.
+      </li>
+      <li>
+        <strong>Tap the link in our invitation email again.</strong> With the app
+        installed it will open there, and you can set your password.
+      </li>
+    </ol>
+
+    <a class="btn btn-secondary" href="https://testflight.apple.com/" rel="noopener noreferrer">Get it on TestFlight</a>
+
+    <hr class="rule">
+
+    <div class="note">
+      <p>
+        <strong>You should also have an email from Apple</strong> inviting you to
+        test Vici Inbox. It arrives separately from ours, so look for it in your
+        inbox and in your junk folder.
+      </p>
+      <p>
+        If there is no email from Apple, ask whoever invited you. They need to add
+        your Apple ID as a tester before you can install anything.
+      </p>
+    </div>
+  </section>
+
+  <!-- State B: not an iPhone. No TestFlight button, because it leads nowhere
+       on this device. -->
+  <section id="state-not-ios" hidden>
+    <div class="alert-icon" aria-hidden="true">!</div>
+    <h1>You will need an iPhone</h1>
+    <p>
+      Vici Inbox is an iPhone app. There is no Android version and no version you
+      can use in a browser, so this invitation cannot be completed on this device.
+    </p>
+    <p>
+      Open our invitation email on an iPhone and tap the link there instead. Your
+      invitation stays valid in the meantime.
+    </p>
+    <p class="quiet">
+      If you do not have an iPhone, tell whoever invited you now rather than later.
+      They will need to sort that out before you can be given access.
+    </p>
+  </section>
+
+  <!-- State C: no token, or a token that cannot be the real thing. -->
+  <section id="state-bad-link" hidden>
+    <div class="alert-icon" aria-hidden="true">!</div>
+    <h1 id="bad-link-title">This invitation link is incomplete</h1>
+    <p id="bad-link-body">
+      The link is missing the part that identifies your invitation.
+    </p>
+    <p>
+      Links are often shortened or cut in half by the app they arrive in. Ask
+      whoever invited you to send the invitation again, and open it by tapping
+      the link rather than copying and pasting it.
+    </p>
+    <p class="quiet">
+      Nothing has gone wrong with your account. There is simply nothing here for
+      this page to hand over to the app.
+    </p>
+  </section>
+
+  <noscript>
+    <h1>Finish setting up in the app</h1>
+    <p>
+      Vici Inbox is an iPhone app, and your invitation is accepted inside it. On
+      your iPhone, install TestFlight from the App Store, use the email from Apple
+      to install Vici Inbox, then tap the link in our invitation email again.
+    </p>
+    <p class="quiet">
+      If no email from Apple has arrived, ask whoever invited you to add your
+      Apple ID as a tester.
+    </p>
+  </noscript>
+
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // Invitation tokens are crypto.randomBytes(32) encoded base64url, so 43
+  // characters from [A-Za-z0-9_-] with no padding. This is a shape check to
+  // avoid showing a dead button, nothing more. Whether a well-formed token is
+  // real, unexpired and unredeemed is the server's business, and it is the only
+  // thing that can answer that.
+  var TOKEN_SHAPE = /^[A-Za-z0-9_-]{40,48}$/;
+
+  function readToken() {
+    try {
+      return new URLSearchParams(window.location.search).get('token');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function show(id) {
+    var el = document.getElementById(id);
+    if (el) el.hidden = false;
+  }
+
+  var raw = readToken();
+  var token = typeof raw === 'string' ? raw.trim() : '';
+
+  if (!token || !TOKEN_SHAPE.test(token)) {
+    if (token) {
+      document.getElementById('bad-link-title').textContent =
+        'This invitation link is damaged';
+      document.getElementById('bad-link-body').textContent =
+        'The part of the link that identifies your invitation is not in a form ' +
+        'this app can use.';
+    }
+    show('state-bad-link');
+    return;
+  }
+
+  // iPadOS 13+ reports itself as a Mac, but the app is iPhone only, so a real
+  // Mac and an iPad both land in the same honest answer and there is nothing to
+  // disambiguate.
+  var ua = navigator.userAgent || '';
+  var isIPhone = /iPhone|iPod/.test(ua);
+
+  if (!isIPhone) {
+    show('state-not-ios');
+    return;
+  }
+
+  // The retry. iOS opens a universal link in the app automatically, but once
+  // somebody has chosen "open in Safari" for this domain it stops doing that
+  // until a link is opened from the app banner or the choice is reset. Pointing
+  // at the current URL keeps the token attached without ever rendering it.
+  var openInApp = document.getElementById('open-in-app');
+  try {
+    openInApp.href = window.location.href;
+  } catch (e) {
+    openInApp.href = '/accept-invite' + window.location.search;
+  }
+
+  show('state-ios');
+}());
+</script>
+</body>
+</html>
