@@ -204,6 +204,30 @@ override's author degrades to "a team member" rather than firing a request that
 would 403. The date and the reason always show, because they arrive on the
 override row itself.
 
+### Against the research
+
+`TRACKING-AND-LEARNING-RESEARCH.md` is cited above and by
+`lib/campaigns/segment-notifications.js` but is **not committed on any branch**.
+It survives only inside a dangling stash object, `e6606a2`, on
+`ios/onboarding-spotlight`. Read it with
+`git show e6606a2:docs/campaigns/TRACKING-AND-LEARNING-RESEARCH.md`, and commit
+it properly before that object is garbage collected. Its "Segmentation UX"
+section asks for six things:
+
+| asked for | where it is |
+|---|---|
+| named segment, live count, plain-language rules, browsable members | the list row and `SegmentDetailView` |
+| origin label and edit affordance, not a separate menu | `SegmentOriginBadge` on every row, one list, and controls that differ by kind |
+| per-person rule trace, "the thing nobody else has" | `SegmentMemberEvidenceView` |
+| the trace ends in an "exits if" line | `SegmentInclusionEvidence.exitConditions` |
+| override as a surviving property, shown as a sentence naming who and when | `attributionSentence`, over the existing override tables |
+| live member count while building | the running "Chosen" count in the manual builder |
+
+The one item NOT built is Braze's "which campaigns and flows currently target
+this segment". There is no link from a segment to a campaign anywhere in the
+schema or the API, so the client has nothing to read. It needs a backend change
+first and is deliberately not faked.
+
 ## Notifications
 
 `SEGMENT_CHANGE_NOTIFICATIONS_ENABLED` must be the exact lowercase string

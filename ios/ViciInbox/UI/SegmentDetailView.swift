@@ -510,6 +510,20 @@ struct SegmentMemberEvidenceView: View {
                     Text("These are the numbers the engine recorded at the time, not a fresh calculation. That is why an old membership still reads as what the rules said then.")
                 }
             }
+            let exits = member.evidence.exitConditions
+            if !exits.isEmpty {
+                Section {
+                    ForEach(exits, id: \.self) { condition in
+                        Label(condition, systemImage: "arrow.right.circle")
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } header: {
+                    Text("What would take them back out")
+                } footer: {
+                    Text("An automatic segment is meant to be predictable. These are the conditions the engine checks, so you can tell in advance when somebody will drop out of it.")
+                }
+            }
             SegmentMemberTimingSection(member: member)
         }
 

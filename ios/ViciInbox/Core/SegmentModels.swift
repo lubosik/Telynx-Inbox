@@ -641,6 +641,44 @@ struct SegmentInclusionEvidence: Hashable {
         }
     }
 
+    /// What would take this person back out again.
+    ///
+    /// The rule-trace sketch in TRACKING-AND-LEARNING-RESEARCH.md ends its
+    /// checklist with an "exits if" line, and it is the half that turns a
+    /// membership into something an operator can predict rather than just
+    /// audit. These are read off the detector, not off this row: they are the
+    /// conditions `calculateReorderCadence` and `qualifyWinback` test, plus the
+    /// commercial eligibility gate every candidate passes through first.
+    var exitConditions: [String] {
+        if source == "manual_selection" {
+            return ["Nothing automatic. They stay until somebody removes them."]
+        }
+        if source == "manual_override_include" {
+            return ["Nothing automatic. They stay until the force include is reversed."]
+        }
+        switch detector {
+        case "reorder":
+            return [
+                "They place another order. That starts a fresh cycle and the expected window moves with it.",
+                "They are contacted about this order.",
+                "The product stops being in stock.",
+                "Their commercial eligibility record stops being current and clear.",
+                "Somebody holds them out of this segment."
+            ]
+        case "winback":
+            var reasons = ["They place another order."]
+            if let expires = SegmentDateText.day(text("expiresAt")) {
+                reasons.append("This qualification lapses on \(expires).")
+            }
+            reasons.append("They are contacted, which starts the win back cooldown.")
+            reasons.append("Their commercial eligibility record stops being current and clear.")
+            reasons.append("Somebody holds them out of this segment.")
+            return reasons
+        default:
+            return []
+        }
+    }
+
     private var stateText: String? {
         switch state {
         case "due":         return "Due now"
