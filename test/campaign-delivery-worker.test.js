@@ -287,3 +287,179 @@ test('the batch and lease sent to the database stay inside what it accepts', asy
   assert.ok(claim.args.p_lease_seconds >= 30 && claim.args.p_lease_seconds <= 300,
     'begin_provider_attempt rejects a lease outside 30..300');
 });
+
+// ── The third outcome: refused ──────────────────────────────────────────────
+
+const { maxBatchForLease, providerRefusalCode, DEFAULT_BATCH, DEFAULT_LEASE, PROVIDER_TIMEOUT_SECONDS } =
+  require('../lib/campaigns/delivery-worker');
+
+/** The shape telnyx.js throws when the provider rejected before submission. */
+function refusal(code = '40300', message = 'Invalid destination number') {
+  return Object.assign(new Error(message), {
+    providerRefused: true, providerErrorCode: code, httpStatus: 400
+  });
+}
+
+test('only an explicit providerRefused flag is a refusal', () => {
+  assert.equal(providerRefusalCode(refusal('40300')), '40300');
+  assert.equal(providerRefusalCode(Object.assign(new Error('x'), { providerRefused: true })),
+    'provider_refused', 'a refusal with no code is still a refusal');
+
+  // Everything that is merely a bad outcome must fail towards uncertain.
+  for (const error of [
+    new Error('socket hang up'),
+    Object.assign(new Error('boom'), { httpStatus: 500 }),
+    Object.assign(new Error('slow'), { httpStatus: 429 }),
+    Object.assign(new Error('truthy'), { providerRefused: 'true' }),
+    Object.assign(new Error('one'), { providerRefused: 1 }),
+    undefined, null
+  ]) {
+    assert.equal(providerRefusalCode(error), null, String(error && error.message));
+  }
+});
+
+test('a provider refusal marks the recipient failed instead of queueing a human', async () => {
+  const client = fakeClient(baseHandlers({
+    record_sms_campaign_provider_refusal: () => ({ data: {} })
+  }));
+  let sends = 0;
+
+  const summary = await deliverBatch({
+    client,
+    send: async () => { sends += 1; throw refusal('40300', 'Invalid destination number'); },
+    env: ON,
+    now: () => new Date('2026-08-23T10:00:00.000Z'),
+    log: SILENT
+  });
+
+  assert.equal(sends, 1, 'a refusal is final; it is not retried either');
+  assert.equal(summary.refused, 1);
+  assert.equal(summary.uncertain, 0, 'a definitive rejection is not an unknown outcome');
+  assert.equal(summary.accepted, 0);
+  assert.deepEqual(summary.reasons, { provider_refused: 1 });
+
+  const call = client.calls.find(c => c.name === 'record_sms_campaign_provider_refusal');
+  assert.equal(call.args.p_recipient_id, 'r-1');
+  assert.equal(call.args.p_claim_token, 'claim-1');
+  assert.equal(call.args.p_provider_idempotency_key, 'campaign-recipient:r-1');
+  assert.equal(call.args.p_error_code, '40300');
+  assert.equal(client.calls.some(c => c.name === 'record_sms_campaign_provider_acceptance'), false);
+});
+
+test('a timeout, an abort and a 5xx stay uncertain and are never refused', async () => {
+  // This is the invariant the refusal path is most likely to erode. An abort is
+  // the one case where we genuinely do not know whether the message went out.
+  const cases = [
+    Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    Object.assign(new Error('Telnyx send failed'), { httpStatus: 503 }),
+    Object.assign(new Error('Too Many Requests'), { httpStatus: 429 }),
+    new Error('fetch failed')
+  ];
+
+  for (const error of cases) {
+    const client = fakeClient(baseHandlers());
+    let sends = 0;
+    const summary = await deliverBatch({
+      client, send: async () => { sends += 1; throw error; }, env: ON, log: SILENT
+    });
+
+    assert.equal(sends, 1, `${error.message}: called once, never retried`);
+    assert.equal(summary.uncertain, 1, error.message);
+    assert.equal(summary.refused, 0, `${error.message} must not be downgraded to a refusal`);
+    assert.equal(client.calls.some(c => c.name === 'record_sms_campaign_provider_refusal'), false);
+    assert.equal(client.calls.some(c => c.name === 'record_sms_campaign_provider_acceptance'), false);
+  }
+});
+
+test('a refusal that cannot be recorded is still not retried and is still visible', async () => {
+  const client = fakeClient(baseHandlers({
+    record_sms_campaign_provider_refusal: () => ({ error: { message: 'connection reset' } })
+  }));
+  let sends = 0;
+
+  const summary = await deliverBatch({
+    client, send: async () => { sends += 1; throw refusal(); }, env: ON, log: SILENT
+  });
+
+  assert.equal(sends, 1);
+  assert.equal(summary.refused, 1);
+  assert.deepEqual(summary.reasons, { provider_refused: 1, refusal_not_recorded: 1 });
+});
+
+// ── The batch must fit its own lease ────────────────────────────────────────
+
+test('the default batch cannot outlive the default lease', () => {
+  const worstCaseSeconds = DEFAULT_BATCH * PROVIDER_TIMEOUT_SECONDS;
+  assert.ok(worstCaseSeconds < DEFAULT_LEASE,
+    `${DEFAULT_BATCH} x ${PROVIDER_TIMEOUT_SECONDS}s = ${worstCaseSeconds}s must fit in ${DEFAULT_LEASE}s`);
+  assert.ok(DEFAULT_BATCH <= maxBatchForLease(DEFAULT_LEASE));
+  assert.ok(DEFAULT_LEASE >= 30 && DEFAULT_LEASE <= 300, 'begin_provider_attempt accepts 30..300');
+
+  // The shape of the old defaults, for the record: 25 x 20s = 500s against a
+  // 120s lease. Everything past recipient six fenced out silently.
+  assert.equal(maxBatchForLease(120), 4);
+});
+
+test('an oversized batch is clamped to what the lease can pay for', async () => {
+  const client = fakeClient(baseHandlers({ claimed: [] }));
+  const warnings = [];
+  const summary = await deliverBatch({
+    client,
+    send: async () => ({ messageId: 'm' }),
+    limit: 100,
+    leaseSeconds: 300,
+    env: ON,
+    log: { error() {}, log() {}, warn: (message) => warnings.push(message) }
+  });
+
+  const claim = client.calls.find(c => c.name === 'claim_sms_campaign_recipients');
+  assert.equal(claim.args.p_limit, 12);
+  assert.equal(summary.limit, 12);
+  assert.equal(warnings.length, 1, 'clamping is announced, not silent');
+});
+
+// ── A fence at the tail of a batch is not a STOP ────────────────────────────
+
+test('a fence caused by the lease running out is distinguishable from a STOP', async () => {
+  const client = fakeClient(baseHandlers({
+    begin_sms_campaign_provider_attempt: () => ({ error: { message: 'campaign_claim_fence_failed (P0001)' } })
+  }));
+
+  // The clock advances past the 300s lease between the claim and the attempt.
+  let tick = 0;
+  const times = [new Date('2026-08-23T10:00:00Z'), new Date('2026-08-23T10:06:00Z'), new Date('2026-08-23T10:06:00Z')];
+  const warnings = [];
+
+  const summary = await deliverBatch({
+    client,
+    send: async () => ({ messageId: 'm' }),
+    env: ON,
+    now: () => times[Math.min(tick++, times.length - 1)],
+    log: { error() {}, log() {}, warn: (message) => warnings.push(message) }
+  });
+
+  assert.deepEqual(summary.reasons, { campaign_claim_fence_failed_lease_expired: 1 });
+  assert.equal(warnings.length, 1, 'throughput collapse must not be silent');
+  assert.match(warnings[0], /1\/1/, 'the position in the batch is reported');
+  assert.match(warnings[0], /claim lease/);
+});
+
+test('a fence inside the lease keeps its own reason and stays quiet', async () => {
+  // A STOP, a cancellation or stale consent between claim and attempt is the
+  // system working. It must not be logged as a throughput fault.
+  const client = fakeClient(baseHandlers({
+    begin_sms_campaign_provider_attempt: () => ({ error: { message: 'campaign_claim_fence_failed (P0001)' } })
+  }));
+  const warnings = [];
+
+  const summary = await deliverBatch({
+    client,
+    send: async () => ({ messageId: 'm' }),
+    env: ON,
+    now: () => new Date('2026-08-23T10:00:00Z'),
+    log: { error() {}, log() {}, warn: (message) => warnings.push(message) }
+  });
+
+  assert.deepEqual(summary.reasons, { campaign_claim_fence_failed: 1 });
+  assert.deepEqual(warnings, []);
+});

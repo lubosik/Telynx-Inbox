@@ -1,7 +1,47 @@
 const crypto = require('crypto');
 
+/**
+ * Hard ceiling on a single provider POST.
+ *
+ * Without this, `fetch` waits for undici's 300-second headers timeout. One hung
+ * Telnyx call therefore blocked whatever was awaiting it for five minutes — an
+ * order-confirmation flow, an inbox send, or a campaign batch with a 2-minute
+ * interval stacking runs behind it. 20 seconds is far beyond Telnyx's normal
+ * sub-second response and far below anything that looks like a working system.
+ */
+const PROVIDER_TIMEOUT_MS = 20_000;
+
+/**
+ * HTTP statuses on which Telnyx has REJECTED the request outright and has not
+ * handed anything to a carrier: the message provably did not go out.
+ *
+ * Narrow on purpose. Everything absent from this set — 401/403 (our credentials
+ * or account, not this destination), 408/425/429 (retryable), every 5xx, every
+ * network error, and every abort — stays UNCERTAIN, because "the provider did
+ * not answer clearly" must never be downgraded to "the provider said no". A
+ * wrongly-refused row is a marketing message a paying customer never receives;
+ * a wrongly-uncertain row is a line in a human queue.
+ */
+const PROVIDER_REFUSAL_STATUSES = new Set([400, 404, 422]);
+
+/**
+ * True when a thrown sendSMS error carries proof the provider refused before
+ * submission. Anything else — including a timeout, an abort and a 5xx — is
+ * false, and callers must treat it as an unknown outcome.
+ */
+function isProviderRefusal(error) {
+  return error?.providerRefused === true;
+}
+
 // mediaUrls: optional array of publicly-accessible HTTPS URLs — presence makes
 // this an MMS. Telnyx caps media_urls at 10; carrier-safe total size is ~600KB.
+//
+// SUCCESS CONTRACT (unchanged, and depended on by order confirmation, shipping,
+// the inbox, GHL relay, reactions, catch-up and the campaign worker): resolves
+// to { messageId, status }, or throws an Error whose `message` is the Telnyx
+// detail. The only addition is that a thrown error may now also carry
+// `providerRefused`, `providerErrorCode` and `httpStatus`. Every existing caller
+// reads `.message` and nothing else, so their behaviour is byte-identical.
 async function sendSMS(to, message, mediaUrls = null) {
   const body = {
     from: process.env.TELNYX_PHONE_NUMBER,
@@ -19,10 +59,31 @@ async function sendSMS(to, message, mediaUrls = null) {
       'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS)
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.errors?.[0]?.detail || 'Telnyx send failed');
+
+  // A body we cannot parse is not evidence of anything. On a success status it
+  // still throws exactly as before; on a failure status it stays uncertain
+  // rather than being promoted to a refusal.
+  let data = null;
+  let parsed = true;
+  try {
+    data = await response.json();
+  } catch (parseError) {
+    if (response.ok) throw parseError;
+    parsed = false;
+  }
+
+  if (!response.ok) {
+    const failure = new Error(data?.errors?.[0]?.detail || 'Telnyx send failed');
+    failure.httpStatus = response.status;
+    if (parsed && PROVIDER_REFUSAL_STATUSES.has(response.status)) {
+      failure.providerRefused = true;
+      failure.providerErrorCode = String(data?.errors?.[0]?.code ?? `http_${response.status}`);
+    }
+    throw failure;
+  }
   return { messageId: data.data.id, status: data.data.to?.[0]?.status };
 }
 
@@ -68,4 +129,11 @@ function verifyWebhookSignatureV2(rawBody, signatureHeader, timestampHeader, pub
   }
 }
 
-module.exports = { sendSMS, verifyWebhookSignature, verifyWebhookSignatureV2 };
+module.exports = {
+  PROVIDER_REFUSAL_STATUSES,
+  PROVIDER_TIMEOUT_MS,
+  isProviderRefusal,
+  sendSMS,
+  verifyWebhookSignature,
+  verifyWebhookSignatureV2
+};

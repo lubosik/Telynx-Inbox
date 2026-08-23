@@ -12,8 +12,78 @@ const { classifyAndStoreSentiment } = require('../lib/analytics/sentiment');
 const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = require('../lib/analytics/events');
 const { isOptOutRequest } = require('../lib/opt-out-language');
 const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-receipts');
+const { recordOptOut, SOURCE } = require('../lib/campaigns/consent');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
+
+/**
+ * Append an inbound STOP to the promotional consent ledger.
+ *
+ * The ledger is evidence, not the switch. `markOptedOut` writes the sentinel
+ * that `isOptedOut()` actually reads, and the campaign eligibility SQL reads
+ * this table; both must record the withdrawal, but only one of them may be
+ * allowed to decide whether it is honoured. So this holds the same standard as
+ * the suppression work it sits beside: an unrecorded suppression is a
+ * bookkeeping problem, an unhonoured STOP is a regulatory one.
+ *
+ * Consequently the entire body is inside try/catch and the function cannot
+ * reject. Its caller starts it before the suppression work and settles it
+ * after the broadcast, so it never delays anything and never becomes an
+ * unhandled rejection.
+ *
+ * The dedupe key is derived from the inbound Telnyx message id, so a
+ * redelivered webhook collides on `sms_consent_events_dedupe_idx` and is
+ * reported as a duplicate rather than writing a second withdrawal event.
+ *
+ * WHY THE SIGNATURE TRAVELS DOWN HERE
+ *   This handler processes unsigned and badly-signed bodies on purpose (see
+ *   "processing anyway" below): losing a real STOP because a key was rotated is
+ *   worse than processing a forged one, and a forged STOP only ever suppresses.
+ *   That fail-safe direction is deliberate and is NOT changed here — a STOP is
+ *   still honoured whatever the signature says.
+ *
+ *   What was wrong was the ledger ROW. It recorded `payload.received_at` as
+ *   `occurred_at` with no note of provenance, so an unauthenticated POST could
+ *   put an attacker-chosen instant into the exact column the "later opt-out
+ *   wins" tuple comparison orders on, and the row read as established fact. So:
+ *
+ *     - `signature_verified` is recorded on every row, matching what
+ *       `lib/campaigns/checkout-consent.js` already does for the strong basis.
+ *     - `occurred_at` uses the provider's `received_at` only when the signature
+ *       verified. Otherwise it is SERVER time — a fact we witnessed — because
+ *       the only honest thing an unverified body tells us is when it arrived.
+ *     - the raw `received_at` is kept in metadata either way, so nothing is
+ *       lost and a later reconciliation can still see what was claimed.
+ */
+async function recordStopInConsentLedger({ phone, messageId, reportedReceivedAt, signatureValid }) {
+  const tail = `...${String(phone || '').slice(-4)}`;
+  const verified = signatureValid === true;
+  const reported = reportedReceivedAt || null;
+  const trustedInstant = verified && reported ? reported : null;
+  try {
+    const result = await recordOptOut({
+      client: supabase,
+      phone,
+      source: SOURCE.INBOUND_STOP,
+      // null makes lib/campaigns/consent.js stamp server time.
+      occurredAt: trustedInstant,
+      dedupeKey: messageId ? `inbound_stop:${messageId}` : null,
+      metadata: {
+        telnyx_message_id: messageId || null,
+        signature_verified: verified,
+        provider_reported_received_at: reported,
+        occurred_at_source: trustedInstant ? 'provider_reported' : 'server_clock'
+      }
+    });
+    if (!result?.recorded) {
+      console.error(`[OPT-OUT] Consent ledger refused the STOP for ${tail}: ${result?.reason || 'unknown'}`);
+    }
+    return result;
+  } catch (error) {
+    console.error(`[OPT-OUT] Consent ledger write failed for ${tail}: ${error?.code || error?.message || 'unknown'}`);
+    return { recorded: false, reason: error?.code || 'consent_ledger_failed' };
+  }
+}
 
 module.exports = (broadcastSSE) => {
   const router = require('express').Router();
@@ -125,6 +195,16 @@ module.exports = (broadcastSSE) => {
         // missing record; the wrong outcome is to leave them subscribed because
         // a logging table was unavailable. An unrecorded suppression is a
         // bookkeeping problem. An unhonoured STOP is a regulatory one.
+        //
+        // The consent-ledger append is started here, before the suppression
+        // work, so it runs alongside it instead of in front of it. It cannot
+        // reject; it is settled at the end of this branch.
+        const consentLedgerWrite = recordStopInConsentLedger({
+          phone: fromPhone,
+          messageId,
+          reportedReceivedAt: payload.received_at || null,
+          signatureValid: analyticsSignatureValid
+        });
         try {
           await markOptedOut(fromPhone);
         } catch (optOutErr) {
@@ -157,6 +237,9 @@ module.exports = (broadcastSSE) => {
           console.error('[OPT-OUT] Could not record the STOP message:', stopLogErr.message);
         }
         broadcastSSE({ type: 'opt_out', phone: fromPhone });
+        // Settled last, after every effect and the broadcast, so the ledger
+        // write delays nothing and cannot be left as an unhandled rejection.
+        await consentLedgerWrite;
         return;
       }
 

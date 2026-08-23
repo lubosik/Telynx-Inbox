@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#101413">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Text messages from Vici Peptides</title>
+<!--
+  Standalone by design, exactly like public/reset-password.html and
+  public/accept-invite.html: no React, no bundle, no fonts, no analytics, and no
+  third-party request of any kind. The only network calls it makes are two
+  same-origin POSTs to this service.
+
+  WHAT THIS PAGE IS
+    The one place a Vici customer turns promotional text messages ON. Vici has
+    email permission and does not have SMS permission, so this page is the whole
+    bridge between the two, and the consent it produces is only as good as the
+    disclosure on it. Everything below the heading is therefore load-bearing
+    rather than decorative:
+
+      * WHO is texting and WHAT KIND of messages they are
+      * that consent is NOT a condition of purchase
+      * HOW OFTEN, stated as the cap the sender actually enforces
+      * that message and data rates may apply
+      * HOW TO STOP, in the exact word the inbound handler recognises
+
+    The frequency sentence is not marketing rounding. lib/campaigns/cadence-
+    policy.js enforces rollingWeekLimit: 2 and rollingMonthLimit: 4, and the copy
+    quotes those two numbers. If that policy changes, this sentence changes in
+    the same commit, because a promise the sender does not keep is worse than no
+    promise at all.
+
+  NOTHING IS RECORDED BY OPENING THIS PAGE
+    Mail scanners and link previewers fetch every URL in an inbound email within
+    seconds of delivery. If arriving here were enough to opt somebody in, this
+    system would manufacture consent for people who never saw the message. So
+    the server serves this file without reading the token, and consent is
+    written only by the POST behind a button. routes/sms-optin.js repeats that
+    rule where it can be violated.
+
+  THE PAGE IS DELIBERATELY UNINFORMED
+    It shows no phone number, no email address and no name, and it asks the
+    server for none of those things. An endpoint that turned a token into a
+    phone number would be an oracle for anybody who found a link. The email that
+    carried this link already names the number, in a mailbox its owner controls.
+
+  BOTH ANSWERS ARE REAL
+    "No thanks" is a POST that records an opt_out, not a link that closes the
+    tab. An email with only a yes button is a leading question, and a recorded
+    no is worth more than an inferred one: silence is indistinguishable from an
+    unread inbox, while an opt_out suppresses the number in every future
+    campaign check.
+
+  THE TOKEN
+    Read from the query string into one closure variable, sent in a POST body,
+    and never rendered into the document, never put in a link, never logged,
+    never stored. After an answer is recorded the query string is replaced so
+    the spent token stops riding along in the address bar and in history.
+
+  Express serves this file from routes/sms-optin.js with
+  Cache-Control: no-store, private. The server does not read the token.
+-->
+<style>
+  :root {
+    --ground: #101413;
+    --card: #171d1c;
+    --field: #121817;
+    --hairline: rgba(126, 199, 188, 0.16);
+    --hairline-bright: rgba(126, 199, 188, 0.34);
+    --ink: #f2f2f0;
+    --ink-2: #c9c9c6;
+    --ink-3: #8b9693;
+    --tint: #7ec7bc;
+    --tint-dim: rgba(126, 199, 188, 0.1);
+    --danger: #f08b84;
+    --ok: #7ec7bc;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100%;
+    padding: max(2rem, env(safe-area-inset-top)) 1.25rem max(2.5rem, env(safe-area-inset-bottom));
+    display: flex;
+    justify-content: center;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 27rem;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 2.5rem 1.75rem;
+  }
+
+  /* ── Wordmark ────────────────────────────────────────────────────────── */
+  .lockup { text-align: center; margin-bottom: 2.5rem; }
+  .lockup .vici {
+    font-family: Georgia, 'Times New Roman', 'Iowan Old Style', serif;
+    font-size: 2.75rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    /* tracking adds a trailing gap after the last glyph; nudge back to centre */
+    text-indent: 0.18em;
+    color: var(--ink);
+    line-height: 1.1;
+  }
+  .lockup .peptides {
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+    color: var(--ink-2);
+    margin-top: 0.375rem;
+  }
+  .lockup .kicker {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 1.25rem;
+  }
+
+  /* ── Content ─────────────────────────────────────────────────────────── */
+  h1 {
+    font-size: 1.375rem;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.875rem;
+  }
+  h2 {
+    font-size: 1.0625rem;
+    font-weight: 650;
+    line-height: 1.35;
+    margin-bottom: 0.625rem;
+  }
+  p { color: var(--ink-2); margin-bottom: 1.125rem; }
+  p.quiet { color: var(--ink-3); font-size: 0.875rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── The disclosure block ────────────────────────────────────────────── */
+  .terms {
+    list-style: none;
+    margin: 0 0 1.5rem;
+    padding: 0;
+  }
+  .terms li {
+    position: relative;
+    padding-left: 1.25rem;
+    color: var(--ink-2);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    margin-bottom: 0.625rem;
+  }
+  .terms li:last-child { margin-bottom: 0; }
+  .terms li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.6875rem;
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 50%;
+    background: var(--tint);
+  }
+  .terms strong { color: var(--ink); font-weight: 650; }
+
+  /* ── Actions ─────────────────────────────────────────────────────────── */
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 3.375rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 14px;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 650;
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary {
+    background: var(--tint);
+    color: #0b100f;
+    border: 1px solid var(--tint);
+  }
+  .btn-primary:active { opacity: 0.82; }
+  .btn-secondary {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-bright);
+  }
+  .btn-secondary:active { background: var(--tint-dim); }
+  .btn + .btn { margin-top: 0.75rem; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .under-btn {
+    color: var(--ink-3);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    text-align: center;
+    margin: 0.75rem 0 0;
+  }
+
+  .rule {
+    height: 1px;
+    background: var(--hairline);
+    border: 0;
+    margin: 1.75rem 0;
+  }
+
+  .note {
+    background: rgba(126, 199, 188, 0.06);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 1rem 1.125rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+  .note strong { color: var(--ink); font-weight: 650; }
+  .note p { font-size: inherit; margin-bottom: 0.625rem; }
+  .note p:last-child { margin-bottom: 0; }
+
+  .message {
+    font-size: 0.875rem;
+    line-height: 1.55;
+    margin: 0 0 1.125rem;
+    min-height: 0;
+  }
+  .message.error { color: var(--danger); }
+  .message.ok { color: var(--ok); }
+  .message:empty { display: none; }
+
+  .alert-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    border: 1px solid rgba(240, 139, 132, 0.4);
+    background: rgba(240, 139, 132, 0.1);
+    color: var(--danger);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+  .ok-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    border: 1px solid var(--hairline-bright);
+    background: var(--tint-dim);
+    color: var(--tint);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+
+  [hidden] { display: none !important; }
+
+  @media (min-width: 30rem) {
+    .card { padding: 3rem 2.5rem; }
+    .lockup .vici { font-size: 3.25rem; }
+  }
+</style>
+</head>
+<body>
+<main class="card">
+
+  <div class="lockup">
+    <div class="vici">VICI</div>
+    <div class="peptides">PEPTIDES</div>
+    <div class="kicker">Text message preferences</div>
+  </div>
+
+  <!-- Nothing is shown until the script has picked a state, so a link that
+       cannot possibly work never flashes a question that cannot be answered. -->
+
+  <!-- State A: the link carries something that could be a live token. -->
+  <section id="state-ask" hidden>
+    <h1>Would you like order offers by text?</h1>
+    <p>
+      You are on our email list. This is us asking, separately, whether you also
+      want the occasional text message. You are not signed up to anything yet and
+      nothing happens unless you choose one of the two buttons below.
+    </p>
+
+    <ul class="terms">
+      <li>
+        <strong>What you would get.</strong> Marketing texts from Vici Peptides:
+        restock alerts, reorder reminders and offers. Order and delivery updates
+        are separate and are not affected by this choice.
+      </li>
+      <li>
+        <strong>How often.</strong> No more than 2 messages in any 7 days, and no
+        more than 4 in any 30 days. That is a limit our system enforces, not an
+        estimate.
+      </li>
+      <li>
+        <strong>This is not a condition of buying anything.</strong> Saying no
+        changes nothing about your account, your orders, your prices or your
+        support.
+      </li>
+      <li>
+        <strong>Message and data rates may apply.</strong> That is between you and
+        your mobile network. We do not charge for the messages.
+      </li>
+      <li>
+        <strong>Stopping is one word.</strong> Reply <strong>STOP</strong> to any
+        text and they end immediately. Reply <strong>HELP</strong> for help. You
+        can also just email us.
+      </li>
+    </ul>
+
+    <div class="message error" id="ask-message" role="alert" aria-live="polite"></div>
+
+    <button class="btn btn-primary" id="confirm-button" type="button">
+      Yes, text me
+    </button>
+    <button class="btn btn-secondary" id="decline-button" type="button">
+      No thanks
+    </button>
+
+    <p class="under-btn">
+      Pressing yes records your permission, along with the date and time, so we
+      can show why we texted you if you ever ask.
+    </p>
+  </section>
+
+  <!-- State B: opted in. -->
+  <section id="state-opted-in" hidden>
+    <div class="ok-icon" aria-hidden="true">✓</div>
+    <h1 id="opted-in-title">Texts are on</h1>
+    <p id="opted-in-lede">
+      Thank you. Your permission has been recorded, with the date and time.
+    </p>
+    <p>
+      You will get no more than 2 messages in any 7 days and no more than 4 in
+      any 30 days. Reply STOP to any of them and they end immediately.
+    </p>
+
+    <hr class="rule">
+
+    <div class="note">
+      <p>
+        <strong>Changed your mind already?</strong> You do not have to wait for a
+        message to arrive. Email us and we will turn them off, and STOP works on
+        the first text you receive.
+      </p>
+    </div>
+  </section>
+
+  <!-- State C: declined. Written so that it does not read as a punishment. -->
+  <section id="state-opted-out" hidden>
+    <div class="ok-icon" aria-hidden="true">✓</div>
+    <h1 id="opted-out-title">No texts. That is recorded.</h1>
+    <p id="opted-out-lede">
+      Thank you for answering. We have written down that you do not want
+      marketing texts, so you will not get them.
+    </p>
+    <p>
+      Nothing else changes. Your emails, your orders and your delivery updates
+      carry on exactly as before.
+    </p>
+  </section>
+
+  <!-- State D: a link that cannot be used. Deliberately not a dead end for the
+       people who most need it to work: the "no thanks" button stays available,
+       because a withdrawal is accepted from an expired or superseded link even
+       though a yes is not. -->
+  <section id="state-dead-link" hidden>
+    <div class="alert-icon" aria-hidden="true">!</div>
+    <h1 id="dead-link-title">This link cannot be used</h1>
+    <p id="dead-link-body">
+      The link is missing the part that identifies which message it came from.
+    </p>
+    <p class="quiet" id="dead-link-hint">
+      Links are often shortened or cut in half by the app they arrive in. Opening
+      the link by tapping it, rather than copying and pasting it, usually avoids
+      that.
+    </p>
+    <p class="quiet">
+      Nothing has been recorded and you have not been signed up to anything.
+    </p>
+
+    <div class="message error" id="dead-link-message" role="alert" aria-live="polite"></div>
+
+    <button class="btn btn-secondary" id="dead-link-decline" type="button" hidden>
+      I do not want marketing texts
+    </button>
+  </section>
+
+  <noscript>
+    <h1>JavaScript is switched off</h1>
+    <p>
+      This page records your answer in your browser, which needs JavaScript
+      enabled. Turn it on for this site and open the link from your email again.
+    </p>
+    <p class="quiet">
+      Nothing has been recorded. If you would rather not deal with this at all,
+      ignore the email: you will not be sent marketing texts unless you ask for
+      them here.
+    </p>
+  </noscript>
+
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // The bounds routes/sms-optin.js applies to the token before it looks
+  // anything up. Anything outside them is answered with the same generic
+  // refusal without a database read, so checking here turns a truncated link
+  // into an explanation instead of a pointless round trip.
+  var MIN_TOKEN_LENGTH = 16;
+  var MAX_TOKEN_LENGTH = 512;
+
+  function byId(id) { return document.getElementById(id); }
+  function show(id) { var el = byId(id); if (el) el.hidden = false; }
+  function hide(id) { var el = byId(id); if (el) el.hidden = true; }
+
+  function setMessage(id, text, kind) {
+    var el = byId(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'message' + (kind ? ' ' + kind : '');
+  }
+
+  // ── The token ────────────────────────────────────────────────────────────
+  // Lives in this closure and nowhere else. It is never written into the DOM,
+  // never put into a link, and never handed to console.
+  var token = (function () {
+    try {
+      var value = new URLSearchParams(window.location.search).get('token');
+      return typeof value === 'string' ? value.trim() : '';
+    } catch (e) {
+      return '';
+    }
+  }());
+
+  /**
+   * Drops the token out of the address bar and out of this history entry.
+   *
+   * CALLED AFTER THE FIRST POST RESOLVES, WHATEVER IT RESOLVED TO. It used to
+   * run only from the two success screens, which meant every failure path left
+   * a live consent token sitting in the URL bar, in session history, in
+   * whatever the browser syncs that history to, and in any screenshot or
+   * screen-share of the tab. Expired, rate-limited and server-error answers are
+   * exactly the states a person lingers on and retries from.
+   *
+   * The token is already held in the closure above, so removing it from the
+   * address bar costs the retry nothing.
+   */
+  function forgetTokenInAddressBar() {
+    try {
+      if (window.history && typeof window.history.replaceState === 'function') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    } catch (e) { /* a browser that refuses is no reason to fail the answer */ }
+  }
+
+  /**
+   * POSTs JSON and returns { ok, status, code, error, alreadyRecorded }. A
+   * transport failure is reported as status 0 rather than thrown, so every
+   * caller has one shape to read and no caller can forget a rejection.
+   */
+  function postJSON(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        return {
+          ok: response.ok,
+          status: response.status,
+          code: payload && payload.code ? String(payload.code) : null,
+          error: payload && payload.error ? String(payload.error) : null,
+          alreadyRecorded: !!(payload && payload.alreadyRecorded)
+        };
+      });
+    }, function () {
+      return { ok: false, status: 0, code: null, error: null, alreadyRecorded: false };
+    });
+  }
+
+  // ── States ───────────────────────────────────────────────────────────────
+
+  function showOptedIn(alreadyRecorded) {
+    hide('state-ask');
+    hide('state-dead-link');
+    if (alreadyRecorded) {
+      byId('opted-in-title').textContent = 'Texts are already on';
+      byId('opted-in-lede').textContent =
+        'This was recorded earlier, so there was nothing new to save. Your permission is on file with the date and time.';
+    }
+    show('state-opted-in');
+  }
+
+  function showOptedOut(alreadyRecorded) {
+    hide('state-ask');
+    hide('state-dead-link');
+    if (alreadyRecorded) {
+      byId('opted-out-title').textContent = 'Already recorded';
+      byId('opted-out-lede').textContent =
+        'You had already told us no, so there was nothing new to save. You will not get marketing texts.';
+    }
+    show('state-opted-out');
+  }
+
+  /**
+   * `canStillDecline` is true when the link is dead for a yes but still good
+   * for a no. That asymmetry is deliberate and is enforced on the server: a
+   * withdrawal is accepted from an expired or superseded invitation, a
+   * permission is not.
+   */
+  function showDeadLink(title, body, hint, canStillDecline) {
+    hide('state-ask');
+    hide('state-opted-in');
+    hide('state-opted-out');
+    if (title) byId('dead-link-title').textContent = title;
+    if (body) byId('dead-link-body').textContent = body;
+    var hintEl = byId('dead-link-hint');
+    if (hint === null) hintEl.hidden = true;
+    else if (hint !== undefined) hintEl.textContent = hint;
+    byId('dead-link-decline').hidden = !canStillDecline;
+    show('state-dead-link');
+  }
+
+  // ── Answering ────────────────────────────────────────────────────────────
+
+  var confirmButton = byId('confirm-button');
+  var declineButton = byId('decline-button');
+  var deadLinkDecline = byId('dead-link-decline');
+
+  function setAskBusy(busy, which) {
+    confirmButton.disabled = busy;
+    declineButton.disabled = busy;
+    if (which === 'confirm') confirmButton.textContent = busy ? 'Saving…' : 'Yes, text me';
+    if (which === 'decline') declineButton.textContent = busy ? 'Saving…' : 'No thanks';
+  }
+
+  /**
+   * @param {'confirm'|'decline'} which
+   * @param {string} messageId  where a retryable failure is written
+   * @param {function} onBusy
+   */
+  function answer(which, messageId, onBusy) {
+    setMessage(messageId, '', null);
+    onBusy(true);
+
+    postJSON('/sms-optin/' + which, { token: token }).then(function (result) {
+      // Unconditional, and before anything branches on the outcome. The token
+      // has now been submitted once; whether it was accepted, refused or lost
+      // to a network error, it has no further business being visible.
+      forgetTokenInAddressBar();
+
+      if (result.ok) {
+        if (which === 'confirm') showOptedIn(result.alreadyRecorded);
+        else showOptedOut(result.alreadyRecorded);
+        return;
+      }
+
+      onBusy(false);
+
+      switch (result.code) {
+        // One generic answer for a token this service cannot place, matching
+        // the server exactly. A page that was more specific than the server
+        // would hand back the oracle the endpoint was built without.
+        case 'OPTIN_NOT_VALID':
+          showDeadLink(
+            'This link cannot be used',
+            result.error || 'That link is not valid.',
+            'It may have been cut short by the app it arrived in, or it may belong to a message that has since been replaced.',
+            which === 'confirm'
+          );
+          return;
+        case 'OPTIN_EXPIRED':
+          showDeadLink(
+            'This invitation has expired',
+            result.error || 'That invitation has expired.',
+            'Invitations last 30 days. You have not been signed up to anything, and you do not need to do anything.',
+            true
+          );
+          return;
+        case 'OPTIN_ALREADY_DECLINED':
+          showDeadLink(
+            'You already said no',
+            result.error || 'This invitation was already answered with a no.',
+            'That answer stands and you will not be texted. If you have changed your mind, email us and we will sort it out properly.',
+            false
+          );
+          return;
+
+        // Texts are already off for this number by a route that outranks an
+        // emailed link: a STOP reply, a suppression, or a do-not-disturb flag.
+        // There is nothing to decline, so no decline button is offered.
+        case 'OPTIN_WITHDRAWN':
+          showDeadLink(
+            'Texts are already off',
+            result.error || 'Marketing texts are already turned off for this number.',
+            'This link cannot turn them back on. If you have changed your mind, reply START to one of our texts or email us and we will sort it out properly.',
+            false
+          );
+          return;
+
+        // Retryable. The buttons stay exactly where they are with the reason
+        // above them.
+        case 'TOO_MANY_ATTEMPTS':
+          setMessage(messageId,
+            result.error || 'Too many attempts from this network. Wait a few minutes and try again.', 'error');
+          return;
+        case 'OPTIN_RECORD_FAILED':
+          setMessage(messageId,
+            result.error || 'Your answer could not be saved just now. Nothing has been recorded, so please try again in a moment.',
+            'error');
+          return;
+        // Distinct from the above on purpose. Something WAS written and the
+        // permission was not, so the fallback copy must not promise that
+        // nothing happened; a person told nothing happened stops pressing the
+        // button that repairs it.
+        case 'OPTIN_NOT_CONFIRMED':
+          setMessage(messageId,
+            result.error || 'We received your answer but could not finish saving it, so your permission is not on file yet. Please press the button again in a moment.',
+            'error');
+          return;
+        default:
+          if (result.status === 0) {
+            setMessage(messageId,
+              'Could not reach the server. Check your connection and try again.', 'error');
+            return;
+          }
+          setMessage(messageId,
+            result.error || 'Your answer could not be saved. Please try again in a moment.', 'error');
+      }
+    });
+  }
+
+  confirmButton.addEventListener('click', function () {
+    if (confirmButton.disabled) return;
+    answer('confirm', 'ask-message', function (busy) { setAskBusy(busy, 'confirm'); });
+  });
+
+  declineButton.addEventListener('click', function () {
+    if (declineButton.disabled) return;
+    answer('decline', 'ask-message', function (busy) { setAskBusy(busy, 'decline'); });
+  });
+
+  deadLinkDecline.addEventListener('click', function () {
+    if (deadLinkDecline.disabled) return;
+    answer('decline', 'dead-link-message', function (busy) {
+      deadLinkDecline.disabled = busy;
+      deadLinkDecline.textContent = busy ? 'Saving…' : 'I do not want marketing texts';
+    });
+  });
+
+  // ── Pick the opening state ───────────────────────────────────────────────
+
+  if (!token) {
+    showDeadLink(
+      'This link is incomplete',
+      'The link is missing the part that identifies which message it came from.',
+      undefined,
+      false
+    );
+  } else if (token.length < MIN_TOKEN_LENGTH || token.length > MAX_TOKEN_LENGTH || /\s/.test(token)) {
+    showDeadLink(
+      'This link is damaged',
+      'The part of the link that identifies which message it came from is not in a form this page can use.',
+      undefined,
+      false
+    );
+  } else {
+    show('state-ask');
+  }
+}());
+</script>
+</body>
+</html>

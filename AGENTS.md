@@ -67,10 +67,30 @@ client.
   the fail-closed delivery foundation. `scripts/campaigns-migration.sql` must
   be applied before the backend routes. Drafting and dry runs are safe while
   live delivery is disabled; they are not permission to send.
+  `scripts/campaign-delivery-fixes-migration.sql` is a follow-up to it and must
+  be applied before enabling live send. Without it, a message whose acceptance
+  fails to record escapes every frequency cap and can never be matched to its
+  delivery receipt. Do not edit `campaigns-migration.sql`; it is already applied
+  in production, so corrections to it belong in a new follow-up file.
 - `scripts/dry-run-campaign-cadence.js`: read-only, aggregate-only historical
   cadence analysis. It prints no customer or product identity and never writes.
   `scripts/dry-run-campaign-opportunities.js` accepts only a local fixture and
   prepares draft outputs without importing a database or provider client.
+- `scripts/sms-optin-migration.sql`, `lib/campaigns/sms-optin-invite.js`,
+  `routes/sms-optin.js`, `public/sms-optin.html`,
+  `docs/campaigns/SMS-OPTIN-INVITE.md`: the emailed promotional-SMS opt-in
+  invitation. **NOT APPLIED IN PRODUCTION.** Apply the migration before deploying
+  the router, or `POST /sms-optin/confirm` returns 503 for every caller: the two
+  RPCs it depends on do not exist. The file is transaction-wrapped, re-runnable
+  and enables RLS with no policies, and applying it alone changes nobody's
+  consent state and sends nothing, because it stores questions rather than
+  answers. The capability is STAGED, not live: nothing mints an invitation
+  automatically, email is sent by a separate agency, and
+  `scripts/send-sms-optin-invites.js` only renders the mailing. Two rules that
+  are load-bearing rather than stylistic: a GET must never record consent, and on
+  the opt-out path the consent ledger is written BEFORE the invitation row is
+  claimed, because the ledger is the only storage the send path reads and a
+  withdrawal lost between the two writes is unrecoverable and invisible.
 - `scripts/onboarding-migration.sql` and `docs/onboarding/`: server-owned,
   role-aware first-time tour state. Existing accounts are deliberately
   ineligible; future named accounts start at `not_started`.
