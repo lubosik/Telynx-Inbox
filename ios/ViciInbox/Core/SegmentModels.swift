@@ -133,12 +133,34 @@ struct SegmentRecord: Codable, Identifiable, Hashable {
     let ruleVersion: String?
     let memberCount: Int
     let lastComputedAt: String?
+    /// Why this manual segment exists. Written once, by the person who created
+    /// it, and shown as the explanation for everybody in it.
+    ///
+    /// Always nil on an automatic segment: its detector definition IS its
+    /// purpose, and the database refuses a second one. Nil on a manual segment
+    /// only where the row predates the requirement.
+    ///
+    /// THIS IS NOT THE PER-PERSON REASON. `SegmentOverride.reason` and the
+    /// `reason` inside a member's inclusion evidence answer a different
+    /// question, about one named human rather than about the group, and both
+    /// still exist. Do not merge them into this.
+    let purpose: String?
     let archivedAt: String?
+    let archivedByUserId: FlexibleID?
+    let archiveReason: String?
     let createdAt: String
     let updatedAt: String
 
     var isArchived: Bool { archivedAt?.isEmpty == false }
     var lastComputedDate: Date? { ServerDate.parse(lastComputedAt) }
+    var archivedDate: Date? { ServerDate.parse(archivedAt) }
+
+    /// The purpose, if there is one worth showing.
+    var statedPurpose: String? {
+        guard let purpose else { return nil }
+        let trimmed = purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     /// What the row says under the name. Never a raw key: "reorder_due" is a
     /// database value and the person reading this screen did not choose it.
@@ -503,9 +525,16 @@ struct SegmentInclusionEvidence: Hashable {
 
     /// One short paragraph, written from the reader's side of the screen.
     /// `personName` is used verbatim, so pass a display name rather than a key.
-    func headline(personName: String) -> String {
+    ///
+    /// `segmentPurpose` is the SEGMENT's one reason, passed in by the caller
+    /// because it lives on the segment row and not on this member's evidence.
+    /// It is deliberately additive: the per-person note, when there is one, is
+    /// still said out loud underneath it.
+    func headline(personName: String, segmentPurpose: String? = nil) -> String {
         if let source, source.hasPrefix("manual") {
-            return manualHeadline(personName: personName, source: source)
+            return manualHeadline(personName: personName,
+                                  source: source,
+                                  segmentPurpose: segmentPurpose)
         }
         switch detector {
         case "reorder": return reorderHeadline(personName: personName)
@@ -518,14 +547,35 @@ struct SegmentInclusionEvidence: Hashable {
         }
     }
 
-    private func manualHeadline(personName: String, source: String) -> String {
-        let opening = source == "manual_override_include"
-            ? "\(personName) was forced into this segment by a person."
-            : "\(personName) was added to this segment by hand."
-        if let reason {
-            return "\(opening) The reason given was: \(reason)"
+    /// Two reasons, in the order somebody would ask for them.
+    ///
+    /// The segment's purpose comes first because it is true of everybody here
+    /// and it is the common case: one sentence, written once, that explains the
+    /// whole group. The per-person note comes second and only when it exists,
+    /// because "added at her request on 12 Aug" says something the group
+    /// purpose cannot. Collapsing the two would lose the second one.
+    ///
+    /// On an automatic segment `segmentPurpose` is always nil, so a force
+    /// include reads exactly as it did before: the person's own reason, or the
+    /// plain statement that nobody recorded one.
+    private func manualHeadline(personName: String,
+                                source: String,
+                                segmentPurpose: String?) -> String {
+        var sentences: [String] = [
+            source == "manual_override_include"
+                ? "\(personName) was forced into this segment by a person."
+                : "\(personName) was added to this segment by hand."
+        ]
+        let purpose = segmentPurpose?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let purpose, !purpose.isEmpty {
+            sentences.append("This segment is for: \(purpose)")
         }
-        return "\(opening) No reason was recorded."
+        if let reason {
+            sentences.append("Note about \(personName): \(reason)")
+        } else if purpose == nil || purpose?.isEmpty == true {
+            sentences.append("No reason was recorded.")
+        }
+        return sentences.joined(separator: " ")
     }
 
     private func reorderHeadline(personName: String) -> String {
@@ -703,6 +753,9 @@ struct SegmentMemberInput: Hashable {
     let phone: String
     let name: String?
     let contactID: String?
+    /// The optional note about THIS person, not the segment's purpose. The
+    /// wire key is still `reason` because that is what the server reads and
+    /// what every existing member row already carries.
     let reason: String?
 
     init(phone: String, name: String? = nil, contactID: String? = nil, reason: String? = nil) {
@@ -719,4 +772,182 @@ struct SegmentMemberInput: Hashable {
         if let reason, !reason.isEmpty { body["reason"] = reason }
         return body
     }
+}
+
+// MARK: - Who can be added
+
+/// `GET /api/segments/:id/candidates`.
+///
+/// WHY THIS ENDPOINT EXISTS AT ALL.
+///   The picker used to read `/api/contacts` and show everybody, so people
+///   already in the segment were offered again. Subtracting them in the client
+///   would only have hidden the ones on the page being looked at: the list is
+///   paged and searchable, and a member on page three would still have been
+///   offered one scroll later. The server subtracts first and pages second,
+///   which is also the only way `total` and `hasMore` can be true statements.
+///
+/// `campaigns.manage`, not `campaigns.read`. It exists to stage an add or a
+/// force include, and a Support Agent can do neither.
+struct SegmentCandidate: Codable, Identifiable, Hashable {
+    let contactPhone: String
+    let contactId: FlexibleID?
+    let contactName: String?
+    /// `available` today. Decoded as a string rather than an enum so a state
+    /// added by a later server cannot blank the whole picker.
+    let state: String?
+
+    var id: String { contactPhone }
+
+    var displayName: String {
+        guard let contactName,
+              !contactName.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return PhoneFormatter.pretty(contactPhone)
+        }
+        return contactName
+    }
+
+    var memberInput: SegmentMemberInput {
+        SegmentMemberInput(phone: contactPhone,
+                           name: contactName,
+                           contactID: contactId?.rawValue)
+    }
+}
+
+/// Somebody a person deliberately held out of an automatic segment.
+///
+/// Not the same state as "not a member", and deliberately not hidden. A
+/// standing exclusion outlives every recompute until it is revoked, so the only
+/// honest thing to do when their name would otherwise appear in the picker is
+/// to show the decision and who made it. Adding them is refused by a database
+/// trigger anyway, so hiding them would produce a name that simply is not there
+/// and no way to find out why.
+struct SegmentHeldCandidate: Codable, Identifiable, Hashable {
+    let contactPhone: String
+    let contactId: FlexibleID?
+    let contactName: String?
+    let override: SegmentOverride?
+
+    var id: String { contactPhone }
+
+    var displayName: String {
+        guard let contactName,
+              !contactName.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return PhoneFormatter.pretty(contactPhone)
+        }
+        return contactName
+    }
+
+    /// "Held out by Lubosi on 12 August 2026." The author is resolved by the
+    /// caller for the same reason `SegmentOverride` does it: a Support Agent
+    /// cannot read the team list at all.
+    func heldSentence(author: String) -> String {
+        guard let override else { return "Held out of this segment by a person." }
+        let when = override.createdDate.map { " on \(SegmentDateText.day($0))" } ?? ""
+        return "Held out by \(author)\(when)."
+    }
+
+    var reason: String? {
+        guard let reason = override?.reason,
+              !reason.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return reason
+    }
+}
+
+struct SegmentCandidatePage: Codable, Hashable {
+    let items: [SegmentCandidate]
+    let page: Int
+    let pageSize: Int
+    let total: Int
+    let hasMore: Bool?
+}
+
+struct SegmentCandidateResponse: Codable, Hashable {
+    let segment: SegmentRecord
+    let candidates: SegmentCandidatePage
+    let held: [SegmentHeldCandidate]?
+    let heldTotal: Int?
+    /// How many people matching this search were taken off the list because
+    /// they are already in the segment. Shown, rather than left as a silent
+    /// difference between what was searched for and what came back.
+    let alreadyInCount: Int?
+    let memberCount: Int?
+    let search: String?
+
+    var heldPeople: [SegmentHeldCandidate] { held ?? [] }
+
+    var alreadyInSentence: String? {
+        guard let alreadyInCount, alreadyInCount > 0 else { return nil }
+        return alreadyInCount == 1
+            ? "1 person matching this search is already in this segment and is not listed."
+            : "\(alreadyInCount.formatted()) people matching this search are already in this segment and are not listed."
+    }
+}
+
+// MARK: - Removing a segment
+
+/// `DELETE /api/segments/:id`.
+///
+/// THE CLIENT DOES NOT DECIDE WHICH OF THE TWO HAPPENS.
+///   It may ask for `mode: "archive"`. It may not ask for a deletion.
+///   `delete_sms_campaign_segment` has no force path and repeats every blocker
+///   inside its own transaction, so a segment that gains an override or a
+///   campaign between the tap and the statement ends up archived rather than
+///   gone. The outcome in the response is the answer, not the request.
+struct SegmentRemovalResponse: Codable, Hashable {
+    let outcome: String
+    let segmentId: String?
+    let blockers: [String]?
+    let name: String?
+    let kind: SegmentKind?
+    let membersRemoved: Int?
+
+    var wasDeleted: Bool { outcome == "deleted" }
+    var blockerList: [String] { blockers ?? [] }
+
+    /// What to tell the person who pressed the button. An archive is not a
+    /// failure and must not read like one.
+    func outcomeSentence(segmentName: String) -> String {
+        if wasDeleted { return "\(segmentName) was deleted." }
+        return "\(segmentName) was archived. It has left the list and nothing about it was destroyed."
+    }
+
+    /// Why it was archived rather than deleted, in the operator's language and
+    /// with the duplicate engine blockers collapsed into one line.
+    var explanations: [String] {
+        var seen = Set<String>()
+        var lines: [String] = []
+        for blocker in blockerList {
+            let sentence = SegmentBlockerText.sentence(blocker)
+            if seen.insert(sentence).inserted { lines.append(sentence) }
+        }
+        return lines
+    }
+}
+
+/// The blocker tokens `delete_sms_campaign_segment` returns, as sentences.
+///
+/// Each one names a thing that is part of the answer to "who did we message and
+/// why". None of them is a rule about size or tidiness.
+enum SegmentBlockerText {
+    static func sentence(_ blocker: String) -> String {
+        switch blocker {
+        case "already_archived":
+            return "It was already archived, so it was left that way."
+        case "campaign_reference":
+            return "A campaign was built against it, which makes it the record of who that campaign was aimed at."
+        case "engine_has_run", "recompute_history":
+            return "The engine has worked out who belongs in it at least once, and those runs are its record of what it decided."
+        case "override_history":
+            return "Somebody forced a person in, or held one out. That decision and any reversal of it stay readable."
+        case "member_reasons":
+            return "Somebody wrote down why a named person is in it."
+        default:
+            return "It holds a record of a decision somebody made."
+        }
+    }
+}
+
+/// `POST /api/segments/:id/restore`.
+struct SegmentRestoreResponse: Codable, Hashable {
+    let segment: SegmentRecord
 }

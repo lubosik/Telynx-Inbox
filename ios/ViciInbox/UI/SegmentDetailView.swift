@@ -17,15 +17,26 @@ import SwiftUI
 struct SegmentDetailView: View {
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model: SegmentDetailModel
-    @StateObject private var picker = SegmentContactPickerModel()
+    /// Reads `/api/segments/:id/candidates`, which has already subtracted the
+    /// people who are in this segment. Not the contacts picker: that one is for
+    /// a segment that does not exist yet, where nobody can already be a member.
+    @StateObject private var picker: SegmentCandidatePickerModel
     @ObservedObject private var authors = SegmentAuthorDirectory.shared
+    @Environment(\.dismiss) private var dismiss
     @State private var showingAddMember = false
+    @State private var confirmingSegmentRemoval = false
 
     private let initialName: String
+    /// Called with the sentence describing what the server actually did, so the
+    /// list behind this screen can refresh and say it. This screen is popped
+    /// immediately afterwards and cannot say it itself.
+    private let onRemoved: ((String) -> Void)?
 
-    init(segmentID: String, initialName: String) {
+    init(segmentID: String, initialName: String, onRemoved: ((String) -> Void)? = nil) {
         _model = StateObject(wrappedValue: SegmentDetailModel(segmentID: segmentID))
+        _picker = StateObject(wrappedValue: SegmentCandidatePickerModel(segmentID: segmentID))
         self.initialName = initialName
+        self.onRemoved = onRemoved
     }
 
     private var canManage: Bool { session.can(Permission.campaignsManage) }
@@ -51,7 +62,24 @@ struct SegmentDetailView: View {
         }
         .refreshable { await model.load() }
         .sheet(isPresented: $showingAddMember) {
-            SegmentAddMemberSheet(model: model, picker: picker)
+            SegmentAddMemberSheet(model: model,
+                                  picker: picker,
+                                  segmentKind: model.segment?.kind ?? .manual,
+                                  segmentPurpose: model.segment?.statedPurpose)
+        }
+        .confirmationDialog("Remove this segment?",
+                            isPresented: $confirmingSegmentRemoval,
+                            titleVisibility: .visible) {
+            Button("Remove it", role: .destructive) {
+                Task {
+                    guard let message = await model.remove(archiveOnly: false) else { return }
+                    onRemoved?(message)
+                    dismiss()
+                }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text(removalWarning)
         }
         .alert("Segment error", isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -84,6 +112,19 @@ struct SegmentDetailView: View {
                     Text(segment.memberCount == 1 ? "1 person" : "\(segment.memberCount.formatted()) people")
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                 }
+                if let purpose = segment.statedPurpose {
+                    // The segment's one reason. It is the explanation for
+                    // everybody in it, so it is stated here once rather than
+                    // repeated against every name below.
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("What this is for")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(purpose)
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let description = segment.description, !description.isEmpty {
                     Text(description)
                         .font(.footnote)
@@ -110,17 +151,8 @@ struct SegmentDetailView: View {
                 SegmentRunSection(run: run)
             }
 
-            if segment.kind == .manual && canManage {
-                Section {
-                    Button {
-                        showingAddMember = true
-                    } label: {
-                        Label("Add someone", systemImage: "person.badge.plus")
-                    }
-                    .disabled(model.isActing)
-                } footer: {
-                    Text("Adding somebody here puts them in this segment straight away. It does not check whether they can be messaged.")
-                }
+            if canManage {
+                addSomeoneSection(segment)
             }
 
             if !model.activeOverrides.isEmpty {
@@ -141,6 +173,19 @@ struct SegmentDetailView: View {
                                         footer: "Kept on purpose. A revoked override is never deleted, so who decided what and who undid it both stay readable.")
             }
 
+            if canManage {
+                Section {
+                    Button(role: .destructive) {
+                        confirmingSegmentRemoval = true
+                    } label: {
+                        Label("Remove this segment", systemImage: "trash")
+                    }
+                    .disabled(model.isActing)
+                } footer: {
+                    Text("Whether this is deleted or archived is not up to you or to this app. A segment that no campaign used, that the engine never worked out, that nobody overruled and where nobody wrote down why a named person is in it is deleted. Anything else is archived, stays readable, and can be put back.")
+                }
+            }
+
             if !canManage {
                 Section {
                     Text("You can see everyone in this segment and the evidence behind each membership. Changing it needs the campaigns manage permission.")
@@ -150,6 +195,58 @@ struct SegmentDetailView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// What the confirmation says before anybody taps Remove. It cannot promise
+    /// either outcome, so it names the destructive possibility plainly.
+    private var removalWarning: String {
+        guard let segment = model.segment else {
+            return "This may be deleted for good, or archived if it carries a record of a decision. Nobody is messaged either way."
+        }
+        let people = segment.memberCount == 1
+            ? "1 person"
+            : "\(segment.memberCount.formatted()) people"
+        var text = "\(segment.name) holds \(people)."
+        if segment.kind == .automatic {
+            text += " The engine has worked it out, so it will be archived rather than deleted. Nothing about it is destroyed."
+        } else {
+            text += " If nobody used it for a campaign, overruled it, or wrote down why a named person is in it, it is deleted for good. Otherwise it is archived and nothing is destroyed."
+        }
+        return text + " Nobody is messaged either way."
+    }
+
+    /// Adding somebody, which means two different things.
+    ///
+    /// On a manual segment it is a literal membership edit. On an automatic one
+    /// it is a force include: a standing instruction that keeps somebody in
+    /// whether or not the engine agrees. Before this the second was only
+    /// reachable from a person already listed, which made pinning somebody the
+    /// engine had never matched impossible, and that is the case it is most for.
+    @ViewBuilder
+    private func addSomeoneSection(_ segment: SegmentRecord) -> some View {
+        if segment.kind == .manual {
+            Section {
+                Button {
+                    showingAddMember = true
+                } label: {
+                    Label("Add someone", systemImage: "person.badge.plus")
+                }
+                .disabled(model.isActing)
+            } footer: {
+                Text("Adding somebody here puts them in this segment straight away. People already in it are not offered again. It does not check whether they can be messaged.")
+            }
+        } else if segment.kind == .automatic {
+            Section {
+                Button {
+                    showingAddMember = true
+                } label: {
+                    Label("Keep someone in", systemImage: "pin")
+                }
+                .disabled(model.isActing)
+            } footer: {
+                Text("This is a force include, not a membership edit. They stay in whether or not the engine matches them, until somebody reverses it. People already in this segment are not offered here; to pin one of them, open their name below.")
+            }
+        }
     }
 
     /// Recompute, described as what it does rather than as what it is called.
@@ -552,7 +649,12 @@ struct SegmentMemberEvidenceView: View {
 
     private func headline(_ detail: SegmentMemberDetail) -> String {
         if let member = detail.member {
-            return member.evidence.headline(personName: model.displayName)
+            // The segment's purpose is passed in because it lives on the
+            // segment and not on this person's evidence. It is the common-case
+            // explanation; the per-person note, when there is one, is still
+            // said underneath it rather than replaced by it.
+            return member.evidence.headline(personName: model.displayName,
+                                            segmentPurpose: detail.segment.statedPurpose)
         }
         if detail.activeOverride?.overrideType == .exclude {
             return "\(model.displayName) is deliberately held out of this segment. The engine may or may not match them. While this exclusion stands they will not be added by any update."
@@ -785,15 +887,40 @@ private struct SegmentReasonSheet: View {
     }
 }
 
-// MARK: - Adding somebody to a manual segment
+// MARK: - Adding somebody to an existing segment
 
+/// Adding somebody to a segment that already exists.
+///
+/// THE PEOPLE ALREADY IN IT ARE NOT HERE, AND THE SERVER IS WHY.
+///   The owner added three contacts, opened this again, and all three were
+///   still offered. The fix is not to filter what is on screen: this list is
+///   paged and searchable, so a member on the next page would still have been
+///   offered a scroll later. `/api/segments/:id/candidates` subtracts
+///   membership before it pages, which is also the only way its counts can be
+///   true. This view must not re-filter; it would be filtering a set the phone
+///   does not hold.
+///
+/// SOMEBODY HELD OUT IS SHOWN, NOT HIDDEN.
+///   An active exclude override is a decision a person made that outlives every
+///   recompute. They are not a member and they are not simply absent either. A
+///   database trigger refuses to add them while it stands, so hiding them would
+///   leave a name missing with no way to find out why. They appear in their own
+///   section, with who held them out and the reason, and tapping one opens the
+///   page where that can be reversed.
 private struct SegmentAddMemberSheet: View {
     @ObservedObject var model: SegmentDetailModel
-    @ObservedObject var picker: SegmentContactPickerModel
+    @ObservedObject var picker: SegmentCandidatePickerModel
+    let segmentKind: SegmentKind
+    let segmentPurpose: String?
+
+    @EnvironmentObject private var session: SessionModel
+    @ObservedObject private var authors = SegmentAuthorDirectory.shared
     @Environment(\.dismiss) private var dismiss
-    @State private var reason = ""
+    @State private var note = ""
     @State private var isWorking = false
-    @State private var chosen: ConversationSummary?
+    @State private var chosen: SegmentCandidate?
+
+    private var isForceInclude: Bool { segmentKind == .automatic }
 
     var body: some View {
         NavigationStack {
@@ -809,54 +936,27 @@ private struct SegmentAddMemberSheet: View {
                 } header: {
                     Text("Who")
                 } footer: {
-                    Text("Search runs on the server. Adding somebody puts them in this segment straight away.")
+                    Text(isForceInclude
+                         ? "Search runs on the server. Anybody already in this segment is left out of these results."
+                         : "Search runs on the server. Anybody already in this segment is left out of these results, so you cannot add the same person twice.")
                 }
 
-                Section("Contacts") {
-                    if let problem = picker.searchProblem {
-                        Text(problem).font(.footnote).foregroundStyle(.secondary)
-                    } else if picker.results.isEmpty && !picker.isSearching {
-                        Text("No contacts found").foregroundStyle(.secondary)
-                    }
-                    ForEach(picker.results) { contact in
-                        Button {
-                            chosen = contact
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(contact.displayName)
-                                    Text(PhoneFormatter.pretty(contact.phone))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: chosen?.phone == contact.phone
-                                      ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(chosen?.phone == contact.phone
-                                                     ? ViciTheme.tint : Color.secondary)
-                            }
-                        }
-                        .foregroundStyle(.primary)
-                    }
+                candidatesSection
+
+                if !picker.held.isEmpty {
+                    heldSection
                 }
 
-                Section {
-                    TextField("Why are they in this group?", text: $reason, axis: .vertical)
-                        .lineLimit(2...4)
-                } header: {
-                    Text("Reason")
-                } footer: {
-                    Text("Optional. It is stored as the evidence behind their membership, so it is what somebody sees when they ask why this person is here.")
-                }
+                noteSection
             }
-            .navigationTitle("Add someone")
+            .navigationTitle(isForceInclude ? "Keep someone in" : "Add someone")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.disabled(isWorking)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isWorking ? "Adding" : "Add") { add() }
+                    Button(confirmTitle) { commit() }
                         .disabled(chosen == nil || isWorking)
                 }
             }
@@ -866,21 +966,164 @@ private struct SegmentAddMemberSheet: View {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     guard !Task.isCancelled else { return }
                 }
-                await picker.loadContacts()
+                await picker.load()
+            }
+            .task { await authors.load(canReadTeam: session.can(Permission.userRead)) }
+        }
+    }
+
+    private var confirmTitle: String {
+        if isWorking { return isForceInclude ? "Keeping" : "Adding" }
+        return isForceInclude ? "Keep in" : "Add"
+    }
+
+    @ViewBuilder
+    private var candidatesSection: some View {
+        Section {
+            if let problem = picker.problem {
+                Text(problem).font(.footnote).foregroundStyle(.secondary)
+                Button("Try again") { Task { await picker.load() } }
+            } else if picker.isSearching && picker.candidates.isEmpty {
+                ProgressView("Loading contacts")
+            } else if picker.candidates.isEmpty {
+                Text(picker.held.isEmpty
+                     ? "Nobody left to add."
+                     : "Nobody left to add. The only matches are people somebody has held out.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(picker.candidates) { candidate in
+                    Button {
+                        chosen = candidate
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(candidate.displayName)
+                                Text(PhoneFormatter.pretty(candidate.contactPhone))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: chosen?.contactPhone == candidate.contactPhone
+                                  ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(chosen?.contactPhone == candidate.contactPhone
+                                                 ? ViciTheme.tint : Color.secondary)
+                                .accessibilityLabel(chosen?.contactPhone == candidate.contactPhone
+                                                    ? "Chosen" : "Not chosen")
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .onAppear { Task { await picker.loadMoreIfNeeded(after: candidate) } }
+                }
+                if picker.isLoadingMore {
+                    ProgressView().frame(maxWidth: .infinity)
+                }
+            }
+        } header: {
+            Text("Contacts")
+        } footer: {
+            if let sentence = picker.alreadyInSentence {
+                Text(sentence)
+            } else {
+                Text("Choosing somebody does not check whether they can be messaged.")
             }
         }
     }
 
-    private func add() {
-        guard let contact = chosen, !isWorking else { return }
+    /// The people a person deliberately held out. Deliberately not selectable:
+    /// the database refuses the insert while the exclusion stands, so an
+    /// enabled control here would produce a 409 and teach nothing. The way
+    /// back in is to reverse the decision, which is on their own page.
+    @ViewBuilder
+    private var heldSection: some View {
+        Section {
+            ForEach(picker.held) { person in
+                NavigationLink {
+                    SegmentMemberEvidenceView(segmentID: model.segmentID,
+                                              segmentKind: segmentKind,
+                                              phone: person.contactPhone,
+                                              fallbackName: person.displayName,
+                                              parent: model)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(person.displayName, systemImage: "nosign")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(ViciTheme.destructive)
+                        Text(PhoneFormatter.pretty(person.contactPhone))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(person.heldSentence(
+                            author: authors.name(for: person.override?.createdByUserId,
+                                                 currentUserID: session.currentUser?.id)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let reason = person.reason {
+                            Text("Reason: \(reason)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        } header: {
+            Text("Held out of this segment")
+        } footer: {
+            Text("These people match your search but somebody decided to keep them out, and that decision survives every update. They cannot be added while it stands. Tap one to see who decided it and to reverse it.")
+        }
+    }
+
+    /// The per-person note.
+    ///
+    /// On a manual segment the group already has a purpose, written once, that
+    /// explains everybody in it. So this is genuinely optional here and is
+    /// labelled as what it is: the extra thing that is true of this person and
+    /// not of the rest.
+    ///
+    /// On an automatic segment there is no group purpose, because the detector
+    /// is the purpose. Here the note is the whole record of why a human
+    /// overruled the engine, which is the case it has always earned.
+    @ViewBuilder
+    private var noteSection: some View {
+        Section {
+            if let segmentPurpose, !isForceInclude {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Everybody in this segment is explained by:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(segmentPurpose)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            TextField(isForceInclude
+                      ? "Why are you overruling the engine for this person?"
+                      : "Anything extra about this person?",
+                      text: $note, axis: .vertical)
+                .lineLimit(2...4)
+        } header: {
+            Text(isForceInclude ? "Reason" : "Note about this person")
+        } footer: {
+            Text(isForceInclude
+                 ? "Worth writing. This override outlives every future update, and whoever reads it in three months will see your name, the date and this sentence."
+                 : "Optional. The segment purpose above is already recorded for everybody here, so this is only for what is true of this one person, such as when and why they asked.")
+        }
+    }
+
+    private func commit() {
+        guard let candidate = chosen, !isWorking else { return }
         isWorking = true
-        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        let input = SegmentMemberInput(phone: PhoneFormatter.e164(contact.phone),
-                                       name: contact.displayName,
-                                       contactID: contact.recordID?.rawValue,
-                                       reason: trimmed.isEmpty ? nil : trimmed)
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let reason = trimmed.isEmpty ? nil : trimmed
         Task {
-            await model.addMember(input)
+            if isForceInclude {
+                await model.forceInclude(candidate, reason: reason)
+            } else {
+                await model.addMember(SegmentMemberInput(phone: candidate.contactPhone,
+                                                         name: candidate.contactName,
+                                                         contactID: candidate.contactId?.rawValue,
+                                                         reason: reason))
+            }
             isWorking = false
             dismiss()
         }

@@ -61,6 +61,7 @@ final class SegmentListModel: ObservableObject {
     /// The catalogue key currently being turned on, so its row can show
     /// progress and cannot be tapped twice.
     @Published private(set) var startingKey: String?
+    @Published private(set) var isRemoving = false
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -147,12 +148,16 @@ final class SegmentListModel: ObservableObject {
     }
 
     /// Returns the new segment on success so the caller can navigate into it.
+    ///
+    /// `purpose` is required by the server and by the form. It is the one
+    /// reason a manual segment carries, and it becomes the explanation shown
+    /// for every person in it.
     func createManual(name: String,
-                      description: String?,
+                      purpose: String,
                       members: [SegmentMemberInput]) async -> SegmentRecord? {
         do {
             let response = try await APIClient.shared.createManualSegment(name: name,
-                                                                          description: description,
+                                                                          purpose: purpose,
                                                                           members: members)
             errorMessage = nil
             let count = response.memberCount ?? members.count
@@ -164,6 +169,88 @@ final class SegmentListModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Remove a segment, and report which of the two things actually happened.
+    ///
+    /// THE CLIENT DOES NOT DECIDE. It may ask for the archive; it may never ask
+    /// for the deletion. A segment that no campaign used, that the engine never
+    /// ran on, that nobody overrode and where nobody wrote down why a named
+    /// person is in it is destroyed. Everything else is archived, and the
+    /// server says which and why. So the confirmation this follows must warn
+    /// about the destructive possibility, and the message afterwards must
+    /// report the outcome rather than repeat the request.
+    @discardableResult
+    func remove(_ segment: SegmentRecord, archiveOnly: Bool = false) async -> Bool {
+        guard !isRemoving else { return false }
+        isRemoving = true
+        defer { isRemoving = false }
+        do {
+            let result = try await APIClient.shared.removeSegment(id: segment.id,
+                                                                  archiveOnly: archiveOnly)
+            errorMessage = nil
+            var message = result.outcomeSentence(segmentName: segment.name)
+            if !result.wasDeleted, let why = result.explanations.first {
+                message += " \(why)"
+            }
+            statusMessage = message
+            await load(reset: true)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+}
+
+// MARK: - The archive
+
+/// Archived segments, on their own screen.
+///
+/// They leave the working list and they do not leave the database, which is the
+/// whole difference between archiving and deleting. If there were no way to
+/// look at them the archive would be indistinguishable from a slow delete, and
+/// an operator who cannot find a segment again will reach for the destructive
+/// path next time.
+@MainActor
+final class SegmentArchiveModel: ObservableObject {
+    @Published private(set) var segments: [SegmentRecord] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isActing = false
+    @Published var errorMessage: String?
+    @Published var statusMessage: String?
+
+    var isEmpty: Bool { segments.isEmpty && !isLoading }
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let page = try await APIClient.shared.fetchSegments(page: 1,
+                                                                pageSize: 100,
+                                                                includeArchived: true)
+            // The server returns live rows alongside archived ones when asked
+            // for both, so this screen keeps only the ones it is about.
+            segments = page.items.filter(\.isArchived)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func restore(_ segment: SegmentRecord) async {
+        guard !isActing else { return }
+        isActing = true
+        defer { isActing = false }
+        do {
+            _ = try await APIClient.shared.restoreSegment(id: segment.id)
+            statusMessage = "\(segment.name) is back on the list."
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
@@ -229,6 +316,92 @@ final class SegmentContactPickerModel: ObservableObject {
         } catch {
             guard requestID == id else { return }
             searchProblem = "Contacts could not be loaded. Try again."
+        }
+    }
+}
+
+/// Who can still be added to one existing segment.
+///
+/// A different model from `SegmentContactPickerModel` on purpose, and the
+/// difference is the whole fix. That one is for a segment that does not exist
+/// yet, where nobody can already be a member and `/api/contacts` is the right
+/// source. This one is for a segment that does exist, so the question is not
+/// "who are our contacts?" but "who is not already in this?", and only the
+/// server can answer that: membership runs to thousands of rows, the list is
+/// paged, and subtracting inside the page the phone happens to be holding would
+/// hide the members on screen and leave the rest one scroll away.
+///
+/// It also carries `held`, the people a person deliberately excluded. Those are
+/// shown rather than dropped. A standing exclusion is a decision somebody made,
+/// the database refuses to add them while it stands, and reversing it is a real
+/// thing to want to do from here.
+@MainActor
+final class SegmentCandidatePickerModel: ObservableObject {
+    @Published var search = ""
+    @Published private(set) var candidates: [SegmentCandidate] = []
+    @Published private(set) var held: [SegmentHeldCandidate] = []
+    @Published private(set) var alreadyInSentence: String?
+    @Published private(set) var isSearching = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMore = false
+    @Published private(set) var problem: String?
+
+    let segmentID: String
+    private var requestID = UUID()
+    private var nextPage = 2
+    private let pageSize = 50
+
+    init(segmentID: String) {
+        self.segmentID = segmentID
+    }
+
+    var isEmpty: Bool { candidates.isEmpty && held.isEmpty && !isSearching }
+
+    func load() async {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = UUID()
+        requestID = id
+        isSearching = true
+        defer { if requestID == id { isSearching = false } }
+        do {
+            let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
+                                                                             search: query,
+                                                                             page: 1,
+                                                                             pageSize: pageSize)
+            // A slower earlier keystroke must not overwrite a faster later one.
+            guard requestID == id else { return }
+            candidates = response.candidates.items
+            held = response.heldPeople
+            alreadyInSentence = response.alreadyInSentence
+            hasMore = response.candidates.hasMore ?? false
+            nextPage = 2
+            problem = nil
+        } catch {
+            guard requestID == id else { return }
+            problem = error.localizedDescription
+        }
+    }
+
+    func loadMoreIfNeeded(after candidate: SegmentCandidate) async {
+        guard candidate.id == candidates.last?.id, hasMore, !isLoadingMore else { return }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = requestID
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
+                                                                             search: query,
+                                                                             page: nextPage,
+                                                                             pageSize: pageSize)
+            guard requestID == id else { return }
+            let known = Set(candidates.map(\.id))
+            candidates.append(contentsOf: response.candidates.items.filter { !known.contains($0.id) })
+            hasMore = response.candidates.hasMore ?? false
+            nextPage += 1
+            problem = nil
+        } catch {
+            guard requestID == id else { return }
+            problem = error.localizedDescription
         }
     }
 }
@@ -367,6 +540,47 @@ final class SegmentDetailModel: ObservableObject {
             return response.override.overrideType == .exclude
                 ? "The hold on \(displayName) was lifted. The next update decides whether they come back."
                 : "\(displayName) is no longer forced in. The next update decides whether they stay."
+        }
+    }
+
+    /// Force somebody in who is not in this segment at all.
+    ///
+    /// The same call as the force include on a member's own page, reached from
+    /// the picker instead. Before this the only way to pin a person was to find
+    /// them already listed, so pinning somebody the engine had never matched
+    /// was unreachable, which is the case the feature is most for.
+    func forceInclude(_ candidate: SegmentCandidate, reason: String?) async {
+        await setOverride(phone: candidate.contactPhone,
+                          displayName: candidate.displayName,
+                          overrideType: .include,
+                          reason: reason)
+    }
+
+    /// Remove this segment.
+    ///
+    /// Returns the sentence describing what ACTUALLY happened, or nil on
+    /// failure. The screen is about to be popped, so the message has to travel
+    /// to whoever is still on screen rather than being shown here: the caller
+    /// hands it to the list. And it has to be the server's answer, not the
+    /// request, because a segment that gains an override between the tap and
+    /// the statement is archived rather than deleted.
+    func remove(archiveOnly: Bool) async -> String? {
+        guard let segment, !isActing else { return nil }
+        isActing = true
+        defer { isActing = false }
+        do {
+            let result = try await APIClient.shared.removeSegment(id: segmentID,
+                                                                  archiveOnly: archiveOnly)
+            errorMessage = nil
+            var message = result.outcomeSentence(segmentName: segment.name)
+            if !result.wasDeleted, let why = result.explanations.first {
+                message += " \(why)"
+            }
+            return message
+        } catch {
+            statusMessage = nil
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 

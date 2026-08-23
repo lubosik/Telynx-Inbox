@@ -644,15 +644,21 @@ actor APIClient {
     }
 
     /// `POST /api/segments` with `kind: "manual"`, `campaigns.manage`.
+    ///
+    /// `purpose` is REQUIRED and the server answers 400
+    /// `SEGMENT_PURPOSE_REQUIRED` without it. It is the segment's one reason,
+    /// written once and shown as the explanation for everybody in it. It is not
+    /// the per-person note, which travels on each `SegmentMemberInput` and says
+    /// something different about one named human.
     func createManualSegment(name: String,
-                             description: String?,
+                             purpose: String,
                              members: [SegmentMemberInput]) async throws -> SegmentCreationResponse {
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "kind": "manual",
             "name": name,
+            "purpose": purpose,
             "members": members.map(\.requestBody)
         ]
-        if let description, !description.isEmpty { body["description"] = description }
         return try await segmentDecoded(post("/api/segments", body: body))
     }
 
@@ -723,6 +729,58 @@ actor APIClient {
     func recomputeSegment(id: String) async throws -> SegmentRecomputeResponse {
         try await segmentDecoded(
             post("/api/segments/\(encodedPathSegment(id))/recompute", body: [:], timeout: 90)
+        )
+    }
+
+    /// `GET /api/segments/:id/candidates`, `campaigns.manage`.
+    ///
+    /// People already in the segment are removed by the SERVER, before paging.
+    /// Do not re-filter here: the client holds one page and the membership it
+    /// would be subtracting can run to ten thousand rows, so a client-side
+    /// filter would hide the members on screen and leave every other one a
+    /// scroll away. That was the bug.
+    ///
+    /// `held` is separate on purpose. Somebody with an active exclude override
+    /// is not a member, but they are not simply absent either, and re-adding
+    /// them is a real thing to want to do.
+    func fetchSegmentCandidates(id: String,
+                                search: String = "",
+                                page: Int = 1,
+                                pageSize: Int = 50) async throws -> SegmentCandidateResponse {
+        var items = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ]
+        if !search.isEmpty { items.append(URLQueryItem(name: "search", value: search)) }
+        return try await decodedGET("/api/segments/\(encodedPathSegment(id))/candidates",
+                                    queryItems: items)
+    }
+
+    /// `DELETE /api/segments/:id`, `campaigns.manage`.
+    ///
+    /// The body may carry `mode: "archive"` and a reason. It may NOT ask for a
+    /// deletion: `delete_sms_campaign_segment` has no force path. Whether the
+    /// row was destroyed or archived is in the RESPONSE, and the interface must
+    /// read it from there rather than assuming the request got what it asked
+    /// for. A segment that gains an override between the tap and the statement
+    /// is archived, and that is a correct answer rather than a failure.
+    func removeSegment(id: String,
+                       archiveOnly: Bool = false,
+                       reason: String? = nil) async throws -> SegmentRemovalResponse {
+        var body: [String: Any] = [:]
+        if archiveOnly { body["mode"] = "archive" }
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        return try await segmentDecoded(
+            delete("/api/segments/\(encodedPathSegment(id))", body: body)
+        )
+    }
+
+    /// `POST /api/segments/:id/restore`, `campaigns.manage`. The inverse of an
+    /// archive. Nothing was removed by the archive, so nothing is rebuilt here.
+    @discardableResult
+    func restoreSegment(id: String) async throws -> SegmentRestoreResponse {
+        try await segmentDecoded(
+            post("/api/segments/\(encodedPathSegment(id))/restore", body: [:])
         )
     }
 
