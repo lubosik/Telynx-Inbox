@@ -22,6 +22,8 @@
 		515447AE1672E23D1520326C /* AccountModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B52032187A64C7FB48FAA0BF /* AccountModels.swift */; };
 		9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */; };
 		672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F149B900F4E19E4142123D9 /* AppConfig.swift */; };
+		7F35601AE465969A0F68FEA6 /* AppearanceSchedule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4463733CB886E325ED288753 /* AppearanceSchedule.swift */; };
+		C87378233C9E67E33B80C510 /* CampaignArchiveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */; };
 		04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */; };
 		7649D086E62D19440F809802 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 285C11288F042740FCF4F46E /* CredentialStore.swift */; };
 		7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */; };
@@ -40,7 +42,9 @@
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
 		2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59F0347583693CB980746A9 /* OnboardingOverlay.swift */; };
+		C3682140C3F49B1ED06D5922 /* OnboardingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */; };
 		98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */; };
+		1B416C2554E8680E43137CE9 /* ProfileEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3A57548EB25EECA7F4CFEEF /* ProfileEditorView.swift */; };
 		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
 		D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
@@ -72,6 +76,8 @@
 		B52032187A64C7FB48FAA0BF /* AccountModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
 		AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsModels.swift; sourceTree = "<group>"; };
 		0F149B900F4E19E4142123D9 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+		4463733CB886E325ED288753 /* AppearanceSchedule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSchedule.swift; sourceTree = "<group>"; };
+		E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignArchiveModels.swift; sourceTree = "<group>"; };
 		0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignModels.swift; sourceTree = "<group>"; };
 		285C11288F042740FCF4F46E /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
 		6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperienceModels.swift; sourceTree = "<group>"; };
@@ -90,7 +96,9 @@
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		E59F0347583693CB980746A9 /* OnboardingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOverlay.swift; sourceTree = "<group>"; };
+		1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSpotlight.swift; sourceTree = "<group>"; };
 		BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumWelcomeView.swift; sourceTree = "<group>"; };
+		D3A57548EB25EECA7F4CFEEF /* ProfileEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileEditorView.swift; sourceTree = "<group>"; };
 		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetPasswordView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -169,6 +177,8 @@
 				B52032187A64C7FB48FAA0BF /* AccountModels.swift */,
 				AEE4B8DC98D5DF7F30042D7B /* AnalyticsModels.swift */,
 				0F149B900F4E19E4142123D9 /* AppConfig.swift */,
+				4463733CB886E325ED288753 /* AppearanceSchedule.swift */,
+				E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */,
 				0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */,
 				285C11288F042740FCF4F46E /* CredentialStore.swift */,
 				6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */,
@@ -194,7 +204,9 @@
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
 				E59F0347583693CB980746A9 /* OnboardingOverlay.swift */,
+				1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */,
 				BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */,
+				D3A57548EB25EECA7F4CFEEF /* ProfileEditorView.swift */,
 				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
 				6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
@@ -318,6 +330,8 @@
 				515447AE1672E23D1520326C /* AccountModels.swift in Sources */,
 				9A7480CC9E78E9ADB80665BB /* AnalyticsModels.swift in Sources */,
 				672C1BDF17670AA7D2A4D451 /* AppConfig.swift in Sources */,
+				7F35601AE465969A0F68FEA6 /* AppearanceSchedule.swift in Sources */,
+				C87378233C9E67E33B80C510 /* CampaignArchiveModels.swift in Sources */,
 				04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */,
 				7649D086E62D19440F809802 /* CredentialStore.swift in Sources */,
 				7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */,
@@ -336,7 +350,9 @@
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
 				2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */,
+				C3682140C3F49B1ED06D5922 /* OnboardingSpotlight.swift in Sources */,
 				98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */,
+				1B416C2554E8680E43137CE9 /* ProfileEditorView.swift in Sources */,
 				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
 				D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,

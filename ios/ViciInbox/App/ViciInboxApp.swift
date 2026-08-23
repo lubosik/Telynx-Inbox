@@ -14,8 +14,21 @@ struct ViciInboxApp: App {
                 .environmentObject(session)
                 .environmentObject(appearance)
                 .environmentObject(onboarding)
-                .preferredColorScheme(appearance.preference.colorScheme)
+                // `resolvedColorScheme`, not `preference.colorScheme`: the
+                // Scheduled preference has no fixed answer and the model is the
+                // only thing that knows what time it is.
+                .preferredColorScheme(appearance.resolvedColorScheme)
                 .task { await session.bootstrap() }
+                // The account's IANA timezone, when the server sends one, so a
+                // scheduled evening means the workspace's evening. Absent or
+                // unrecognised falls back to this device's timezone inside
+                // `AppearanceTimeZoneResolver`; nothing here can fail.
+                .task(id: session.currentUser?.timeZone) {
+                    appearance.applyAccountTimeZone(
+                        session.currentUser?.timeZone,
+                        isDefault: session.currentUser?.timeZoneIsDefault ?? false
+                    )
+                }
                 .onChange(of: scenePhase) { phase in
                     if phase == .active { session.refreshConnection() }
                 }

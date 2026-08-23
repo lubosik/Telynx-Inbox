@@ -34,10 +34,43 @@ final class CampaignListModel: ObservableObject {
     @Published private(set) var isLoadingMore = false
     @Published var errorMessage: String?
 
+    /// Campaign id -> archived timestamp, for the items currently loaded.
+    /// Absent means not archived.
+    @Published private(set) var archivedAt: [String: String] = [:]
+
+    /// Whether archived campaigns are included in the list.
+    ///
+    /// Off by default: the point of archiving is that the working list stops
+    /// showing the thing. Changing it reloads from page one, because paging
+    /// state cannot survive a change to what the pages contain.
+    @Published var showsArchived = false
+
+    /// Set to the campaign currently being archived, restored or deleted, so
+    /// its row can show progress and its actions cannot be fired twice.
+    @Published private(set) var mutatingID: String?
+
+    /// A short confirmation of what just happened, shown and then dismissed.
+    /// Archiving is silent otherwise, and silence after a destructive-looking
+    /// swipe reads as failure.
+    @Published var statusMessage: String?
+
     private var nextPage = 1
     private var total = 0
+    private let pageSize = 25
 
     var hasMore: Bool { campaigns.count < total }
+
+    func isArchived(_ campaign: CampaignRecord) -> Bool {
+        archivedAt[campaign.id] != nil
+    }
+
+    /// Deleting is offered only for a draft or a rejected draft — something
+    /// that has never been approved and never reached a customer. Everything
+    /// else is archived instead. The server is the actual gate; this only keeps
+    /// the app from offering an action that is going to be refused.
+    func canDelete(_ campaign: CampaignRecord) -> Bool {
+        campaign.status.isEditable
+    }
 
     func load(reset: Bool = false) async {
         if reset {
@@ -48,11 +81,14 @@ final class CampaignListModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            async let page = APIClient.shared.fetchCampaigns(page: 1)
+            async let page = APIClient.shared.fetchCampaigns(page: 1,
+                                                             pageSize: pageSize,
+                                                             includeArchived: showsArchived)
             async let count = APIClient.shared.fetchCampaignReviewCount()
             let result = try await (page, count)
-            campaigns = result.0.items
-            total = result.0.total
+            campaigns = result.0.page.items
+            archivedAt = result.0.archivedAt
+            total = result.0.page.total
             nextPage = 2
             reviewCount = result.1
             errorMessage = nil
@@ -66,15 +102,66 @@ final class CampaignListModel: ObservableObject {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let page = try await APIClient.shared.fetchCampaigns(page: nextPage)
+            let result = try await APIClient.shared.fetchCampaigns(page: nextPage,
+                                                                   pageSize: pageSize,
+                                                                   includeArchived: showsArchived)
             let known = Set(campaigns.map(\.id))
-            campaigns.append(contentsOf: page.items.filter { !known.contains($0.id) })
-            total = page.total
+            campaigns.append(contentsOf: result.page.items.filter { !known.contains($0.id) })
+            archivedAt.merge(result.archivedAt) { _, new in new }
+            total = result.page.total
             nextPage += 1
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Archive, restore, delete
+
+    /// Archiving removes nothing. The row leaves the working list when archived
+    /// items are hidden, and is restorable from the same place.
+    func archive(_ campaign: CampaignRecord) async {
+        await mutate(campaign, confirmation: "\(campaign.title) archived.") {
+            _ = try await APIClient.shared.archiveCampaign(id: campaign.id)
+        }
+    }
+
+    func unarchive(_ campaign: CampaignRecord) async {
+        await mutate(campaign, confirmation: "\(campaign.title) restored.") {
+            _ = try await APIClient.shared.unarchiveCampaign(id: campaign.id)
+        }
+    }
+
+    /// The destructive one. Only reached behind an explicit confirmation, and
+    /// only offered for a draft, but the server decides.
+    func delete(_ campaign: CampaignRecord) async {
+        await mutate(campaign, confirmation: "\(campaign.title) deleted.") {
+            try await APIClient.shared.deleteCampaign(id: campaign.id)
+        }
+    }
+
+    /// Runs one campaign mutation and reloads.
+    ///
+    /// The list is reloaded from the server rather than edited in place. A
+    /// local edit would have to guess whether an archived item still belongs on
+    /// screen, what the new total is, and whether the review count moved; the
+    /// server already knows all three.
+    private func mutate(_ campaign: CampaignRecord,
+                        confirmation: String,
+                        action: () async throws -> Void) async {
+        guard mutatingID == nil else { return }
+        mutatingID = campaign.id
+        defer { mutatingID = nil }
+        do {
+            try await action()
+            errorMessage = nil
+            statusMessage = confirmation
+        } catch {
+            statusMessage = nil
+            errorMessage = error.localizedDescription
+            return
+        }
+        await load(reset: true)
     }
 }
 

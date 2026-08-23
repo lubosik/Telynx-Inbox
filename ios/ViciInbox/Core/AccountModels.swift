@@ -62,6 +62,42 @@ struct AuthUser: Codable, Identifiable, Hashable {
     let viaLegacySession: Bool?
     let onboarding: AccountOnboardingState?
 
+    /// The account's IANA timezone id, e.g. `Europe/London`.
+    ///
+    /// `GET /api/users/me` sends this as an OBJECT, not a string:
+    /// `{ id, label, region, offsetMinutes, offsetLabel, abbreviation,
+    /// isDefault }`. Only the id is modelled here, because the id is the only
+    /// part the app acts on — the rest is display text the server computed for
+    /// a picker this client does not show. A bare string is accepted too, so
+    /// the field survives being flattened later or arriving from another
+    /// surface.
+    ///
+    /// Optional despite the server documenting it as always present. A build
+    /// that assumed presence would break against any older deployment, and the
+    /// only cost of tolerating nil is one fallback that already had to exist:
+    /// everything reading this goes through `AppearanceTimeZoneResolver`, which
+    /// degrades to the device timezone for absent, blank and unrecognised
+    /// values alike.
+    let timeZone: String?
+
+    /// True when the server supplied its own fallback rather than a zone this
+    /// person chose. Lets the settings screen say where the times came from
+    /// instead of implying a choice that was never made.
+    let timeZoneIsDefault: Bool?
+
+    /// An outstanding email change, if the server ever reports one.
+    ///
+    /// It currently never does, and that is deliberate on its side rather than
+    /// an omission: `POST /api/users/me/email` answers identically whether the
+    /// requested address was free or already belongs to somebody, so that the
+    /// endpoint cannot be used to test whether an account exists. Exposing a
+    /// pending address on the identity would reintroduce exactly that oracle.
+    ///
+    /// Kept, decoded tolerantly, and read if it ever appears — but nothing in
+    /// the app depends on it. `ProfileEditorModel` holds the pending address
+    /// locally instead, which is the only place it can safely live.
+    let pendingEmail: String?
+
     var name: String { displayName ?? email ?? "Signed in" }
     var permissionSet: Set<String> { Set(permissions ?? []) }
 
@@ -74,6 +110,11 @@ struct AuthUser: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, displayName, email, role, permissions
         case mustChangePassword, isLegacyShared, viaLegacySession, onboarding
+        case timeZone
+        case timeZoneSnake = "time_zone"
+        case timezoneLowercase = "timezone"
+        case pendingEmail
+        case pendingEmailSnake = "pending_email"
     }
 
     init(from decoder: Decoder) throws {
@@ -95,6 +136,107 @@ struct AuthUser: Codable, Identifiable, Hashable {
         isLegacyShared = try? container.decodeIfPresent(Bool.self, forKey: .isLegacyShared)
         viaLegacySession = try? container.decodeIfPresent(Bool.self, forKey: .viaLegacySession)
         onboarding = try? container.decodeIfPresent(AccountOnboardingState.self, forKey: .onboarding)
+        let zone = AuthUser.decodeTimeZone(from: container)
+        timeZone = zone.id
+        timeZoneIsDefault = zone.isDefault
+        pendingEmail = AuthUser.firstNonEmpty(in: container,
+                                              keys: [.pendingEmail, .pendingEmailSnake])
+    }
+
+    /// Written by hand because the alias keys above have no stored property
+    /// to pair with, which makes the encoder impossible to synthesise. Only the
+    /// canonical camelCase spelling is ever produced; the snake_case and
+    /// lowercase spellings exist to read a server, not to write one.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
+        try container.encodeIfPresent(email, forKey: .email)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(permissions, forKey: .permissions)
+        try container.encodeIfPresent(mustChangePassword, forKey: .mustChangePassword)
+        try container.encodeIfPresent(isLegacyShared, forKey: .isLegacyShared)
+        try container.encodeIfPresent(viaLegacySession, forKey: .viaLegacySession)
+        try container.encodeIfPresent(onboarding, forKey: .onboarding)
+        // Re-emitted as the bare id rather than as the server's object. Nothing
+        // in this app posts an identity back, and a partial copy of a structure
+        // the server owns would be worse than a plain string.
+        try container.encodeIfPresent(timeZone, forKey: .timeZone)
+        try container.encodeIfPresent(pendingEmail, forKey: .pendingEmail)
+    }
+
+    /// Reads the timezone from whichever shape arrived: the documented object,
+    /// or a bare identifier string.
+    private static func decodeTimeZone(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> (id: String?, isDefault: Bool?) {
+        struct Envelope: Decodable {
+            let id: String?
+            let isDefault: Bool?
+        }
+        for key in [CodingKeys.timeZone, .timeZoneSnake, .timezoneLowercase] {
+            if let envelope = try? container.decodeIfPresent(Envelope.self, forKey: key),
+               let raw = envelope.id {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return (trimmed, envelope.isDefault) }
+            }
+            if let raw = try? container.decodeIfPresent(String.self, forKey: key) {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return (trimmed, nil) }
+            }
+        }
+        return (nil, nil)
+    }
+
+    /// First key that carries a non-blank string, or nil.
+    ///
+    /// A present-but-empty string is treated as absent on purpose: the server
+    /// clearing a value by writing `""` and the server never having sent one
+    /// mean the same thing to every caller here.
+    private static func firstNonEmpty(in container: KeyedDecodingContainer<CodingKeys>,
+                                      keys: [CodingKeys]) -> String? {
+        for key in keys {
+            guard let raw = try? container.decodeIfPresent(String.self, forKey: key) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
+}
+
+/// The answer to `POST /api/users/me/email`.
+///
+/// Note what is NOT here: the pending address. The server returns the same body
+/// whether the requested address was free or already taken, on purpose, so that
+/// this endpoint cannot be used to discover whether an account exists. The
+/// client therefore remembers the address it submitted rather than being told
+/// it back, and `message` is deliberately non-committal — show it verbatim
+/// rather than rewriting it into a promise the server did not make.
+struct EmailChangeRequestResult: Decodable, Hashable {
+    /// The server's own sentence. Shown as-is.
+    let message: String?
+    /// How long the confirmation link lasts.
+    let expiresInHours: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case message
+        case expiresInHours
+        case expiresInHoursSnake = "expires_in_hours"
+    }
+
+    init(message: String?, expiresInHours: Int?) {
+        self.message = message
+        self.expiresInHours = expiresInHours
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let raw = try? container.decodeIfPresent(String.self, forKey: .message)
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        message = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        expiresInHours = (try? container.decodeIfPresent(Int.self, forKey: .expiresInHours))
+            ?? (try? container.decodeIfPresent(Int.self, forKey: .expiresInHoursSnake))
+            ?? nil
     }
 }
 

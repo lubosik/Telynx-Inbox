@@ -222,12 +222,12 @@ function createAuthRouter({ authz, client, invitationStore, emailChangeStore, au
    * Write an audit row, but only for an event type the catalogue knows.
    *
    * The twin of `auditIfRegistered` in routes/users.js, and here for the same
-   * reason: `logAudit` throws on an unregistered type, and
-   * `team.member.email_changed` is not in lib/audit/event-types.js yet. That
-   * file is owned elsewhere. The call site below is complete and starts writing
-   * rows the moment the type is registered; until then it logs one warning
-   * naming the missing type rather than failing a confirmation that has already
-   * committed in the database.
+   * reason. `team.member.email_changed` IS registered in
+   * lib/audit/event-types.js, so the call site below writes a real row. The
+   * guard stays because that file is owned elsewhere and `logAudit` throws on
+   * an unregistered type: if the type is ever removed, a confirmation that has
+   * ALREADY committed in the database must not turn into a 500. One warning
+   * naming the missing type is the correct degradation.
    */
   async function auditIfRegistered(input) {
     if (!eventDefinition(input.eventType)) {
@@ -534,13 +534,13 @@ function createAuthRouter({ authz, client, invitationStore, emailChangeStore, au
   // whoever opens the link is not necessarily at a device that should end up
   // holding a session for that account.
   //
-  // NOTE FOR WHOEVER OWNS public/ AND server.js: the link in the email is
-  // `${APP_URL}/confirm-email-change?token=...`, and there is no page at that
-  // path yet. server.js serves /accept-invite explicitly and everything else
-  // falls through to the SPA. A GET of the confirm URL therefore returns
-  // index.html and nothing calls this endpoint. The API half is complete and
-  // testable; the landing page that POSTs the token to it is not this file's to
-  // add. See the report accompanying this change.
+  // WHAT CALLS THIS. The link in the email is
+  // `${APP_URL}/confirm-email-change?token=...`. On an iPhone with a build that
+  // routes the path, iOS opens the app and the app posts here; everywhere else
+  // `app.get('/confirm-email-change')` in server.js serves
+  // public/confirm-email-change.html, which posts here itself. Both callers are
+  // unauthenticated and both send nothing but the token, which is why this
+  // endpoint takes nothing else.
   router.post('/email-change/confirm', loginLimiter, async (req, res) => {
     const token = req.body?.token;
 

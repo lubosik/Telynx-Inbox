@@ -184,6 +184,80 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    // MARK: - Profile
+    //
+    // ASSUMED CONTRACT. The backend for name and email editing is being built
+    // in parallel; every call below is written against the shape documented on
+    // each method and every one of them degrades to a readable error rather
+    // than a crash if the endpoint is absent. Nothing here is destructive and
+    // nothing here changes authorisation: the server still owns which account
+    // is being edited, derived from the session, and `userId` is never sent.
+
+    /// `PATCH /api/users/me` with `{ "displayName": String }`.
+    ///
+    /// Takes effect immediately — there is nothing to confirm about a display
+    /// name. Returns the refreshed account when the server echoes one so the
+    /// caller does not have to guess what was stored; a server that answers
+    /// `204` is fine and yields nil.
+    ///
+    /// The 400 `INVALID_DISPLAY_NAME` code already has a sentence in
+    /// `readableMessage`, because invitations hit the same validation.
+    @discardableResult
+    func updateDisplayName(_ displayName: String) async throws -> AuthUser? {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (data, response) = try await patch("/api/users/me", body: ["displayName": trimmed])
+        try validate(data: data, response: response)
+        if let user = try? decoder.decode(AuthUser.self, from: data) {
+            lastKnownUser = user
+            return user
+        }
+        if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.identity {
+            lastKnownUser = user
+            return user
+        }
+        return nil
+    }
+
+    /// `POST /api/users/me/email` with `{ "email": String }`.
+    ///
+    /// Starts a change; it does not perform one. The server mails a
+    /// confirmation link to the NEW address, mails a heads-up to the OLD one,
+    /// and leaves the account answering to the old address until the link is
+    /// opened. That ordering is the whole safety property: an address that has
+    /// not been proven never becomes the address that signs in, so a typo
+    /// cannot lock anybody out and a borrowed session cannot be made permanent.
+    ///
+    /// The reply is identical whether the requested address was free or already
+    /// belongs to somebody, deliberately, so that this cannot be used to test
+    /// whether an account exists. Nothing in this client may add a check that
+    /// reintroduces that: do not pre-validate the address against the team
+    /// directory, and do not reword `message` into a promise that the link was
+    /// definitely sent.
+    ///
+    /// Calling it again with the same address is also the resend path — the
+    /// server cancels the open request and issues a fresh link, because two
+    /// live links to two different addresses is the exact state the flow
+    /// exists to prevent.
+    @discardableResult
+    func requestEmailChange(to email: String) async throws -> EmailChangeRequestResult {
+        let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let (data, response) = try await post("/api/users/me/email", body: ["email": trimmed])
+        try validate(data: data, response: response)
+        return (try? decoder.decode(EmailChangeRequestResult.self, from: data))
+            ?? EmailChangeRequestResult(message: nil, expiresInHours: nil)
+    }
+
+    /// `POST /api/users/me/email/cancel`. Abandons an open request and leaves
+    /// the current address exactly as it was.
+    ///
+    /// Idempotent, and deliberately silent about whether there was anything to
+    /// cancel: the same 200 either way, for the same reason the request
+    /// endpoint is uniform.
+    func cancelEmailChange() async throws {
+        let (data, response) = try await post("/api/users/me/email/cancel", body: [:])
+        try validate(data: data, response: response)
+    }
+
     func logout() async {
         _ = try? await post("/auth/logout", body: [:], retryOn401: false)
         lastKnownUser = nil
@@ -338,10 +412,41 @@ actor APIClient {
     // MARK: - Campaigns
 
     func fetchCampaigns(page: Int = 1, pageSize: Int = 25) async throws -> CampaignPage {
-        try await decodedGET("/api/campaigns", queryItems: [
+        try await fetchCampaigns(page: page, pageSize: pageSize, includeArchived: false).page
+    }
+
+    /// The campaign list, plus which of its items are archived.
+    ///
+    /// The archive flags are decoded as a second, fully optional pass over the
+    /// same response rather than as a field on `CampaignRecord`, because the
+    /// column is being added by another agent and this build must work before
+    /// and after it lands. A backend with no archiving returns flags that are
+    /// all nil and the list behaves exactly as it did.
+    ///
+    /// `includeArchived` is only sent when true, so an older backend never
+    /// receives a query parameter it does not understand.
+    func fetchCampaigns(page: Int,
+                        pageSize: Int,
+                        includeArchived: Bool) async throws -> CampaignListResult {
+        var items = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
-        ])
+        ]
+        if includeArchived {
+            items.append(URLQueryItem(name: "includeArchived", value: "true"))
+        }
+        let (data, response) = try await get("/api/campaigns", queryItems: items)
+        try validate(data: data, response: response)
+        guard let page = try? decoder.decode(CampaignPage.self, from: data) else {
+            throw APIError.decoding
+        }
+        var archived: [String: String] = [:]
+        if let flags = try? decoder.decode(CampaignArchiveStatePage.self, from: data) {
+            for flag in flags.items where flag.archivedAt != nil && !flag.id.isEmpty {
+                archived[flag.id] = flag.archivedAt
+            }
+        }
+        return CampaignListResult(page: page, archivedAt: archived)
     }
 
     func fetchCampaignReviewCount() async throws -> Int {
@@ -439,6 +544,36 @@ actor APIClient {
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignDryRun.self, from: data) }
         catch { throw APIError.decoding }
+    }
+
+    /// `POST /api/campaigns/:id/archive`.
+    ///
+    /// ASSUMED CONTRACT. Archiving is reversible and removes nothing: the
+    /// campaign, its revisions and its audit rows all stay. It exists so a
+    /// finished or abandoned draft can leave the working list without anybody
+    /// having to destroy a record that an approval decision may point at.
+    func archiveCampaign(id: String) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/archive")
+    }
+
+    /// `POST /api/campaigns/:id/unarchive`. The exact inverse.
+    func unarchiveCampaign(id: String) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/unarchive")
+    }
+
+    /// `DELETE /api/campaigns/:id`.
+    ///
+    /// ASSUMED CONTRACT, and the only destructive campaign call in this client.
+    /// It is expected to be refused by the server for anything that has been
+    /// approved, scheduled, sent or is sending — a campaign that reached a
+    /// customer is evidence, and the audit trail is append-only for the same
+    /// reason. The client offers it only for drafts, but the client is not the
+    /// control: a 409 here is a correct answer and surfaces as its message.
+    ///
+    /// Returns nothing. A `204` with an empty body is the expected success.
+    func deleteCampaign(id: String) async throws {
+        let (data, response) = try await delete("/api/campaigns/\(encodedPathSegment(id))")
+        try validate(data: data, response: response)
     }
 
     private func campaignMutation(_ path: String,

@@ -6,6 +6,7 @@
  *   POST   /api/users                     user.manage
  *   GET    /api/users/me                  any authenticated actor
  *   PATCH  /api/users/me                  any authenticated actor
+ *   GET    /api/users/me/timezones        any authenticated actor
  *   POST   /api/users/me/onboarding       any authenticated named actor
  *   POST   /api/users/me/password         any authenticated actor
  *   POST   /api/users/me/email            any authenticated actor
@@ -95,6 +96,18 @@ const {
 // DIGEST", it is the pattern this feature was asked to copy, and a second
 // hasher is a second thing that can drift.
 const { hashToken, generateToken, TOKEN_PREFIX_LENGTH } = require('./invitations');
+// Per-account DISPLAY time zone. Read that module's header before touching any
+// of this: `sms_users.timezone` decides how a timestamp is RENDERED for one
+// person and has no bearing on when a customer is texted. Campaign quiet hours
+// are enforced in SQL against `sms_campaign_settings.business_timezone`, which
+// is a property of the business, not of a member of staff.
+const {
+  DEFAULT_TIME_ZONE,
+  canonicalTimeZone,
+  catalogue: timeZoneCatalogue,
+  describeStoredTimeZone,
+  effectiveTimeZoneId
+} = require('../lib/timezones');
 
 const ADMINISTRATIVE_ROLES = ['owner', 'admin'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -116,26 +129,50 @@ const EMAIL_CHANGE_TTL_HOURS = 24;
 const WORKSPACE_NAME = 'Vici Inbox';
 
 /**
- * Audit event types this file WANTS to emit but which do not exist in
- * lib/audit/event-types.js.
+ * The three profile/address audit types this file emits.
  *
- * That file is owned elsewhere and `logAudit` THROWS on an unregistered type,
- * so emitting one would be a guaranteed failure dressed up as instrumentation.
- * The call sites below are fully written and go through `auditIfRegistered`,
- * which consults the catalogue first: the moment these two types are added
- * there — and their metadata keys are added to METADATA_ALLOWLIST in
- * lib/audit/redact.js, or every field is dropped — the rows start being
- * written with no further change here.
+ * All three ARE registered in lib/audit/event-types.js, and their metadata keys
+ * are on the allowlists in lib/audit/redact.js, so every call site below writes
+ * a real row. They are still emitted through `auditIfRegistered` rather than
+ * `logAudit` directly: that file is owned elsewhere, `logAudit` THROWS on an
+ * unregistered type, and a type deleted there must degrade to one warning in
+ * the service log rather than turning a completed profile edit into a 500.
  *
- * Until then each attempt logs one warning naming the missing type, so the gap
- * is visible in the service log rather than silent.
- *
- *   team.member.profile_updated  — display name / phone, self-service.
- *   team.member.email_changed    — an address actually moved, by either path.
+ *   team.member.profile_updated       — display name, phone, or display time
+ *                                       zone. Self-service or an admin edit.
+ *   team.member.email_change_requested— somebody ASKED to move address. Written
+ *                                       even when nothing was created, because
+ *                                       an unconfirmed attempt is exactly the
+ *                                       one worth having a record of.
+ *   team.member.email_changed         — an address actually moved, by either
+ *                                       path.
  */
 const PROFILE_UPDATED_EVENT = 'team.member.profile_updated';
 const EMAIL_CHANGED_EVENT = 'team.member.email_changed';
 const EMAIL_CHANGE_REQUESTED_EVENT = 'team.member.email_change_requested';
+
+/** PostgREST/Postgres codes for "that column or relation is not there". */
+const MISSING_COLUMN_CODES = new Set(['42703', 'PGRST204', 'PGRST205']);
+
+/**
+ * Does this store error mean scripts/user-timezone-migration.sql has not been
+ * applied to this database?
+ *
+ * Shaped after isMissingSchema() in lib/audit/log.js, and narrow for the same
+ * reason it is: Postgres names the column in CHECK violations and permission
+ * errors too, so a bare "the message mentions timezone" test would tell an
+ * operator to run a migration that is already applied and would hide a real
+ * constraint failure behind that advice. The message must say the thing is
+ * ABSENT and it must name this column.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isMissingTimezoneColumn(error) {
+  if (MISSING_COLUMN_CODES.has(error?.code)) return true;
+  const message = String(error?.message || '');
+  return /does not exist|could not find|schema cache/i.test(message) && /timezone/i.test(message);
+}
 
 /**
  * The RAISE strings in confirm_sms_email_change mapped onto HTTP. Each refusal
@@ -209,6 +246,52 @@ function createUserStore({ client } = {}) {
           .maybeSingle(),
         'getById'
       );
+    },
+
+    /**
+     * Every stored display time zone, keyed by id.
+     *
+     * Same 500-row cap as list() above and for the same reason: the team is
+     * single-digit sized, so this is one of the few reads here that genuinely
+     * cannot meet PostgREST's silent 1000-row ceiling.
+     *
+     * @returns {Promise<Array<{id: number, timezone: string|null}>>}
+     */
+    async listTimezones() {
+      return unwrap(
+        await db()
+          .from('sms_users')
+          .select('id, timezone')
+          .order('id', { ascending: true })
+          .limit(500),
+        'listTimezones'
+      ) || [];
+    },
+
+    /**
+     * This person's stored display time zone, or null when they have never
+     * chosen one.
+     *
+     * Read on its own rather than folded into the column lists above, and that
+     * is deliberate. `timezone` arrives with
+     * scripts/user-timezone-migration.sql; adding it to list(), getById() and
+     * update() would mean that on a server where the migration has not been
+     * applied yet EVERY team endpoint answers 500. Isolated here, an unapplied
+     * migration costs one optional field on one payload. Same reasoning as
+     * getOnboarding() below.
+     *
+     * @returns {Promise<string|null>}
+     */
+    async getTimezone(id) {
+      const row = unwrap(
+        await db()
+          .from('sms_users')
+          .select('timezone')
+          .eq('id', id)
+          .maybeSingle(),
+        'getTimezone'
+      );
+      return row?.timezone || null;
     },
 
     async getOnboarding(id) {
@@ -519,7 +602,34 @@ function createEmailChangeStore({ client } = {}) {
   };
 }
 
-/** The only serialiser. password_hash is reduced to a boolean and dropped. */
+/**
+ * The only serialiser. password_hash is reduced to a boolean and dropped.
+ *
+ * THE TIME ZONE IS SENT TWICE, ON PURPOSE, AND THE SHAPES ARE NOT INTERCHANGEABLE
+ *
+ *   `timeZone`        a bare IANA identifier as a STRING. This is the field a
+ *                     client binds to, and it is the whole contract for
+ *                     anything that only needs to format a date. Keep it a
+ *                     string. It was briefly an object during development and
+ *                     the iOS decoder, written in parallel against `String?`,
+ *                     would have silently decoded nil — every timestamp would
+ *                     have kept rendering in device-local time with no error
+ *                     anywhere, which is precisely the bug this whole feature
+ *                     exists to remove. test/user-timezone.test.js asserts the
+ *                     type on every payload that carries it, so it cannot
+ *                     regress into an object again.
+ *
+ *   `timeZoneDetail`  the label, region, current offset and `isDefault`, for a
+ *                     picker or a settings screen. Additive. A client that
+ *                     ignores it loses nothing.
+ *
+ * Both are always present and `timeZone` is never null for a real account:
+ * `isDefault: true` in the detail is what says "no stored choice was read".
+ * That covers three cases a client cannot usefully tell apart — never chosen,
+ * serialised without selecting the column, and
+ * scripts/user-timezone-migration.sql not applied — and the right behaviour is
+ * the same in all three: render the default and offer the picker.
+ */
 function publicUser(row) {
   if (!row) return null;
   return {
@@ -534,7 +644,10 @@ function publicUser(row) {
     mustChangePassword: row.must_change_password === true,
     lastSeenAt: row.last_seen_at || null,
     deactivatedAt: row.deactivated_at || null,
-    createdAt: row.created_at || null
+    createdAt: row.created_at || null,
+    // A string. See the note above before changing this.
+    timeZone: effectiveTimeZoneId(row.timezone ?? null),
+    timeZoneDetail: describeStoredTimeZone(row.timezone ?? null)
   };
 }
 
@@ -558,9 +671,72 @@ function fail(res, status, code, message, extra = {}) {
   return res.status(status).json({ error: message, code, ...extra });
 }
 
+/**
+ * The answer when a WRITE to sms_users.timezone fails because the column is not
+ * there yet.
+ *
+ * A read falls back to the default and says nothing; see readStoredTimeZone().
+ * A write must not, because silently discarding somebody's choice and
+ * answering 200 is worse than refusing. 503 rather than 500: the request was
+ * valid, the server is not ready for it, and the fix is an operator applying
+ * scripts/user-timezone-migration.sql rather than the caller retrying.
+ */
+function timeZoneUnavailable(res, error) {
+  console.error(
+    '[USERS] sms_users.timezone is not present, so a time zone could not be saved. '
+    + `Apply scripts/user-timezone-migration.sql (${error?.code || 'unknown'}).`
+  );
+  return fail(
+    res, 503, 'TIME_ZONE_UNAVAILABLE',
+    'Time zones are not available on this server yet. Ask an admin to finish the update.'
+  );
+}
+
 function sendStoreError(res, error, label) {
   console.error(`[USERS] ${label} failed:`, error?.code || 'internal_error', error?.context || '');
   return fail(res, 500, 'USER_REQUEST_FAILED', 'That change could not be completed.');
+}
+
+/**
+ * Validate a submitted `timeZone` and, if it is good, write it into `patch`.
+ *
+ * The accepted set is `Intl.supportedValuesOf('timeZone')`, read from the
+ * running ICU rather than from a list kept in this repository. See
+ * lib/timezones.js for why: a hand-written list rots, and it drifts away from
+ * the very formatter the clients use, so a value we accepted today would fail
+ * to render tomorrow.
+ *
+ * A rejection NAMES the problem, because the only way to reach it is to have
+ * sent something that is not a zone, and it leaks nothing: the accepted set is
+ * public knowledge and GET /api/users/me/timezones publishes all of it.
+ *
+ * `null` (or an empty string) CLEARS the choice, which is not the same as
+ * setting one. It returns the account to the documented fallback and lets a
+ * client prompt again.
+ *
+ * @param {object} patch   mutated in place when the value is acceptable
+ * @param {unknown} value  req.body.timeZone
+ * @returns {null|{status: number, code: string, message: string}}
+ */
+function timeZonePatch(patch, value) {
+  if (value === null || value === '') {
+    patch.timezone = null;
+    return null;
+  }
+  const canonical = canonicalTimeZone(value);
+  if (!canonical) {
+    return {
+      status: 400,
+      code: 'INVALID_TIME_ZONE',
+      message: 'That is not a time zone this server knows. Send an IANA identifier such as '
+        + `${DEFAULT_TIME_ZONE} or America/New_York. GET /api/users/me/timezones lists every one.`
+    };
+  }
+  // The CANONICAL spelling is stored, never what arrived. `europe/london` and
+  // `Europe/London` must not become two rows that render identically and
+  // compare differently.
+  patch.timezone = canonical;
+  return null;
 }
 
 function parseUserId(raw) {
@@ -582,10 +758,26 @@ function actorName(req) {
  * `${APP_URL}/confirm-email-change?token=...`, or null when APP_URL is unset.
  *
  * Mirrors acceptUrlFor() in routes/invitations.js, including the trailing-slash
- * strip that lib/email.js:appUrl() performs. Unlike the invitation link this is
- * NOT a Universal Link: lib/apple-site-association.js claims /accept-invite and
- * nothing else, so this URL opens in a browser everywhere. See the note in the
- * handler about the landing page that has to answer it.
+ * strip that lib/email.js:appUrl() performs.
+ *
+ * ONE URL, THREE ANSWERS, in this order:
+ *
+ *   1. An iPhone with a build that routes the path opens the Vici Inbox app.
+ *      lib/apple-site-association.js carries the claim as a STAGED one,
+ *      published when APPLE_CLAIM_EMAIL_CHANGE is set, which happens after such
+ *      a build is in the field. iOS caches the association document, so
+ *      publishing before the app can answer produces a link that opens the app
+ *      to nothing; that file's header explains why the order is not optional.
+ *   2. Everywhere else, `app.get('/confirm-email-change')` in server.js serves
+ *      public/confirm-email-change.html, which posts the token to
+ *      POST /auth/email-change/confirm and completes the change in any browser.
+ *   3. With APP_URL unset there is no link at all, and the handler below
+ *      refuses the request rather than writing a pending change nobody can
+ *      confirm.
+ *
+ * The literal path here and the claimed path must stay the same string;
+ * test/email-change-link.test.js asserts it, because a drift between them
+ * silently stops the claim matching and produces no error anywhere.
  */
 function confirmUrlFor(rawToken) {
   const base = appUrl();
@@ -677,9 +869,10 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
    * `logAuditSafely` would swallow into a warning nobody reads. This checks
    * first and says exactly which type is missing.
    *
-   * Every registered type goes straight through, so this is a no-op for the
-   * `team.*` events that already exist. See PROFILE_UPDATED_EVENT and
-   * EMAIL_CHANGED_EVENT for the two that do not.
+   * Every registered type goes straight through, so today this is a no-op for
+   * every `team.*` event this file emits. It stays because the catalogue is
+   * owned elsewhere: a type removed there must cost one warning, not a 500 on
+   * a change that has already been written to sms_users.
    *
    * @returns {Promise<{audited: boolean, reason?: string}>}
    */
@@ -790,8 +983,17 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
     try {
       const rows = await users.list();
       const roles = await users.listRoles();
+      // Merged in from a separate read, for the same reason getTimezone() is a
+      // separate read: `timezone` arrives with a migration, and folding it into
+      // the main column list would turn "the migration has not run yet" into
+      // "the team screen is broken". A failure here costs the column, not the
+      // page, and every row then serialises with the documented default.
+      const zones = await listStoredTimeZones();
       res.set('Cache-Control', 'no-store, private');
-      return res.json({ users: rows.map(publicUser), roles });
+      return res.json({
+        users: rows.map(row => publicUser({ ...row, timezone: zones.get(Number(row.id)) ?? null })),
+        roles
+      });
     } catch (error) {
       return sendStoreError(res, error, 'list');
     }
@@ -800,6 +1002,77 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
   // ── GET /api/users/me ─────────────────────────────────────────────────────
   // Deliberately open to every authenticated actor, including one locked into
   // must_change_password. It is how a client learns what to render.
+  /**
+   * Every stored zone, keyed by user id, and never a throw.
+   *
+   * Bounded by the same 500-row cap as users.list(): the team is single-digit
+   * sized, so this cannot approach PostgREST's silent 1000-row ceiling. An
+   * unreadable column yields an empty map and every row then serialises with
+   * the documented default.
+   *
+   * @returns {Promise<Map<number, string|null>>}
+   */
+  async function listStoredTimeZones() {
+    if (typeof users.listTimezones !== 'function') return new Map();
+    try {
+      const rows = await users.listTimezones();
+      return new Map((rows || []).map(row => [Number(row.id), row.timezone || null]));
+    } catch (error) {
+      warnTimeZoneReadFailed(error, 'the team list');
+      return new Map();
+    }
+  }
+
+  /**
+   * `sms_users.timezone` for one id, or null, and never a throw.
+   *
+   * The fail-open read. A person who has never chosen, a failed read, and a
+   * database where the migration has not been applied yet are all null here
+   * and all become the documented default one layer up. A missing column
+   * during a rolling deploy must cost one rendered field, never account
+   * access.
+   *
+   * @param {number|string} id
+   * @returns {Promise<string|null>}
+   */
+  async function readStoredTimeZone(id) {
+    if (typeof users.getTimezone !== 'function') return null;
+    try {
+      return await users.getTimezone(id);
+    } catch (error) {
+      warnTimeZoneReadFailed(error, `user ${id}`);
+      return null;
+    }
+  }
+
+  /** One warning shape for both readers, so the advice is never half-given. */
+  function warnTimeZoneReadFailed(error, what) {
+    if (isMissingTimezoneColumn(error)) {
+      console.warn(
+        `[USERS] sms_users.timezone is not present, so no time zone was read for ${what}. `
+        + 'Apply scripts/user-timezone-migration.sql.'
+      );
+      return;
+    }
+    console.warn(`[USERS] time zone unavailable for ${what}:`, error?.code || 'read_failed');
+  }
+
+  /**
+   * The `timeZone` object for one actor. ALWAYS resolves to a descriptor.
+   *
+   * The shared legacy identity is not asked at all: two people are behind it,
+   * so there is no such thing as "their" zone, and answering the documented
+   * default is honest where answering one of them would not be.
+   *
+   * @param {object} actor  req.actor
+   */
+  async function timeZoneFor(actor) {
+    const shared = actor.viaLegacySession || actor.isLegacyShared
+      || actor.id === null || actor.id === undefined;
+    if (shared) return describeStoredTimeZone(null);
+    return describeStoredTimeZone(await readStoredTimeZone(actor.id));
+  }
+
   router.get('/me', async (req, res) => {
     const actor = req.actor;
     if (!actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
@@ -814,6 +1087,12 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         console.warn('[USERS] onboarding state unavailable:', error?.code || 'read_failed');
       }
     }
+    // Unlike `onboarding`, these keys are ALWAYS present. Onboarding is omitted
+    // when unknown so an older account is never made to look new; a display
+    // time zone has a correct answer in every case, and a client forced to
+    // cope with its absence would re-implement the fallback locally, which is
+    // exactly the per-device divergence this feature removes.
+    const timeZoneDetail = await timeZoneFor(actor);
     res.set('Cache-Control', 'no-store, private');
     return res.json({
       id: actor.id,
@@ -824,8 +1103,40 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
       viaLegacySession: actor.viaLegacySession,
       mustChangePassword: actor.mustChangePassword,
       permissions: [...actor.permissions].sort(),
+      // A STRING, matching publicUser() above and the iOS decoder. The rich
+      // object is a sibling, never a replacement.
+      timeZone: timeZoneDetail.id,
+      timeZoneDetail,
       ...(onboarding ? { onboarding } : {})
     });
+  });
+
+  // ── GET /api/users/me/timezones ───────────────────────────────────────────
+  // The picker. Every IANA zone this server accepts, grouped by region, each
+  // with the offset it is on RIGHT NOW and a human label.
+  //
+  // WHY THE LIST IS BUILT HERE AND NOT ON EACH CLIENT
+  //   Two clients formatting their own list from their own runtime would show
+  //   two different lists: different ICU versions know different zones, so one
+  //   of them would offer a zone this server then refuses. One server-side list
+  //   means the set a person can pick from is exactly the set that will be
+  //   accepted, and the offsets shown beside each entry are the ones the server
+  //   computed rather than two devices' separate guesses.
+  //
+  // WHY IT IS UNDER /me RATHER THAN /api/users/timezones
+  //   `permission: null` in lib/route-policy.js is reserved for endpoints under
+  //   /api/users/me that act only on the caller, and test/route-policy.test.js
+  //   asserts exactly that. Choosing your own zone is open to every Support
+  //   Agent, so the picker has to be open, so it belongs under /me. It reads no
+  //   account state and returns the same document to everybody.
+  router.get('/me/timezones', (req, res) => {
+    if (!req.actor) return fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+    // Not `no-store`. This is a constant public list, it costs real Intl work
+    // to build, and a picker that re-downloads four hundred rows every time it
+    // opens is a worse experience for no privacy gain. `private` because it is
+    // still served behind a session and no shared proxy should hold it.
+    res.set('Cache-Control', 'private, max-age=900');
+    return res.json(timeZoneCatalogue());
   });
 
   // ── POST /api/users/me/onboarding ────────────────────────────────────────
@@ -969,10 +1280,26 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
     if (req.body?.phone !== undefined) {
       patch.phone = req.body.phone ? String(req.body.phone).trim() : null;
     }
+    // Your own display time zone. This changes how YOU see timestamps and
+    // nothing else.
+    //
+    // IT IS NOT THE BUSINESS TIME ZONE. Campaign quiet hours are enforced in
+    // SQL against sms_campaign_settings.business_timezone, which is a property
+    // of the business: the hours in which it is lawful and decent to text a
+    // customer. If the two were ever read from one column, the Miami partner
+    // switching his display to Europe/London would silently move the
+    // quiet-hours window five hours and start texting American customers at
+    // four in the morning. Two columns, two tables, two meanings, and nothing
+    // that decides WHEN a customer is contacted may read this one.
+    if (req.body?.timeZone !== undefined) {
+      const problem = timeZonePatch(patch, req.body.timeZone);
+      if (problem) return fail(res, problem.status, problem.code, problem.message);
+    }
     if (Object.keys(patch).length === 0) {
       return fail(
         res, 400, 'NOTHING_TO_UPDATE',
-        'Send displayName, phone, or both. Your email address is changed with POST /api/users/me/email.'
+        'Send displayName, phone, timeZone, or any combination. '
+        + 'Your email address is changed with POST /api/users/me/email.'
       );
     }
 
@@ -989,12 +1316,27 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         );
       }
 
-      const previous = { display_name: row.display_name, phone: row.phone || null };
+      // Read BEFORE the write, so the audit row can say what it changed from
+      // and so a request that did not touch the zone still serialises the
+      // current one. Fail-open; see readStoredTimeZone().
+      const previousTimeZone = await readStoredTimeZone(actor.id);
+      const previous = {
+        display_name: row.display_name,
+        phone: row.phone || null,
+        timezone: previousTimeZone
+      };
       const updated = await users.update(actor.id, patch);
+
+      // users.update() selects a fixed column list that deliberately does not
+      // include `timezone` (see getTimezone()), so the value is merged back in
+      // here. When this request did not touch it, the pre-write read above is
+      // still the current value.
+      const timezone = 'timezone' in patch ? patch.timezone : previousTimeZone;
 
       // Nothing here changes what this person can do, so no session is revoked
       // and no epoch is bumped. A rename that signed somebody out mid-shift
-      // would be a worse bug than the typo they were fixing.
+      // would be a worse bug than the typo they were fixing, and the same is
+      // true of a time zone: it is a rendering preference, not an authority.
       const changedFields = Object.keys(patch);
       const audited = await auditIfRegistered({
         eventType: PROFILE_UPDATED_EVENT,
@@ -1002,7 +1344,7 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         entityId: actor.id,
         summary: `${actorName(req)} updated their own profile (${changedFields.join(', ')})`,
         previousState: previous,
-        newState: { display_name: updated.display_name, phone: updated.phone || null },
+        newState: { display_name: updated.display_name, phone: updated.phone || null, timezone },
         changedFields,
         metadata: {
           user_id: actor.id,
@@ -1013,8 +1355,12 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         }
       });
 
-      return res.json({ user: publicUser(updated), audited: audited.audited });
+      return res.json({ user: publicUser({ ...updated, timezone }), audited: audited.audited });
     } catch (error) {
+      // A write that failed because the column is absent gets its own answer.
+      // Silently discarding somebody's choice and returning 200 would be worse
+      // than refusing.
+      if (isMissingTimezoneColumn(error)) return timeZoneUnavailable(res, error);
       return sendStoreError(res, error, 'updateOwnProfile');
     }
   });
@@ -1337,6 +1683,28 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         patch.phone = req.body.phone ? String(req.body.phone).trim() : null;
       }
 
+      // Setting somebody else's DISPLAY time zone. Reaching this handler at all
+      // requires `user.manage`, which is Owner and Admin.
+      //
+      // It is NOT session-affecting. It changes how one person's client renders
+      // a timestamp and nothing about what they may do, so ending their
+      // sessions over it would be gratuitous.
+      //
+      // It is NOT the business time zone. Campaign quiet hours are enforced in
+      // SQL against sms_campaign_settings.business_timezone, and an Owner
+      // editing a teammate's profile here must never move the window in which
+      // customers are textable. Two columns, two tables, two meanings.
+      //
+      // The peer-Owner guard applies for the same reason it applies to an
+      // address: an Owner does not get to reach into another Owner's account
+      // and change what they see.
+      if (req.body?.timeZone !== undefined) {
+        const peerProblem = peerOwnerError(actor, { id: target.id, role: previousRole });
+        if (peerProblem) return fail(res, peerProblem.status, peerProblem.code, peerProblem.message);
+        const problem = timeZonePatch(patch, req.body.timeZone);
+        if (problem) return fail(res, problem.status, problem.code, problem.message);
+      }
+
       // An Admin correcting somebody else's address does NOT go through the
       // confirmation dance. It is an administrative correction — usually a typo
       // that is stopping an invitation from arriving — and requiring the person
@@ -1473,7 +1841,12 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         sessionAffecting = true;
       }
 
+      // Read before the write, so the audit row can say what it changed from
+      // and so a request that did not touch the zone still serialises the
+      // current one. Fail-open; see readStoredTimeZone().
+      const previousTimeZone = await readStoredTimeZone(id);
       const updated = Object.keys(patch).length > 0 ? await users.update(id, patch) : target;
+      const timezone = 'timezone' in patch ? patch.timezone : previousTimeZone;
       if (sessionAffecting) await revokeSessions(id);
 
       // Audited only once the change has actually landed, and separately per
@@ -1524,6 +1897,32 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         });
       }
 
+      // An administrative time-zone change. Recorded because somebody's view of
+      // every timestamp in the product just moved and they did not ask for it:
+      // without a row, "why does my Activity Center suddenly read New York
+      // time?" has no answer anywhere. Not session-affecting, and deliberately
+      // its own row rather than folded into any above, which answer different
+      // questions.
+      if ('timezone' in patch && timezone !== previousTimeZone) {
+        await auditIfRegistered({
+          eventType: PROFILE_UPDATED_EVENT,
+          req,
+          entityId: id,
+          summary: `${actorName(req)} set the display time zone for ${targetName} to `
+            + `${timezone || 'the workspace default'}`,
+          previousState: { timezone: previousTimeZone },
+          newState: { timezone },
+          changedFields: ['timezone'],
+          metadata: {
+            user_id: id,
+            email: targetEmail,
+            role: previousRole,
+            changed_fields: ['timezone'],
+            via: 'admin_correction'
+          }
+        });
+      }
+
       // An address change has three consequences beyond the row itself, and all
       // three run only once the write has landed.
       let emailNotifications;
@@ -1552,10 +1951,10 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
           newAddress: await deliverMessage(send, message, patch.email)
         };
 
-        // 3. Audited. See EMAIL_CHANGED_EVENT: the type is not in the audit
-        //    catalogue yet, so this currently logs a warning naming it instead
-        //    of writing a row. The call site is complete and lights up the
-        //    moment the type is registered.
+        // 3. Audited as `team.member.email_changed` with via: 'admin_correction'
+        //    and confirmed: false, so the Activity Center can tell an
+        //    administrative correction apart from an address its owner proved
+        //    control of.
         await auditIfRegistered({
           eventType: EMAIL_CHANGED_EVENT,
           req,
@@ -1606,7 +2005,7 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
       }
 
       return res.json({
-        user: publicUser(updated),
+        user: publicUser({ ...updated, timezone }),
         sessionsRevoked: sessionAffecting,
         // Present only when an address moved, and honest about each recipient.
         // An admin who is told "changed" but not "and we could not tell them"
@@ -1614,6 +2013,7 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         ...(emailNotifications ? { emailNotifications } : {})
       });
     } catch (error) {
+      if (isMissingTimezoneColumn(error)) return timeZoneUnavailable(res, error);
       return sendStoreError(res, error, 'update');
     }
   });

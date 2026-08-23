@@ -8,6 +8,14 @@ final class OnboardingCoordinator: ObservableObject {
     @Published private(set) var isPresented = false
     @Published private(set) var isManualReplay = false
 
+    /// Set when a finished step asked for the app to be somewhere specific.
+    ///
+    /// The tour never presents that destination itself. It publishes the
+    /// request and the view that owns the presentation acts on it, which is why
+    /// the account step can open the account menu without this type knowing
+    /// anything about sheets.
+    @Published private(set) var pendingHandoff: OnboardingHandoff?
+
     private var userID: String?
     private var version: Int?
     private let defaults: UserDefaults
@@ -62,10 +70,21 @@ final class OnboardingCoordinator: ObservableObject {
     func next() {
         guard isPresented else { return }
         if isLastStep {
+            // Read before finishing, because `finish` clears the step list.
+            let stage = currentStep?.stage
             finish(as: .completed)
+            if stage == .accountButtonThenOpenMenu {
+                pendingHandoff = .accountMenu
+            }
         } else {
             index += 1
         }
+    }
+
+    /// Called by whichever view performed the handoff, so a later republication
+    /// of the same value cannot reopen it.
+    func consumeHandoff() {
+        pendingHandoff = nil
     }
 
     func back() {
@@ -119,6 +138,10 @@ final class OnboardingCoordinator: ObservableObject {
         version = nil
         isManualReplay = false
         isPresented = false
+        // Skipping, or dismissing a replay, is not a request to be taken
+        // anywhere. Only `next()` on a step that asked for it sets this, and it
+        // does so after `finish` has already called through to here.
+        pendingHandoff = nil
     }
 
     private func isLocallySuppressed(userID: String, version: Int) -> Bool {

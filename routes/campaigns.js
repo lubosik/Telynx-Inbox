@@ -9,8 +9,21 @@ const {
   createCampaignService
 } = require('../lib/campaigns/service');
 const { createCampaignGenerationService } = require('../lib/campaigns/generation-service');
+const { CopyDraftError, draftCandidates } = require('../lib/campaigns/copy-writer');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
+
+/**
+ * Body keys accepted by POST /copy-suggestions.
+ *
+ * Narrow on purpose, and enforced rather than filtered. Everything here is
+ * campaign shape, never customer evidence: there is no recipient, no phone, no
+ * contact id and no order. `lib/campaigns/copy-writer.js` re-checks each value
+ * for identifier shapes before anything reaches a model.
+ */
+const COPY_SUGGESTION_BODY_KEYS = new Set([
+  'workflowType', 'productName', 'cadence', 'brief', 'candidateCount', 'linkUrl', 'approvedProductCodes'
+]);
 
 function generationRequest(body) {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
@@ -25,6 +38,18 @@ function generationRequest(body) {
     throw new CampaignRequestError('commit must be a boolean.', 'CAMPAIGN_GENERATION_INPUT_REJECTED', 400);
   }
   return { workflows: input.workflows, commit: input.commit === true };
+}
+
+function copySuggestionRequest(body) {
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(input).filter(key => !COPY_SUGGESTION_BODY_KEYS.has(key));
+  if (unknown.length) {
+    throw new CampaignRequestError(
+      `Copy drafting accepts campaign shape only; ${unknown.join(', ')} is not accepted. Recipient and customer evidence is server-owned.`,
+      'CAMPAIGN_AI_COPY_INPUT_REJECTED', 400
+    );
+  }
+  return input;
 }
 
 function campaignSummaryName(campaign) {
@@ -89,7 +114,9 @@ function createCampaignRouter({
   auditApprovalWriter,
   generationService,
   campaignNotificationSender,
-  generationAuditWriter
+  generationAuditWriter,
+  campaignDeletionAuditWriter,
+  copyDrafter
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -100,6 +127,11 @@ function createCampaignRouter({
   const notifyCampaignReview = campaignNotificationSender || ((...args) =>
     require('../lib/apns-notify').sendCampaignReadyNotifications(...args));
   const writeGenerationAudit = generationAuditWriter || logAuditSafely;
+  // Deletion is the one campaign action whose audit row must exist before the
+  // effect. logAudit, not logAuditSafely: no row, no delete.
+  const deletionAuditWriter = campaignDeletionAuditWriter || logAudit;
+  // Injectable so route tests never construct an OpenRouter client.
+  const drafter = copyDrafter || draftCandidates;
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -165,6 +197,48 @@ function createCampaignRouter({
         ...(notification?.error ? { error: notification.error } : {})
       } });
     } catch (error) { return sendError(res, error); }
+  });
+
+  // A DRAFTING AID. It returns candidate wording for a human to choose from
+  // and edit. It creates nothing, submits nothing for review, approves
+  // nothing, schedules nothing and sends nothing - a candidate becomes a
+  // campaign only when somebody posts it to POST /api/campaigns, which is a
+  // separate, audited action.
+  //
+  // Behind campaigns.manage, so Support Agents cannot reach it: the agent role
+  // holds campaigns.read and nothing else in the campaign family.
+  //
+  // Deliberately not `audit: true`. That flag means "the handler writes an
+  // audit row", and lib/route-policy.js records that asserting coverage the
+  // code does not provide is worse than no flag at all. This handler mutates
+  // nothing, so there is no state change to record; the campaign that
+  // eventually carries this wording is audited at creation, with its message
+  // fingerprint.
+  router.post('/copy-suggestions', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const input = copySuggestionRequest(req.body);
+      const result = await drafter(input);
+      // Rejected drafts leave this process as rule ids and reasons only. Their
+      // text is never returned, so a reviewer cannot lift a draft that failed
+      // validation out of a response body and paste it into a campaign.
+      return res.json({
+        workflowType: result.workflowType,
+        brandName: result.brandName,
+        requested: result.requested,
+        returned: result.returned,
+        candidates: result.candidates,
+        rejected: result.rejected,
+        model: result.model,
+        copyStatus: result.copyStatus,
+        reviewRequirements: result.reviewRequirements
+      });
+    } catch (error) {
+      if (error instanceof CopyDraftError) {
+        return res.status(error.status || 400).json({ error: error.message, code: error.code });
+      }
+      return sendError(res, error);
+    }
   });
 
   router.post('/', async (req, res) => {
@@ -288,6 +362,90 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.dryRun(req.params.id));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Remove a campaign from the list.
+   *
+   * DESTROY OR ARCHIVE IS NOT THE CALLER'S DECISION.
+   *   A draft that was never submitted, never approved, never scheduled and
+   *   whose recipients never reached a provider is somebody's abandoned
+   *   experiment. It proves nothing and keeping it forever is clutter, so it
+   *   is genuinely deleted.
+   *
+   *   Anything else is evidence. An approval row records who authorised a
+   *   promotional send and against which frozen audience hash. A recipient
+   *   with a provider message id is the only proof that a specific customer
+   *   was messaged, and the revenue attribution chain hangs off it. Deleting
+   *   those would destroy the answer to "did we have permission, and who
+   *   said so?" That campaign is archived: it leaves the working list, the row
+   *   stays, and `?archived=true` still finds it.
+   *
+   *   The body may ask for `mode: "archive"`. It may NOT ask for a delete.
+   *   delete_sms_campaign has no force path, and it repeats every blocker
+   *   check inside the transaction, so a campaign that gets approved between
+   *   the preview below and the statement ends up archived rather than gone.
+   *
+   * AUDIT ORDER. The row is written BEFORE the destructive statement, with
+   *   `logAudit` so a failed write refuses the delete outright. After the
+   *   delete there is nothing left to describe. Over-recording an attempt that
+   *   then failed is a bookkeeping error; under-recording a destruction that
+   *   succeeded is a hole in the audit trail, and only one of those is
+   *   recoverable.
+   */
+  router.delete('/:id', async (req, res) => {
+    try {
+      const requestedMode = req.body?.mode === 'archive' ? 'archive' : 'auto';
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null;
+      const preview = await campaigns.deletionPreview(req.params.id);
+      const willDelete = requestedMode !== 'archive' && preview.destructible === true;
+
+      if (willDelete) {
+        const proof = await deletionAuditWriter({
+          eventType: 'campaign.deleted',
+          req,
+          entityId: preview.campaign.id,
+          summary: `Deleted the unapproved draft ${campaignSummaryName(preview.campaign)}`,
+          previousState: { status: preview.campaign.status, revision: preview.campaign.revision },
+          metadata: {
+            campaign_type: preview.campaign.campaign_type,
+            workflow_category: preview.campaign.workflow_category,
+            revision: preview.campaign.revision,
+            reason
+          },
+          fingerprint: `campaign-deleted:${preview.campaign.id}`
+        });
+        if (!proof?.recorded && proof?.reason !== 'duplicate') {
+          throw Object.assign(new Error('Campaign deletion audit was not recorded.'), {
+            code: 'CAMPAIGN_DELETE_AUDIT_REQUIRED', status: 503
+          });
+        }
+      }
+
+      const result = await campaigns.remove(req.params.id, { mode: requestedMode, reason }, req.actor);
+
+      if (result.outcome === 'archived') {
+        await auditCampaign('campaign.archived', req, preview.campaign, {
+          summary: `Archived ${campaignSummaryName(preview.campaign)}; it holds approval or delivery evidence and cannot be deleted`,
+          previousState: { status: preview.campaign.status, archived: false },
+          newState: { status: result.status, archived: true },
+          metadata: {
+            revision: preview.campaign.revision,
+            requested_mode: requestedMode,
+            blockers: result.blockers,
+            reason
+          },
+          fingerprint: `campaign-archived:${preview.campaign.id}`
+        });
+      } else if (!willDelete) {
+        // The preview said archive, the RPC destroyed it. That means the two
+        // disagree about the rules, which is a bug worth shouting about rather
+        // than a row worth writing quietly.
+        console.error('[CAMPAIGNS] Deletion preview and delete_sms_campaign disagreed; the row is gone and unaudited.');
+      }
+
+      return res.json(result);
     } catch (error) { return sendError(res, error); }
   });
 
