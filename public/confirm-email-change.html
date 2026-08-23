@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#101413">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Confirm your new email address</title>
+<!--
+  public/confirm-email-change.html
+
+  Standalone by design, exactly like public/reset-password.html and
+  public/accept-invite.html: no React, no bundle, no fonts, no analytics, no
+  third-party request of any kind. The only network call it makes is one
+  same-origin POST to this service.
+
+  WHAT ANSWERS THIS LINK, AND IN WHAT ORDER
+    The confirmation email links to `${APP_URL}/confirm-email-change?token=...`.
+
+      * On an iPhone with a build that routes the path, iOS opens the Vici
+        Inbox app and this page never runs. That is the intended destination;
+        lib/apple-site-association.js publishes the claim once
+        APPLE_CLAIM_EMAIL_CHANGE is set, which happens after such a build is in
+        the field. See that file's header for why the order matters.
+      * Everywhere else — a laptop, an Android phone, an iPhone without the app
+        — this page answers, and it FINISHES THE JOB rather than telling
+        somebody to go and install something.
+
+    That is the same choice public/reset-password.html makes and the opposite of
+    public/accept-invite.html. An invitee is being sent to the app deliberately,
+    because a new teammate is not meant to use the web inbox at all. Somebody
+    confirming an address already has an account and may be reading their mail
+    anywhere; refusing to complete it here would strand a change that is already
+    pending and already blocking their next attempt.
+
+  IT CONFIRMS ON OPEN
+    No button. Opening the link IS the confirmation, which is what the email
+    promises, so the POST is issued as soon as the page loads. The token is
+    single-use, so this page can be opened exactly once; a second visit is
+    reported as already used rather than as a failure.
+
+  THE TOKEN
+    Read from the query string into one closure variable, sent once in a POST
+    body, and never rendered into the document, never put in a link, never
+    logged, never stored. Once it has been spent the query string is replaced,
+    so the used token stops riding along in the address bar and in history.
+
+  Express serves this file from app.get('/confirm-email-change') with
+  Cache-Control: no-store, private. The server does not read the token.
+-->
+<style>
+  :root {
+    --ground: #101413;
+    --card: #171d1c;
+    --field: #121817;
+    --hairline: rgba(126, 199, 188, 0.16);
+    --hairline-bright: rgba(126, 199, 188, 0.34);
+    --ink: #f2f2f0;
+    --ink-2: #c9c9c6;
+    --ink-3: #8b9693;
+    --tint: #7ec7bc;
+    --tint-dim: rgba(126, 199, 188, 0.1);
+    --danger: #f08b84;
+    --ok: #7ec7bc;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100%;
+    padding: max(2rem, env(safe-area-inset-top)) 1.25rem max(2.5rem, env(safe-area-inset-bottom));
+    display: flex;
+    justify-content: center;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 27rem;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 20px;
+    padding: 2.5rem 1.75rem;
+  }
+
+  /* ── Wordmark ────────────────────────────────────────────────────────── */
+  .lockup { text-align: center; margin-bottom: 2.5rem; }
+  .lockup .vici {
+    font-family: Georgia, 'Times New Roman', 'Iowan Old Style', serif;
+    font-size: 2.75rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    /* tracking adds a trailing gap after the last glyph; nudge back to centre */
+    text-indent: 0.18em;
+    color: var(--ink);
+    line-height: 1.1;
+  }
+  .lockup .peptides {
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+    color: var(--ink-2);
+    margin-top: 0.375rem;
+  }
+  .lockup .kicker {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-top: 1.25rem;
+  }
+
+  /* ── Content ─────────────────────────────────────────────────────────── */
+  h1 {
+    font-size: 1.375rem;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.875rem;
+  }
+  h2 {
+    font-size: 1.0625rem;
+    font-weight: 650;
+    line-height: 1.35;
+    margin-bottom: 0.625rem;
+  }
+  p { color: var(--ink-2); margin-bottom: 1.125rem; }
+  p.quiet { color: var(--ink-3); font-size: 0.875rem; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── Fields ──────────────────────────────────────────────────────────── */
+  label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    margin-bottom: 0.375rem;
+  }
+  input[type="email"],
+  input[type="password"],
+  input[type="text"] {
+    width: 100%;
+    min-height: 3rem;
+    padding: 0.75rem 0.9375rem;
+    background: var(--field);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.4;
+  }
+  input:focus {
+    outline: none;
+    border-color: var(--hairline-bright);
+    box-shadow: 0 0 0 3px var(--tint-dim);
+  }
+  input:disabled { opacity: 0.55; }
+  .field { margin-bottom: 1rem; }
+
+  .rules {
+    color: var(--ink-3);
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    margin: -0.25rem 0 1.125rem;
+  }
+
+  .reveal {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink-3);
+    font-size: 0.8125rem;
+    margin: -0.25rem 0 1.125rem;
+    cursor: pointer;
+  }
+  .reveal input { width: 1rem; height: 1rem; accent-color: var(--tint); }
+
+  /* ── Actions ─────────────────────────────────────────────────────────── */
+  .btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 3.375rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 14px;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 650;
+    text-decoration: none;
+    text-align: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary {
+    background: var(--tint);
+    color: #0b100f;
+    border: 1px solid var(--tint);
+  }
+  .btn-primary:active { opacity: 0.82; }
+  .btn-secondary {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-bright);
+  }
+  .btn-secondary:active { background: var(--tint-dim); }
+  .btn + .btn { margin-top: 0.75rem; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .under-btn {
+    color: var(--ink-3);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    text-align: center;
+    margin: 0.75rem 0 0;
+  }
+
+  .rule {
+    height: 1px;
+    background: var(--hairline);
+    border: 0;
+    margin: 1.75rem 0;
+  }
+
+  .note {
+    background: rgba(126, 199, 188, 0.06);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    padding: 1rem 1.125rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+  .note strong { color: var(--ink); font-weight: 650; }
+  .note p { font-size: inherit; margin-bottom: 0.625rem; }
+  .note p:last-child { margin-bottom: 0; }
+
+  .message {
+    font-size: 0.875rem;
+    line-height: 1.55;
+    margin: 0 0 1.125rem;
+    min-height: 0;
+  }
+  .message.error { color: var(--danger); }
+  .message.ok { color: var(--ok); }
+  .message:empty { display: none; }
+
+  .alert-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    border: 1px solid rgba(240, 139, 132, 0.4);
+    background: rgba(240, 139, 132, 0.1);
+    color: var(--danger);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+  .ok-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    border: 1px solid var(--hairline-bright);
+    background: var(--tint-dim);
+    color: var(--tint);
+    font-size: 1.375rem;
+    font-weight: 700;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+
+  [hidden] { display: none !important; }
+
+  @media (min-width: 30rem) {
+    .card { padding: 3rem 2.5rem; }
+    .lockup .vici { font-size: 3.25rem; }
+  }
+</style></head>
+<body>
+<main class="card">
+
+  <div class="lockup">
+    <div class="vici">VICI</div>
+    <div class="peptides">PEPTIDES</div>
+    <div class="kicker">Email change</div>
+  </div>
+
+  <!-- Nothing is shown until the script has picked a state, so a link that
+       cannot possibly work never flashes a message that contradicts itself. -->
+
+  <!-- State A: working. Shown while the POST is in flight. -->
+  <section id="state-working" hidden>
+    <h1>Confirming your new address</h1>
+    <p id="working-body">One moment.</p>
+  </section>
+
+  <!-- State B: done. The address genuinely moved. -->
+  <section id="state-done" hidden>
+    <div class="ok-icon" aria-hidden="true">&#10003;</div>
+    <h1>Your email address is confirmed</h1>
+    <p id="done-body">
+      This is the address you sign in with from now on.
+    </p>
+    <p>
+      Every other device that was signed in as you has been signed out. Each one
+      will ask you to sign in again with the new address.
+    </p>
+
+    <a class="btn btn-primary" href="/">Go to sign in</a>
+    <p class="under-btn">
+      On your iPhone, open the Vici Inbox app and sign in there with the new
+      address. That is where calls ring.
+    </p>
+
+    <hr class="rule">
+
+    <div class="note">
+      <p>
+        <strong>This link has now been used.</strong> It cannot be used a second
+        time, so there is nothing left in it for anyone who sees it later.
+      </p>
+    </div>
+  </section>
+
+  <!-- State C: the link cannot work. One heading, one explanation, and the
+       explanation is the server's own wording wherever there is one, so the
+       page never invents a reason the server did not give. -->
+  <section id="state-dead-link" hidden>
+    <div class="alert-icon" aria-hidden="true">!</div>
+    <h1 id="dead-link-title">This confirmation link did not work</h1>
+    <p id="dead-link-body">
+      The link is missing the part that identifies your request.
+    </p>
+    <p class="quiet" id="dead-link-hint">
+      Nothing has changed on your account. Open Vici Inbox, go to your profile,
+      and ask to change your email address again. A fresh link will be sent to
+      the new address.
+    </p>
+    <a class="btn btn-secondary" href="/">Back to sign in</a>
+  </section>
+
+  <noscript>
+    <h1>JavaScript is switched off</h1>
+    <p>
+      This page confirms your new email address in your browser, which needs
+      JavaScript enabled. Turn it on for this site and open the link from your
+      email again.
+    </p>
+    <p class="quiet">
+      Nothing has changed on your account in the meantime. If you cannot enable
+      it, ask an admin to change the address for you.
+    </p>
+  </noscript>
+
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // The bounds routes/auth.js applies to the token before it looks anything up.
+  // Anything outside them is answered EMAIL_CHANGE_NOT_FOUND with no database
+  // read, so checking here turns a truncated link into an explanation rather
+  // than a pointless round trip. Mirrored from that file, and from
+  // InviteLinkRouter.parse on the iOS side, which applies the same two bounds.
+  var MIN_TOKEN_LENGTH = 16;
+  var MAX_TOKEN_LENGTH = 512;
+
+  function byId(id) { return document.getElementById(id); }
+  function show(id) { var el = byId(id); if (el) el.hidden = false; }
+  function hide(id) { var el = byId(id); if (el) el.hidden = true; }
+  function setText(id, text) { var el = byId(id); if (el && text) el.textContent = text; }
+
+  function deadLink(title, body, hint) {
+    hide('state-working');
+    setText('dead-link-title', title);
+    setText('dead-link-body', body);
+    setText('dead-link-hint', hint);
+    show('state-dead-link');
+  }
+
+  // Read once, held in this closure, and never written anywhere else.
+  var token = (function () {
+    try {
+      var value = new URLSearchParams(window.location.search).get('token');
+      return value === null ? '' : value.trim();
+    } catch (error) {
+      return '';
+    }
+  }());
+
+  // Replace the address bar so a spent or malformed token stops riding along in
+  // history and in anything the person later shares or screenshots. Done before
+  // the request rather than after, because the request may never come back.
+  function stripTokenFromUrl() {
+    try {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    } catch (error) { /* an old browser keeps the query string; harmless */ }
+  }
+
+  if (!token) {
+    deadLink(
+      'This confirmation link is incomplete',
+      'The link is missing the part that identifies your request.',
+      'Links are often shortened or cut in half by the app they arrive in. '
+        + 'Opening the link by tapping it, rather than copying and pasting it, usually avoids that. '
+        + 'Nothing has changed on your account.'
+    );
+    return;
+  }
+  if (token.length < MIN_TOKEN_LENGTH || token.length > MAX_TOKEN_LENGTH || /\s/.test(token)) {
+    stripTokenFromUrl();
+    deadLink(
+      'This confirmation link is incomplete',
+      'Part of the link is missing, so it cannot be checked.',
+      'Open Vici Inbox, go to your profile, and ask to change your email address again. '
+        + 'Nothing has changed on your account.'
+    );
+    return;
+  }
+
+  show('state-working');
+  stripTokenFromUrl();
+
+  fetch('/auth/email-change/confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // No cookie is needed and none should be sent: whoever opens this link is
+    // proving control of a MAILBOX, not of a session, and may be on a device
+    // that has never signed in.
+    credentials: 'omit',
+    body: JSON.stringify({ token: token })
+  }).then(function (response) {
+    return response.json().then(
+      function (payload) { return { ok: response.ok, payload: payload }; },
+      function () { return { ok: response.ok, payload: {} }; }
+    );
+  }).then(function (result) {
+    if (result.ok && result.payload && result.payload.success === true) {
+      hide('state-working');
+      if (result.payload.email) {
+        setText('done-body',
+          'You now sign in with ' + result.payload.email + '.');
+      }
+      show('state-done');
+      return;
+    }
+    // The server's own wording, every time. Each refusal has its own code and
+    // its own next step, and paraphrasing them here would mean telling somebody
+    // whose link expired ten minutes ago to go hunting for a typo.
+    deadLink(
+      'This confirmation link did not work',
+      (result.payload && result.payload.error)
+        || 'That confirmation link is not valid.',
+      'Nothing has changed on your account. Open Vici Inbox, go to your profile, '
+        + 'and ask to change your email address again. A fresh link will be sent '
+        + 'to the new address.'
+    );
+  }).catch(function () {
+    // A network failure, not a refusal. The token may or may not have been
+    // spent, so this must not claim either way.
+    deadLink(
+      'We could not reach the server',
+      'The confirmation could not be sent. Check your connection and open the link again.',
+      'If the link then says it has already been used, the change went through the first time.'
+    );
+  });
+}());
+</script>
+</body>
+</html>

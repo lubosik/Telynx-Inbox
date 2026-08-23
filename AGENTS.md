@@ -100,6 +100,26 @@ client.
 - `scripts/rbac-migration.sql`: additive accounts/roles/permissions schema. Every
   seeded human has `password_hash NULL`, so applying it alone changes nobody's
   access. Apply before deploying the matching code.
+- `scripts/user-timezone-migration.sql` and `lib/timezones.js`: per-account
+  DISPLAY time zone, `sms_users.timezone`, an IANA identifier and never an
+  offset. Additive, nullable, backfills nothing: NULL means "never chosen" and
+  the application falls back to `DEFAULT_TIME_ZONE` (Europe/London), reporting
+  `isDefault: true` so a client can prompt. Validation is against
+  `Intl.supportedValuesOf('timeZone')`, never a list in this repository.
+  **This is not the business time zone.** Campaign quiet hours are enforced in
+  SQL against `sms_campaign_settings.business_timezone`, and nothing that
+  decides when a customer is contacted may read `sms_users.timezone`. Crossing
+  the two would let one person shift the hours in which customers are textable
+  by editing their own profile; `test/user-timezone.test.js` guards both
+  directions against the source.
+- `scripts/email-change-migration.sql`: confirmed self-service email changes.
+  The confirmation link is `${APP_URL}/confirm-email-change?token=...`, served
+  by `public/confirm-email-change.html` for anyone without the app. Its
+  universal-link claim is STAGED in `lib/apple-site-association.js` behind
+  `APPLE_CLAIM_EMAIL_CHANGE`, off by default: iOS caches the association
+  document, so publishing a claim before a build that routes the path is in the
+  field produces a link that opens the app to nothing. Flip the variable after
+  that build ships, never before.
 - `docs/team/ACTIVITY-CENTER.md` and `lib/audit/`: the append-only audit trail
   (`sms_audit_log`, `/api/audit`). Campaign draft, review, approval, scheduling,
   rejection, and cancellation types are active; `campaign.launched` remains
