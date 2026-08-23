@@ -89,7 +89,11 @@ struct AnalyticsView: View {
         }
 
         if overview.availability.revenueAttribution {
+            // The tour's attribution step describes this card. It is only a
+            // candidate: the resolver drops it when it is taller than the
+            // screen or scrolled away, and falls back to the Analytics tab.
             RevenueImpactCard(overview: overview, query: model.query)
+                .onboardingTarget(.revenueAttribution)
             let measuredDrivers = (overview.revenueDrivers ?? []).filter(\.hasMeasuredValue)
             if !measuredDrivers.isEmpty {
                 RevenueDriversCard(drivers: measuredDrivers, currency: overview.currency)

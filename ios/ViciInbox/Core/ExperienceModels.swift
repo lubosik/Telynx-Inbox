@@ -35,11 +35,46 @@ enum OnboardingTarget: String, Hashable {
     case account
 }
 
+/// App state a step needs beyond selecting its own tab.
+///
+/// The tour is allowed to drive the app, but only through this: a step declares
+/// what it needs and the coordinator asks for it, rather than each view
+/// inventing its own rule from the step's target.
+enum OnboardingStage: Hashable {
+    /// Selecting the step's tab is the whole requirement.
+    case tab
+
+    /// The step is about the account button, which lives on the navigation bar
+    /// of every tab. The account menu itself opens when the tour ends rather
+    /// than during the step: a sheet is presented above this overlay, so
+    /// opening it while the step is on screen would hide the card behind the
+    /// very thing it is describing.
+    case accountButtonThenOpenMenu
+}
+
+/// Navigation the tour hands back to the app when it finishes.
+enum OnboardingHandoff: Hashable {
+    case accountMenu
+}
+
 struct OnboardingStep: Identifiable, Hashable {
     let id: String
     let target: OnboardingTarget
     let title: String
     let detail: String
+    let stage: OnboardingStage
+
+    init(id: String,
+         target: OnboardingTarget,
+         title: String,
+         detail: String,
+         stage: OnboardingStage = .tab) {
+        self.id = id
+        self.target = target
+        self.title = title
+        self.detail = detail
+        self.stage = stage
+    }
 }
 
 enum OnboardingPlan {
@@ -109,7 +144,8 @@ enum OnboardingPlan {
             id: "account",
             target: .account,
             title: "Account and Settings",
-            detail: "Use the account button for appearance, notifications, help and the settings available to you. You're all set, \(firstName(from: user.name))."
+            detail: "This button, top left of every screen, holds appearance, notifications, help and the settings available to you. Finish opens it. You're all set, \(firstName(from: user.name)).",
+            stage: .accountButtonThenOpenMenu
         ))
         return result
     }

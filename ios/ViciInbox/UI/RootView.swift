@@ -218,6 +218,12 @@ struct MainTabView: View {
     }
 
     @State private var selection: Tab = .inbox
+
+    /// The account menu, opened by the tour's last step rather than by the
+    /// toolbar button. `AccountToolbarModifier` owns its own presentation and
+    /// closes it whenever the tour starts, so this is a separate one; only one
+    /// of the two is ever up.
+    @State private var showingAccountHandoff = false
     @StateObject private var inboxModel = InboxModel()
     // Owned here rather than inside the Calls tab so the badge is right before
     // the operator ever opens it.
@@ -265,10 +271,29 @@ struct MainTabView: View {
         .onChange(of: showsAnalytics) { visible in
             if !visible && selection == .analytics { selection = .inbox }
         }
-        .overlay {
+        // `overlayPreferenceValue` rather than `overlay`, so the tour is handed
+        // the frames that `.onboardingTarget(_:)` published during this layout
+        // pass. It is the only way an in-content subject — the Campaigns
+        // segment, the revenue breakdown — can be highlighted where it actually
+        // is instead of where the screen width suggests it might be.
+        .overlayPreferenceValue(OnboardingTargetFrameKey.self) { contentFrames in
             if onboarding.isPresented {
-                OnboardingOverlay(visibleTabs: visibleOnboardingTabs)
+                OnboardingOverlay(contentFrames: contentFrames,
+                                  visibleTabs: visibleOnboardingTabs)
             }
+        }
+        .sheet(isPresented: $showingAccountHandoff) { AccountMenuSheet() }
+        .onChange(of: onboarding.pendingHandoff) { handoff in
+            guard handoff == .accountMenu else { return }
+            onboarding.consumeHandoff()
+            showingAccountHandoff = true
+        }
+        // Replay is started from Settings, which is two pushes inside this very
+        // sheet. `AccountToolbarModifier` closes its own presentation when a
+        // tour starts; this one is separate and has to close itself, or the
+        // replay runs underneath the sheet it was launched from.
+        .onChange(of: onboarding.isPresented) { presented in
+            if presented { showingAccountHandoff = false }
         }
         .onChange(of: onboarding.currentStep?.target) { target in
             applyOnboardingTarget(target)
@@ -346,6 +371,11 @@ struct MainTabView: View {
         notifications.consumePendingScreen()
     }
 
+    /// The tab bar's targets, left to right, in the same order the tabs are
+    /// declared above. The tour maps measured tab buttons onto this, so it must
+    /// stay in step with the `TabView` body — including the conditional
+    /// Analytics tab, which is why it is derived from `showsAnalytics` rather
+    /// than written out as a constant.
     private var visibleOnboardingTabs: [OnboardingTarget] {
         var tabs: [OnboardingTarget] = [.inbox, .contacts, .growth, .calls]
         if showsAnalytics { tabs.append(.analytics) }
@@ -362,6 +392,11 @@ struct MainTabView: View {
         case .analytics, .revenueAttribution:
             if showsAnalytics { selection = .analytics }
         case .account:
+            // Deliberately no tab change. The account button is on the
+            // navigation bar of every tab, so the step highlights it wherever
+            // the previous step left the app; switching tabs underneath the
+            // final card would only make the screen jump. The menu itself is
+            // opened by the `.accountMenu` handoff when Finish is tapped.
             break
         }
     }
