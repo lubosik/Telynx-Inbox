@@ -165,6 +165,56 @@ struct AuthUser: Codable, Identifiable, Hashable {
     }
 }
 
+/// The outcome of asking to change the signed-in account's email address.
+///
+/// ASSUMED CONTRACT — the backend for this is being built in parallel. The
+/// shape here is deliberately forgiving: every field is optional and the app
+/// falls back to the address it just submitted, so a server that answers
+/// `202 {}` still produces the correct "check your new address" screen.
+struct EmailChangeRequestResult: Decodable, Hashable {
+    /// The address the confirmation link was sent to. The account has NOT
+    /// moved to it yet.
+    let pendingEmail: String?
+    /// When the link stops working, if the server says.
+    let expiresAt: String?
+
+    init(pendingEmail: String?, expiresAt: String?) {
+        self.pendingEmail = pendingEmail
+        self.expiresAt = expiresAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case pendingEmail
+        case pendingEmailSnake = "pending_email"
+        case email
+        case expiresAt
+        case expiresAtSnake = "expires_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func value(_ keys: [CodingKeys]) -> String? {
+            for key in keys {
+                guard let raw = try? container.decodeIfPresent(String.self, forKey: key) else { continue }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+            return nil
+        }
+        pendingEmail = value([.pendingEmail, .pendingEmailSnake, .email])
+        expiresAt = value([.expiresAt, .expiresAtSnake])
+    }
+}
+
+extension EmailChangeRequestResult {
+    /// The result to use when the server accepted the change but returned no
+    /// usable body. The address is the one that was just submitted, which is
+    /// the only thing the screen actually needs to name.
+    static func pending(_ email: String) -> EmailChangeRequestResult {
+        EmailChangeRequestResult(pendingEmail: email, expiresAt: nil)
+    }
+}
+
 /// `POST /auth/login` and `GET /auth/check`. Both are a strict superset of the
 /// legacy `{ success: true }` / `{ authenticated: true }` bodies, so an older
 /// backend still decodes with `user == nil`.
