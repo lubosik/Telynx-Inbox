@@ -62,6 +62,30 @@ struct AuthUser: Codable, Identifiable, Hashable {
     let viaLegacySession: Bool?
     let onboarding: AccountOnboardingState?
 
+    /// The account's own IANA timezone, e.g. `Europe/London`.
+    ///
+    /// Optional in every sense: an older backend omits it, a newly created
+    /// account may not have one yet, and the value is not trusted to be a real
+    /// identifier. Everything that reads it goes through
+    /// `AppearanceTimeZoneResolver`, which falls back to the device timezone
+    /// for absent, blank and unrecognised values alike. Nothing in the app
+    /// fails because this is missing.
+    ///
+    /// Three spellings are accepted on the wire because the identity envelope
+    /// is not consistent about casing elsewhere either — `actor` vs `user` in
+    /// `AuthResponse` is the same problem — and a field that silently decodes
+    /// to nil would look exactly like a person who has not set one.
+    let timeZone: String?
+
+    /// An email change that has been requested but not yet confirmed from the
+    /// new address. Present only while one is outstanding.
+    ///
+    /// The address here is the NEW one. The signed-in identity keeps answering
+    /// with the old `email` until the link is followed, which is what makes the
+    /// "check your new address" state safe: nothing about the account has
+    /// actually moved yet.
+    let pendingEmail: String?
+
     var name: String { displayName ?? email ?? "Signed in" }
     var permissionSet: Set<String> { Set(permissions ?? []) }
 
@@ -74,6 +98,11 @@ struct AuthUser: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, displayName, email, role, permissions
         case mustChangePassword, isLegacyShared, viaLegacySession, onboarding
+        case timeZone
+        case timeZoneSnake = "time_zone"
+        case timezoneLowercase = "timezone"
+        case pendingEmail
+        case pendingEmailSnake = "pending_email"
     }
 
     init(from decoder: Decoder) throws {
@@ -95,6 +124,44 @@ struct AuthUser: Codable, Identifiable, Hashable {
         isLegacyShared = try? container.decodeIfPresent(Bool.self, forKey: .isLegacyShared)
         viaLegacySession = try? container.decodeIfPresent(Bool.self, forKey: .viaLegacySession)
         onboarding = try? container.decodeIfPresent(AccountOnboardingState.self, forKey: .onboarding)
+        timeZone = AuthUser.firstNonEmpty(in: container,
+                                          keys: [.timeZone, .timeZoneSnake, .timezoneLowercase])
+        pendingEmail = AuthUser.firstNonEmpty(in: container,
+                                              keys: [.pendingEmail, .pendingEmailSnake])
+    }
+
+    /// Written by hand because the alias keys above have no stored property
+    /// to pair with, which makes the encoder impossible to synthesise. Only the
+    /// canonical camelCase spelling is ever produced; the snake_case and
+    /// lowercase spellings exist to read a server, not to write one.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
+        try container.encodeIfPresent(email, forKey: .email)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(permissions, forKey: .permissions)
+        try container.encodeIfPresent(mustChangePassword, forKey: .mustChangePassword)
+        try container.encodeIfPresent(isLegacyShared, forKey: .isLegacyShared)
+        try container.encodeIfPresent(viaLegacySession, forKey: .viaLegacySession)
+        try container.encodeIfPresent(onboarding, forKey: .onboarding)
+        try container.encodeIfPresent(timeZone, forKey: .timeZone)
+        try container.encodeIfPresent(pendingEmail, forKey: .pendingEmail)
+    }
+
+    /// First key that carries a non-blank string, or nil.
+    ///
+    /// A present-but-empty string is treated as absent on purpose: the server
+    /// clearing a value by writing `""` and the server never having sent one
+    /// mean the same thing to every caller here.
+    private static func firstNonEmpty(in container: KeyedDecodingContainer<CodingKeys>,
+                                      keys: [CodingKeys]) -> String? {
+        for key in keys {
+            guard let raw = try? container.decodeIfPresent(String.self, forKey: key) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
     }
 }
 
