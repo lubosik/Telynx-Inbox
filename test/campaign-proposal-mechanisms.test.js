@@ -195,9 +195,39 @@ test('when the repeat-purchase research lands, its DECISIONS reconcile with this
   }
   const text = fs.readFileSync(doc, 'utf8');
   const block = text.match(/##\s*DECISIONS([\s\S]*?)(?=\n##\s|$)/i);
-  if (!block) return;
-  const named = [...block[1].matchAll(/mechanism:\s*`?([a-z_]+)`?/gi)].map(match => match[1]);
-  const missing = named.filter(id => !MECHANISM_IDS.includes(id));
+
+  // A guard that cannot find anything to check must FAIL, not pass.
+  //
+  // The first version of this test looked for the literal string
+  // `mechanism: <id>` and returned early if the DECISIONS heading did not
+  // match. The research landed with its mechanisms in a markdown table
+  // instead, so the pattern found nothing, `missing` was empty, and the test
+  // reported success while checking precisely nothing. Inventing a mechanism
+  // called `send_them_a_hug` in the document still passed 18 of 18.
+  //
+  // Both silent-pass paths are now failures, and the scan is format-agnostic:
+  // any backtick-quoted snake_case identifier anywhere in the block counts.
+  assert.ok(block, 'the research document must carry a "## DECISIONS" heading for this guard to read');
+
+  const named = [...new Set(
+    [...block[1].matchAll(/`([a-z][a-z0-9_]{3,})`/g)].map(match => match[1])
+  )];
+  assert.ok(
+    named.length > 0,
+    'found no backtick-quoted identifiers in the DECISIONS block, so this guard is checking nothing'
+  );
+
+  // Only identifiers shaped like a mechanism are held to the catalogue. The
+  // block legitimately names columns, flags and files too, so an unknown
+  // identifier is only a failure when it looks like one of ours.
+  const mechanismShaped = named.filter(id => MECHANISM_IDS.includes(id)
+    || /^(plain|product|ask|free|first|bundle|offer|send|give|show)_/.test(id));
+  assert.ok(
+    mechanismShaped.length > 0,
+    'the DECISIONS block names no mechanism at all, which means the research and the catalogue are not connected'
+  );
+
+  const missing = mechanismShaped.filter(id => !MECHANISM_IDS.includes(id));
   assert.deepEqual(
     missing, [],
     `\n\nThe research names mechanisms this catalogue does not have:\n  ${missing.join('\n  ')}\n`
