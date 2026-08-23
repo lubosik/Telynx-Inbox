@@ -81,6 +81,24 @@ client.
   cadence analysis. It prints no customer or product identity and never writes.
   `scripts/dry-run-campaign-opportunities.js` accepts only a local fixture and
   prepares draft outputs without importing a database or provider client.
+  `scripts/dry-run-campaign-proposals.js` is the same idea for campaign
+  proposals: two local fixtures, one of them standing in for the model reply,
+  no database and no OpenRouter client.
+- `docs/campaigns/OPPORTUNITY-PROPOSALS.md`, `lib/campaigns/proposal-*.js`,
+  `routes/campaign-proposals.js`: turning a detected cohort opportunity into
+  several reviewable campaign proposals. Apply
+  `scripts/campaign-proposals-migration.sql` before deploying the route. The
+  brake is `CAMPAIGN_OPPORTUNITY_PROPOSALS_ENABLED`, off unless it is exactly
+  `true`. **A proposal is not a campaign.** The model writes only the wording;
+  the mechanism, the audience, the offer structure and every number are
+  deterministic. Read the doc before changing what a proposal may show: the
+  opportunity shape in it is an ASSUMED contract with the cohort detector, and
+  `lib/campaigns/opportunity-contract.js` is the single adapter to change if
+  the detector lands with different field names. Two guards in
+  `lib/campaigns/proposal-guards.js` are load-bearing and each is applied at
+  three call sites on purpose: copy that failed the validator is never
+  surfaced, and nothing becomes a campaign without a named human accepting it.
+  Accepting produces an ordinary campaign `draft` and nothing more.
 - `lib/campaigns/product-identity.js`, `lib/campaigns/product-catalogue.js`:
   which catalogue product a historical order line item is. Legacy
   `sms_orders.items` rows carry `{sku, name}` and no Woo identifiers, so the

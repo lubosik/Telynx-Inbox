@@ -162,6 +162,10 @@ app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
 app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')());
+// Its own mount rather than a path under /api/campaigns: a proposal is not a
+// campaign, and keeping the two apart means no literal proposal path can ever
+// be shadowed by GET /api/campaigns/:id.
+app.use('/api/campaign-proposals', requireAuth, require('./routes/campaign-proposals')());
 app.use('/api/segments',      requireAuth, require('./routes/segments')());
 app.use('/api/users',         requireAuth, require('./routes/users')());
 app.use('/api/invitations',   requireAuth, require('./routes/invitations')());
