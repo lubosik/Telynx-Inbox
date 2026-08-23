@@ -18,6 +18,12 @@ enum Permission {
     static let automationCancel = "automation.cancel"
     static let analyticsRead    = "analytics.read"
     static let auditRead        = "audit.read"
+    /// Listing team members. Held by Owner and Admin, deliberately NOT by
+    /// `agent` in scripts/rbac-migration.sql. It is checked before the segment
+    /// screens try to turn an override's `createdByUserId` into a name: a
+    /// Support Agent may read a segment and may not read the team directory, so
+    /// for them the author degrades to "a team member" rather than a 403.
+    static let userRead         = "user.read"
     static let userManage       = "user.manage"
     /// Granting or revoking the Owner role. Deliberately not held by `admin` or
     /// `legacy` in scripts/rbac-migration.sql, so only an Owner sees Owner in a

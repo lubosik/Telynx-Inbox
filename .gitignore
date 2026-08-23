@@ -16,3 +16,6 @@ node_modules/
 DerivedData/
 *.xcarchive
 *.ipa
+
+# Agent worktrees are transient and must never be committed.
+.claude/worktrees/
