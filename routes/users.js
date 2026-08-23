@@ -737,10 +737,26 @@ function actorName(req) {
  * `${APP_URL}/confirm-email-change?token=...`, or null when APP_URL is unset.
  *
  * Mirrors acceptUrlFor() in routes/invitations.js, including the trailing-slash
- * strip that lib/email.js:appUrl() performs. Unlike the invitation link this is
- * NOT a Universal Link: lib/apple-site-association.js claims /accept-invite and
- * nothing else, so this URL opens in a browser everywhere. See the note in the
- * handler about the landing page that has to answer it.
+ * strip that lib/email.js:appUrl() performs.
+ *
+ * ONE URL, THREE ANSWERS, in this order:
+ *
+ *   1. An iPhone with a build that routes the path opens the Vici Inbox app.
+ *      lib/apple-site-association.js carries the claim as a STAGED one,
+ *      published when APPLE_CLAIM_EMAIL_CHANGE is set, which happens after such
+ *      a build is in the field. iOS caches the association document, so
+ *      publishing before the app can answer produces a link that opens the app
+ *      to nothing; that file's header explains why the order is not optional.
+ *   2. Everywhere else, `app.get('/confirm-email-change')` in server.js serves
+ *      public/confirm-email-change.html, which posts the token to
+ *      POST /auth/email-change/confirm and completes the change in any browser.
+ *   3. With APP_URL unset there is no link at all, and the handler below
+ *      refuses the request rather than writing a pending change nobody can
+ *      confirm.
+ *
+ * The literal path here and the claimed path must stay the same string;
+ * test/email-change-link.test.js asserts it, because a drift between them
+ * silently stops the claim matching and produces no error anywhere.
  */
 function confirmUrlFor(rawToken) {
   const base = appUrl();
