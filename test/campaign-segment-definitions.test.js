@@ -52,6 +52,11 @@ function reorderCandidate(phone, options = {}) {
 
 test('the catalogue is a closed, stable set of keys', () => {
   assert.deepEqual(SEGMENT_DEFINITION_KEYS, [
+    // The buyer cohorts. Customer-level, and computed from
+    // buildBuyerCohortFacts rather than the per-product engine input.
+    'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',
+    'one_time_lapsed', 'one_time_multi_product', 'one_time_slipping',
+    // The reorder and win-back detectors.
     'reorder_approaching', 'reorder_due', 'reorder_due_high_confidence', 'winback_qualified'
   ]);
   for (const entry of segmentCatalogue()) {

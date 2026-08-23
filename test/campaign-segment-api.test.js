@@ -232,7 +232,11 @@ test('listing tells the operator which catalogue segments are not saved yet', as
   assert.equal(result.items[0].kind, 'automatic');
   assert.deepEqual(
     result.available.map(entry => entry.key).sort(),
-    ['reorder_approaching', 'reorder_due', 'winback_qualified']
+    [
+      'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',
+      'one_time_lapsed', 'one_time_multi_product', 'one_time_slipping',
+      'reorder_approaching', 'reorder_due', 'winback_qualified'
+    ]
   );
   assert.equal(result.ruleVersion, SEGMENT_RULE_VERSION);
 });
