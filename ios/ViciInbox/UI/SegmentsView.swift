@@ -26,6 +26,7 @@ struct SegmentsView: View {
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model = SegmentListModel()
     @State private var showingNewManual = false
+    @State private var showingDescribe = false
 
     private var canManage: Bool { session.can(Permission.campaignsManage) }
 
@@ -40,9 +41,10 @@ struct SegmentsView: View {
                 ProgressView("Loading segments")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.isEmpty {
-                SegmentsEmptyStateView(model: model, canManage: canManage) {
-                    showingNewManual = true
-                }
+                SegmentsEmptyStateView(model: model,
+                                       canManage: canManage,
+                                       createManual: { showingNewManual = true },
+                                       createDescribed: { showingDescribe = true })
             } else {
                 segmentList
             }
@@ -50,15 +52,29 @@ struct SegmentsView: View {
         .toolbar {
             if canManage {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingNewManual = true } label: {
+                    Menu {
+                        Button {
+                            showingDescribe = true
+                        } label: {
+                            Label("Describe one in words", systemImage: "text.bubble")
+                        }
+                        Button {
+                            showingNewManual = true
+                        } label: {
+                            Label("Pick the people by hand", systemImage: "hand.point.up.left")
+                        }
+                    } label: {
                         Image(systemName: "plus")
                     }
-                    .accessibilityLabel("New manual segment")
+                    .accessibilityLabel("New segment")
                 }
             }
         }
         .sheet(isPresented: $showingNewManual) {
             SegmentManualEditorView(model: model)
+        }
+        .sheet(isPresented: $showingDescribe) {
+            SegmentRuleBuilderView(listModel: model)
         }
         .refreshable {
             guard session.can(Permission.campaignsRead) else { return }
@@ -118,6 +134,10 @@ struct SegmentsView: View {
                 } footer: {
                     Text("You decide who is in these. The engine never adds or removes anybody.")
                 }
+            }
+
+            if canManage {
+                SegmentDescribeSection { showingDescribe = true }
             }
 
             if canManage && !model.catalogue.isEmpty {
@@ -212,6 +232,42 @@ struct SegmentOriginBadge: View {
     }
 }
 
+// MARK: - Describing one in words
+
+/// The entry point for the described-segment builder.
+///
+/// It sits above the catalogue rather than in a menu because it is the answer
+/// to the question the catalogue raises: "none of these patterns is the group
+/// I actually want." The sentence under the button is the honest description
+/// of what happens, including the part where a person reads the rules before
+/// anything is saved.
+struct SegmentDescribeSection: View {
+    let start: () -> Void
+
+    init(_ start: @escaping () -> Void) {
+        self.start = start
+    }
+
+    var body: some View {
+        Section {
+            Button(action: start) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Describe one in words", systemImage: "text.bubble")
+                        .font(.body.weight(.semibold))
+                    Text("Example: customers who bought BPC-157 more than twice and have not ordered since June")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } header: {
+            Text("Build your own")
+        } footer: {
+            Text("Your sentence is turned into rules you can read and change. You see how many people match before anything is saved, and the segment then keeps itself up to date the same way the automatic ones do.")
+        }
+    }
+}
+
 // MARK: - The catalogue
 
 /// The automatic definitions this workspace has not turned on yet.
@@ -281,6 +337,7 @@ private struct SegmentsEmptyStateView: View {
     @ObservedObject var model: SegmentListModel
     let canManage: Bool
     let createManual: () -> Void
+    let createDescribed: () -> Void
 
     var body: some View {
         List {
@@ -303,6 +360,8 @@ private struct SegmentsEmptyStateView: View {
             Section { SegmentSafetyNotice() }
 
             if canManage {
+                SegmentDescribeSection(createDescribed)
+
                 if model.catalogue.isEmpty {
                     Section {
                         Text("The engine offered no automatic patterns for this workspace. You can still build a segment by hand.")

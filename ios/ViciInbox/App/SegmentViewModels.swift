@@ -146,6 +146,16 @@ final class SegmentListModel: ObservableObject {
         await load(reset: true)
     }
 
+    /// Announce a segment created by another screen.
+    ///
+    /// `SegmentRuleBuilderView` owns its own model and does its own two calls,
+    /// so it has nowhere to put the confirmation. Without this the list simply
+    /// reappears with one more row on it, and silence after a save reads as a
+    /// failure.
+    func noteSegmentCreated(_ segment: SegmentRecord) {
+        statusMessage = "\(segment.name) is now being tracked."
+    }
+
     /// Returns the new segment on success so the caller can navigate into it.
     func createManual(name: String,
                       description: String?,
@@ -434,5 +444,272 @@ final class SegmentMemberDetailModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Describing a segment in words
+
+/// What the builder is currently showing.
+///
+/// Four of the five are not rules. That is deliberate: an ambiguous sentence
+/// and a sentence about something the system does not record are ordinary,
+/// expected outcomes, and presenting either as an error would teach the
+/// operator that the feature is broken when it is being careful.
+enum SegmentRuleBuilderStage: Equatable {
+    /// Nothing has been asked yet.
+    case empty
+    /// Rules exist and can be read, edited, previewed and saved.
+    case rules
+    /// The sentence had more than one reading. These are the questions.
+    case question([String])
+    /// This system does not record what was asked for.
+    case unanswerable(String)
+    /// The model wrote something outside the grammar. These are the reasons.
+    case rejected([SegmentRuleProblem])
+}
+
+/// The describe-a-segment screen.
+///
+/// THE ORDER IS ENFORCED HERE, NOT ONLY IN THE INTERFACE
+///   `canSave` is false until a preview of the CURRENT rules has come back.
+///   Editing a rule clears the preview, so an operator cannot change "at least
+///   3" to "at least 1" and save without looking again. The whole point of the
+///   feature is that nobody ships a segment without seeing who is in it.
+///
+/// WHY THE PLAIN ENGLISH IS NEVER RENDERED ON THIS SIDE
+///   `describeRuleSet()` on the server produces both the sentence and the
+///   per-condition lines, and those lines are index-aligned with the
+///   conditions. Rendering a second version here would be a second source of
+///   truth that could disagree with the one that runs. So a local edit marks
+///   the rendering stale rather than patching it, and the next preview brings
+///   back a rendering of what will actually execute.
+@MainActor
+final class SegmentRuleBuilderModel: ObservableObject {
+    @Published var description = ""
+    @Published var name = ""
+
+    @Published private(set) var stage: SegmentRuleBuilderStage = .empty
+    @Published private(set) var ruleSet: SegmentRuleSet?
+    @Published private(set) var plainEnglish: SegmentRulePlainEnglish?
+    @Published private(set) var preview: SegmentRulePreviewResponse?
+    @Published private(set) var warnings: [SegmentRuleProblem] = []
+
+    @Published private(set) var isDrafting = false
+    @Published private(set) var isPreviewing = false
+    @Published private(set) var isSaving = false
+    @Published var errorMessage: String?
+
+    /// True when a rule changed after the last preview. The preview is kept on
+    /// screen but marked out of date, because hiding it would lose the only
+    /// number the operator has to compare against.
+    @Published private(set) var editedSincePreview = false
+
+    var isBusy: Bool { isDrafting || isPreviewing || isSaving }
+
+    var hasRules: Bool { (ruleSet?.conditions.isEmpty == false) }
+
+    /// The one guard that matters. No preview of these exact rules, no save.
+    var canSave: Bool {
+        hasRules
+            && preview != nil
+            && !editedSincePreview
+            && !trimmedName.isEmpty
+            && trimmedName.count <= 160
+            && !isBusy
+    }
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Mirrors `assertDescription()` in lib/campaigns/segment-rule-writer.js so
+    /// an obvious mistake is caught before a round trip. The server remains the
+    /// authority; this only saves a wasted call.
+    var descriptionProblem: String? {
+        let text = trimmedDescription
+        if text.isEmpty { return nil }
+        if text.count < 8 { return "That is too short to work from. Describe the audience in a sentence." }
+        if text.count > 400 { return "Keep it under 400 characters." }
+        if text.range(of: "[<>{}\\[\\]`|^~]", options: .regularExpression) != nil {
+            return "Write it as plain words. Brackets, braces and backticks are not accepted."
+        }
+        if text.range(of: "[$£€]\\s*\\d", options: .regularExpression) != nil {
+            return "Write money as words, for example 500 dollars."
+        }
+        return nil
+    }
+
+    var canDraft: Bool {
+        !trimmedDescription.isEmpty && descriptionProblem == nil && !isBusy
+    }
+
+    // MARK: Drafting
+
+    /// One tap: draft the rules, then immediately run them.
+    ///
+    /// Two calls rather than one, for the same reason `startTracking` makes two:
+    /// the endpoints do genuinely different things and only one of them can be
+    /// slow for a reason the operator understands. If the draft succeeds and the
+    /// preview fails, the rules are kept and the failure is reported. Losing a
+    /// good draft because the count could not be read would be the wrong trade.
+    func draftAndPreview() async {
+        guard canDraft else { return }
+        isDrafting = true
+        errorMessage = nil
+        let sentence = trimmedDescription
+
+        let response: SegmentRuleDraftResponse
+        do {
+            response = try await APIClient.shared.draftSegmentRules(description: sentence)
+        } catch {
+            isDrafting = false
+            errorMessage = error.localizedDescription
+            return
+        }
+        isDrafting = false
+
+        switch response.outcome {
+        case .drafted(let rules, let english):
+            ruleSet = rules
+            plainEnglish = english
+            warnings = response.warnings ?? []
+            stage = .rules
+            editedSincePreview = false
+            preview = nil
+            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                name = Self.suggestedName(from: sentence)
+            }
+            await runPreview()
+        case .question(let questions):
+            clearRules()
+            stage = .question(questions)
+        case .unanswerable(let because):
+            clearRules()
+            stage = .unanswerable(because)
+        case .rejected(let problems):
+            clearRules()
+            stage = .rejected(problems)
+        }
+    }
+
+    /// The dry run, on demand. Nothing here writes.
+    func runPreview() async {
+        guard let rules = ruleSet, !rules.conditions.isEmpty, !isPreviewing, !isSaving else { return }
+        isPreviewing = true
+        defer { isPreviewing = false }
+        do {
+            let result = try await APIClient.shared.previewSegmentRules(rules)
+            preview = result
+            plainEnglish = result.plainEnglish
+            // The server returns the validated, canonical rules. Adopting them
+            // keeps the local copy identical to what a save would store, so
+            // "what I looked at" and "what I saved" cannot diverge.
+            ruleSet = result.ruleSet
+            warnings = result.warnings ?? []
+            editedSincePreview = false
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: Editing
+
+    func setMatch(_ match: SegmentRuleMatch) {
+        guard let rules = ruleSet, rules.match != match else { return }
+        ruleSet = rules.settingMatch(match)
+        markEdited()
+    }
+
+    func update(_ condition: SegmentRuleCondition, at index: Int) {
+        guard let rules = ruleSet, rules.conditions.indices.contains(index) else { return }
+        guard rules.conditions[index] != condition else { return }
+        ruleSet = rules.replacing(at: index, with: condition)
+        markEdited()
+    }
+
+    /// Removing the last rule is refused. A rule set with no conditions would
+    /// match everybody, and the server refuses it too.
+    func remove(at index: Int) {
+        guard let rules = ruleSet, rules.conditions.count > 1 else {
+            errorMessage = "A segment needs at least one rule. Describe it again to start over."
+            return
+        }
+        ruleSet = rules.removing(at: index)
+        markEdited()
+    }
+
+    var canRemoveConditions: Bool { (ruleSet?.conditions.count ?? 0) > 1 }
+
+    private func markEdited() {
+        editedSincePreview = true
+        // The rendering belonged to the rules as they were. Keeping it next to
+        // an edited rule would put a sentence on screen that is no longer true.
+        plainEnglish = nil
+    }
+
+    // MARK: Saving
+
+    /// Save, then work out who is in it.
+    ///
+    /// Two calls, exactly like turning on a catalogue segment: the create call
+    /// stores an empty automatic segment and the recompute fills it. A failed
+    /// recompute does not undo the save, so the outcome says what did and did
+    /// not happen rather than implying the whole thing failed.
+    func save() async -> SegmentRecord? {
+        guard canSave, let rules = ruleSet else { return nil }
+        isSaving = true
+        defer { isSaving = false }
+
+        let created: SegmentRuleCreationResponse
+        do {
+            created = try await APIClient.shared.createSegmentFromRules(
+                name: trimmedName,
+                description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                rules: rules
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+
+        do {
+            _ = try await APIClient.shared.recomputeSegment(id: created.segment.id)
+            errorMessage = nil
+        } catch {
+            errorMessage = "\(created.segment.name) was saved, but working out who is in it did not finish. Open it and try Update membership."
+        }
+        return created.segment
+    }
+
+    // MARK: Housekeeping
+
+    func startOver() {
+        clearRules()
+        stage = .empty
+        description = ""
+        name = ""
+        errorMessage = nil
+    }
+
+    private func clearRules() {
+        ruleSet = nil
+        plainEnglish = nil
+        preview = nil
+        warnings = []
+        editedSincePreview = false
+    }
+
+    /// A first guess at a name, from the operator's own words. Only ever a
+    /// starting point: the field is editable and the save requires one.
+    static func suggestedName(from sentence: String) -> String {
+        let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let capped = trimmed.count <= 60 ? trimmed : String(trimmed.prefix(57)) + "..."
+        return capped.prefix(1).uppercased() + capped.dropFirst()
     }
 }
