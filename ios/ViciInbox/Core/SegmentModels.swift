@@ -537,7 +537,7 @@ struct SegmentInclusionEvidence: Hashable {
         var sentences: [String] = []
         if let median = medianIntervalDays {
             let basis = cadenceSource == "product"
-                ? "\(personName) has not ordered often enough for us to read their own pattern, so we go by other customers, who buy this again every \(SegmentNumberText.days(median)) or so."
+                ? "\(personName) has not ordered often enough for us to read a pattern of their own, so we go by other customers, who buy this again every \(SegmentNumberText.days(median)) or so."
                 : "\(personName) usually orders every \(SegmentNumberText.days(median)) or so."
             sentences.append(basis)
         }
@@ -548,13 +548,13 @@ struct SegmentInclusionEvidence: Hashable {
         }
         switch state {
         case "overdue":
-            sentences.append("That date has gone by, so they are late.")
+            sentences.append("That date has gone by, so they are past due.")
         case "due":
             sentences.append("That is about now.")
         case "approaching":
             sentences.append("That is close but not here yet, so this is one to get ready for rather than send to.")
         case "not_due":
-            sentences.append("There is still time to run.")
+            sentences.append("That is still a way off.")
         default:
             break
         }
@@ -578,7 +578,7 @@ struct SegmentInclusionEvidence: Hashable {
         } else if let last = SegmentDateText.day(lastOrderAt) {
             sentences.append("The last one was on \(last).")
         }
-        sentences.append("That is far enough past their usual gap to count them as gone quiet.")
+        sentences.append("That is far enough past their usual gap that they count as gone quiet.")
         sentences.append("Anyone it would be tactless to approach was left out before this list was built.")
         return sentences.joined(separator: " ")
     }
@@ -609,9 +609,15 @@ struct SegmentInclusionEvidence: Hashable {
         } else {
             add("Orders on record", purchaseCount.map(SegmentNumberText.count))
         }
-        add(isWinback ? "Used to order every" : "Usually orders every",
-            medianIntervalDays.map(SegmentNumberText.days))
-        add("Gaps we measured", intervalsObserved.map(SegmentNumberText.count))
+        // A product level pattern is not this person's pattern, and a label that
+        // says "usually orders every" over somebody else's number is a lie the
+        // reader has no way to catch.
+        let borrowed = cadenceSource == "product"
+        let gapLabel = isWinback ? "Used to order every"
+            : borrowed ? "Other customers order every" : "Usually orders every"
+        add(gapLabel, medianIntervalDays.map(SegmentNumberText.days))
+        add(borrowed ? "Gaps measured across those customers" : "Gaps we measured",
+            intervalsObserved.map(SegmentNumberText.count))
         add("How regular that is", confidenceText)
         add("Worked out from", cadenceSourceText)
         add("How much the gap moves", madDays.flatMap { $0 > 0 ? "about \(SegmentNumberText.days($0)) either way" : nil })
@@ -634,12 +640,23 @@ struct SegmentInclusionEvidence: Hashable {
         return facts
     }
 
+    /// A win back row carries no expected date, so the reorder wording that ends
+    /// in "the date" would be describing something the reader cannot see.
     private var confidenceText: String? {
+        let isWinback = detector == "winback"
         switch confidence {
-        case "high":     return "Very. The gaps barely change, so the date should be close"
-        case "moderate": return "Fairly. The gaps move around a bit, so treat the date as a rough one"
-        case "none":     return "Not enough orders yet to call it regular"
-        default:         return nil
+        case "high":
+            return isWinback
+                ? "Very. The gaps between their orders barely moved"
+                : "Very. The gaps barely change, so the date should be close"
+        case "moderate":
+            return isWinback
+                ? "Fairly. The gaps between their orders moved around a bit"
+                : "Fairly. The gaps move around a bit, so treat the date as a rough one"
+        case "none":
+            return "Not enough orders yet to call it regular"
+        default:
+            return nil
         }
     }
 

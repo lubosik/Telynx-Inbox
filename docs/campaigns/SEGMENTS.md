@@ -222,6 +222,20 @@ a checklist of only the values that are actually present. Nothing recomputes;
 `ruleVersion` is the last line of the checklist so an old row still reads as
 what the rules said then.
 
+The trace is written for somebody reading it between two other jobs, so it
+sounds like a colleague talking:
+
+> Alex usually orders every 30 days or so. The last one was on 22 July 2026,
+> which puts the next around 21 August 2026. That is about now.
+
+Not "median interval 30.0 days, relative MAD 0.18". Two rules hold that line.
+The checklist labels never name a statistic, they name the question a person
+would actually ask, so `medianIntervalDays` appears as "Usually orders every".
+And where the number does not belong to the person on screen it says so:
+a product level cadence is labelled "Other customers order every" and
+"Gaps measured across those customers", because "usually orders every" printed
+over somebody else's number is a lie the reader has no way to catch.
+
 Turning on a catalogue entry is two calls, save then recompute, because
 `POST /api/segments` saves an automatic segment with no members and only a
 recompute reads the engine. A failure of the second is reported without
