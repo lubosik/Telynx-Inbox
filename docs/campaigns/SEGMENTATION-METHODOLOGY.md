@@ -162,10 +162,56 @@ A refresh that fails keeps the previous snapshot, marks it `stale`, and does not
 
 The catalogue supplies stock ROWS in the shape of `sms_product_inventory`, so there is no second definition of "available". It never supplies product EVENTS. Reading current stock is a first sighting, and a first sighting of "in stock" is not evidence that anything came back; `isRestockTransition()` has always said so and two tests guard it. `scripts/seed-product-inventory-baseline.js` can write the baseline so a later webhook has a `previous` to compare against, but it is read-only unless given both `--persist` and `PRODUCT_INVENTORY_SEED_APPROVED=YES`, it never overwrites an existing row, and it creates no event.
 
+## Segmentation is not permission
+
+Two different questions were being answered by one code path, and the smaller one was gating the larger one.
+
+| Question | Answer comes from | Fails closed? |
+|---|---|---|
+| Who matches this pattern? | Purchase history, cadence, product identity, recency | No. It reports what is true. |
+| May we contact this person? | Consent, STOP, DND freshness, quiet hours, frequency, support clearance | Yes, always, at every layer. |
+
+`buildGenerationInput()` used to drop any candidate without a current commercial clearance before the cadence arithmetic ever ran. With `sms_customer_commercial_eligibility` empty in production that dropped every candidate: 3,378 `support_state_unknown` suppressions, four automatic segments reading zero, and a screen that looked identical to a broken engine.
+
+The split is one option on that function.
+
+- `clearance: 'gate'` is the default and is the historical behaviour to the byte. An uncleared phone produces no candidate. Draft generation and every delivery path use it and nothing about them changed.
+- `clearance: 'observe'`, reachable only through the named wrapper `buildSegmentationInput()`, builds the candidate anyway and attaches `commercialClearance: { clear, reason }`. The whole input is stamped `segmentationOnly: true`.
+
+`prepareOpportunityDraftRun()` throws `SEGMENTATION_INPUT_IS_NOT_A_SEND_PATH` on that stamp, and on `clearanceMode: 'observe'` independently, so removing either one is not enough to smuggle a segmentation input into a draft. `test/campaign-segmentation-seam.test.js` asserts the refusal, asserts that no send-path file so much as mentions the wrapper, and asserts that the person who is newly VISIBLE is still not DRAFTABLE.
+
+### Eligibility travels as information
+
+`lib/campaigns/segment-contactability.js` answers the permission question for display and puts it ON the member row, never in front of it. It reuses `evaluateRecipient()` from `lib/campaigns/eligibility.js` and `authoritativeSupportState()` unchanged rather than forming a second opinion; it only batches the reads and merges the two verdicts. Reasons accumulate rather than short-circuit, because "no clearance AND no consent" is two pieces of work.
+
+It is computed at read time and never stored. A persisted "contactable: true" would be stale within the hour and is exactly the artefact somebody later mistakes for permission. It never enters `computedSetDigest()`, so a DND sync ageing out cannot move a person in or out of a segment or make an unchanged recompute look like a change.
+
+The result is that a segment screen can say "9 people match, 0 can be messaged today, because 9 have no clearance on record and 9 have no current DND sync", which is both true and actionable, instead of showing nothing.
+
+### What the live numbers actually are
+
+Read-only, live, no counterfactual, 23 August 2026, via `scripts/dry-run-segment-membership.js`:
+
+| Segment | People matching | Contactable |
+|---|---:|---:|
+| Reorder due | 9 | 0 |
+| Reorder due, high confidence | 4 | 0 |
+| Reorder approaching | 2 | 0 |
+| Win-back qualified | 2 | 0 |
+
+Non-zero for the first time, and much smaller than the 1,689 candidate groups across 761 people that the identity dry run reported as reach. The gap is not permission and not identity. It is repeat-purchase evidence, and it is the next real constraint:
+
+- 1,318 of 1,689 candidate groups have exactly one qualifying purchase, so they have no interval at all;
+- 1,659 of 1,689 have fewer than the three personal intervals the cadence floor requires;
+- only 21 of 761 people have three or more intervals on any single parent product;
+- the product-level fallback rescues nobody. Four products clear the 20-interval and 10-customer volume bar and all four fail the variability check: relative MAD 0.42 and 0.58 on the two largest, and outlier fractions of 0.33 to 0.52 against a 0.25 ceiling. Products 556 and 558 are inside the MAD limit and fail on outliers alone.
+
+That is a description of the customer base, not a bug. Most Vici buyers have bought once. Raising the segment population means either more repeat history or a deliberately calibrated relaxation of the cadence thresholds, which is a decision about acceptable wrongness and belongs to the owner, not to a patch.
+
 ## Known limitations before wiring
 
 - The product-level cadence thresholds have not yet been calibrated against the approved Vici historical dry run.
-- Consent coverage and Telnyx eligibility remain unknown. A useful segment can still have zero send-eligible recipients.
+- Consent coverage and Telnyx eligibility remain unknown. A useful segment can still have zero send-eligible recipients, and today every one of them does. That is now displayed rather than hidden.
 - These functions do not read Supabase, claim jobs, schedule work, or send SMS. Persistence and concurrency belong in the campaign service and SQL queue.
-- `sms_customer_commercial_eligibility` is empty in production, so `authoritativeSupportState()` answers `unknown` for every phone and the detectors fail closed with `support_state_unknown` before they reach cadence. That gate is correct and is upstream data that does not exist yet, not a defect in identity or cadence. `scripts/dry-run-campaign-identity.js` reports the population behind it as an explicitly labelled counterfactual so the two causes cannot be confused again.
+- `sms_customer_commercial_eligibility` is empty in production, so `authoritativeSupportState()` answers `unknown` for every phone. That still fails SENDING closed with `support_state_unknown`, which is correct. It no longer fails SEGMENTATION closed: see "Segmentation is not permission" below. `scripts/dry-run-segment-membership.js` reports live membership with no counterfactual anywhere in it.
 - `sms_commerce_product_events` is empty, so back in stock has nobody: there is no recorded out-to-in transition, and current stock is not one. Seeding the inventory baseline is what makes the FIRST future transition detectable rather than swallowed.

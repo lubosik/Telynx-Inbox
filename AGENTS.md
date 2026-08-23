@@ -94,6 +94,25 @@ client.
   which are public shop content, and no customer identity. Its
   support-clearance pass is an explicitly labelled counterfactual measuring
   reach, not permission.
+- `lib/campaigns/segment-contactability.js` and the `clearance` option on
+  `buildGenerationInput()`: the split between WHO MATCHES THIS PATTERN and MAY
+  WE CONTACT THIS PERSON. Segment membership is behaviour only. It must never
+  read consent, STOP, DND, quiet hours or support clearance, because gating it
+  on the empty `sms_customer_commercial_eligibility` table made all four
+  automatic segments read zero and look like a broken engine. Sending is
+  unchanged: `clearance: 'gate'` is the default and is the historical
+  behaviour, and only the named wrapper `buildSegmentationInput()` reaches
+  observe mode. Its output is stamped `segmentationOnly` and
+  `prepareOpportunityDraftRun()` THROWS on that stamp, so a widened view can
+  never become a widened send. Contactability is reused from
+  `lib/campaigns/eligibility.js`, computed at READ time, put ON the member row
+  and never used to filter it, and never stored or hashed into
+  `computedSetDigest()`. Do not add a `contactable` column; a stale one is what
+  somebody later mistakes for permission.
+- `scripts/dry-run-segment-membership.js`: read-only, aggregate-only, and with
+  NO counterfactual. Live per-segment counts, the contactability breakdown, and
+  the funnel from paid order to segment member. Use it, not the identity dry
+  run, when the question is how many people are in a segment.
 - `scripts/seed-product-inventory-baseline.js`: writes one current-stock row per
   purchasable catalogue unit into `sms_product_inventory`, so a later webhook
   has a `previous` to compare against. Read-only unless given BOTH `--persist`
