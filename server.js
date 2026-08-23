@@ -232,6 +232,44 @@ app.get('/reset-password', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'reset-password.html'));
 });
 
+// ── The email-change confirmation page (no auth) ──────────────────────────
+// `/confirm-email-change?token=...` is the third mailed, token-bearing link in
+// this service. lib/apple-site-association.js carries the universal-link claim
+// for it as a STAGED claim, published once APPLE_CLAIM_EMAIL_CHANGE is set,
+// which happens after an iOS build that routes the path is in the field. Until
+// then, and on every device that is not an iPhone with the app installed, this
+// is what answers it.
+//
+// LIKE THE PASSWORD RESET PAGE, THIS ONE FINISHES THE JOB. Somebody confirming
+// an address already has an account and may be reading their mail on a laptop.
+// public/accept-invite.html deliberately sends an invitee to the app because a
+// new teammate is not meant to use the web inbox at all; refusing to complete a
+// confirmation here would instead strand a pending change that is already
+// blocking the person's next attempt. The page posts the token to
+// POST /auth/email-change/confirm itself.
+//
+// THIS ROUTE MUST EXIST BEFORE THE CLAIM IS PUBLISHED. A claimed path that
+// nothing answers on the web sends anybody without the app to the SPA login
+// screen with no explanation; test/email-change-link.test.js asserts the page
+// is served before the switch can be turned on, and test/claimed-links.test.js
+// asserts it again for whatever is actually published.
+//
+// PLACEMENT: alongside /accept-invite and /reset-password, after the
+// /.well-known mount, before express.static and before the catch-all, and
+// deliberately not under /api so the policy enforcer never sees it. Whoever
+// opens this link has no session and must not need one.
+//
+// The token is NOT read, logged or validated here. It is a live single-use
+// credential; the page inspects its shape in the browser only to avoid a
+// pointless round trip, and POST /auth/email-change/confirm remains the only
+// thing that verifies it.
+app.get('/confirm-email-change', (req, res) => {
+  // Keyed to a single-use confirmation token, so no intermediary should hold a
+  // copy and no shared device should re-serve it from cache.
+  res.set('Cache-Control', 'no-store, private');
+  res.sendFile(path.join(__dirname, 'public', 'confirm-email-change.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
