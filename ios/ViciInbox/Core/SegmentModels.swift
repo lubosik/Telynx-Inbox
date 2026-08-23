@@ -544,6 +544,20 @@ struct SegmentInclusionEvidence: Hashable {
         switch detector {
         case "reorder": return reorderHeadline(personName: personName)
         case "winback": return winbackHeadline(personName: personName)
+        case "back_in_stock", "buyer_cohort":
+            // The backend already writes a finished operator-facing sentence
+            // for these two, so prefer it over anything reconstructed here.
+            //
+            // Deliberately NOT routed to reorderHeadline. A restock row does
+            // carry cadence facts, so borrowing that branch would compile and
+            // read plausibly, and it would print "this is one to get ready for
+            // rather than send to" over a segment that exists precisely to be
+            // sent to. Wrong copy that looks right is worse than none.
+            if let written = text("summary"), !written.isEmpty { return written }
+            if isEmpty {
+                return "No evidence was recorded for this membership. That happens when the row predates the current rules."
+            }
+            return "\(personName) is in this segment, and the facts behind it are below."
         default:
             if isEmpty {
                 return "No evidence was recorded for this membership. That happens when the row predates the current rules."
