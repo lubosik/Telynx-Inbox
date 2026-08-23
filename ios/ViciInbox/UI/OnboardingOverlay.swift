@@ -58,7 +58,22 @@ struct OnboardingOverlay: View {
         }
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: step?.id)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: spotlight)
+        // Deliberately NOT animated on `spotlight`.
+        //
+        // The spotlight frame arrives asynchronously: OnboardingChromeProbe
+        // measures the real tab bar on a repeating timer, so for up to a
+        // quarter of a second after a step appears the placement is still
+        // `centred` and the card then moves to `.top` or `.bottom`. Animating
+        // that transition looks smooth and costs the first tap, because
+        // SwiftUI hit-tests an animating view at its FINAL geometry: a tap on
+        // the visible Next button during the ~470ms window lands on empty
+        // space, and the person taps again. That is one of the three
+        // two-taps reported from the field.
+        //
+        // Moving instantly is the right trade. The jump is over before a hand
+        // arrives, and a control that is where it looks is worth more than a
+        // transition nobody asked for. The step change is still animated,
+        // which is the movement that actually reads as motion.
         .onChange(of: step?.id) { _ in announceCurrentStep() }
         .onAppear { announceCurrentStep() }
     }

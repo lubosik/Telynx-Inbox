@@ -142,15 +142,34 @@ test('control characters are rejected even though GSM-7 can encode them', () => 
   }
 });
 
-test('the existing hardcoded starter templates would fail check 2 today', () => {
-  // Not a hypothetical. lib/campaigns/draft-copy.js ships U+2014 in every
-  // back-in-stock body, which makes those messages UCS-2 at 70 characters a
-  // segment. This test records the finding rather than asserting it is fine.
+test('no hardcoded starter template contains a non-GSM-7 character', () => {
+  // This test was written the other way round. The validator's first run
+  // against the shipped templates found U+2014 in all three back-in-stock
+  // bodies, which forced those messages to UCS-2 at 70 characters a segment:
+  // triple the cost and triple the filtering exposure, for a dash. It also
+  // broke the house rule against em dashes in anything customer-facing.
+  //
+  // The templates are fixed, so the assertion is now the stronger one. Every
+  // workflow is checked, not just the three that were wrong, because the next
+  // one somebody adds is the one that will carry a curly quote.
   const { prepareDraftCopy } = require('../lib/campaigns/draft-copy');
-  const existing = prepareDraftCopy({ opportunityType: 'back_in_stock', productName: 'a product' });
-  assert.ok(existing.proposedMessage.includes('—'));
-  assert.equal(validateCopy(existing.proposedMessage).ok, false);
-  assert.ok(failedChecks(existing.proposedMessage).includes('gsm7_character_set_only'));
+  const workflows = [
+    'back_in_stock', 'back_in_stock_requested', 'back_in_stock_repeat_buyer',
+    'reorder_personal', 'reorder_personal_high', 'winback'
+  ];
+
+  for (const opportunityType of workflows) {
+    const existing = prepareDraftCopy({ opportunityType, productName: 'a product' });
+    const failures = failedChecks(existing.proposedMessage);
+    assert.equal(
+      failures.includes('gsm7_character_set_only'), false,
+      `${opportunityType} must be GSM-7: ${existing.proposedMessage}`
+    );
+    assert.equal(
+      /[\u2013\u2014]/.test(existing.proposedMessage), false,
+      `${opportunityType} must not contain an en or em dash`
+    );
+  }
 });
 
 // ── 3. brand prefix ────────────────────────────────────────────────────────
