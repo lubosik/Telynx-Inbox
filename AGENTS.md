@@ -148,6 +148,13 @@ client.
   no RLS. Fixing that needs its own deliberate migration reviewing every reader
   of that table; do not fold it into this file.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
+- `ios/ViciInbox/UI/SegmentsView.swift`, `SegmentDetailView.swift`: the client
+  for `routes/segments.js`, reached from the Growth tab's third control,
+  "Audiences". All evidence interpretation lives in
+  `ios/ViciInbox/Core/SegmentModels.swift` rather than in a view, precisely so
+  it lands in the Foundation layer that can be type-checked locally. The copy
+  rule is the same as the notification module's: no em dashes, and an override
+  is never described as a membership edit.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
 - `ios/scripts/generate-xcodeproj.py`: deterministic generator used on this
@@ -245,9 +252,16 @@ swiftc -frontend -parse ios/ViciInbox/App/*.swift ios/ViciInbox/Core/*.swift ios
 # where -parse is blindest. The UI and Voice layers cannot be checked this way
 # (SwiftUI needs the iOS SDK, TelnyxRTC is a Swift Package that is not vendored),
 # so a full compile still belongs to the `iOS Build` workflow.
+#
+# THIS LIST IS HAND-MAINTAINED AND GOES STALE SILENTLY. It listed neither
+# CampaignArchiveModels.swift nor SegmentModels.swift at one point, so the
+# command as written failed with "cannot find type 'CampaignListResult'" and
+# looked like the caller's fault. Add every new Foundation-only file here.
+# Anything a file in this list references must also be in it.
 swiftc -typecheck \
   ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
   ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
+  ios/ViciInbox/Core/CampaignArchiveModels.swift ios/ViciInbox/Core/SegmentModels.swift \
   ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
   ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift

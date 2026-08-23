@@ -15,6 +15,7 @@
 		3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */; };
 		A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */; };
 		8C8081511BC03481914DB0FC /* OnboardingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */; };
+		BA540F1273CB384669C32398 /* SegmentViewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26F90D00127D14FE65D4E3E /* SegmentViewModels.swift */; };
 		7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */; };
 		970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */; };
 		AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */; };
@@ -30,6 +31,7 @@
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
+		5A25774B04D2C7A28F1C35E7 /* SegmentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86799FF5058FCB7200B04BE1 /* SegmentModels.swift */; };
 		6D8B6B0E50CAFA9DE92355A8 /* AcceptInvitationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FDDD3E46FDBB4F01257CF1E /* AcceptInvitationView.swift */; };
 		407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */; };
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
@@ -48,6 +50,8 @@
 		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
 		D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */; };
 		2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDF3A51A63AD26FC2585DEB /* RootView.swift */; };
+		C27266D64DD4254A98645704 /* SegmentDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD13E351F66EFC9CDBBA107C /* SegmentDetailView.swift */; };
+		8D64FCB9E605A013D0064675 /* SegmentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F833ED5A4C9F7193A60FB7 /* SegmentsView.swift */; };
 		74DD34D116DB7C41A94E4999 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */; };
 		A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1885CD5B99B42947AAC096CC /* TeamView.swift */; };
 		825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A571897E3D65CD158FDBD81 /* Theme.swift */; };
@@ -69,6 +73,7 @@
 		847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteLinkRouter.swift; sourceTree = "<group>"; };
 		5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageNotificationManager.swift; sourceTree = "<group>"; };
 		E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingCoordinator.swift; sourceTree = "<group>"; };
+		B26F90D00127D14FE65D4E3E /* SegmentViewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentViewModels.swift; sourceTree = "<group>"; };
 		C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionModel.swift; sourceTree = "<group>"; };
 		81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamActivityModels.swift; sourceTree = "<group>"; };
 		B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViciInboxApp.swift; sourceTree = "<group>"; };
@@ -84,6 +89,7 @@
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
+		86799FF5058FCB7200B04BE1 /* SegmentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentModels.swift; sourceTree = "<group>"; };
 		9FDDD3E46FDBB4F01257CF1E /* AcceptInvitationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcceptInvitationView.swift; sourceTree = "<group>"; };
 		3AEEB2C10CF5BE34D13D5DC8 /* AccountMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenuView.swift; sourceTree = "<group>"; };
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
@@ -102,6 +108,8 @@
 		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetPasswordView.swift; sourceTree = "<group>"; };
 		FCDF3A51A63AD26FC2585DEB /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		BD13E351F66EFC9CDBBA107C /* SegmentDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentDetailView.swift; sourceTree = "<group>"; };
+		83F833ED5A4C9F7193A60FB7 /* SegmentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentsView.swift; sourceTree = "<group>"; };
 		DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1885CD5B99B42947AAC096CC /* TeamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamView.swift; sourceTree = "<group>"; };
 		2A571897E3D65CD158FDBD81 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -163,6 +171,7 @@
 				847F2EBBEAF16306C9CD88D7 /* InviteLinkRouter.swift */,
 				5C8B0868CF14D5068D98ACED /* MessageNotificationManager.swift */,
 				E4238FD9D101D4C1076F22AD /* OnboardingCoordinator.swift */,
+				B26F90D00127D14FE65D4E3E /* SegmentViewModels.swift */,
 				C1A2D306EDCBCC1677FC3DC4 /* SessionModel.swift */,
 				81EE35854474BF43CAD03C90 /* TeamActivityModels.swift */,
 				B8C4E8686C525E80F6D0959C /* ViciInboxApp.swift */,
@@ -185,6 +194,7 @@
 				19325CE8AEB5A75468A51A38 /* Log.swift */,
 				D20048ACF33742E9925F16EA /* MobileModels.swift */,
 				52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */,
+				86799FF5058FCB7200B04BE1 /* SegmentModels.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -210,6 +220,8 @@
 				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
 				6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */,
 				FCDF3A51A63AD26FC2585DEB /* RootView.swift */,
+				BD13E351F66EFC9CDBBA107C /* SegmentDetailView.swift */,
+				83F833ED5A4C9F7193A60FB7 /* SegmentsView.swift */,
 				DCFE2F1EF25AE7F2F59753A6 /* SettingsView.swift */,
 				1885CD5B99B42947AAC096CC /* TeamView.swift */,
 				2A571897E3D65CD158FDBD81 /* Theme.swift */,
@@ -323,6 +335,7 @@
 				3F101C8135A30CFF62CC81EF /* InviteLinkRouter.swift in Sources */,
 				A97B2439051C136B532A821D /* MessageNotificationManager.swift in Sources */,
 				8C8081511BC03481914DB0FC /* OnboardingCoordinator.swift in Sources */,
+				BA540F1273CB384669C32398 /* SegmentViewModels.swift in Sources */,
 				7002204D5D9B5E9C5EF420F7 /* SessionModel.swift in Sources */,
 				970D5094F937CE9C0122997D /* TeamActivityModels.swift in Sources */,
 				AE78437F5E7096DBFB16ACCC /* ViciInboxApp.swift in Sources */,
@@ -338,6 +351,7 @@
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
+				5A25774B04D2C7A28F1C35E7 /* SegmentModels.swift in Sources */,
 				6D8B6B0E50CAFA9DE92355A8 /* AcceptInvitationView.swift in Sources */,
 				407EC1EBA943AF1F9A420D8B /* AccountMenuView.swift in Sources */,
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
@@ -356,6 +370,8 @@
 				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
 				D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */,
 				2A49F6C3D66A710FE0DE2D3C /* RootView.swift in Sources */,
+				C27266D64DD4254A98645704 /* SegmentDetailView.swift in Sources */,
+				8D64FCB9E605A013D0064675 /* SegmentsView.swift in Sources */,
 				74DD34D116DB7C41A94E4999 /* SettingsView.swift in Sources */,
 				A876920F5ABCD8007FFADFA9 /* TeamView.swift in Sources */,
 				825B8FD52CDA4405E4019C7B /* Theme.swift in Sources */,

@@ -584,6 +584,159 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    // MARK: - Campaign segments
+
+    /// `GET /api/segments`, `campaigns.read`.
+    ///
+    /// The response carries `available`, the catalogue entries this workspace
+    /// has not saved yet, so the empty state can offer them without a second
+    /// request to `/api/segments/catalogue`.
+    ///
+    /// `archived` is only sent when true. The server hides archived segments by
+    /// default and reads the parameter as a string comparison against "true",
+    /// so sending `archived=false` would be indistinguishable from not sending
+    /// it and is simply left off.
+    func fetchSegments(page: Int = 1,
+                       pageSize: Int = 50,
+                       includeArchived: Bool = false) async throws -> SegmentListPage {
+        var items = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ]
+        if includeArchived { items.append(URLQueryItem(name: "archived", value: "true")) }
+        return try await decodedGET("/api/segments", queryItems: items)
+    }
+
+    /// `GET /api/segments/:id`, `campaigns.read`. Members are paged; the
+    /// override history is not, because it is bounded by how many times a
+    /// person has intervened.
+    func fetchSegment(id: String,
+                      page: Int = 1,
+                      pageSize: Int = 50) async throws -> SegmentDetailResponse {
+        try await decodedGET("/api/segments/\(encodedPathSegment(id))", queryItems: [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ])
+    }
+
+    /// `GET /api/segments/:id/members/:phone`, `campaigns.read`.
+    ///
+    /// The "why is this person here" call. `member` comes back null when the
+    /// person has an active exclude override and no member row, which is the
+    /// answer to the opposite question and is a success, not an error.
+    func fetchSegmentMember(id: String, phone: String) async throws -> SegmentMemberDetail {
+        try await decodedGET(
+            "/api/segments/\(encodedPathSegment(id))/members/\(encodedPathSegment(phone))"
+        )
+    }
+
+    /// `POST /api/segments` with `kind: "automatic"`, `campaigns.manage`.
+    ///
+    /// Idempotent by definition key: asking twice returns the existing segment
+    /// with `created: false` and HTTP 200 rather than a duplicate. Membership
+    /// is NOT computed here; the segment is saved empty and a recompute fills
+    /// it, which is why `SegmentListModel.startTracking` does both.
+    func createAutomaticSegment(definitionKey: String) async throws -> SegmentCreationResponse {
+        try await segmentDecoded(post("/api/segments", body: [
+            "kind": "automatic",
+            "definitionKey": definitionKey
+        ]))
+    }
+
+    /// `POST /api/segments` with `kind: "manual"`, `campaigns.manage`.
+    func createManualSegment(name: String,
+                             description: String?,
+                             members: [SegmentMemberInput]) async throws -> SegmentCreationResponse {
+        var body: [String: Any] = [
+            "kind": "manual",
+            "name": name,
+            "members": members.map(\.requestBody)
+        ]
+        if let description, !description.isEmpty { body["description"] = description }
+        return try await segmentDecoded(post("/api/segments", body: body))
+    }
+
+    /// `POST /api/segments/:id/members`, `campaigns.manage`. Manual segments
+    /// only; an automatic one answers 409 and says to use an override instead.
+    func addSegmentMember(id: String, member: SegmentMemberInput) async throws -> SegmentMemberResponse {
+        try await segmentDecoded(
+            post("/api/segments/\(encodedPathSegment(id))/members", body: member.requestBody)
+        )
+    }
+
+    /// `DELETE /api/segments/:id/members/:phone`, `campaigns.manage`.
+    @discardableResult
+    func removeSegmentMember(id: String, phone: String) async throws -> SegmentMemberRemoval {
+        try await segmentDecoded(
+            delete("/api/segments/\(encodedPathSegment(id))/members/\(encodedPathSegment(phone))")
+        )
+    }
+
+    /// `POST /api/segments/:id/overrides`, `campaigns.manage`.
+    ///
+    /// NOT a membership edit. An exclude survives every recompute until it is
+    /// revoked, and an include keeps somebody in whether or not the engine
+    /// still matches them. The screens that call this must say so.
+    func setSegmentOverride(id: String,
+                            phone: String,
+                            overrideType: SegmentOverrideType,
+                            reason: String?,
+                            name: String? = nil,
+                            contactID: String? = nil) async throws -> SegmentOverrideResponse {
+        var body: [String: Any] = [
+            "phone": phone,
+            "overrideType": overrideType.rawValue
+        ]
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        if let name, !name.isEmpty { body["name"] = name }
+        if let contactID, let numeric = Int(contactID), numeric > 0 { body["contactId"] = numeric }
+        return try await segmentDecoded(
+            post("/api/segments/\(encodedPathSegment(id))/overrides", body: body)
+        )
+    }
+
+    /// `DELETE /api/segments/:id/overrides/:phone`, `campaigns.manage`.
+    ///
+    /// The reason travels in the body of a DELETE, which is unusual but is what
+    /// the route reads. `express.json()` is mounted globally in server.js ahead
+    /// of every router, so the body is parsed for this method too. The row is
+    /// never deleted: revoking stamps `revoked_at`, `revoked_by` and
+    /// `revoke_reason` so both decisions stay readable.
+    func revokeSegmentOverride(id: String,
+                               phone: String,
+                               reason: String?) async throws -> SegmentOverrideResponse {
+        var body: [String: Any] = [:]
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        return try await segmentDecoded(
+            delete("/api/segments/\(encodedPathSegment(id))/overrides/\(encodedPathSegment(phone))",
+                   body: body)
+        )
+    }
+
+    /// `POST /api/segments/:id/recompute`, `campaigns.manage`.
+    ///
+    /// Automatic segments only. Given a longer timeout than the default 20
+    /// seconds because this reads the same authoritative order history the
+    /// draft generator does, over the whole workspace, before it decides
+    /// anything. It is idempotent twice over, so a client-side timeout followed
+    /// by a retry cannot double-apply it.
+    func recomputeSegment(id: String) async throws -> SegmentRecomputeResponse {
+        try await segmentDecoded(
+            post("/api/segments/\(encodedPathSegment(id))/recompute", body: [:], timeout: 90)
+        )
+    }
+
+    /// Validates and decodes one segment response.
+    ///
+    /// Written to take the already-performed request rather than a path,
+    /// because the segment routes use every verb and several of them carry a
+    /// body a generic helper could not build.
+    private func segmentDecoded<T: Decodable>(_ result: (Data, HTTPURLResponse)) throws -> T {
+        try validate(data: result.0, response: result.1)
+        do { return try decoder.decode(T.self, from: result.0) }
+        catch { throw APIError.decoding }
+    }
+
     // MARK: - Analytics
 
     func fetchAnalyticsOverview(query: AnalyticsQuery) async throws -> AnalyticsOverview {
@@ -1080,14 +1233,19 @@ actor APIClient {
         return try await perform(request, retryOn401: retryOn401)
     }
 
+    /// `timeout` overrides the session's 20 second default for the few calls
+    /// that legitimately take longer. A segment recompute reads the whole
+    /// workspace's order history before it answers.
     @discardableResult
     private func post(_ path: String,
                       body: [String: Any],
-                      retryOn401: Bool = true) async throws -> (Data, HTTPURLResponse) {
+                      retryOn401: Bool = true,
+                      timeout: TimeInterval? = nil) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let timeout { request.timeoutInterval = timeout }
         return try await perform(request, retryOn401: retryOn401)
     }
 
@@ -1099,9 +1257,16 @@ actor APIClient {
         return try await perform(request)
     }
 
-    private func delete(_ path: String) async throws -> (Data, HTTPURLResponse) {
+    /// A DELETE body is only sent when there is something in it, so no existing
+    /// caller starts sending `{}` and a Content-Type it never had.
+    private func delete(_ path: String,
+                        body: [String: Any] = [:]) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: try url(path))
         request.httpMethod = "DELETE"
+        if !body.isEmpty {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
         return try await perform(request)
     }
 

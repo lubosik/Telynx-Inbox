@@ -158,6 +158,52 @@ anything. Every route has an entry in `lib/route-policy.js`; the enforcer
 default-denies, so a route added without one is closed and
 `test/route-policy.test.js` fails.
 
+## The iPhone client
+
+The API above shipped without an interface, so the owner opened Growth, saw
+Automations and Campaigns, and asked where his segments were. That was a fair
+reading: the word "segment" in `GrowthView.swift` was the segmented control, not
+this feature.
+
+Growth now carries a third control, "Audiences". The label is shorter than
+"Segments" because that is what buys the room for three, and it is the word an
+operator uses; the screens underneath say segment, matching the notifications
+and this document. Hanging it off the Campaigns pane instead was rejected:
+Growth opens on Automations, so anything requiring a switch to Campaigns first
+reproduces the bug.
+
+| screen | file | what it is |
+|---|---|---|
+| Audiences | `ios/ViciInbox/UI/SegmentsView.swift` | the list, grouped by origin, plus the unsaved catalogue and the manual builder |
+| One segment | `ios/ViciInbox/UI/SegmentDetailView.swift` | paged members, active and reversed overrides, recompute |
+| One person | same file, `SegmentMemberEvidenceView` | the rule trace |
+
+`ios/ViciInbox/Core/SegmentModels.swift` holds every model AND all of the
+evidence interpretation. That split is deliberate: SwiftUI files get no local
+type-check on the Ventura build machine, the Foundation layer does, and the
+interpretation is the part worth checking. `SegmentInclusionEvidence` reads a
+stored row back as `headline(personName:)`, one short paragraph, plus `facts`,
+a checklist of only the values that are actually present. Nothing recomputes;
+`ruleVersion` is the last line of the checklist so an old row still reads as
+what the rules said then.
+
+Turning on a catalogue entry is two calls, save then recompute, because
+`POST /api/segments` saves an automatic segment with no members and only a
+recompute reads the engine. A failure of the second is reported without
+implying the first was undone.
+
+Read-only is absence, not disablement. A Support Agent holds `campaigns.read`,
+sees every screen including the evidence, and sees no mutating control at all.
+That follows `CampaignsView`, and deliberately not `TeamView`: TeamView greys a
+control out and explains the rule, because there the actor normally could act
+and one specific guard is stopping them. Here they never can, so the
+explanation sits once at the foot of the list.
+
+`GET /api/users` needs `user.read`, which an agent does not hold, so an
+override's author degrades to "a team member" rather than firing a request that
+would 403. The date and the reason always show, because they arrive on the
+override row itself.
+
 ## Notifications
 
 `SEGMENT_CHANGE_NOTIFICATIONS_ENABLED` must be the exact lowercase string

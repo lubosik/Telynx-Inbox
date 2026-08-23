@@ -22,6 +22,11 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     /// omit it; single-campaign alerts can add either `campaignId` or the legacy
     /// snake-case spelling without requiring another client release.
     @Published private(set) var pendingCampaignID: String?
+    /// Optional exact segment destination, from a segment-change push. The
+    /// payload key is `segmentID`, spelled exactly that way by
+    /// `segmentChangePayload` in lib/apns-notify.js; the snake-case spelling is
+    /// accepted too so a future server-side rename cannot strand this build.
+    @Published private(set) var pendingSegmentID: String?
     @Published private(set) var campaignRefreshSequence = 0
     @Published private(set) var inboxRefreshSequence = 0
 
@@ -125,7 +130,19 @@ final class MessageNotificationManager: NSObject, ObservableObject {
 
     func consumePendingCampaignRoute() {
         pendingCampaignID = nil
-        pendingScreen = nil
+        // Only the campaign destination is cleared here. Clearing an unrelated
+        // pending screen would swallow a segment route that arrived in the same
+        // payload, and this method runs whether or not it matched.
+        if pendingScreen?.lowercased() == "campaigns" { pendingScreen = nil }
+    }
+
+    func queueSegment(id: String?) {
+        pendingSegmentID = id?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func consumePendingSegmentRoute() {
+        pendingSegmentID = nil
+        if pendingScreen?.lowercased() == "segments" { pendingScreen = nil }
     }
 
     /// Reconciles the message half of the badge with the server-backed unread
@@ -253,9 +270,14 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         // valuable for a shared business inbox.
         let screen = notification.request.content.userInfo["screen"] as? String
         Task { @MainActor in
-            if screen?.lowercased() == "campaigns" {
+            // A named destination is never a message. Treating one as a message
+            // inflates the unread badge with something no conversation can
+            // clear. "segments" joined this list when segment-change pushes
+            // shipped; without it a segment alert made the inbox look unread.
+            switch screen?.lowercased() {
+            case "campaigns", "segments":
                 MessageNotificationManager.shared.noteCampaignActivity()
-            } else {
+            default:
                 MessageNotificationManager.shared.noteIncomingMessage()
             }
         }
@@ -273,9 +295,12 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         let screen = userInfo["screen"] as? String
         let campaignID = (userInfo["campaignId"] as? String)
             ?? (userInfo["campaign_id"] as? String)
+        let segmentID = (userInfo["segmentID"] as? String)
+            ?? (userInfo["segmentId"] as? String)
+            ?? (userInfo["segment_id"] as? String)
 
         guard (phone?.isEmpty == false) || (screen?.isEmpty == false) ||
-                (campaignID?.isEmpty == false) else {
+                (campaignID?.isEmpty == false) || (segmentID?.isEmpty == false) else {
             completionHandler()
             return
         }
@@ -289,10 +314,15 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
             if screen?.lowercased() == "campaigns" || campaignID?.isEmpty == false {
                 manager.queueCampaign(id: campaignID)
             }
+            if screen?.lowercased() == "segments" || segmentID?.isEmpty == false {
+                manager.queueSegment(id: segmentID)
+            }
             if let screen, !screen.isEmpty {
                 manager.queueScreen(screen)
             } else if campaignID?.isEmpty == false {
                 manager.queueScreen("campaigns")
+            } else if segmentID?.isEmpty == false {
+                manager.queueScreen("segments")
             }
             completionHandler()
         }
