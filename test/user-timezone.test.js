@@ -49,6 +49,7 @@ const createUsersRouter = require('../routes/users');
 const {
   DEFAULT_TIME_ZONE,
   canonicalTimeZone,
+  effectiveTimeZoneId,
   catalogue,
   describeStoredTimeZone,
   describeTimeZone,
@@ -474,25 +475,62 @@ async function call(router, method, routePath, { params = {}, body = {}, actor =
   return res;
 }
 
-test('GET /api/users/me carries the chosen zone under `timeZone`', async () => {
+/**
+ * The contract, asserted on every payload that carries it.
+ *
+ * `timeZone` MUST be a bare IANA string. It was briefly an object during
+ * development while the iOS client was being written in parallel against
+ * `String?`, which would have decoded nil: the account zone would never have
+ * reached the app, every timestamp would have kept rendering in device-local
+ * time, and nothing would have errored. That is exactly the bug this feature
+ * exists to remove, so the type is asserted rather than described.
+ */
+function assertTimeZoneContract(payload, where) {
+  assert.ok(
+    typeof payload.timeZone === 'string' || payload.timeZone === null,
+    `${where}: timeZone must be a string or null, got ${
+      payload.timeZone === null ? 'null' : typeof payload.timeZone}`
+  );
+  if (payload.timeZone !== null) {
+    assert.ok(isSupportedTimeZone(payload.timeZone),
+      `${where}: timeZone must be an identifier this server accepts`);
+  }
+  assert.equal(typeof payload.timeZoneDetail, 'object', `${where}: the rich sibling is present`);
+  assert.ok(payload.timeZoneDetail !== null);
+  assert.deepEqual(
+    Object.keys(payload.timeZoneDetail).sort(),
+    [...DESCRIPTOR_KEYS, 'isDefault'].sort(),
+    `${where}: the detail object shape`
+  );
+  assert.equal(payload.timeZoneDetail.id, payload.timeZone,
+    `${where}: the two fields must never disagree`);
+}
+
+test('GET /api/users/me carries the zone as a STRING, with the detail alongside', async () => {
   const { router } = fixture();
   const res = await call(router, 'get', '/me', { actor: LUBOSI });
 
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(
-    Object.keys(res.payload.timeZone).sort(),
-    [...DESCRIPTOR_KEYS, 'isDefault'].sort()
-  );
-  assert.equal(res.payload.timeZone.id, 'Europe/London');
-  assert.equal(res.payload.timeZone.isDefault, false);
-  assert.equal(res.payload.timeZone.region, 'Europe');
+  assertTimeZoneContract(res.payload, 'GET /me');
+  assert.equal(res.payload.timeZone, 'Europe/London');
+  assert.equal(res.payload.timeZoneDetail.isDefault, false);
+  assert.equal(res.payload.timeZoneDetail.region, 'Europe');
 });
 
 test('the field is present even for somebody who has never chosen', async () => {
   const { router } = fixture();
   const res = await call(router, 'get', '/me', { actor: SARAH });
-  assert.equal(res.payload.timeZone.id, DEFAULT_TIME_ZONE);
-  assert.equal(res.payload.timeZone.isDefault, true);
+  assertTimeZoneContract(res.payload, 'GET /me, unchosen');
+  assert.equal(res.payload.timeZone, DEFAULT_TIME_ZONE);
+  assert.equal(res.payload.timeZoneDetail.isDefault, true);
+});
+
+test('effectiveTimeZoneId is a plain string on every input a row can hold', () => {
+  for (const stored of [null, undefined, '', 'Europe/London', 'Asia/Kolkata', 'nonsense', 42]) {
+    const id = effectiveTimeZoneId(stored);
+    assert.equal(typeof id, 'string');
+    assert.ok(isSupportedTimeZone(id));
+  }
 });
 
 test('the shared team login is not asked, and is answered the default', async () => {
@@ -501,8 +539,9 @@ test('the shared team login is not asked, and is answered the default', async ()
   const { router, users } = fixture();
   const before = users.state.users.find(row => row.id === 1).timezone;
   const res = await call(router, 'get', '/me', { actor: LEGACY });
-  assert.equal(res.payload.timeZone.id, DEFAULT_TIME_ZONE);
-  assert.equal(res.payload.timeZone.isDefault, true);
+  assertTimeZoneContract(res.payload, 'GET /me, shared login');
+  assert.equal(res.payload.timeZone, DEFAULT_TIME_ZONE);
+  assert.equal(res.payload.timeZoneDetail.isDefault, true);
   assert.equal(users.state.users.find(row => row.id === 1).timezone, before);
 });
 
@@ -513,9 +552,9 @@ test('an unapplied migration costs the field, never the payload', async () => {
   const { router } = fixture({ timezoneColumn: false });
   const res = await call(router, 'get', '/me', { actor: LUBOSI });
   assert.equal(res.statusCode, 200);
-  assert.equal(res.payload.timeZone.id, DEFAULT_TIME_ZONE);
-  assert.equal(res.payload.timeZone.isDefault, true);
-  assert.equal(res.payload.email, LUBOSI.email ?? res.payload.email);
+  assertTimeZoneContract(res.payload, 'GET /me, migration not applied');
+  assert.equal(res.payload.timeZone, DEFAULT_TIME_ZONE);
+  assert.equal(res.payload.timeZoneDetail.isDefault, true);
   assert.ok(Array.isArray(res.payload.permissions));
 });
 
@@ -544,8 +583,9 @@ test('PATCH /api/users/me stores the canonical spelling and audits it', async ()
 
   assert.equal(res.statusCode, 200);
   assert.equal(users.state.users.find(row => row.id === 5).timezone, 'America/New_York');
-  assert.equal(res.payload.user.timeZone.id, 'America/New_York');
-  assert.equal(res.payload.user.timeZone.isDefault, false);
+  assertTimeZoneContract(res.payload.user, 'PATCH /me');
+  assert.equal(res.payload.user.timeZone, 'America/New_York');
+  assert.equal(res.payload.user.timeZoneDetail.isDefault, false);
 
   const row = auditRows.find(entry => entry.eventType === 'team.member.profile_updated');
   assert.ok(row, 'a profile_updated row is written');
@@ -565,7 +605,8 @@ test('a name and a zone can move together, and both are reported', async () => {
   });
   assert.equal(res.statusCode, 200);
   assert.equal(res.payload.user.displayName, 'Sarah Chen');
-  assert.equal(res.payload.user.timeZone.id, 'Europe/London');
+  assertTimeZoneContract(res.payload.user, 'PATCH /me, name and zone');
+  assert.equal(res.payload.user.timeZone, 'Europe/London');
   assert.equal(users.state.users.find(row => row.id === 5).display_name, 'Sarah Chen');
 });
 
@@ -577,8 +618,8 @@ test('a rename alone still reports the zone the account already had', async () =
   const res = await call(router, 'patch', '/me', {
     actor: LUBOSI, body: { displayName: 'Lubosi K' }
   });
-  assert.equal(res.payload.user.timeZone.id, 'Europe/London');
-  assert.equal(res.payload.user.timeZone.isDefault, false);
+  assert.equal(res.payload.user.timeZone, 'Europe/London');
+  assert.equal(res.payload.user.timeZoneDetail.isDefault, false);
 });
 
 test('null clears the choice rather than being refused', async () => {
@@ -586,7 +627,11 @@ test('null clears the choice rather than being refused', async () => {
   const res = await call(router, 'patch', '/me', { actor: LUBOSI, body: { timeZone: null } });
   assert.equal(res.statusCode, 200);
   assert.equal(users.state.users.find(row => row.id === 4).timezone, null);
-  assert.equal(res.payload.user.timeZone.isDefault, true);
+  assertTimeZoneContract(res.payload.user, 'PATCH /me, cleared');
+  // Clearing the STORED choice does not blank the SENT field. The client still
+  // gets a usable identifier, and `isDefault` is what says it was not chosen.
+  assert.equal(res.payload.user.timeZone, DEFAULT_TIME_ZONE);
+  assert.equal(res.payload.user.timeZoneDetail.isDefault, true);
 });
 
 test('a value that is not a zone is refused and nothing is written', async () => {
@@ -632,7 +677,8 @@ test('an Owner may set somebody else\'s zone, and it is audited as an admin edit
 
   assert.equal(res.statusCode, 200);
   assert.equal(users.state.users.find(row => row.id === 5).timezone, 'America/New_York');
-  assert.equal(res.payload.user.timeZone.id, 'America/New_York');
+  assertTimeZoneContract(res.payload.user, 'PATCH /:id');
+  assert.equal(res.payload.user.timeZone, 'America/New_York');
   // Not an authority change, so nobody is signed out over it.
   assert.equal(res.payload.sessionsRevoked, false);
   assert.deepEqual(users.state.epochBumps, []);
@@ -667,9 +713,13 @@ test('the team list carries each person\'s zone', async () => {
   const { router } = fixture();
   const res = await call(router, 'get', '/', { actor: LUBOSI });
   const byId = new Map(res.payload.users.map(user => [user.id, user]));
-  assert.equal(byId.get(4).timeZone.id, 'Europe/London');
-  assert.equal(byId.get(3).timeZone.id, 'America/New_York');
-  assert.equal(byId.get(5).timeZone.isDefault, true);
+  // Every row in the list obeys the same contract as /me. A divergence between
+  // the two would be worse than a single bug: one screen would work and the
+  // other would not, and nothing would say why.
+  for (const user of res.payload.users) assertTimeZoneContract(user, `GET /users id=${user.id}`);
+  assert.equal(byId.get(4).timeZone, 'Europe/London');
+  assert.equal(byId.get(3).timeZone, 'America/New_York');
+  assert.equal(byId.get(5).timeZoneDetail.isDefault, true);
 });
 
 test('the team list still renders when the column is not there', async () => {
@@ -677,5 +727,8 @@ test('the team list still renders when the column is not there', async () => {
   const res = await call(router, 'get', '/', { actor: LUBOSI });
   assert.equal(res.statusCode, 200);
   assert.equal(res.payload.users.length, 4);
-  for (const user of res.payload.users) assert.equal(user.timeZone.isDefault, true);
+  for (const user of res.payload.users) {
+    assertTimeZoneContract(user, `GET /users, migration not applied, id=${user.id}`);
+    assert.equal(user.timeZoneDetail.isDefault, true);
+  }
 });

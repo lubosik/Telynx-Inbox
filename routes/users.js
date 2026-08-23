@@ -105,7 +105,8 @@ const {
   DEFAULT_TIME_ZONE,
   canonicalTimeZone,
   catalogue: timeZoneCatalogue,
-  describeStoredTimeZone
+  describeStoredTimeZone,
+  effectiveTimeZoneId
 } = require('../lib/timezones');
 
 const ADMINISTRATIVE_ROLES = ['owner', 'admin'];
@@ -604,12 +605,30 @@ function createEmailChangeStore({ client } = {}) {
 /**
  * The only serialiser. password_hash is reduced to a boolean and dropped.
  *
- * `timeZone` is always present and never null, so no client has to model its
- * absence. `isDefault: true` means "no stored choice was read", which covers
- * three cases a client cannot usefully tell apart: the person has never
- * chosen, the row was serialised without selecting the column, and
- * scripts/user-timezone-migration.sql has not been applied. The right
- * behaviour is the same in all three: render the default, offer the picker.
+ * THE TIME ZONE IS SENT TWICE, ON PURPOSE, AND THE SHAPES ARE NOT INTERCHANGEABLE
+ *
+ *   `timeZone`        a bare IANA identifier as a STRING. This is the field a
+ *                     client binds to, and it is the whole contract for
+ *                     anything that only needs to format a date. Keep it a
+ *                     string. It was briefly an object during development and
+ *                     the iOS decoder, written in parallel against `String?`,
+ *                     would have silently decoded nil — every timestamp would
+ *                     have kept rendering in device-local time with no error
+ *                     anywhere, which is precisely the bug this whole feature
+ *                     exists to remove. test/user-timezone.test.js asserts the
+ *                     type on every payload that carries it, so it cannot
+ *                     regress into an object again.
+ *
+ *   `timeZoneDetail`  the label, region, current offset and `isDefault`, for a
+ *                     picker or a settings screen. Additive. A client that
+ *                     ignores it loses nothing.
+ *
+ * Both are always present and `timeZone` is never null for a real account:
+ * `isDefault: true` in the detail is what says "no stored choice was read".
+ * That covers three cases a client cannot usefully tell apart — never chosen,
+ * serialised without selecting the column, and
+ * scripts/user-timezone-migration.sql not applied — and the right behaviour is
+ * the same in all three: render the default and offer the picker.
  */
 function publicUser(row) {
   if (!row) return null;
@@ -626,7 +645,9 @@ function publicUser(row) {
     lastSeenAt: row.last_seen_at || null,
     deactivatedAt: row.deactivated_at || null,
     createdAt: row.created_at || null,
-    timeZone: describeStoredTimeZone(row.timezone ?? null)
+    // A string. See the note above before changing this.
+    timeZone: effectiveTimeZoneId(row.timezone ?? null),
+    timeZoneDetail: describeStoredTimeZone(row.timezone ?? null)
   };
 }
 
@@ -1066,12 +1087,12 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
         console.warn('[USERS] onboarding state unavailable:', error?.code || 'read_failed');
       }
     }
-    // Unlike `onboarding`, this key is ALWAYS present. Onboarding is omitted
+    // Unlike `onboarding`, these keys are ALWAYS present. Onboarding is omitted
     // when unknown so an older account is never made to look new; a display
     // time zone has a correct answer in every case, and a client forced to
     // cope with its absence would re-implement the fallback locally, which is
     // exactly the per-device divergence this feature removes.
-    const timeZone = await timeZoneFor(actor);
+    const timeZoneDetail = await timeZoneFor(actor);
     res.set('Cache-Control', 'no-store, private');
     return res.json({
       id: actor.id,
@@ -1082,7 +1103,10 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
       viaLegacySession: actor.viaLegacySession,
       mustChangePassword: actor.mustChangePassword,
       permissions: [...actor.permissions].sort(),
-      timeZone,
+      // A STRING, matching publicUser() above and the iOS decoder. The rich
+      // object is a sibling, never a replacement.
+      timeZone: timeZoneDetail.id,
+      timeZoneDetail,
       ...(onboarding ? { onboarding } : {})
     });
   });
