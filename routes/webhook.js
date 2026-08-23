@@ -11,6 +11,7 @@ const { normaliseTelnyxStatus, updateMessageStatus } = require('../lib/message-s
 const { classifyAndStoreSentiment } = require('../lib/analytics/sentiment');
 const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = require('../lib/analytics/events');
 const { isOptOutRequest } = require('../lib/opt-out-language');
+const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-receipts');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -63,6 +64,20 @@ module.exports = (broadcastSSE) => {
           console.warn('[ANALYTICS] Trusted delivery capture skipped:', error.code || 'write_error');
           return { trusted: false };
         });
+        // Campaign recipients carry their own delivery state. This is a no-op
+        // for every message that is not one, and it is deliberately not
+        // awaited: a campaign bookkeeping write must never delay or fail the
+        // status update the inbox is waiting on.
+        void recordCampaignDeliveryResult({
+          client: supabase,
+          providerMessageId: messageId,
+          status,
+          occurredAt: event?.occurred_at || payload?.completed_at || undefined,
+          errorCode: toEntry?.error_code || payload?.errors?.[0]?.code || null,
+          eventId: event?.id || null,
+          signatureValid: analyticsSignatureValid
+        });
+
         const updated = await updateMessageStatus(supabase, messageId, status);
 
         if (updated) {
