@@ -42,6 +42,24 @@ private struct AccountToolbarModifier: ViewModifier {
 }
 
 /// A circular button showing the signed-in person's initials.
+///
+/// The touch target is 44x44 while the circle stays 30x30, and that gap is the
+/// entire point of the `contentShape`.
+///
+/// This control was reported as needing two taps. It does not toggle anything,
+/// there is no gesture competing with it and no keyboard to dismiss — the first
+/// tap was simply missing it. A `Button` with a custom label and
+/// `.buttonStyle(.plain)` is hosted in a bar button item as a custom view, and
+/// a custom view gets none of the hit-slop UIKit gives a standard one; its
+/// touch area is exactly its own bounds. Worse, the label's shape was a
+/// `Circle().fill`, so the hittable region was the circle's path — about 707
+/// square points against the 1,936 of Apple's 44x44 minimum, or 36% of it,
+/// sited in the top-left corner of the screen where thumb accuracy is at its
+/// worst. Every tap that landed in the corners of the 30pt box, or in the bar's
+/// padding around it, did nothing at all.
+///
+/// `.contentShape(Rectangle())` inside a 44x44 frame makes the whole square
+/// hittable including the corners, and the visual circle is unchanged.
 struct AccountAvatarButton: View {
     @EnvironmentObject private var session: SessionModel
     let action: () -> Void
@@ -64,8 +82,16 @@ struct AccountAvatarButton: View {
                 }
             }
             .frame(width: 30, height: 30)
+            // Order matters: the frame is widened first, then the whole 44x44
+            // is declared hittable. Reversing these two would set the content
+            // shape on the 30pt box and change nothing.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Keeps the 44pt box from pushing the title further right than the
+        // 30pt circle used to. The extra 14pt is touch area, not layout.
+        .padding(.leading, -7)
         .accessibilityLabel("Account")
         .accessibilityHint("Activity, Team, Password, Settings, and Sign out")
     }

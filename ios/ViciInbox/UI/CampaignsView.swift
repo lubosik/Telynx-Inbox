@@ -5,6 +5,22 @@ struct CampaignsView: View {
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
 
+    /// The campaign a confirmation is currently being asked about, and which
+    /// question is being asked. One piece of state rather than two booleans and
+    /// a separate id, so it is not possible to show the delete confirmation
+    /// while holding the campaign the archive swipe picked.
+    @State private var pendingAction: PendingCampaignAction?
+
+    /// Archiving and deleting are different in kind, not in degree, so they are
+    /// confirmed differently: archive is reversible and says so, delete is not
+    /// and says that instead.
+    private struct PendingCampaignAction: Identifiable {
+        enum Kind { case archive, unarchive, delete }
+        let campaign: CampaignRecord
+        let kind: Kind
+        var id: String { "\(campaign.id).\(kind)" }
+    }
+
     var body: some View {
         Group {
             if !session.can(Permission.campaignsRead) {
@@ -22,6 +38,20 @@ struct CampaignsView: View {
             }
         }
         .toolbar {
+            if session.can(Permission.campaignsRead) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Toggle(isOn: $model.showsArchived) {
+                            Label("Show Archived", systemImage: "archivebox")
+                        }
+                    } label: {
+                        Image(systemName: model.showsArchived
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease.circle")
+                    }
+                    .accessibilityLabel("Filter campaigns")
+                }
+            }
             if session.can(Permission.campaignsManage) {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showingNewCampaign = true } label: {
@@ -44,6 +74,12 @@ struct CampaignsView: View {
             guard session.can(Permission.campaignsRead) else { return }
             await model.load()
         }
+        // Reloads from page one when archived items are shown or hidden. Paging
+        // state cannot survive a change to what the pages contain.
+        .task(id: model.showsArchived) {
+            guard session.can(Permission.campaignsRead), !model.campaigns.isEmpty else { return }
+            await model.load(reset: true)
+        }
         .alert("Campaigns error", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
@@ -52,6 +88,61 @@ struct CampaignsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "Please try again.")
+        }
+        // Confirmation before anything leaves the list. A swipe is easy to do
+        // by accident on a phone, and one of these three actions cannot be
+        // undone.
+        .confirmationDialog(confirmationTitle,
+                            isPresented: Binding(
+                                get: { pendingAction != nil },
+                                set: { if !$0 { pendingAction = nil } }
+                            ),
+                            titleVisibility: .visible,
+                            presenting: pendingAction) { action in
+            switch action.kind {
+            case .archive:
+                Button("Archive") { Task { await model.archive(action.campaign) } }
+            case .unarchive:
+                Button("Restore") { Task { await model.unarchive(action.campaign) } }
+            case .delete:
+                Button("Delete Permanently", role: .destructive) {
+                    Task { await model.delete(action.campaign) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { action in
+            switch action.kind {
+            case .archive:
+                Text("\(action.campaign.title) will be hidden from this list. Nothing is deleted, and you can restore it from Show Archived.")
+            case .unarchive:
+                Text("\(action.campaign.title) will return to the campaign list.")
+            case .delete:
+                Text("\(action.campaign.title) will be permanently deleted. This cannot be undone. Archive it instead if you only want it out of the way.")
+            }
+        }
+        // Archiving is otherwise silent, and silence after a swipe reads as a
+        // failure. Auto-dismissed rather than needing a tap.
+        .overlay(alignment: .bottom) {
+            if let message = model.statusMessage {
+                CampaignStatusToast(message: message)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .task(id: message) {
+                        try? await Task.sleep(nanoseconds: 2_600_000_000)
+                        guard !Task.isCancelled else { return }
+                        model.statusMessage = nil
+                    }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.statusMessage)
+    }
+
+    private var confirmationTitle: String {
+        switch pendingAction?.kind {
+        case .archive:   return "Archive this campaign?"
+        case .unarchive: return "Restore this campaign?"
+        case .delete:    return "Delete this campaign?"
+        case nil:        return ""
         }
     }
 
@@ -88,9 +179,17 @@ struct CampaignsView: View {
                     NavigationLink {
                         CampaignDetailView(campaignID: campaign.id)
                     } label: {
-                        CampaignRow(campaign: campaign)
+                        CampaignRow(campaign: campaign,
+                                    isArchived: model.isArchived(campaign),
+                                    isMutating: model.mutatingID == campaign.id)
                     }
                     .onAppear { Task { await model.loadMoreIfNeeded(after: campaign) } }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        campaignSwipeActions(for: campaign)
+                    }
+                    // The same actions without a swipe. A swipe is invisible
+                    // until somebody guesses it is there.
+                    .contextMenu { campaignSwipeActions(for: campaign) }
                 }
                 if model.isLoadingMore {
                     ProgressView().frame(maxWidth: .infinity)
@@ -98,6 +197,41 @@ struct CampaignsView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    /// Archive, restore and delete for one campaign.
+    ///
+    /// Archive is offered for everything, because "get this out of my list" is
+    /// a reasonable thing to want about any campaign. Delete is offered only
+    /// for a draft, and is `role: .destructive` so it is red before it is read.
+    /// Neither acts immediately; both raise a confirmation first.
+    @ViewBuilder
+    private func campaignSwipeActions(for campaign: CampaignRecord) -> some View {
+        if session.can(Permission.campaignsManage) {
+            if model.isArchived(campaign) {
+                Button {
+                    pendingAction = PendingCampaignAction(campaign: campaign, kind: .unarchive)
+                } label: {
+                    Label("Restore", systemImage: "arrow.uturn.backward")
+                }
+                .tint(ViciTheme.tint)
+            } else {
+                Button {
+                    pendingAction = PendingCampaignAction(campaign: campaign, kind: .archive)
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .tint(ViciTheme.warning)
+            }
+
+            if model.canDelete(campaign) {
+                Button(role: .destructive) {
+                    pendingAction = PendingCampaignAction(campaign: campaign, kind: .delete)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        }
     }
 
     private var campaignEmptyState: some View {
@@ -124,6 +258,12 @@ struct CampaignsView: View {
 
 private struct CampaignRow: View {
     let campaign: CampaignRecord
+    /// Archived rows stay legible but visibly set aside. Dimming alone would
+    /// read as "disabled", so there is a word as well as an opacity change —
+    /// archived and deleted must never look the same, and neither should look
+    /// like a loading failure.
+    var isArchived: Bool = false
+    var isMutating: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -132,6 +272,16 @@ private struct CampaignRow: View {
                     .font(.body.weight(.semibold))
                     .lineLimit(2)
                 Spacer(minLength: 8)
+                if isMutating {
+                    ProgressView()
+                } else if isArchived {
+                    Label("Archived", systemImage: "archivebox.fill")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color(.tertiarySystemFill), in: Capsule())
+                        .foregroundStyle(.secondary)
+                }
                 CampaignStatusBadge(status: campaign.status)
             }
             Text(campaign.message)
@@ -151,7 +301,26 @@ private struct CampaignRow: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+        .opacity(isArchived ? 0.55 : 1)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(isArchived ? "Archived. \(campaign.title)" : campaign.title)
+    }
+}
+
+/// A short, self-dismissing confirmation that an archive, restore or delete
+/// actually happened.
+private struct CampaignStatusToast: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.footnote.weight(.medium))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Material.regular, in: Capsule())
+            .overlay(Capsule().stroke(ViciTheme.tint.opacity(0.25)))
+            .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+            .accessibilityAddTraits(.isStaticText)
     }
 }
 
@@ -869,48 +1038,15 @@ struct CampaignEditorView: View {
                 stepContent
             }
             .scrollDismissesKeyboard(.interactively)
+            // The wizard's own controls, in a bar that rides above the keyboard
+            // instead of behind it. See `wizardControls` for why this is not a
+            // `ToolbarItemGroup(placement: .bottomBar)` any more.
+            .safeAreaInset(edge: .bottom, spacing: 0) { wizardControls }
             .navigationTitle(model.existingID == nil ? "New Campaign" : "Edit Campaign")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Sits in the keyboard accessory bar, so it is the one control
-                // the keyboard can never cover. The bottom bar holding Next is
-                // hidden while the keyboard is up; this is how you get back to it.
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    KeyboardDoneButton { focusedField = nil }
-                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button(model.savedCampaign == nil ? "Cancel" : "Done") { dismiss() }
-                }
-                ToolbarItemGroup(placement: .bottomBar) {
-                    if model.canGoBack {
-                        Button("Back") { model.back() }
-                    }
-                    Spacer()
-                    if model.savedCampaign != nil {
-                        if model.savedCampaign?.status.isEditable == true {
-                            Button("Submit for Review") {
-                                Task {
-                                    if await model.submitSavedDraftForReview() { onSaved() }
-                                }
-                            }
-                            .disabled(!model.canSubmitSavedDraft)
-                        }
-                        Button("Done") { dismiss() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ViciTheme.tint)
-                    } else if model.isFinalStep {
-                        Button(model.existingID == nil ? "Save Draft" : "Save New Revision") {
-                            Task {
-                                if await model.saveAndCheckEligibility() { onSaved() }
-                            }
-                        }
-                        .disabled(model.isSaving)
-                    } else {
-                        Button("Next") { model.advance() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(ViciTheme.tint)
-                    }
                 }
             }
             .interactiveDismissDisabled(model.isSaving || model.isCheckingEligibility || model.isSubmitting)
@@ -935,6 +1071,94 @@ struct CampaignEditorView: View {
                 Text(model.errorMessage ?? "Please try again.")
             }
         }
+    }
+
+    /// Back, Next, Save — the controls that move the wizard along.
+    ///
+    /// THE TWO-TAP FIX. These used to be a `ToolbarItemGroup(placement:
+    /// .bottomBar)`, which lives in the navigation controller's toolbar. That
+    /// toolbar does not move when the keyboard appears, so the keyboard simply
+    /// covered it. Step one of this wizard is a required title in a `TextField`
+    /// and step four is the message in a `TextEditor`, so on the steps that
+    /// matter the keyboard is up by definition and `Next` was underneath it.
+    ///
+    /// Commit e5062d8 recognised half of this — its own message says "the
+    /// keyboard covers the bottom toolbar where Next lives" — and answered it
+    /// with a Done button in the keyboard accessory bar. That unblocked the
+    /// dead end, but it made every advance cost two taps by construction: one
+    /// on Done to retract the keyboard and uncover the bar, then one on Next.
+    /// The owner reported precisely that as "buttons need two taps", and it was
+    /// not a hit-testing bug at all; the first tap was doing a real job.
+    ///
+    /// `safeAreaInset(edge: .bottom)` is the fix, because SwiftUI applies the
+    /// keyboard as a bottom safe-area inset. The bar is therefore always
+    /// visible, sitting directly above the keyboard while typing, and one tap
+    /// on Next both resigns focus and advances. The keyboard accessory group is
+    /// gone with it: the reason it existed no longer exists, and leaving it
+    /// would stack two bars above the keyboard.
+    private var wizardControls: some View {
+        HStack(spacing: 12) {
+            if model.canGoBack {
+                Button("Back") { advanceOrGoBack(model.back) }
+                    .buttonStyle(.bordered)
+            }
+
+            // Only while something is focused, and only because a TextEditor
+            // treats Return as a newline. Dragging the form dismisses too, but
+            // an explicit control is easier to find than a gesture.
+            if focusedField != nil {
+                Button {
+                    focusedField = nil
+                } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Hide keyboard")
+            }
+
+            Spacer(minLength: 0)
+
+            if model.savedCampaign != nil {
+                if model.savedCampaign?.status.isEditable == true {
+                    Button("Submit for Review") {
+                        focusedField = nil
+                        Task {
+                            if await model.submitSavedDraftForReview() { onSaved() }
+                        }
+                    }
+                    .disabled(!model.canSubmitSavedDraft)
+                }
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ViciTheme.tint)
+            } else if model.isFinalStep {
+                Button(model.existingID == nil ? "Save Draft" : "Save New Revision") {
+                    focusedField = nil
+                    Task {
+                        if await model.saveAndCheckEligibility() { onSaved() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ViciTheme.tint)
+                .disabled(model.isSaving)
+            } else {
+                Button("Next") { advanceOrGoBack(model.advance) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ViciTheme.tint)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Material.bar)
+    }
+
+    /// Clears focus and then moves. Order matters: the step's validation reads
+    /// `model.title` and `model.message`, and both are bound live, so the value
+    /// is already committed by the time this runs. Resigning first only
+    /// guarantees the keyboard does not follow the wizard onto the next step.
+    private func advanceOrGoBack(_ move: () -> Void) {
+        focusedField = nil
+        move()
     }
 
     @ViewBuilder
