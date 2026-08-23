@@ -37,7 +37,24 @@
 
 require('dotenv').config();
 
-const { supabase } = require('../db');
+/**
+ * The database client is resolved lazily, not at module load.
+ *
+ * `../db` builds a Supabase client the moment it is required and throws
+ * "supabaseUrl is required" when the environment is absent. CI has no `.env`,
+ * so importing this file to unit-test `parseArgs`, `persistenceAllowed` and
+ * `rowsToInsert` took the whole test file down at the require, reported only
+ * as "test failed" with nothing naming the real cause. It passed locally,
+ * where `.env` exists, which is the worst version of this failure: green on
+ * the machine that wrote it, red on the machine that gates it.
+ *
+ * The house pattern is the one `scripts/backfill-order-sms-consent.js` uses:
+ * pure logic importable with no database, and the client resolved only on the
+ * path that actually talks to one.
+ */
+function defaultClient() {
+  return require('../db').supabase;
+}
 const { wooGet } = require('../woocommerce');
 const { catalogueInventoryRows, productCatalogue } = require('../lib/campaigns/product-catalogue');
 
@@ -62,14 +79,15 @@ function rowsToInsert(catalogueRows, existingRows) {
     !existing.has(`${row.workspace_id}:${row.product_id}:${row.variation_id}`));
 }
 
-async function run(args, client = supabase) {
+async function run(args, client = null) {
+  const db = client || defaultClient();
   const now = new Date();
   const catalogue = await productCatalogue({ wooGet, now, forceRefresh: true });
   if (!catalogue.available) throw new Error(`WooCommerce catalogue unavailable: ${catalogue.error}`);
 
   const catalogueRows = catalogueInventoryRows(catalogue, { workspaceID: WORKSPACE_ID, now });
 
-  const { data: existing, error } = await client.from('sms_product_inventory')
+  const { data: existing, error } = await db.from('sms_product_inventory')
     .select('workspace_id,product_id,variation_id').eq('workspace_id', WORKSPACE_ID);
   if (error) throw new Error(`sms_product_inventory could not be read: ${error.message}`);
 
@@ -95,7 +113,7 @@ async function run(args, client = supabase) {
 
   // Insert only. `onConflict ... ignoreDuplicates` means a concurrent webhook
   // write during the seed keeps its own, more authoritative row.
-  const { error: insertError } = await client.from('sms_product_inventory')
+  const { error: insertError } = await db.from('sms_product_inventory')
     .upsert(pending, { onConflict: 'workspace_id,product_id,variation_id', ignoreDuplicates: true });
   if (insertError) throw new Error(`baseline insert failed: ${insertError.message}`);
   result.inserted = pending.length;
