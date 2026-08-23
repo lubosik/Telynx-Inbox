@@ -330,26 +330,71 @@ test('the substitutions named in the brief are rejected, not accepted', () => {
     const verdict = assertRejectedFor('no_character_substitution_evasion', `Vici: ${attempt} on this. ${OPT_OUT}`);
     const reasons = verdict.failures.map(item => item.reason).join(' ');
     assert.match(reasons, /substitution/i);
+    // The brief is explicit that these are violations in themselves, so the
+    // banned word underneath must be named rather than merely implied.
+    assert.match(reasons, /once character substitutions are undone/);
   }
 });
 
-test('substituted banned words are caught through both substitution maps', () => {
+/**
+ * The normalised re-match, isolated.
+ *
+ * Asserting only "this draft was rejected" is not enough here, and a mutation
+ * run proved it: disabling the normalisation branch entirely left every
+ * substitution test green, because the mixed-token detector happened to catch
+ * the same drafts. The two defences are meant to be independent, so each is
+ * asserted by the reason it produces, not by the verdict they share.
+ */
+function substitutionFailure(text, options) {
+  const verdict = validateCopy(text, options);
+  const hit = verdict.failures.find(item =>
+    item.check === 'no_character_substitution_evasion' &&
+    /once character substitutions are undone/.test(item.reason));
+  assert.ok(hit, `the normalised re-match did not fire for ${JSON.stringify(text)}`);
+  return hit;
+}
+
+test('substituted banned words are caught by the normalised re-match itself', () => {
   const attempts = [
-    'Fr33',        // free, digits
-    'S@ve',        // save, symbol
-    'C4SH',        // cash
-    'd0se',        // dose
-    'c1ick here',  // click here, 1 as l
-    '1nject',      // inject, 1 as i
-    'gu4r4nteed',  // guaranteed
-    'l4st ch4nce', // last chance
-    'cur3',        // cure
-    '$ave'         // save
+    ['Fr33', 'free'],
+    ['S@ve', 'save'],
+    ['$ave', 'save'],
+    ['C4SH', 'cash'],
+    ['d0se', 'dose'],
+    ['1nject', 'inject'],
+    ['gu4r4nteed', 'guaranteed'],
+    ['l4st ch4nce', 'last chance'],
+    ['cur3', 'cure']
   ];
-  for (const attempt of attempts) {
-    const verdict = assertRejectedFor('no_character_substitution_evasion', `Vici: ${attempt} today. ${OPT_OUT}`);
-    assert.ok(verdict.failures.length >= 1, attempt);
+  for (const [attempt, expectedTerm] of attempts) {
+    const hit = substitutionFailure(`Vici: ${attempt} today. ${OPT_OUT}`);
+    assert.equal(hit.detail.term, expectedTerm, attempt);
+    assert.ok(['primary', 'alternate'].includes(hit.detail.substitutionMap));
   }
+});
+
+test('the alternate substitution map is not decorative: 1 reads as l as well as i', () => {
+  // "c1ick here" normalises to "ciick here" under the primary map and to
+  // "click here" only under the alternate one. If the alternate map is ever
+  // dropped, this is the test that notices.
+  const hit = substitutionFailure(`Vici: c1ick here today. ${OPT_OUT}`);
+  assert.equal(hit.detail.term, 'click here');
+  assert.equal(hit.detail.substitutionMap, 'alternate');
+
+  // And the primary map still carries its own cases, so neither is redundant.
+  const primary = substitutionFailure(`Vici: 1nject today. ${OPT_OUT}`);
+  assert.equal(primary.detail.substitutionMap, 'primary');
+});
+
+test('the two substitution defences fire independently, not as one rule', () => {
+  // Both must be present on a leetspeak banned word: the normalised re-match
+  // (which names the term) and the mixed-token detector (which names the
+  // token). Losing either leaves a real gap even though the draft still fails.
+  const verdict = validateCopy(`Vici: Fr33 today. ${OPT_OUT}`);
+  const normalised = verdict.failures.filter(item => /once character substitutions are undone/.test(item.reason));
+  const shaped = verdict.failures.filter(item => /mixes letters with/.test(item.reason));
+  assert.equal(normalised.length, 1, 'the normalised re-match did not report');
+  assert.equal(shaped.length, 1, 'the mixed-token detector did not report');
 });
 
 test('a substituted word that is on no banned list is still rejected as obfuscation', () => {

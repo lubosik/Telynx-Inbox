@@ -9,8 +9,21 @@ const {
   createCampaignService
 } = require('../lib/campaigns/service');
 const { createCampaignGenerationService } = require('../lib/campaigns/generation-service');
+const { CopyDraftError, draftCandidates } = require('../lib/campaigns/copy-writer');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
+
+/**
+ * Body keys accepted by POST /copy-suggestions.
+ *
+ * Narrow on purpose, and enforced rather than filtered. Everything here is
+ * campaign shape, never customer evidence: there is no recipient, no phone, no
+ * contact id and no order. `lib/campaigns/copy-writer.js` re-checks each value
+ * for identifier shapes before anything reaches a model.
+ */
+const COPY_SUGGESTION_BODY_KEYS = new Set([
+  'workflowType', 'productName', 'cadence', 'brief', 'candidateCount', 'linkUrl', 'approvedProductCodes'
+]);
 
 function generationRequest(body) {
   const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
@@ -25,6 +38,18 @@ function generationRequest(body) {
     throw new CampaignRequestError('commit must be a boolean.', 'CAMPAIGN_GENERATION_INPUT_REJECTED', 400);
   }
   return { workflows: input.workflows, commit: input.commit === true };
+}
+
+function copySuggestionRequest(body) {
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(input).filter(key => !COPY_SUGGESTION_BODY_KEYS.has(key));
+  if (unknown.length) {
+    throw new CampaignRequestError(
+      `Copy drafting accepts campaign shape only; ${unknown.join(', ')} is not accepted. Recipient and customer evidence is server-owned.`,
+      'CAMPAIGN_AI_COPY_INPUT_REJECTED', 400
+    );
+  }
+  return input;
 }
 
 function campaignSummaryName(campaign) {
@@ -89,7 +114,8 @@ function createCampaignRouter({
   auditApprovalWriter,
   generationService,
   campaignNotificationSender,
-  generationAuditWriter
+  generationAuditWriter,
+  copyDrafter
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -100,6 +126,8 @@ function createCampaignRouter({
   const notifyCampaignReview = campaignNotificationSender || ((...args) =>
     require('../lib/apns-notify').sendCampaignReadyNotifications(...args));
   const writeGenerationAudit = generationAuditWriter || logAuditSafely;
+  // Injectable so route tests never construct an OpenRouter client.
+  const drafter = copyDrafter || draftCandidates;
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -165,6 +193,48 @@ function createCampaignRouter({
         ...(notification?.error ? { error: notification.error } : {})
       } });
     } catch (error) { return sendError(res, error); }
+  });
+
+  // A DRAFTING AID. It returns candidate wording for a human to choose from
+  // and edit. It creates nothing, submits nothing for review, approves
+  // nothing, schedules nothing and sends nothing - a candidate becomes a
+  // campaign only when somebody posts it to POST /api/campaigns, which is a
+  // separate, audited action.
+  //
+  // Behind campaigns.manage, so Support Agents cannot reach it: the agent role
+  // holds campaigns.read and nothing else in the campaign family.
+  //
+  // Deliberately not `audit: true`. That flag means "the handler writes an
+  // audit row", and lib/route-policy.js records that asserting coverage the
+  // code does not provide is worse than no flag at all. This handler mutates
+  // nothing, so there is no state change to record; the campaign that
+  // eventually carries this wording is audited at creation, with its message
+  // fingerprint.
+  router.post('/copy-suggestions', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const input = copySuggestionRequest(req.body);
+      const result = await drafter(input);
+      // Rejected drafts leave this process as rule ids and reasons only. Their
+      // text is never returned, so a reviewer cannot lift a draft that failed
+      // validation out of a response body and paste it into a campaign.
+      return res.json({
+        workflowType: result.workflowType,
+        brandName: result.brandName,
+        requested: result.requested,
+        returned: result.returned,
+        candidates: result.candidates,
+        rejected: result.rejected,
+        model: result.model,
+        copyStatus: result.copyStatus,
+        reviewRequirements: result.reviewRequirements
+      });
+    } catch (error) {
+      if (error instanceof CopyDraftError) {
+        return res.status(error.status || 400).json({ error: error.message, code: error.code });
+      }
+      return sendError(res, error);
+    }
   });
 
   router.post('/', async (req, res) => {
