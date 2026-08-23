@@ -109,8 +109,35 @@ test('the rule set is deeply frozen, so no caller can widen a compliance list', 
   assert.equal(RULES.length.maxSeptets, 160);
 });
 
-test('no product code is exempt by default', () => {
-  // Inventing a SKU list here would let an unverified code through the
-  // ALL-CAPS and substitution checks. Empty is the fail-closed value.
-  assert.deepEqual(RULES.defaultApprovedProductCodes, []);
+test('the approved codes are real catalogue entries, and name no GLP-1', () => {
+  // This list was empty, on the reasoning that an invented SKU list would
+  // exempt unverified codes. It is now read from the live WooCommerce
+  // catalogue, so emptiness is no longer the property worth asserting. Two
+  // things are.
+  const codes = RULES.defaultApprovedProductCodes;
+  assert.ok(codes.length > 0, 'populated from the catalogue, not invented');
+
+  // First: exemption is narrow. A code buys an ALL-CAPS pass and nothing more,
+  // so nothing in the list may collide with a banned term.
+  // bannedTerms is grouped by source, each group { source, terms }.
+  const banned = new Set(
+    Object.values(RULES.bannedTerms)
+      .flatMap(group => group.terms)
+      .map(term => String(term).toUpperCase())
+  );
+  for (const code of codes) {
+    assert.equal(banned.has(code.toUpperCase()), false, `${code} is also a banned term`);
+  }
+
+  // Second, and the one that matters: the catalogue calls the GLP-1 products
+  // RT, TZ and SM, never by name. Those three substances are what place a
+  // peptide seller inside Telnyx's prohibited categories. Approving the full
+  // name here would exempt it from the ALL-CAPS check and, worse, put it in
+  // front of the drafting model as a sanctioned token.
+  for (const forbidden of ['RETATRUTIDE', 'TIRZEPATIDE', 'SEMAGLUTIDE', 'OZEMPIC', 'MOUNJARO', 'WEGOVY', 'ZEPBOUND']) {
+    assert.equal(
+      codes.some(code => code.toUpperCase() === forbidden), false,
+      `${forbidden} must never be an approved product code`
+    );
+  }
 });

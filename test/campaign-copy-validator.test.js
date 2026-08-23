@@ -436,7 +436,14 @@ test('the validator does not repair a substituted draft into a passing one', () 
 
 test('a verified product code is exempt, an unverified one is not', () => {
   assertAccepted(`Vici: BPC-157 is back in stock. ${OPT_OUT}`, { approvedProductCodes: CODES });
-  const verdict = assertRejectedFor('no_character_substitution_evasion', `Vici: BPC-157 is back in stock. ${OPT_OUT}`);
+
+  // BPC-157 used to be the negative case here, because the default list was
+  // empty. It is now a real catalogue entry read from WooCommerce, so it is
+  // exempt by default and proves nothing. The negative case has to be a code
+  // that is genuinely not in the catalogue, which is the property the test
+  // was always about: verification, not shape.
+  assertAccepted(`Vici: BPC-157 is back in stock. ${OPT_OUT}`);
+  const verdict = assertRejectedFor('no_all_caps_shouting', `Vici: ZQX-999 is back in stock. ${OPT_OUT}`);
   assert.ok(verdict.failedChecks.includes('no_all_caps_shouting'));
   // And an attacker cannot smuggle a substituted word in by calling it a code
   // that was never verified.

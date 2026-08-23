@@ -96,7 +96,7 @@ anywhere in the codebase.
     ],
     "allowApprovedProductCodes": true
   },
-  "defaultApprovedProductCodes": [],
+  "defaultApprovedProductCodes": ["BPC-157", "TB-500", "GHK-Cu", "PT-141", "MOTS-C", "CJC-1295", "IGF-1LR3", "KPV", "NAD", "IPA", "DAC", "BAC", "RT", "TZ", "SM", "II", "BB10", "BBG70", "BC10", "BT10", "CND10", "CP10", "CU100", "IG1", "IP10", "KLOW80", "ML10", "MT1", "PT10", "SK10", "TSM10", "XA10", "P-GTT600", "P-MS10", "P-NJ100", "P-RT10", "P-SM10", "P-TR10", "P-WA10"],
   "leetSubstitutions": {
     "primary": {
       "0": "o",
