@@ -119,3 +119,47 @@ private extension UIColor {
         )
     }
 }
+
+/// A "Done" button for the keyboard accessory bar.
+///
+/// Multi-line `TextEditor` treats Return as a newline, which is correct for a
+/// message body and leaves no way to dismiss the keyboard. Without this the
+/// keyboard covers the wizard's bottom toolbar and the Next button becomes
+/// unreachable — you can finish typing and still not move on.
+///
+/// Liquid Glass where the OS has it, a tinted capsule everywhere else. Both
+/// read as the same control; only the material differs.
+struct KeyboardDoneButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label("Done", systemImage: "keyboard.chevron.compact.down")
+                .font(.subheadline.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+        }
+        .accessibilityLabel("Dismiss keyboard")
+        .accessibilityHint("Hides the keyboard so you can continue")
+        .modifier(KeyboardDoneBackground())
+    }
+}
+
+private struct KeyboardDoneBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            // A concrete Capsule() rather than the `.capsule` shorthand, and no
+            // `.interactive()`: this file cannot be type-checked locally (SwiftUI
+            // needs the iOS SDK), so it sticks to the narrowest API surface that
+            // is certain to resolve.
+            content
+                .glassEffect(.regular.tint(ViciTheme.tint.opacity(0.22)), in: Capsule())
+                .foregroundStyle(ViciTheme.tint)
+        } else {
+            content
+                .background(ViciTheme.tint.opacity(0.14), in: Capsule())
+                .foregroundStyle(ViciTheme.tint)
+        }
+    }
+}
