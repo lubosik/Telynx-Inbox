@@ -71,6 +71,34 @@ client.
   cadence analysis. It prints no customer or product identity and never writes.
   `scripts/dry-run-campaign-opportunities.js` accepts only a local fixture and
   prepares draft outputs without importing a database or provider client.
+- `lib/campaigns/product-identity.js`, `lib/campaigns/product-catalogue.js`:
+  which catalogue product a historical order line item is. Legacy
+  `sms_orders.items` rows carry `{sku, name}` and no Woo identifiers, so the
+  detectors used to discard 2,334 of 2,343 paid line items and every automatic
+  segment was empty; that was misread as a consent problem, and consent gates
+  sending rather than segmenting. Resolution is EQUALITY ONLY — Woo IDs, SKU,
+  catalogue name, a curated reviewed alias table, then canonical component-set
+  equality — with no prefix, substring, edit distance or model, and ambiguity
+  resolves to nothing. Dose variants share a parent for CADENCE and stay
+  separate for STOCK; combination products are one identity and are never
+  decomposed into their components. Unresolved items are counted in
+  `sourceCoverage.productIdentity`, never absorbed. The catalogue cache is
+  invalidated by the product webhook first and `CAMPAIGN_CATALOGUE_TTL_MS`
+  second, and a provider failure keeps the last snapshot marked `stale` rather
+  than throwing. It produces stock ROWS and never product EVENTS: a first
+  sighting of "in stock" is not a restock. Read
+  `docs/campaigns/SEGMENTATION-METHODOLOGY.md` before changing a matching rule.
+- `scripts/dry-run-campaign-identity.js`: read-only, aggregate-only. Reads the
+  live database and the Woo catalogue, prints resolution counts and detector
+  populations, and writes nothing. It prints catalogue product names and SKUs,
+  which are public shop content, and no customer identity. Its
+  support-clearance pass is an explicitly labelled counterfactual measuring
+  reach, not permission.
+- `scripts/seed-product-inventory-baseline.js`: writes one current-stock row per
+  purchasable catalogue unit into `sms_product_inventory`, so a later webhook
+  has a `previous` to compare against. Read-only unless given BOTH `--persist`
+  and `PRODUCT_INVENTORY_SEED_APPROVED=YES`. It never overwrites an existing
+  row and never writes a product event.
 - `scripts/onboarding-migration.sql` and `docs/onboarding/`: server-owned,
   role-aware first-time tour state. Existing accounts are deliberately
   ineligible; future named accounts start at `not_started`.

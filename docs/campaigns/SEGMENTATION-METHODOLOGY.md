@@ -118,9 +118,54 @@ The pure modules return reason codes and timestamps. A production detector must 
 
 No raw customer message body belongs in the campaign audit log. An unconverted-enquiry classifier remains out of scope until its accuracy is measured against a private, labelled sample through the existing OpenRouter privacy boundary.
 
+## Product identity
+
+Everything above depends on knowing which product a historical line item was, and for most of the Vici history the line item does not say. `sms_orders.items` rows written by the older sync are `{sku, name, total, quantity}`: 2,334 of 2,343 paid line items carry no WooCommerce product or variation ID at all. The original rule read those IDs and accepted nothing else, so it identified 12 items, every detector saw an empty world, and every automatic segment was empty. That was read as a consent problem. It was not: consent gates sending and sits downstream of segmentation.
+
+`lib/campaigns/product-identity.js` resolves a line item against the live catalogue. Every rule is an equality test, tried in this order:
+
+1. `order_item_ids` — the line item already carries Woo identifiers;
+2. `catalogue_sku` — the SKU equals exactly one catalogue SKU;
+3. `catalogue_name` — the base name equals exactly one catalogue product name;
+4. `curated_alias` — the base name is in the reviewed alias table in that file;
+5. `component_set` — the canonical molecule set equals exactly one product's.
+
+There is no prefix match, no substring containment, no edit distance, no closest match and no model. A key that two different parent products could claim is recorded as ambiguous and thereafter resolves to nothing. A SKU and a name that disagree about the parent resolve to neither. A wrong identity produces a wrong cadence, and a wrong cadence eventually produces a message to a real person at the wrong moment, so refusing is structural rather than a matter of care.
+
+Unresolved items are counted, never absorbed. `sourceCoverage.productIdentity` reports the resolution method histogram, the unresolved reasons and the notes on partially resolved items, and `nonExactOrderItems` remains as the unresolved total.
+
+### Dose variants are one product for cadence and two for stock
+
+A resolution carries a parent `productID` and an exact `variationID`.
+
+Cadence groups on the PARENT. "Retatrutide - 10mg" and "Retatrutide - 30mg" are the same molecule in a different vial, and customers titrate between them: the live history has the same people across RT10, RT20 and RT30. Splitting the series by vial leaves each customer with two or three purchases of each dose, below the three-interval floor above, so no cadence is ever reliable and the answer is zero forever. Grouping on the parent answers the question the detector is actually asking, which is how often this person comes back for this molecule.
+
+Availability stays on the VARIATION. "Your BPC-157 is back" is a factual claim about one vial size. Stock is read for the exact variation the customer bought most recently and falls back to the parent record only when no variation-level record exists. That fallback direction matters: WooCommerce reports a variable parent as out of stock while a published, purchasable variation of it still has quantity, which is currently true of BPC-157, BPC-157 + TB-500, GHK-Cu + BPC-157 + TB-500 and Ipamorelin. Preferring the parent there would suppress every one of their buyers.
+
+A cadence identity that spans doses also widens the contact ledger check to the parent. A reorder message already sent about the 10mg vial suppresses a second one about the 30mg vial of the same molecule. Widening can only suppress more contact, never cause more.
+
+### Combination products are one identity and are never decomposed
+
+"GHK-Cu + BPC-157 + TB-500" (BBG70) and "GHK-Cu + BPC-157 + TB-500 + KPV" (KLOW80) are separate catalogue products with separate stock and separate prices, and both appear in the live order history. A customer who buys the KLOW combo and later buys BPC-157 alone has bought two different things. You cannot fulfil a BPC-157 reorder from a KLOW purchase, the amounts are not comparable, and a cadence built by pooling them would fire at a time supported by neither series.
+
+The component list is therefore used only to recognise a renamed bundle, by SET EQUALITY, and never to relate a bundle to its parts. Set equality is also what keeps BBG70 and KLOW80 apart, since one component list is a strict subset of the other. Relaxing it to containment would merge two real products, so there is a mutation test against it.
+
+### Catalogue caching and invalidation
+
+`lib/campaigns/product-catalogue.js` reads the catalogue once and caches it in process. It invalidates, in order of what actually fires:
+
+1. the WooCommerce product webhook calls `invalidateProductCatalogue()`, so a product created, updated or deleted drops the cache immediately;
+2. `CAMPAIGN_CATALOGUE_TTL_MS`, default 15 minutes, as the backstop for a missed webhook;
+3. process restart, which costs one refetch and no authority.
+
+A refresh that fails keeps the previous snapshot, marks it `stale`, and does not throw. `currentInventory()` still refuses any observation older than 24 hours, so a WooCommerce outage degrades to no candidates rather than to candidates based on last week's stock.
+
+The catalogue supplies stock ROWS in the shape of `sms_product_inventory`, so there is no second definition of "available". It never supplies product EVENTS. Reading current stock is a first sighting, and a first sighting of "in stock" is not evidence that anything came back; `isRestockTransition()` has always said so and two tests guard it. `scripts/seed-product-inventory-baseline.js` can write the baseline so a later webhook has a `previous` to compare against, but it is read-only unless given both `--persist` and `PRODUCT_INVENTORY_SEED_APPROVED=YES`, it never overwrites an existing row, and it creates no event.
+
 ## Known limitations before wiring
 
-- Historical `sms_orders.items` may not retain WooCommerce product and variation IDs. Name or SKU matching alone is weaker and must not be silently treated as exact-product evidence.
 - The product-level cadence thresholds have not yet been calibrated against the approved Vici historical dry run.
 - Consent coverage and Telnyx eligibility remain unknown. A useful segment can still have zero send-eligible recipients.
 - These functions do not read Supabase, claim jobs, schedule work, or send SMS. Persistence and concurrency belong in the campaign service and SQL queue.
+- `sms_customer_commercial_eligibility` is empty in production, so `authoritativeSupportState()` answers `unknown` for every phone and the detectors fail closed with `support_state_unknown` before they reach cadence. That gate is correct and is upstream data that does not exist yet, not a defect in identity or cadence. `scripts/dry-run-campaign-identity.js` reports the population behind it as an explicitly labelled counterfactual so the two causes cannot be confused again.
+- `sms_commerce_product_events` is empty, so back in stock has nobody: there is no recorded out-to-in transition, and current stock is not one. Seeding the inventory baseline is what makes the FIRST future transition detectable rather than swallowed.
