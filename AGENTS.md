@@ -62,6 +62,16 @@ client.
 - `docs/analytics/`: revenue-claim methodology, implementation architecture,
   and the provisional historical audit. Read the methodology before changing
   attribution rules or displaying revenue.
+- `lib/campaigns/segment-rule-schema.js` is the CLOSED grammar a described
+  segment may be expressed in, and `segment-rule-validator.js` is the gate
+  every rule set passes through, whether it came from a model or from a client.
+  Nothing downstream builds a query: `segment-rule-evaluator.js` switches over
+  the same closed dimension list and reads properties of records
+  `segment-facts.js` built in memory, which is why an invented field has
+  nothing to reach. A dimension added to the schema needs a rendering, an
+  evaluation branch and a sample in `test/campaign-segment-rule-validator.test.js`,
+  and two of those three fail the suite if you forget them. `.env.example`
+  carries `SEGMENT_AI_BUILDER_ENABLED`, off unless it is exactly `true`.
 - `docs/campaigns/`, `lib/campaigns/`, `routes/campaigns.js`: campaign research,
   deterministic opportunity and attribution policies, draft/review APIs, and
   the fail-closed delivery foundation. `scripts/campaigns-migration.sql` must
@@ -237,6 +247,15 @@ client.
   is never described as a membership edit. A removal confirmation must not
   promise an outcome: the server chooses delete or archive and the sentence
   shown afterwards is built from the response.
+  is never described as a membership edit.
+- `ios/ViciInbox/UI/SegmentRuleBuilderView.swift` and
+  `ios/ViciInbox/Core/SegmentRuleModels.swift`: describing a segment in plain
+  words. The model DRAFTS RULES; it never creates a segment and never returns
+  people. The order is enforced in `SegmentRuleBuilderModel.canSave`, not in a
+  view: no preview of the current rules, no Save, and editing a rule takes the
+  preview away again. `SegmentRuleModels.swift` is the only segment file with a
+  `CodingKeys` map, because the wire key for a comparison is literally
+  `operator`.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
 - `ios/scripts/generate-xcodeproj.py`: deterministic generator used on this
@@ -344,6 +363,7 @@ swiftc -typecheck \
   ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
   ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
   ios/ViciInbox/Core/CampaignArchiveModels.swift ios/ViciInbox/Core/SegmentModels.swift \
+  ios/ViciInbox/Core/SegmentRuleModels.swift \
   ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
   ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift
