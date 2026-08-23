@@ -26,6 +26,10 @@ struct SegmentsView: View {
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model = SegmentListModel()
     @State private var showingNewManual = false
+    /// The segment a removal has been asked about but not yet confirmed. One
+    /// piece of state rather than a boolean plus a separate selection, so it
+    /// cannot be possible to show the dialog holding the wrong segment.
+    @State private var pendingRemoval: SegmentRecord?
 
     private var canManage: Bool { session.can(Permission.campaignsManage) }
 
@@ -90,6 +94,44 @@ struct SegmentsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.statusMessage)
+        .confirmationDialog(
+            "Remove this segment?",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { segment in
+            Button("Remove it", role: .destructive) {
+                let target = segment
+                pendingRemoval = nil
+                Task { await model.remove(target) }
+            }
+            Button("Keep it", role: .cancel) { pendingRemoval = nil }
+        } message: { segment in
+            Text(removalWarning(segment))
+        }
+    }
+
+    /// What the confirmation has to say before anybody taps Remove.
+    ///
+    /// It cannot promise either outcome, because the client does not decide:
+    /// the server destroys a segment that records no decision about anybody and
+    /// archives everything else. So the warning states the destructive
+    /// possibility plainly, and the message afterwards reports what actually
+    /// happened.
+    private func removalWarning(_ segment: SegmentRecord) -> String {
+        let people = segment.memberCount == 1
+            ? "1 person"
+            : "\(segment.memberCount.formatted()) people"
+        var text = "\(segment.name) holds \(people)."
+        if segment.kind == .automatic {
+            text += " It has been worked out by the engine, so it will be archived rather than deleted. It leaves this list and nothing about it is destroyed."
+        } else {
+            text += " If nobody has used it for a campaign, overridden it, or written down why a named person is in it, it is deleted for good. Otherwise it is archived and nothing is destroyed."
+        }
+        return text + " Nobody is messaged either way."
     }
 
     private var segmentList: some View {
@@ -128,6 +170,16 @@ struct SegmentsView: View {
                 Section { ProgressView().frame(maxWidth: .infinity) }
             }
 
+            Section {
+                NavigationLink {
+                    SegmentArchiveView(canManage: canManage)
+                } label: {
+                    Label("Archived segments", systemImage: "archivebox")
+                }
+            } footer: {
+                Text("A segment that carries a record of a decision is archived instead of deleted. It leaves this list and stays readable here.")
+            }
+
             if !canManage {
                 Section {
                     Text("You can see who is in a segment and why they are in it. Changing one needs the campaigns manage permission.")
@@ -142,11 +194,137 @@ struct SegmentsView: View {
     @ViewBuilder
     private func segmentRow(_ segment: SegmentRecord) -> some View {
         NavigationLink {
-            SegmentDetailView(segmentID: segment.id, initialName: segment.name)
+            // The detail screen is popped the moment a removal succeeds, so it
+            // hands the outcome sentence back here to be said. It is the
+            // SERVER's sentence: deleted or archived is not the app's call.
+            SegmentDetailView(segmentID: segment.id,
+                              initialName: segment.name,
+                              onRemoved: { message in
+                                  model.statusMessage = message
+                                  Task { await model.load(reset: true) }
+                              })
         } label: {
             SegmentRow(segment: segment)
         }
         .onAppear { Task { await model.loadMoreIfNeeded(after: segment) } }
+        // Absent, not disabled. A Support Agent is refused this by the server
+        // and a swipe that ends in a 403 teaches nothing.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if canManage {
+                Button(role: .destructive) {
+                    pendingRemoval = segment
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - The archive
+
+/// Segments that have left the working list without leaving the database.
+///
+/// This screen is the difference between archiving and deleting. Without it an
+/// archive is indistinguishable from a slow delete, and somebody who cannot
+/// find a segment again reaches for the destructive path the next time.
+struct SegmentArchiveView: View {
+    let canManage: Bool
+    @StateObject private var model = SegmentArchiveModel()
+
+    var body: some View {
+        List {
+            if model.isLoading && model.segments.isEmpty {
+                Section { ProgressView().frame(maxWidth: .infinity) }
+            } else if model.isEmpty {
+                Section {
+                    Text("Nothing has been archived.")
+                        .foregroundStyle(.secondary)
+                } footer: {
+                    Text("A segment is archived when it carries a record of a decision: a campaign that used it, an engine run, an override, or a written reason about a named person.")
+                }
+            } else {
+                Section {
+                    ForEach(model.segments) { segment in
+                        SegmentArchiveRow(segment: segment,
+                                          canManage: canManage,
+                                          isActing: model.isActing) {
+                            Task { await model.restore(segment) }
+                        }
+                    }
+                } header: {
+                    Text("Archived")
+                } footer: {
+                    Text(canManage
+                         ? "Nothing here was destroyed. Members, overrides and every recorded decision are intact, and putting one back changes none of them."
+                         : "Nothing here was destroyed. Putting one back needs the campaigns manage permission.")
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Archived")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.load() }
+        .refreshable { await model.load() }
+        .alert("Archive error", isPresented: Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )) { Button("OK", role: .cancel) {} } message: {
+            Text(model.errorMessage ?? "Please try again.")
+        }
+        .overlay(alignment: .bottom) {
+            if let message = model.statusMessage {
+                SegmentToast(message: message)
+                    .padding(.bottom, 12)
+                    .task(id: message) {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        model.statusMessage = nil
+                    }
+            }
+        }
+    }
+}
+
+private struct SegmentArchiveRow: View {
+    let segment: SegmentRecord
+    let canManage: Bool
+    let isActing: Bool
+    let restore: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(segment.name)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                SegmentOriginBadge(kind: segment.kind)
+            }
+            Text(segment.membershipSummary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let archived = segment.archivedDate {
+                Text("Archived \(SegmentDateText.relative(archived)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let purpose = segment.statedPurpose {
+                Text(purpose)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            if canManage {
+                Button(action: restore) {
+                    Label("Put it back", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .tint(ViciTheme.tint)
+                .disabled(isActing)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 
@@ -378,7 +556,18 @@ struct SegmentToast: View {
 
 // MARK: - Creating a manual segment
 
-/// Name it, describe it, and optionally choose the first people for it.
+/// Name it, say what it is for, and optionally choose the first people for it.
+///
+/// THE PURPOSE IS ONE FIELD, ASKED ONCE, AND REQUIRED.
+///   The owner's words were "maybe we do one reason if we're doing a manual
+///   segment, and then that reason appears for everybody". So this asks for it
+///   here rather than next to each name, the server refuses the segment without
+///   it, and it is shown as the explanation for every member.
+///
+///   It is NOT the per-person note. That still exists, on a member row and on
+///   an override, and it answers a different question: not why this group
+///   exists but why this one named human is in it, or deliberately not in it.
+///   The two are kept apart everywhere.
 ///
 /// A manual segment may legitimately start empty; the backend defaults
 /// `members` to an empty array. So the people step is optional and the save
@@ -388,7 +577,7 @@ struct SegmentManualEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var picker = SegmentContactPickerModel()
     @State private var name = ""
-    @State private var summary = ""
+    @State private var purpose = ""
     @State private var isSaving = false
     @FocusState private var searchFocused: Bool
 
@@ -396,12 +585,18 @@ struct SegmentManualEditorView: View {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var trimmedPurpose: String {
+        purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Mirrors the server's own validation so a mistake is caught before the
-    /// round trip. `textField()` in segment-service.js checks both.
+    /// round trip. `textField()` and `requiredPurpose()` in segment-service.js
+    /// check the same three things.
     private var validationProblem: String? {
         if trimmedName.isEmpty { return "Give this segment a name." }
         if trimmedName.count > 160 { return "That name is longer than 160 characters." }
-        if summary.count > 1_000 { return "That description is longer than 1,000 characters." }
+        if trimmedPurpose.isEmpty { return "Say what this segment is for." }
+        if trimmedPurpose.count > 500 { return "That purpose is longer than 500 characters." }
         return nil
     }
 
@@ -411,12 +606,21 @@ struct SegmentManualEditorView: View {
                 Section {
                     TextField("Example: Regulars who ask for a call", text: $name)
                         .textInputAutocapitalization(.sentences)
-                    TextField("What is this group for?", text: $summary, axis: .vertical)
-                        .lineLimit(2...4)
                 } header: {
                     Text("Name")
                 } footer: {
                     Text("Write it the way you would say it out loud. This name shows on the list and on every notification about the segment.")
+                }
+
+                Section {
+                    TextField("Example: customers who asked about the December restock",
+                              text: $purpose, axis: .vertical)
+                        .lineLimit(2...5)
+                        .textInputAutocapitalization(.sentences)
+                } header: {
+                    Text("What this segment is for")
+                } footer: {
+                    Text("Required, and written once. This is the reason shown for everybody in this segment, so you do not have to type it again next to each name. You can still add a note about one person when there is something extra to say about them.")
                 }
 
                 Section {
@@ -434,7 +638,7 @@ struct SegmentManualEditorView: View {
                 } header: {
                     Text("People")
                 } footer: {
-                    Text("Optional. You can save an empty segment now and add people to it later. Choosing somebody here does not check whether they can be messaged.")
+                    Text("Optional. You can save an empty segment now and add people to it later. Everybody you choose here is explained by the purpose above. Choosing somebody does not check whether they can be messaged.")
                 }
 
                 SegmentPickerResultsSection(picker: picker)
@@ -478,10 +682,9 @@ struct SegmentManualEditorView: View {
         guard validationProblem == nil, !isSaving else { return }
         isSaving = true
         searchFocused = false
-        let description = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             let created = await model.createManual(name: trimmedName,
-                                                   description: description.isEmpty ? nil : description,
+                                                   purpose: trimmedPurpose,
                                                    members: picker.selectedInputs)
             isSaving = false
             if created != nil { dismiss() }

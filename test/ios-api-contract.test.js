@@ -139,3 +139,152 @@ test('every permission the client gates UI on is a permission the server grants'
       'the server will never grant it and the control is permanently hidden');
   }
 });
+
+// ── Segments ───────────────────────────────────────────────────────────────
+//
+// Three papercuts landed here within minutes of the segments screen shipping,
+// and all three are the kind that only show up on a real phone: the app builds,
+// the server tests pass, and the picker still offers somebody who is already
+// in. These read the Swift as text for exactly that reason.
+
+const SEGMENT_MODELS = swift('Core/SegmentModels.swift');
+const SEGMENTS_VIEW = swift('UI/SegmentsView.swift');
+const SEGMENT_DETAIL_VIEW = swift('UI/SegmentDetailView.swift');
+const SEGMENT_VIEW_MODELS = fs.readFileSync(
+  path.join(ROOT, 'ios', 'ViciInbox', 'App', 'SegmentViewModels.swift'), 'utf8'
+);
+
+test('every segment path the client calls is a path the server polices', () => {
+  const { ROUTE_POLICY } = require('../lib/route-policy');
+  const policed = new Set(ROUTE_POLICY.map(entry => `${entry.method} ${entry.path}`));
+
+  // The Swift interpolates the id, so compare on the shape rather than the text.
+  const expected = [
+    'GET /api/segments/:id/candidates',
+    'DELETE /api/segments/:id',
+    'POST /api/segments/:id/restore'
+  ];
+  for (const signature of expected) {
+    assert.ok(policed.has(signature),
+      `${signature} is called by the app and must have a policy entry, or it is default-denied`);
+  }
+
+  assert.match(API_CLIENT, /\/api\/segments\/\\\(encodedPathSegment\(id\)\)\/candidates/);
+  assert.match(API_CLIENT, /\/api\/segments\/\\\(encodedPathSegment\(id\)\)\/restore/);
+});
+
+test('the picker does not re-filter the page the server already subtracted from', () => {
+  // The fix is server side because the list is paged: filtering the visible
+  // page would hide the members on screen and leave the rest one scroll away,
+  // which is the bug rather than the fix. If a `filter` creeps into the add
+  // sheet's candidate list, that is the regression.
+  assert.match(API_CLIENT, /func fetchSegmentCandidates/);
+  assert.match(SEGMENT_VIEW_MODELS, /class SegmentCandidatePickerModel/);
+
+  const sheet = SEGMENT_DETAIL_VIEW.slice(
+    SEGMENT_DETAIL_VIEW.indexOf('struct SegmentAddMemberSheet')
+  );
+  assert.ok(sheet.length > 0, 'the add sheet exists');
+  assert.match(sheet, /ForEach\(picker\.candidates\)/);
+  assert.doesNotMatch(
+    sheet, /picker\.candidates\s*\.\s*filter/,
+    'membership is subtracted on the server, before paging. A client filter here ' +
+    'only hides the members that happen to be on screen.'
+  );
+
+  // And the old source is gone from this screen. /api/contacts knows nothing
+  // about segments and would offer members again.
+  assert.doesNotMatch(
+    SEGMENT_DETAIL_VIEW, /SegmentContactPickerModel/,
+    'the detail screen must use the candidate picker, not the raw contacts picker'
+  );
+});
+
+test('somebody held out by an override is shown rather than dropped', () => {
+  // "Not a member" and "a person decided to hold them out" are different
+  // answers. The second has to be visible, because a database trigger refuses
+  // to add them while it stands and hiding them leaves a name missing with no
+  // way to find out why.
+  assert.match(SEGMENT_MODELS, /struct SegmentHeldCandidate/);
+  assert.match(SEGMENT_MODELS, /func heldSentence\(author: String\) -> String/);
+  assert.match(SEGMENT_DETAIL_VIEW, /picker\.held/);
+  assert.match(SEGMENT_DETAIL_VIEW, /Held out of this segment/);
+});
+
+test('a manual segment cannot be created from the app without a purpose', () => {
+  // The server answers 400 SEGMENT_PURPOSE_REQUIRED. A form that could submit
+  // without one would turn a required field into an error message.
+  assert.match(API_CLIENT, /func createManualSegment\(name: String,\s*\n\s*purpose: String,/);
+  assert.match(SEGMENTS_VIEW, /if trimmedPurpose\.isEmpty \{ return "Say what this segment is for\." \}/);
+  assert.doesNotMatch(
+    API_CLIENT, /createManualSegment\([^)]*description:/,
+    'description was the optional field this replaces; sending both would be two answers to one question'
+  );
+});
+
+test('the segment purpose and the per-person reason stay two different things', () => {
+  // A purpose describes the group. A per-person reason describes one decision
+  // about one named human, and it is still the whole record on an automatic
+  // segment where somebody is overruling the engine. Collapsing them loses the
+  // second one, silently.
+  assert.match(SEGMENT_MODELS, /let purpose: String\?/);
+  assert.match(SEGMENT_MODELS, /func headline\(personName: String, segmentPurpose: String\? = nil\)/);
+  assert.match(SEGMENT_MODELS, /sentences\.append\("This segment is for: \\\(purpose\)"\)/);
+  assert.match(SEGMENT_MODELS, /sentences\.append\("Note about \\\(personName\): \\\(reason\)"\)/);
+
+  // The override reason is untouched: still its own field, still shown.
+  assert.match(SEGMENT_MODELS, /struct SegmentOverride[\s\S]{0,600}let reason: String\?/);
+  assert.match(SEGMENT_DETAIL_VIEW, /Text\("Reason: \\\(reason\)"\)/);
+});
+
+test('the destructive segment control is absent without campaigns.manage, not disabled', () => {
+  // A Support Agent is refused by the server. A greyed out button that errors
+  // on tap teaches nothing, and a swipe action that 403s teaches less.
+  const row = SEGMENTS_VIEW.slice(
+    SEGMENTS_VIEW.indexOf('private func segmentRow'),
+    SEGMENTS_VIEW.indexOf('// MARK: - The archive')
+  );
+  assert.match(row, /\.swipeActions\(/);
+  assert.match(row, /if canManage \{/);
+  assert.doesNotMatch(row, /\.disabled\(!canManage\)/);
+
+  const detailRemoval = SEGMENT_DETAIL_VIEW.slice(
+    SEGMENT_DETAIL_VIEW.indexOf('Remove this segment", systemImage')
+  ).slice(0, 400);
+  assert.doesNotMatch(detailRemoval, /!canManage/);
+});
+
+test('the app never claims a removal deleted something the server archived', () => {
+  // delete_sms_campaign_segment decides, not the client, and a segment that
+  // gains an override between the tap and the statement is archived. So the
+  // sentence shown afterwards has to be built from the response.
+  assert.match(SEGMENT_MODELS, /var wasDeleted: Bool \{ outcome == "deleted" \}/);
+  assert.match(SEGMENT_MODELS, /func outcomeSentence\(segmentName: String\) -> String/);
+  assert.match(SEGMENT_VIEW_MODELS, /result\.outcomeSentence\(segmentName:/);
+
+  // Every blocker token the RPC can return has a sentence, or an operator sees
+  // a raw database word.
+  const migration = fs.readFileSync(
+    path.join(ROOT, 'scripts', 'segment-lifecycle-migration.sql'), 'utf8'
+  );
+  const tokens = [...migration.matchAll(/v_blockers \|\| '([a-z_]+)'/g)].map(match => match[1]);
+  assert.ok(tokens.length >= 6, `expected the blocker list to be substantial, got ${tokens.length}`);
+  for (const token of new Set(tokens)) {
+    assert.ok(
+      SEGMENT_MODELS.includes(`case "${token}"`) ||
+      SEGMENT_MODELS.includes(`"${token}",`) ||
+      SEGMENT_MODELS.includes(`, "${token}"`),
+      `SegmentBlockerText has no sentence for "${token}", so the app would show the raw token`
+    );
+  }
+});
+
+test('an archived segment is still reachable from the app', () => {
+  // Archiving is only meaningfully different from deleting if the row can be
+  // found again. Without this screen an operator who loses a segment reaches
+  // for the destructive path next time.
+  assert.match(SEGMENTS_VIEW, /struct SegmentArchiveView/);
+  assert.match(SEGMENTS_VIEW, /Archived segments/);
+  assert.match(SEGMENT_VIEW_MODELS, /includeArchived: true/);
+  assert.match(API_CLIENT, /func restoreSegment/);
+});
