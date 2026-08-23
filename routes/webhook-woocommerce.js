@@ -5,6 +5,7 @@ const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
 const { verifyWooSignature, wooDeliveryID } = require('../lib/woocommerce-webhook');
 const { recordTrustedProductEvent } = require('../lib/campaigns/product-webhooks');
+const { captureCheckoutConsent } = require('../lib/campaigns/checkout-consent');
 
 // SMS flows
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
@@ -162,6 +163,28 @@ module.exports = (broadcastSSE) => {
       const orderId = String(order.id);
 
       console.log(`[WEBHOOK] WooCommerce | topic=${topic} order=${orderId} status=${status}`);
+
+      // Promotional SMS consent evidence, captured only from a live checkout.
+      //
+      // This sits BEFORE the first await in the handler and is deliberately not
+      // awaited. Not awaited, because a consent write must never delay or fail
+      // an order confirmation; first, because EVERY await below — `syncOrder`
+      // included — throws into the same outer catch, and anything sequenced
+      // after one of them is silently skipped on the failure path. This line
+      // used to sit under `await syncOrder(...)`, where a sync failure dropped
+      // the customer's tick exactly as this comment claimed it could not.
+      //
+      // It is safe to run on every topic and status: the ledger dedupes on the
+      // order id, so `order.updated` firing five times still writes once.
+      //
+      // Historical bulk syncs do NOT reach this line, and must not. See
+      // docs/campaigns/CONSENT-CAPTURE.md.
+      void captureCheckoutConsent({
+        client: supabase,
+        order,
+        secretConfigured: Boolean(process.env.WC_WEBHOOK_SECRET),
+        signatureValid
+      });
 
       // Sync contact + order record (preserves existing SMS flags)
       const sync = await syncOrder(order, { fromWebhook: true });

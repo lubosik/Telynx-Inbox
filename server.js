@@ -232,6 +232,27 @@ app.get('/reset-password', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'reset-password.html'));
 });
 
+// ── The promotional SMS opt-in page (no auth) ─────────────────────────────
+// `/sms-optin?token=...` is the link in the email that asks a CUSTOMER, not a
+// member of staff, whether they want marketing texts. Vici holds email
+// permission and holds no SMS permission, so this router is the only place in
+// the product where promotional SMS consent can be created by the person it
+// belongs to.
+//
+// PLACEMENT: alongside /accept-invite and /reset-password. After the
+// /.well-known mount, before express.static and before the catch-all, and
+// deliberately not under /api so the policy enforcer never sees it. A customer
+// has no session and must never be asked for one. Mounted after the static
+// middleware or the catch-all, `GET /sms-optin` would answer index.html with
+// HTTP 200 — a login screen where a consent page should be, silently.
+//
+// The GET is a static file and does NOT read the token. Mail scanners fetch
+// every link in an inbound email within seconds; if arriving here recorded an
+// opt-in, this service would manufacture consent for people who never saw the
+// message. Consent is written only by the POSTs behind the page's buttons.
+// routes/sms-optin.js carries the same warning at the point it could be broken.
+app.use('/sms-optin', require('./routes/sms-optin')());
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -306,9 +327,13 @@ function startCampaignDelivery() {
   const TWO_MINUTES = 2 * 60 * 1000;
   const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
+  let recovering = false;
   setInterval(async () => {
+    if (recovering) return;
+    recovering = true;
     try { await recoverExpiredClaims({ client: supabase }); }
     catch (err) { console.error('[CAMPAIGN SEND] Claim recovery error:', err.message); }
+    finally { recovering = false; }
   }, FIFTEEN_MINUTES);
 
   if (!liveSendEnabled(process.env)) {
@@ -317,17 +342,29 @@ function startCampaignDelivery() {
   }
 
   console.log('[CAMPAIGN SEND] Live sending is ON. Delivery loop running every 2 minutes.');
+
+  // Re-entrancy guard. A batch can legitimately outlast the 2-minute interval:
+  // the claim lease is 300 seconds and a batch of 10 has up to 200 seconds of
+  // provider timeout in it. Without this, setInterval stacked concurrent
+  // deliverBatch runs, each claiming its own rows against the same leases, and
+  // the overlap grew until the process was doing nothing but fencing itself
+  // out. A skipped tick costs two minutes; a stacked one costs correctness.
+  let delivering = false;
   setInterval(async () => {
+    if (delivering) return;
+    delivering = true;
     try {
       const summary = await deliverBatch({ client: supabase, send: sendSMS });
       if (summary.claimed > 0) {
         console.log(
           `[CAMPAIGN SEND] claimed=${summary.claimed} accepted=${summary.accepted} `
-          + `uncertain=${summary.uncertain} skipped=${summary.skipped}`
+          + `refused=${summary.refused} uncertain=${summary.uncertain} skipped=${summary.skipped}`
         );
       }
     } catch (err) {
       console.error('[CAMPAIGN SEND] Delivery error:', err.message);
+    } finally {
+      delivering = false;
     }
   }, TWO_MINUTES);
 }
