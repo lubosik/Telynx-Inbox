@@ -148,13 +148,48 @@ client.
   no RLS. Fixing that needs its own deliberate migration reviewing every reader
   of that table; do not fold it into this file.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
+- `scripts/segment-lifecycle-migration.sql`: NOT applied yet. Adds
+  `sms_campaign_segments.purpose`, backfills it, and creates
+  `delete_sms_campaign_segment` / `restore_sms_campaign_segment`. It DROPs the
+  nine-argument `create_sms_campaign_segment` and replaces it with a
+  ten-argument version, deliberately rather than adding an overload, so apply
+  it in the SAME window as the matching deploy: in the gap the running backend
+  gets PGRST202 on segment CREATION only, which `databaseError()` already turns
+  into the friendly not-ready message. Reads, member edits, overrides and
+  recomputes are untouched by the gap. It adds no permission key, so it cannot
+  cause a startup crash loop.
+- A SEGMENT is removed the same way a campaign is: `delete_sms_campaign_segment`
+  decides, the caller cannot ask for the destructive path, and the audit row is
+  written before the effect with the hard-failing `logAudit`. Destruction is
+  reachable only for a segment that no campaign was built against, that the
+  engine never ran on, that carries no override row (revoked ones count), and
+  where no member row carries a written reason. Bare membership is deliberately
+  not a blocker: a hand-picked list of phone numbers records no decision about
+  anybody. Everything else archives, and the archive is reversible.
+- TWO KINDS OF REASON, AND THEY MUST NOT BE MERGED. A manual segment carries one
+  required `purpose`, captured at creation, that explains everybody in it. A
+  per-person reason lives on the member row's `inclusion_evidence` and on
+  `sms_campaign_segment_overrides.reason`, and answers a different question
+  about one named human. The second is the whole record on an AUTOMATIC segment,
+  where somebody is overruling the engine, and automatic segments have no
+  purpose at all because their detector definition is it. A database CHECK
+  enforces that split.
+- `GET /api/segments/:id/candidates` is the add-someone picker and the only
+  segment GET that is not `campaigns.read`. It subtracts current members BEFORE
+  paging; do not filter membership in the client, because the picker is paged
+  and the client holds one page of a set that runs to thousands of rows. People
+  with an active exclude override come back separately in `held`, never hidden:
+  a database trigger refuses to add them, so hiding them would leave a missing
+  name with no explanation.
 - `ios/ViciInbox/UI/SegmentsView.swift`, `SegmentDetailView.swift`: the client
   for `routes/segments.js`, reached from the Growth tab's third control,
   "Audiences". All evidence interpretation lives in
   `ios/ViciInbox/Core/SegmentModels.swift` rather than in a view, precisely so
   it lands in the Foundation layer that can be type-checked locally. The copy
   rule is the same as the notification module's: no em dashes, and an override
-  is never described as a membership edit.
+  is never described as a membership edit. A removal confirmation must not
+  promise an outcome: the server chooses delete or archive and the sentence
+  shown afterwards is built from the response.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
 - `ios/scripts/generate-xcodeproj.py`: deterministic generator used on this
