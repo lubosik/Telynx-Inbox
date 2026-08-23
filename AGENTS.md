@@ -122,6 +122,22 @@ client.
   which are public shop content, and no customer identity. Its
   support-clearance pass is an explicitly labelled counterfactual measuring
   reach, not permission.
+- `lib/campaigns/restock-reorder.js`, the automatic segment
+  `back_in_stock_nearly_due`: a recorded return to stock PAIRED with the buyers
+  who are also `approaching` their own next order. THE RESTOCK IS THE REASON
+  THE MESSAGE EXISTS AND THE ONLY THING COPY MAY SAY; the timing only chooses
+  the audience and is never stated or implied, because "your product is back"
+  is a fact about our inventory and "you are probably running low" is a dosing
+  claim about a person. Every member row carries `statedReason`, `timingUse:
+  'selection_only'` and a constant `copyBasis` so the split is next to each
+  name and not only in a document. It holds NO threshold of its own: it calls
+  `calculateReorderCadence()` exactly as `reorder_approaching` does and is a
+  strict subset of it, so it cannot become a route to loosening variability
+  limits that were considered and declined. The transition test reuses
+  `back-in-stock.js` unchanged, so a first sighting of stock is still not a
+  restock, and it additionally requires the item to be in stock NOW. Both
+  inventory tables are empty in production, so it legitimately returns zero and
+  `describeRestockReorderEmptiness()` says which of six things is missing.
 - `lib/campaigns/segment-contactability.js` and the `clearance` option on
   `buildGenerationInput()`: the split between WHO MATCHES THIS PATTERN and MAY
   WE CONTACT THIS PERSON. Segment membership is behaviour only. It must never

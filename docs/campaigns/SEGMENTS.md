@@ -52,6 +52,7 @@ there had been edits.
 | `reorder_due_high_confidence` | Due to reorder, best timing | Due or past due, and the pattern the date rests on barely moves | `eligible` and `cadence.confidence === 'high'`: relative MAD at or below 0.25 with zero outlying gaps |
 | `reorder_due` | Due to reorder, everyone due | Due or past due on any usable pattern, their own or the product's | `eligible`: state `due` or `overdue` on a reliable cadence, personal or product level |
 | `reorder_approaching` | Nearly due to reorder | Close to their usual moment but not there yet | state `approaching`: inside the early half of the expected window |
+| `back_in_stock_nearly_due` | Back in stock, and nearly due to reorder | The exact thing they bought went out of stock and has come back, AND they are close to their usual next order | a genuine out to in transition on a signed event, the item in stock now, and state `approaching` on the parent product. No threshold of its own |
 | `winback_qualified` | Good customers who have stopped | Repeat buyers who have gone quiet, minus anyone it would be tactless to contact | reliable cadence, 3 or more lifetime orders, lapsed beyond max(60 days, 1.75x median), no complaint, refund, recent negative support, open opportunity or 180 day cooldown |
 
 `GET /api/segments` returns the saved segments plus an `available` list of
@@ -93,6 +94,106 @@ Names and descriptions are copied onto `sms_campaign_segments` when a catalogue
 entry is saved, so a segment already saved under the old wording keeps it until
 somebody edits the row. New saves pick the new copy up immediately.
 
+### Back in stock, and nearly due: two weak signals making one strong one
+
+`back_in_stock_nearly_due` is the only segment built from two detectors at once,
+and the reason it exists in that shape is a compliance reason rather than a
+targeting one.
+
+| signal | on its own |
+|---|---|
+| nearly due | the timing is a guess about somebody's consumption. Unsafe to act on. |
+| back in stock | the timing is a fact, but it is pointed at everybody who ever bought the thing. |
+| both | the timing is a fact, AND it is pointed at the people for whom saying it today is worth anything. |
+
+**The restock is the reason the message exists. The timing only decides who
+receives it, and is never stated, implied or referenced in copy.**
+
+`REPEAT-PURCHASE-RESEARCH.md` rules out replenishment and "running low"
+reminders outright: the mechanism is a consumption-rate assumption, which is a
+dosing claim, and under 21 CFR 201.128 the firm's own written statements are
+evidence of intended human use. It names the substitute in one line, "a restock
+notice about OUR stock, which moves the trigger from their usage to our supply".
+
+"The thing you bought is back in stock" is a fact about our inventory. "You are
+probably running low" is a claim about a person's body. The first is fine and
+the second ends the business. Every member row therefore carries `statedReason`
+and `timingUse: 'selection_only'` alongside a constant `copyBasis` sentence, so
+the split is written next to each name rather than living only in a document.
+
+#### The bar did not move, and here is the argument
+
+The obvious temptation is to say that because the restock carries the reason,
+the timing half can be read more loosely here than it would be on its own. It
+cannot, and it is not.
+
+`lib/campaigns/restock-reorder.js` holds no threshold. It calls
+`calculateReorderCadence()` with the same arguments `reorder_approaching` uses
+and accepts the same single state, so the segment is a strict subset of "Nearly
+due to reorder" and `test/campaign-segment-restock-reorder.test.js` asserts it.
+
+- **Not widened.** A restock tells us something about our shelves and nothing
+  at all about how fast a person gets through what they bought. Replacing the
+  MAD-scaled band with a fixed "within N days" would be the relaxation that was
+  considered and declined, arriving through a side door. The band's width is
+  the person's own regularity, which is the property that makes "approaching"
+  mean anything.
+- **Not raised either.** On `reorder_due` the timing IS the reason for the
+  message, so being wrong means writing to somebody for no reason. Here the
+  reason is true of everybody in the list whatever the timing said, so a
+  merely-usable pattern mistimes a truthful message rather than manufacturing a
+  false one. Demanding the tightest patterns would take a list that currently
+  tops out at two people to a certain zero and teach nobody anything.
+- **Still refused: no pattern at all.** Somebody whose history is unreadable is
+  not rescued by the restock. That would be "restock alone", which is an
+  untargeted campaign and a different thing with a different name.
+- **Not `due` or `overdue` either.** Those people are already in "Due to
+  reorder, everyone due". Two lists means two messages.
+
+#### The awkward cases and what was chosen
+
+- **They bought it again since it came back.** Excluded. The news is not news to
+  somebody who has already acted on it. Note this is a real case and not a
+  theoretical one only because a short pattern can be `approaching` again within
+  days; a longer pattern moves to `not_due` and falls out on its own.
+- **They have since bought a different vial of the same product.** Nothing
+  special happens, and nothing needs to: timing groups on the parent, so the
+  later purchase moves the whole series and they are `not_due`.
+- **They have since bought a combination product containing the same molecule.**
+  They stay in. `product-identity.js` never decomposes a combination into its
+  parts, and relaxing that to make this case work would merge two real products
+  everywhere else. The cost is bounded: the message still says only that a
+  product they demonstrably buy is back on the shelf.
+- **A product goes out and back in twice in a week.** One member, not two. The
+  most recent return is the current fact and the earlier ones are counted in
+  `earlierReturnsSeen`, which the evidence sentence admits out loud. The pairing
+  also requires the item to be in stock *now*, so a flap that ended out of stock
+  produces nobody.
+- **A variation restocks and the person bought a different size.** Not a member.
+  "Your BPC-157 10mg is back" is a claim about one vial size.
+  `buildGenerationInput()` already indexes buyers under both the parent and the
+  exact variation and looks an event up by its own key, so a variation-level
+  event only reaches the buyers of that vial; a parent-level event reaches
+  everyone. That behaviour is reused, never weakened.
+- **The vial they bought most recently is out of stock.** They are left out,
+  because the engine builds no reorder candidate for them at all and their
+  timing is therefore unreadable. This errs toward silence and is counted as
+  `noReorderCandidateForBuyer` rather than hidden.
+
+#### It is empty, and that is a true answer
+
+`sms_product_inventory` and `sms_commerce_product_events` are both empty in
+production, so no out-to-in transition has ever been recorded and this segment
+returns nobody. Reading current stock is not a substitute: a first sighting of
+"in stock" is not evidence that anything came back, and `back-in-stock.js` has
+always said so.
+
+An empty automatic segment and a broken one look identical on a screen, and this
+project has already lost a week to that confusion. So the description says the
+list stays empty until something is recorded going out and coming back, and
+`describeRestockReorderEmptiness()` names which of six things is missing.
+`scripts/dry-run-segment-membership.js` prints it.
+
 ## Per-member evidence
 
 Every member row carries `inclusion_evidence`, the facts that put them there.
@@ -117,6 +218,39 @@ For a reorder member that is:
   "segmentKey": "reorder_due_high_confidence"
 }
 ```
+
+A `back_in_stock_nearly_due` member carries the same timing block, stamped with
+its own detector, plus the stock half and the rule that keeps the two apart:
+
+```json
+{
+  "detector": "back_in_stock",
+  "statedReason": "product_back_in_stock",
+  "restockObservedAt": "2026-08-22T09:00:00.000Z",
+  "restockedProductID": 900,
+  "restockedVariationID": 568,
+  "earlierReturnsSeen": 0,
+  "timingUse": "selection_only",
+  "mostRecentVariationID": null,
+  "state": "approaching",
+  "medianIntervalDays": 56,
+  "lastOrderAt": "2026-07-03T12:00:00.000Z",
+  "copyBasis": "Say only that the product is back in stock. ...",
+  "summary": "Their GHK-Cu came back in stock on 22 August 2026. They last ordered it on 3 July 2026, and they usually reorder around every 8 weeks."
+}
+```
+
+`summary` is written server-side and uses absolute dates on purpose: a sentence
+containing "three days ago" would change every night and churn the run digest.
+A product-level pattern is never described as this person's own, for the same
+reason the iPhone's evidence checklist relabels it.
+
+**Known gap.** `SegmentInclusionEvidence.headline` on iOS switches on
+`detector` and has branches for `reorder` and `winback` only, so a
+`back_in_stock` row currently falls to the generic sentence. The fact checklist
+underneath it renders correctly. Adding the branch, and showing `summary`
+directly, is a small client change that was out of scope for the build that
+added the segment.
 
 `GET /api/segments/:id/members/:phone` returns that, plus the active override
 and the full override history. This is the per-person rule trace that

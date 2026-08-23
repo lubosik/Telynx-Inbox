@@ -52,6 +52,9 @@ function reorderCandidate(phone, options = {}) {
 
 test('the catalogue is a closed, stable set of keys', () => {
   assert.deepEqual(SEGMENT_DEFINITION_KEYS, [
+    // A recorded return to stock, paired with the smaller group of its buyers
+    // who are also close to their own next order.
+    'back_in_stock_nearly_due',
     // The buyer cohorts. Customer-level, and computed from
     // buildBuyerCohortFacts rather than the per-product engine input.
     'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',

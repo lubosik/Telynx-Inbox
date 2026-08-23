@@ -47,6 +47,10 @@ const {
   intervalDays,
   qualifyingPurchaseTimes
 } = require('../lib/campaigns/reorder-cadence');
+const {
+  describeRestockReorderEmptiness,
+  restockReorderPairs
+} = require('../lib/campaigns/restock-reorder');
 const { computeSegmentMembers, segmentCatalogue } = require('../lib/campaigns/segment-definitions');
 const {
   readSegmentContactability,
@@ -155,6 +159,9 @@ async function run() {
     delete segment.phones;
   }
 
+  // ---- 2b. why the restock pairing is the size it is ----------------------
+  const restockPairing = restockReorderPairs(input, { now });
+
   // ---- 3. why not more ----------------------------------------------------
   // The funnel from candidate group to segment member. A candidate group is one
   // person and one parent product.
@@ -243,6 +250,13 @@ async function run() {
       lineItemsResolved: input.sourceCoverage.productIdentity?.resolved ?? null
     },
     segments,
+    // An empty automatic segment and a broken one look identical, and this one
+    // is empty on purpose until a stock baseline exists. It says which of the
+    // two it is rather than leaving a nought to be interpreted.
+    restockPairing: {
+      ...restockPairing.diagnostics,
+      explanation: describeRestockReorderEmptiness(restockPairing.diagnostics)
+    },
     funnel: {
       candidateGroups: input.reorderCandidates.length,
       peopleWithACandidateGroup: new Set(input.reorderCandidates.map(row => row.phone)).size,
@@ -287,6 +301,18 @@ function report(result) {
       console.log(`    ${String(row.people).padStart(6)}  ${row.reason}`);
     }
   }
+  console.log('');
+  console.log('2b. BACK IN STOCK, AND NEARLY DUE  (why this one is the size it is)');
+  console.log(`  restock candidate rows considered            ${result.restockPairing.restockCandidatesConsidered}`);
+  console.log(`  genuine return rows                          ${result.restockPairing.genuineTransitionRows}`);
+  console.log(`  distinct items that returned                 ${result.restockPairing.itemsThatReturned}`);
+  console.log(`  buyers with no readable buying pattern       ${result.restockPairing.noReorderCandidateForBuyer}`);
+  console.log(`  ordered it again since it returned           ${result.restockPairing.orderedSinceTheReturn}`);
+  console.log(`  repeat returns collapsed into one            ${result.restockPairing.repeatReturnsCollapsed}`);
+  console.log(`  people paired                                ${result.restockPairing.people}`);
+  printCounts('reasons a stock change was not a return', result.restockPairing.transitionRejections);
+  printCounts('where the buyers of a returned item stood', result.restockPairing.cadenceStates);
+  console.log(`  ${result.restockPairing.explanation.sentence}`);
   console.log('');
   console.log('3. WHY NOT MORE  (the funnel, live)');
   console.log(`  candidate groups (person x parent product)   ${result.funnel.candidateGroups}`);
