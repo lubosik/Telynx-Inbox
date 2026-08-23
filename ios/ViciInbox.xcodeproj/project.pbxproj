@@ -40,6 +40,7 @@
 		A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2347989C6951378E9FDA1E85 /* InboxViews.swift */; };
 		5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684ACFBD5D68D460E80AEEAC /* LoginView.swift */; };
 		2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59F0347583693CB980746A9 /* OnboardingOverlay.swift */; };
+		C3682140C3F49B1ED06D5922 /* OnboardingSpotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */; };
 		98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */; };
 		1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */; };
 		D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */; };
@@ -90,6 +91,7 @@
 		2347989C6951378E9FDA1E85 /* InboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViews.swift; sourceTree = "<group>"; };
 		684ACFBD5D68D460E80AEEAC /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		E59F0347583693CB980746A9 /* OnboardingOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingOverlay.swift; sourceTree = "<group>"; };
+		1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingSpotlight.swift; sourceTree = "<group>"; };
 		BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PremiumWelcomeView.swift; sourceTree = "<group>"; };
 		8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingPlayerView.swift; sourceTree = "<group>"; };
 		6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetPasswordView.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				2347989C6951378E9FDA1E85 /* InboxViews.swift */,
 				684ACFBD5D68D460E80AEEAC /* LoginView.swift */,
 				E59F0347583693CB980746A9 /* OnboardingOverlay.swift */,
+				1926FE2DCB25EA0C2B2C4C6A /* OnboardingSpotlight.swift */,
 				BD46DC26C9141CEBC446437B /* PremiumWelcomeView.swift */,
 				8E5253775E43222B4ED66465 /* RecordingPlayerView.swift */,
 				6C240314DCFDA7177B0B7BDA /* ResetPasswordView.swift */,
@@ -336,6 +339,7 @@
 				A51FB6B875250CD2CFECBB8D /* InboxViews.swift in Sources */,
 				5B0E624CAA9895C3DC976FB9 /* LoginView.swift in Sources */,
 				2EFE3A83C91B33A5460C5843 /* OnboardingOverlay.swift in Sources */,
+				C3682140C3F49B1ED06D5922 /* OnboardingSpotlight.swift in Sources */,
 				98E6A1D5F5A22EC3BE873BCA /* PremiumWelcomeView.swift in Sources */,
 				1C708700D74A86EC93453679 /* RecordingPlayerView.swift in Sources */,
 				D356D29D01D82EFDB2B2EB2D /* ResetPasswordView.swift in Sources */,

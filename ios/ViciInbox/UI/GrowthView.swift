@@ -53,6 +53,10 @@ struct GrowthView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
                 .padding(.bottom, 8)
+                // The tour's campaign step is about this control, so it points
+                // at this control. If the frame never arrives the step falls
+                // back to the Growth tab button rather than to a guess.
+                .onboardingTarget(.campaigns)
 
                 switch segment {
                 case .automations: AutomationQueueView()
