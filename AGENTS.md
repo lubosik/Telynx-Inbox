@@ -123,6 +123,59 @@ client.
   NO counterfactual. Live per-segment counts, the contactability breakdown, and
   the funnel from paid order to segment member. Use it, not the identity dry
   run, when the question is how many people are in a segment.
+- `lib/campaigns/buyer-cohorts.js`, `docs/campaigns/BUYER-COHORTS.md`: the
+  BUYER COHORTS. A COHORT IS DECIDED AT THE CUSTOMER LEVEL, NEVER THE
+  CUSTOMER-PRODUCT LEVEL. Somebody who bought BPC-157 once and GHK-Cu once is a
+  repeat customer with two one-time products; counting customer-product pairs
+  turns 504 real one-time buyers into an imaginary 1,300. `orderCount` comes
+  from `buildCustomerFacts()` and counts distinct paid ORDERS per person.
+  Repeat behaviour here is CROSS-PRODUCT, which is why the same-product reorder
+  engine finds about nine people out of 781 buyers and is not broken.
+  Tenure cuts are 30/90/365 days, FROZEN in `COHORT_CALIBRATION` rather than
+  recomputed live, because a segment whose meaning shifts nightly makes "why is
+  this person in this list" unanswerable. Drift is reported, never applied:
+  re-freezing means editing the constant and bumping
+  `BUYER_COHORT_RULE_VERSION`. There is deliberately no RFM grid, no propensity
+  score and no dormant-over-a-year cohort; `COHORTS_NOT_BUILT` records each
+  omission and its reason and the endpoint returns it, so the absence is
+  visible rather than looking like a gap. Cohorts are first-class entries in
+  `segment-definitions.js` carrying `source: 'buyer_cohorts'`, and
+  `segment-service.js` dispatches on that one field into
+  `buildBuyerCohortFacts()`. Membership is behaviour, never permission, exactly
+  as for every other automatic segment.
+- `lib/campaigns/opportunity-sizing.js`: the honesty boundary, and the reason
+  this feature is safe to show an owner. Three results exist and no fourth:
+  `observed()`, `project()` and `refuse()`. A projection CANNOT be constructed
+  without the rate's sample, a named source from a closed set and a stated
+  claim, it returns RANGES and never a point, and it carries no `value`,
+  `total`, `amount` or `revenue` key, so there is nothing a template can print
+  on its own and have it read as a fact. `assertNoHeadlineFigure()` walks the
+  whole payload and throws rather than shipping one.
+  **`incremental_from_contact` refuses by construction.** No promotional
+  campaign has ever been delivered here and the commercial contact ledger is
+  empty, so every observed rate is what customers do ANYWAY. Presenting it as
+  campaign revenue would claim credit for the baseline. Do not add a default
+  rate, a flag or an override; hand `project()` a measured uplift with a real
+  sample and the refusal becomes a projection on its own.
+- `lib/campaigns/opportunity-detector.js`: portfolio-level findings, not
+  per-person ones. Rates are CONDITIONAL on tenure: a rate measured from day
+  zero is dominated by people who returned in week one, and not one of them is
+  still in a one-time-buyer cohort. A cohort spanning every tenure is refused a
+  rate entirely rather than quoted an averaged one. Tenure cohorts quote the
+  rate anchored at their own lower boundary, which errs HIGH on purpose,
+  because a do-nothing baseline is a hurdle a campaign must clear and an
+  understated hurdle flatters the campaign.
+- `lib/campaigns/opportunity-portfolio.js`, `GET /api/campaigns/opportunities`:
+  the refresh. Read-only, no table, no migration, no persisted snapshot. The
+  computation is a pure function of `readAuthoritativeGenerationSources()`, so
+  the cache is in-process and disposable; persisting it would create a second
+  copy of the truth. A failed refresh serves the previous payload with
+  `freshness.stale` set rather than emptying the screen. `server.js` starts it
+  60 seconds after boot, unconditionally, because it cannot send.
+- `scripts/dry-run-buyer-cohorts.js`: read-only, aggregate-only, no customer
+  identity. Live cohort populations, the organic return baseline, and every
+  finding with its assumption and every refusal printed in full. Run this, not
+  the segment membership dry run, when the question is where the revenue is.
 - `scripts/seed-product-inventory-baseline.js`: writes one current-stock row per
   purchasable catalogue unit into `sms_product_inventory`, so a later webhook
   has a `previous` to compare against. Read-only unless given BOTH `--persist`

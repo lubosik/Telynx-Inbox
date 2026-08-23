@@ -26,7 +26,8 @@ test('campaign router exposes the complete review lifecycle', () => {
   const noop = async () => ({});
   const router = createCampaignRouter({ service: new Proxy({}, { get: () => noop }) });
   for (const [method, path] of [
-    ['get', '/'], ['get', '/review-count'], ['post', '/generate'], ['post', '/'], ['get', '/:id'],
+    ['get', '/'], ['get', '/review-count'], ['get', '/opportunities'],
+    ['post', '/generate'], ['post', '/'], ['get', '/:id'],
     ['patch', '/:id'], ['get', '/:id/recipients'], ['post', '/:id/submit-review'],
     ['get', '/:id/performance'],
     ['post', '/:id/reject'], ['post', '/:id/approve'], ['post', '/:id/schedule'],
@@ -216,4 +217,44 @@ test('the legacy intelligence suggestion sender cannot bypass campaign gates', (
   assert.ok(gate > -1 && consent > gate && send > consent,
     'provider gate and recipient consent must both run before sendSMS');
   assert.match(source, /CAMPAIGN_LIVE_SEND_DISABLED/);
+});
+
+// ── the opportunity portfolio ────────────────────────────────────────────────
+
+test('the opportunity portfolio is readable, server-owned and never audited', async () => {
+  const calls = [];
+  const router = createCampaignRouter({
+    service: {},
+    opportunityPortfolio: {
+      current: async input => { calls.push(input); return { findings: [], refusals: [] }; }
+    }
+  });
+  const opportunities = handler(router, 'get', '/opportunities');
+
+  const res = response();
+  await opportunities({ query: {} }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['Cache-Control'], 'no-store, private');
+  assert.deepEqual(calls, [{ refresh: false }]);
+
+  const refreshed = response();
+  await opportunities({ query: { refresh: 'true' } }, refreshed);
+  assert.deepEqual(calls[1], { refresh: true });
+
+  // Every population, rate and figure is computed server-side. A caller who
+  // could pass one in could choose the answer.
+  const rejected = response();
+  await opportunities({ query: { population: '99999' } }, rejected);
+  assert.equal(rejected.statusCode, 400);
+  assert.equal(rejected.payload.code, 'CAMPAIGN_OPPORTUNITY_INPUT_REJECTED');
+  assert.equal(calls.length, 2, 'a rejected request must not reach the detector');
+});
+
+test('the literal opportunities path is never shadowed by /:id', () => {
+  const { ROUTE_POLICY } = require('../lib/route-policy');
+  const entry = ROUTE_POLICY.find(row =>
+    row.method === 'GET' && row.path === '/api/campaigns/opportunities');
+  assert.ok(entry, 'the endpoint must have its own policy entry or the enforcer denies it');
+  assert.equal(entry.permission, 'campaigns.read');
+  assert.ok(!entry.audit, 'reading a count changes nothing and must not write an audit row');
 });

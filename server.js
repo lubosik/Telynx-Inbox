@@ -371,6 +371,25 @@ function startCampaignDelivery() {
   }, TWO_MINUTES);
 }
 
+// Where the revenue actually is, recomputed on a schedule so the picture on
+// the Growth tab is not a month old.
+//
+// Read-only by construction: it counts customers and reports what has already
+// happened. It writes no row, creates no draft, touches no send gate and calls
+// no messaging provider, so unlike the delivery loop there is no flag to keep
+// it off. A failure logs and returns; a customer-base analysis may never be
+// able to interrupt the inbox, the dialler or order SMS.
+function startOpportunityRefresh() {
+  try {
+    const {
+      startOpportunityPortfolioRefresh
+    } = require('./lib/campaigns/opportunity-portfolio');
+    startOpportunityPortfolioRefresh({ env: process.env });
+  } catch (err) {
+    console.error('[OPPORTUNITIES] Refresh loop not started:', err.message);
+  }
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
@@ -393,6 +412,7 @@ app.listen(PORT, async () => {
   startShipmentPoll();
   startDeliveryCheck();
   startCampaignDelivery();
+  startOpportunityRefresh();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);
