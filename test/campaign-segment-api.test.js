@@ -124,7 +124,7 @@ function segmentRow(overrides = {}) {
     id: 's0000000-0000-4000-8000-000000000001',
     workspace_id: 'vici',
     segment_key: 'reorder_due_high_confidence',
-    name: 'Reorder due, high confidence',
+    name: 'Due to reorder, best timing',
     description: 'Engine computed.',
     segment_kind: 'automatic',
     definition: { detector: 'reorder', definitionKey: 'reorder_due_high_confidence' },

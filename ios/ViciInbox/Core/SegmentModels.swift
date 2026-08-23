@@ -453,8 +453,13 @@ enum SegmentNumberText {
 /// Stored inclusion evidence, read as a sentence and a short checklist.
 ///
 /// This is the thing the research says nobody in the market does well: not "you
-/// are in the Reorder segment" but "you order about every 30 days, your last
-/// order was on 22 July, so the next one was expected around 21 August".
+/// are in the Reorder segment" but "Alex usually orders every 30 days or so.
+/// The last one was on 22 July, which puts the next around 21 August."
+///
+/// Every string in here is written to be read out loud by somebody who has
+/// never seen the arithmetic. No median, no MAD, no confidence score, no em
+/// dash. The numbers that survive are the ones a person can picture: days,
+/// dates and counts.
 ///
 /// Nothing here recomputes anything. Every value is read from the row the
 /// engine wrote at the time, which is also why `ruleVersion` is shown: an old
@@ -582,22 +587,24 @@ struct SegmentInclusionEvidence: Hashable {
         var sentences: [String] = []
         if let median = medianIntervalDays {
             let basis = cadenceSource == "product"
-                ? "Customers who buy this product reorder about every \(SegmentNumberText.days(median))."
-                : "\(personName) orders about every \(SegmentNumberText.days(median))."
+                ? "\(personName) has not ordered often enough for us to read a pattern of their own, so we go by other customers, who buy this again every \(SegmentNumberText.days(median)) or so."
+                : "\(personName) usually orders every \(SegmentNumberText.days(median)) or so."
             sentences.append(basis)
         }
         if let last = SegmentDateText.day(lastOrderAt), let expected = SegmentDateText.day(expectedAt) {
-            sentences.append("The last order was on \(last), so the next one was expected around \(expected).")
+            sentences.append("The last one was on \(last), which puts the next around \(expected).")
         } else if let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("The last order was on \(last).")
+            sentences.append("The last one was on \(last).")
         }
         switch state {
         case "overdue":
-            sentences.append("That window has already passed.")
+            sentences.append("That date has gone by, so they are past due.")
         case "due":
-            sentences.append("That window is open now.")
+            sentences.append("That is about now.")
         case "approaching":
-            sentences.append("The window has not opened yet, so this is for planning rather than contact.")
+            sentences.append("That is close but not here yet, so this is one to get ready for rather than send to.")
+        case "not_due":
+            sentences.append("That is still a way off.")
         default:
             break
         }
@@ -610,18 +617,19 @@ struct SegmentInclusionEvidence: Hashable {
     private func winbackHeadline(personName: String) -> String {
         var sentences: [String] = []
         if let median = medianIntervalDays {
-            sentences.append("\(personName) used to order about every \(SegmentNumberText.days(median)).")
+            sentences.append("\(personName) used to order every \(SegmentNumberText.days(median)) or so.")
         } else {
-            sentences.append("\(personName) is a repeat customer who has stopped ordering.")
+            sentences.append("\(personName) bought regularly and has stopped.")
         }
         if let days = daysSinceLastOrder, let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("There has been no order for \(SegmentNumberText.days(days)), since \(last).")
+            sentences.append("There has been nothing since \(last), which is \(SegmentNumberText.days(days)) ago.")
         } else if let days = daysSinceLastOrder {
-            sentences.append("There has been no order for \(SegmentNumberText.days(days)).")
+            sentences.append("There has been nothing for \(SegmentNumberText.days(days)).")
         } else if let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("The last order was on \(last).")
+            sentences.append("The last one was on \(last).")
         }
-        sentences.append("That is long enough past their normal gap to count as lapsed.")
+        sentences.append("That is far enough past their usual gap that they count as gone quiet.")
+        sentences.append("Anyone it would be tactless to approach was left out before this list was built.")
         return sentences.joined(separator: " ")
     }
 
@@ -645,48 +653,68 @@ struct SegmentInclusionEvidence: Hashable {
             facts.append(SegmentFact(label: label, value: value))
         }
 
-        if detector == "winback" {
-            add("Lifetime orders", lifetimePurchaseCount.map(SegmentNumberText.count))
+        let isWinback = detector == "winback"
+        if isWinback {
+            add("Orders in total", lifetimePurchaseCount.map(SegmentNumberText.count))
         } else {
             add("Orders on record", purchaseCount.map(SegmentNumberText.count))
         }
-        add("Typical gap between orders", medianIntervalDays.map(SegmentNumberText.days))
-        add("Gaps measured", intervalsObserved.map(SegmentNumberText.count))
-        add("How steady that pattern is", confidenceText)
+        // A product level pattern is not this person's pattern, and a label that
+        // says "usually orders every" over somebody else's number is a lie the
+        // reader has no way to catch.
+        let borrowed = cadenceSource == "product"
+        let gapLabel = isWinback ? "Used to order every"
+            : borrowed ? "Other customers order every" : "Usually orders every"
+        add(gapLabel, medianIntervalDays.map(SegmentNumberText.days))
+        add(borrowed ? "Gaps measured across those customers" : "Gaps we measured",
+            intervalsObserved.map(SegmentNumberText.count))
+        add("How regular that is", confidenceText)
         add("Worked out from", cadenceSourceText)
-        add("Usual variation", madDays.flatMap { $0 > 0 ? "plus or minus \(SegmentNumberText.days($0))" : nil })
+        add("How much the gap moves", madDays.flatMap { $0 > 0 ? "about \(SegmentNumberText.days($0)) either way" : nil })
         add("Last order", SegmentDateText.day(lastOrderAt))
-        add("Days since that order", daysSinceLastOrder.map(SegmentNumberText.days))
-        add("Next order expected", SegmentDateText.day(expectedAt))
-        add("Expected window", expectedRange)
-        add("Where they are in that window", stateText)
+        add("Time since then", daysSinceLastOrder.map(SegmentNumberText.days))
+        add("Next one expected around", SegmentDateText.day(expectedAt))
+        add("Reasonable window", expectedRange)
+        add("Where they stand", stateText)
         add("Product", productName)
-        add("Qualified on", SegmentDateText.day(text("eligibleAt")))
-        add("Contact cooldown ended", SegmentDateText.day(text("cooldownEndsAt")))
-        add("Stops qualifying", SegmentDateText.day(text("expiresAt")))
+        add("Counted as gone quiet on", SegmentDateText.day(text("eligibleAt")))
+        add("Free to contact again since", SegmentDateText.day(text("cooldownEndsAt")))
+        add("Drops off this list on", SegmentDateText.day(text("expiresAt")))
         add("Added", SegmentDateText.day(addedAt))
         if let extra = additionalMatches, extra >= 1 {
             let count = Int(extra.rounded())
-            add("Also matched on", count == 1 ? "1 other product" : "\(count) other products")
+            add(isWinback ? "Also gone quiet on" : "Also due on",
+                count == 1 ? "1 other product" : "\(count) other products")
         }
-        add("Rules version", ruleVersion)
+        add("Rules used", ruleVersion)
         return facts
     }
 
+    /// A win back row carries no expected date, so the reorder wording that ends
+    /// in "the date" would be describing something the reader cannot see.
     private var confidenceText: String? {
+        let isWinback = detector == "winback"
         switch confidence {
-        case "high":     return "High. Their orders are very evenly spaced"
-        case "moderate": return "Moderate. Their orders are roughly evenly spaced"
-        case "none":     return "Not enough history to call it steady"
-        default:         return nil
+        case "high":
+            return isWinback
+                ? "Very. The gaps between their orders barely moved"
+                : "Very. The gaps barely change, so the date should be close"
+        case "moderate":
+            return isWinback
+                ? "Fairly. The gaps between their orders moved around a bit"
+                : "Fairly. The gaps move around a bit, so treat the date as a rough one"
+        case "none":
+            return "Not enough orders yet to call it regular"
+        default:
+            return nil
         }
     }
 
     private var cadenceSourceText: String? {
         switch cadenceSource {
         case "personal": return "Their own order history"
-        case "product":  return "How other customers reorder this product"
-        case "none":     return "No reliable pattern"
+        case "product":  return "How often other customers reorder this product"
+        case "none":     return "No pattern we could use"
         default:         return nil
         }
     }
@@ -709,20 +737,20 @@ struct SegmentInclusionEvidence: Hashable {
         switch detector {
         case "reorder":
             return [
-                "They place another order. That starts a fresh cycle and the expected window moves with it.",
-                "They are contacted about this order.",
-                "The product stops being in stock.",
-                "Their commercial eligibility record stops being current and clear.",
-                "Somebody holds them out of this segment."
+                "They order again. The clock starts over and the expected date moves with it.",
+                "Somebody messages them about this order.",
+                "The product goes out of stock.",
+                "Their permission to be sent marketing stops being current and clear.",
+                "Somebody holds them out of this segment by hand."
             ]
         case "winback":
-            var reasons = ["They place another order."]
+            var reasons = ["They order again."]
             if let expires = SegmentDateText.day(text("expiresAt")) {
-                reasons.append("This qualification lapses on \(expires).")
+                reasons.append("They drop off this list on \(expires) if nothing changes before then.")
             }
-            reasons.append("They are contacted, which starts the win back cooldown.")
-            reasons.append("Their commercial eligibility record stops being current and clear.")
-            reasons.append("Somebody holds them out of this segment.")
+            reasons.append("They are contacted as a win back, which keeps them off this list for the next six months.")
+            reasons.append("Their permission to be sent marketing stops being current and clear.")
+            reasons.append("Somebody holds them out of this segment by hand.")
             return reasons
         default:
             return []
@@ -732,11 +760,11 @@ struct SegmentInclusionEvidence: Hashable {
     private var stateText: String? {
         switch state {
         case "due":         return "Due now"
-        case "overdue":     return "Overdue"
-        case "approaching": return "Approaching, not due yet"
+        case "overdue":     return "Past due"
+        case "approaching": return "Nearly due, not there yet"
         case "not_due":     return "Not due yet"
-        case "contacted":   return "Already contacted for this order"
-        case "suppressed":  return "Held back"
+        case "contacted":   return "Already contacted about this order"
+        case "suppressed":  return "Held back for now"
         default:            return nil
         }
     }

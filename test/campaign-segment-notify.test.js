@@ -24,7 +24,7 @@ const {
   prepareCampaignReadyNotifications
 } = require('../lib/campaigns/campaign-ready-notifications');
 
-const SEGMENT = { id: 'seg-1', key: 'reorder_due_high_confidence', name: 'Reorder due, high confidence', kind: 'automatic' };
+const SEGMENT = { id: 'seg-1', key: 'reorder_due_high_confidence', name: 'Due to reorder, best timing', kind: 'automatic' };
 
 const USERS = [
   { id: 1, role: 'owner', isActive: true, canManageCampaigns: true },
@@ -223,7 +223,7 @@ test('a mixed batch describing two different segments is refused outright', asyn
     users: [USERS[0]], segment: SEGMENT, change: { reason: 'created', memberCount: 3 }
   });
   const second = prepareSegmentChangeNotifications({
-    users: [USERS[1]], segment: { ...SEGMENT, id: 'seg-2', name: 'Win-back qualified' },
+    users: [USERS[1]], segment: { ...SEGMENT, id: 'seg-2', name: 'Good customers who have stopped' },
     change: { reason: 'created', memberCount: 9 }
   });
   const result = await sendSegmentChangeNotifications([...first, ...second], { dryRun: true }, { env: {} });

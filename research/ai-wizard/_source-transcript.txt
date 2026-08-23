@@ -1,0 +1,3437 @@
+0:00 SMS is by far the single easiest and
+0:02 highest ROI marketing channel for your
+0:04 entire business because within just a
+0:06 few minutes of setting it up, it'll
+0:08 start blowing up your show rates,
+0:09 increase your ROAs from paid ads, and
+0:11 massively improve your close rates. I
+0:14 know this because I've personally sent
+0:15 millions of text messages across dozens
+0:17 of industries. And I've watched it add
+0:19 up to $17 million to businesses in a
+0:22 single year from just a few simple
+0:24 flows. The only problem is the way most
+0:26 people set it up has their text ending
+0:28 up in spam or worse they get blocked by
+0:30 A2P 10 DLC restrictions and find [music]
+0:33 thousands of dollars for even the
+0:35 smallest mistake. So in this video I'm
+0:37 giving you everything the full A toz
+0:39 guide on SMS marketing how it works what
+0:42 to avoid the exact flows that you need
+0:44 to build to add tons of money to your
+0:46 business so that by the end of this
+0:47 you'll have a complete system that you
+0:49 could plug into your business today and
+0:51 easily start stacking more revenue. So,
+0:54 emails, calls, and social media, that's
+0:56 where everyone is fighting for attention
+0:58 right now. And most of them are losing.
+1:00 Inboxes are buried, calls go to
+1:02 voicemail, DMs get ignored, and
+1:04 meanwhile, there's SMS sitting right
+1:07 there, the most direct line to a human
+1:09 being's attention with a 98% open rate.
+1:12 That's basically every message that you
+1:14 send getting seen. And get this, on
+1:16 average, Americans send and receive 32
+1:18 texts a day. Compare that to just six
+1:21 phone calls, 15 emails, and 11 DMs. Text
+1:25 is the number one form of communication
+1:27 for every American under 50. And when a
+1:29 text comes in, 81% of people read that
+1:32 text within the first 5 minutes of
+1:33 receiving it. No other channel comes
+1:36 close to that kind of attention. But
+1:38 most businesses either ignore that
+1:40 completely or they're doing it badly.
+1:41 When you translate that attention into
+1:43 actual business results, like replies,
+1:45 bookings, and closed deals, the gap gets
+1:48 even wider. Industry data puts the
+1:50 average response rate of SMS at 45%.
+1:53 Compare that to emails 6%. But here's my
+1:56 personal experience from sending
+1:57 millions of texts across real
+1:59 businesses. When you use SMS correctly,
+2:02 you could push that response rate much
+2:03 closer to 75%. So if SMS is this
+2:07 powerful, why isn't everyone crushing
+2:09 it? The opportunity is massive, but most
+2:12 businesses just aren't seeing it. not
+2:14 because they're not trying, but because
+2:16 something specific is breaking their SMS
+2:18 outreach before it even reaches their
+2:20 leads. So, here's a scenario that I see
+2:22 play out hundreds of times. You're
+2:23 running ads, your leads are opting into
+2:26 those ads, your CRM is firing off text
+2:28 automatically, and your dashboard shows
+2:30 delivered, and then nothing. There is no
+2:34 replies coming in, no bookings, and your
+2:36 setter is staring at an empty inbox
+2:38 wondering what's wrong with the leads.
+2:41 And the answer has nothing to do with
+2:42 the leads. Instead, it has everything to
+2:44 do with these five things that are
+2:46 actively working against your SMS
+2:48 campaigns. So, the first is A2P 10DLC
+2:52 registration. This is the compliance
+2:53 framework that every business sending
+2:55 text in the USA has to go through and it
+2:58 is brutal. We're talking about a full
+3:00 checklist here. Your website needs a
+3:02 privacy policy in the right format. Your
+3:04 opt-in language needs to be worded in a
+3:06 very specific way. Register your
+3:08 campaign. Describe exactly what kind of
+3:10 messages you're going to send. and then
+3:11 carriers could still reject your
+3:13 campaign or block specific messages
+3:14 because a single word in your campaign
+3:17 triggered that filter. Now, most
+3:18 businesses either skip this, they rush
+3:21 through it, or they do it completely
+3:23 wrong, and their messages get throttled
+3:24 or blocked entirely before they even
+3:27 leave the gate. Second is that your
+3:29 lead's inbox looks exactly like this.
+3:31 It's a complete dumping ground. Just
+3:32 think about what lands in a text inbox
+3:34 today. You have one-time passwords,
+3:36 delivery tracking updates, you have bank
+3:38 alerts, appointment reminders, system
+3:41 notifications, and just tons of other
+3:43 texts. And businesses have been using
+3:45 SMS as an infrastructure layer for
+3:47 years, and it has absolutely flooded
+3:50 people's inboxes. And on top of that,
+3:52 scam texting has exploded. I mean, just
+3:55 check your phone right now. You're
+3:56 getting fraudulent text, package
+3:58 notifications that are fake, bank
+4:00 alerts, fake, everything. So when an
+4:02 unknown business number shows up on
+4:04 their phone, their guard is already up
+4:06 before they even read a single word. Now
+4:08 third is the green bubble problem. Okay?
+4:11 So every business text that has ever
+4:13 been sent, every single one has landed
+4:16 as a green SMS. And for the majority of
+4:18 your leads who are iPhone users, that
+4:20 green bubble from an unknown number
+4:23 already signals spam or automation
+4:25 before they've even read a single word.
+4:27 Fourth, every business text that you
+4:29 send out is legally required to include
+4:31 the opt- out language, the reply stop to
+4:33 opt out. You have no choice. And no
+4:36 matter how good you are at reframing the
+4:38 copy of the opt- out language, that line
+4:41 at the bottom of all your text tells
+4:43 them exactly what this is, an automated
+4:46 business blast. And fifth, this is the
+4:48 one that should really scare you. It's
+4:50 text inbox placement. Most businesses
+4:52 look at their dashboard and they see
+4:54 delivered next to every single text that
+4:56 they send. What they don't realize is
+4:58 that delivered and seen is no longer the
+5:01 same thing. With iOS 26, Apple
+5:03 introduced inbox placement for text
+5:05 messages, which means that your text
+5:07 messages may be quietly routed to an
+5:09 unknown senders folder or a spam folder
+5:11 buried behind a drop- down menu most
+5:14 people will never even open. And if that
+5:16 happens, the recipient doesn't get a
+5:18 notification. The text doesn't appear on
+5:20 the lock screen or on the main inbox.
+5:22 And the text doesn't even make the phone
+5:24 vibrate or ping. So basically, the
+5:26 message reached the phone, but it just
+5:28 never reached them. So let that sink in
+5:30 for a moment. Your ads are running, your
+5:32 leads are opting in, your CRM is firing
+5:35 text, your dashboard says delivered, and
+5:38 more than half of your messages may
+5:40 never be seen. That's a major
+5:42 infrastructure problem. So, it doesn't
+5:44 matter how good your message is, how
+5:46 strong your offer is or how dialed in
+5:48 your follow-up strategy is. If your
+5:50 texts aren't reaching your leads the
+5:52 right way, none of this converts. So,
+5:54 how do we fix that? The single biggest
+5:56 factor in whether your texts get
+5:58 delivered and opened and replied to has
+6:00 nothing to do with what you wrote. It
+6:02 has everything to do with how that
+6:03 message shows up on your lead's phone.
+6:05 Just think about it, okay? A text comes
+6:07 in and it looks like this. It's a
+6:10 standard green SMS from an unknown
+6:12 sender with some type of opt- out
+6:14 disclaimer at the bottom of it. What do
+6:16 you do? You probably dismiss it, right?
+6:18 You're not going to read it carefully
+6:20 because your brain made the decision in
+6:21 half a second that this was a spam text
+6:23 or a business automation. Now, think
+6:26 about getting that exact same text, but
+6:28 as a blue eye message. We're talking
+6:30 about the same copy here. The reaction
+6:32 is completely different. You actually
+6:34 read it. You might even reply to it. Not
+6:37 because the words are better. It's the
+6:38 same copy, but because your brain
+6:40 processed it differently. Your brain has
+6:42 been subconsciously trained to think
+6:44 that a blue iMessage is a trusted text
+6:47 because it came from another iPhone user
+6:49 who's a real human being. Now, I want to
+6:51 show you something. So, this is a
+6:53 dashboard that tracks conversation
+6:55 performance across sending text messages
+6:57 at scale on iMessage and on SMS. And
+6:59 this is specifically for a SAS business
+7:02 running an opt-in flow. So, these are
+7:04 people that are opting into ads and then
+7:05 the business is then reaching out to
+7:07 them via iMessage or via SMS depending
+7:09 on their device. Okay, an average
+7:11 response rate for this company of 75%.
+7:15 But check this out. When we look at the
+7:17 SMS response rate that's down here,
+7:19 we're talking about a 32 31 36% reply
+7:23 rate. When we look at their IM message
+7:25 response rate, we're seeing much higher
+7:27 results. 85% 90% 84%. These are the
+7:31 exact same text messages that are being
+7:33 sent out at the exact same time through
+7:35 the exact same automations. But the
+7:37 second that those texts show up as IME
+7:39 messages, this business is seeing
+7:41 upwards of a 2.5% increase when they're
+7:44 sending IME messages compared to SMS.
+7:46 Now, check out this brickandmortar gym
+7:48 that is doing appointment reminders via
+7:51 text message at scale. They are seeing
+7:53 the same exact results here. an average
+7:55 response rate of 65% across SMS and
+7:58 iMessage. But the SMS response rate is
+8:00 always around 33 29 35% and their
+8:04 iMessage response rate is always at
+8:06 least two times higher than that,
+8:08 hovering around the 80 to 85%. And then
+8:11 there's this coaching business that's
+8:12 running a webinar reminder flow, sending
+8:15 texts out via SMS and iMessage to get
+8:17 people to show up to that appointment.
+8:20 61% response rate. And the exact same
+8:22 trend here. SMS response rates always
+8:25 around 30%. And iMessage response rates
+8:28 always around 70 to 80 to even sometimes
+8:30 90%. And the reason the numbers look
+8:32 like this every single time comes down
+8:34 to how iMessage actually works under the
+8:36 hood. So unlike A2P SMS, iMessage runs
+8:40 on a P2P network. It travels through the
+8:43 same path as a text between two friends.
+8:45 There's no carrier filtering. There's no
+8:47 compliance registration. There's no
+8:49 mandatory optout footer. destroying the
+8:52 conversation feel before anyone reads a
+8:54 word. And on top of that, you could even
+8:56 send things like voice notes, high-res
+8:57 videos, and typing indicators, which are
+9:00 just all things that make it feel like a
+9:02 real conversation rather than a
+9:04 broadcast. So every layer that was
+9:06 working against SMS just disappears with
+9:08 iMessage P2B. So what does that look
+9:10 like in practice? Your leads are
+9:12 replying within minutes instead of
+9:13 ghosting for days. Your setters inbox is
+9:16 actually moving. Your show rates jump.
+9:19 your closers are actually closing
+9:21 because they're talking to people who
+9:22 show up and the dead leads that you'd
+9:24 written off start responding again. Now,
+9:26 here's why this matters so much for any
+9:28 business that's operating in the USA.
+9:30 iPhone holds about a 57 to 65% of the US
+9:34 smartphone market. And if you're in any
+9:36 kind of high ticket offer like coaching
+9:38 or healthcare or real estate or even SAS
+9:41 or targeting millennials or Gen Zed with
+9:43 your offer, that number skews
+9:46 significantly higher amongst your leads.
+9:48 Most businesses that I work with are
+9:50 seeing 70 to 75, even 80% of their leads
+9:53 coming in that are iPhone users. These
+9:55 are the exact people that are most
+9:57 deeply conditioned to dismiss the green
+9:59 bubble because they live in iMessage
+10:01 every single day. Blue is how they text
+10:03 the people that they trust and green is
+10:04 what they get from delivery
+10:06 notifications and scam attempts and
+10:08 businesses. So, when you're reaching
+10:10 your leads through iMessage, you're not
+10:12 just fixing a deliverability problem.
+10:14 you're showing up in the right place,
+10:16 looking like the right thing before you
+10:18 even said a single word. And once you've
+10:20 got that foundation locked in, once your
+10:22 messages are actually landing in front
+10:24 of your leads, that's when copy becomes
+10:26 everything because now people are
+10:29 actually seeing your messages. And so
+10:31 what you say and how you say it
+10:32 determines whether they reply. So now
+10:34 that you understand that the delivery
+10:36 channel is the entire foundation, I need
+10:38 to show you how to actually write
+10:40 messages that get replies and turn into
+10:42 sales. The number one rule of writing
+10:43 good SMS copy is really simple to
+10:45 follow. Your message has to feel like it
+10:47 came from a real person, not a business
+10:50 or some marketing platform. So if
+10:51 someone reads it and they think, "Hey,
+10:53 this could be automated." It means
+10:55 you've already lost. So the way that we
+10:58 do that is we have to embody this
+11:00 mindset that I am a person that's
+11:03 texting. I am Tristan that's texting.
+11:06 You are not a business texting. You
+11:08 might work at a business. You might even
+11:09 be the business owner, but you are not a
+11:12 business texting because this is exactly
+11:13 what business text looks like. They
+11:15 always have the goal of broadcasting,
+11:17 right? It's always text out, notifying,
+11:20 informing with never the expectation of
+11:22 getting anything back in. And you see
+11:25 these types of texts probably everywhere
+11:26 on your own phone, right? On the flip
+11:29 side, this is how a person texts. You
+11:30 could go to your own phone right now.
+11:32 You could check your recent
+11:33 conversations with your friends, with
+11:34 your girlfriend, with your family, and
+11:36 this is what your text messages will
+11:37 look like. They look like a
+11:38 conversation. For every text that is
+11:40 being sent out, you are expecting a text
+11:43 back in unless they're being, you know,
+11:45 a very bad friend to you. And that's
+11:47 exactly what we want to be achieving
+11:48 when writing good SMS copy is getting
+11:51 replies back from our leads. So, the
+11:53 first thing is we don't want to be
+11:54 killing the conversations before they
+11:56 even happen. And these are some classic
+11:58 examples of conversation killers that I
+12:00 see many businesses using when they
+12:02 first reach out to their lead over text.
+12:04 So, let's read them. Hey Alex, just saw
+12:06 you booked an appointment on my
+12:07 calendar. I wanted to reach out and
+12:09 introduce myself. I'm Sam with the Sam
+12:11 Blue team. Please reply yes to confirm
+12:12 your appointment. Or the second one, hey
+12:14 John, the reason I'm reaching out is
+12:15 because we received a form from you
+12:16 regarding an extended warranty to for
+12:18 your car. You could book a call with us
+12:20 here to learn more about how we could
+12:21 help you save thousands of dollars down
+12:23 the line. The link Joe's Automotive
+12:25 Reply stop to opt out. There was no
+12:26 opportunity in both of those texts to
+12:28 get a conversation going. they simply
+12:30 killed that conversation because they
+12:32 were trying to push information out
+12:35 either about the booking or about the
+12:37 offer on the second text here. Now, what
+12:39 we want to be doing is building out
+12:42 conversation starters when we first
+12:43 reach out to our leads. And it's really
+12:45 easy to do this. What we're going to be
+12:46 doing is we're going to be basically
+12:48 engineering a reply back from our lead.
+12:51 basically guaranteeing that our lead is
+12:53 going to reply to us by asking them a
+12:56 very low friction question that's super
+12:59 easy to respond to. So, let's look at an
+13:01 example. So, hey Alex, it's Sam with
+13:02 Samlau. Just got your call book for
+13:04 Tuesday. What kind of business do you
+13:06 have? Right? In this text, by asking the
+13:08 business owner about their business,
+13:10 they are almost guaranteed to reply to
+13:12 us because everyone is interested in
+13:14 talking about their business. Right? And
+13:16 we're also making it super easy for the
+13:18 lead to reply to you because all they
+13:19 have to reply with is a simple oneliner
+13:23 about what their business does or what
+13:25 they offer. Right? Super easy. Second
+13:26 one, we're locked in for Tuesday 10 a.m.
+13:28 I could send you a video of what we'll
+13:30 talk about here. Yeah. We are literally
+13:33 engineering the reply from our lead,
+13:35 which is going to be a simple yes or
+13:37 yeah, and that's going to officially
+13:39 start the dialogue with our lead. Now,
+13:41 the reason that we're doing this and
+13:42 we're doing conversation starters and
+13:44 not conversation killers is because
+13:46 conversions happen in conversations.
+13:49 Sales is a relationship game. It's a
+13:52 conversation game. So, the more replies
+13:54 and the more conversations that we could
+13:55 have with our leads, that is where we
+13:57 will see the most success. Next off is
+13:59 to break the brick. What we don't want
+14:01 to be doing is sending text messages out
+14:03 that look like this, right? this big
+14:05 block of text that's going to make it
+14:07 nearly impossible for a lead to reply to
+14:10 or to even read through. Right? What we
+14:13 want to be doing is taking our text and
+14:15 separating them into shorter bite-sized
+14:17 text. And my normal rule of thumb is to
+14:20 say that your text should never be over
+14:22 80 characters. So, if it's 80 characters
+14:24 or more, you should separate it into two
+14:27 text, right? And it is totally okay to
+14:29 double text a lead because that's just a
+14:31 normal texting behavior. Not sending
+14:33 these super long breakup texts to a
+14:35 lead, right? That doesn't make sense.
+14:37 So, message number one, we could see how
+14:39 we could transform this into two shorter
+14:41 texts. Hey, Alex. Just saw you booked an
+14:42 appointment on my calendar. I wanted to
+14:44 reach out and introduce myself. I'm Sam
+14:46 with the Horizon team. Before I call,
+14:48 I'd like to number one, confirm your
+14:49 appointment. Number two, check out this
+14:51 video we put together on how Horizon
+14:53 works. If you have any questions, please
+14:54 let me know. Have a great day. So that
+14:56 text is definitely over 80 characters
+14:58 which means that we have to separate it
+14:59 into two text and we also have to get a
+15:02 reply out of our lead which this is not
+15:04 doing right. It's just asking them to do
+15:06 something just informing them. So what
+15:09 we're going to be doing is saying hey
+15:10 Alex it's Sam with Horizon. Just got
+15:12 your call booked for Tuesday. What kind
+15:14 of business do you have? Right? Super
+15:16 easy to take this big text and turn it
+15:18 into a conversational type of text. Same
+15:20 exact thing with the text that we saw
+15:22 before about the extended warranty.
+15:25 super big brick of text that no one's
+15:27 going to read. They're probably going to
+15:28 associate it with spam or automation.
+15:30 Disregard it. Mark it as spam or reply
+15:32 stop. What we're going to be doing is
+15:34 adding a conversational starter. Hi
+15:36 John, this is Rick from Joe's
+15:37 Automotive. Are you still driving an
+15:38 Audi A4? This is going to make it so
+15:42 easy for our lead to respond because
+15:43 they're probably proud of the car that
+15:45 they drive and so they're much more
+15:47 likely to engage with that text. And you
+15:49 could then see how this business sending
+15:51 out this text could take this text from
+15:53 asking about what car they drive to a
+15:56 point of presenting their offer, which
+15:58 in this case is going to be to book a
+16:00 call about a warranty. Right? It's going
+16:01 to follow naturally and fit naturally in
+16:04 the conversation as it unfolds. Next off
+16:07 is to skip the link. So when businesses
+16:10 send texts and include links in them in
+16:12 their first initial outreach, it raises
+16:15 tons of red flags to carriers and also
+16:19 to the lead. So on the carrier side,
+16:20 they've often times see, you know, links
+16:22 associated to spam or to scams. That's
+16:25 why they block them. But most
+16:26 importantly, it's for your lead to not
+16:28 associate that with spam or with scams
+16:30 or to associate you with any of those.
+16:32 Right? A lot of phones have made it
+16:34 extremely easy now to report your text
+16:36 messages as junk. It's literally a
+16:38 one-tap button as you can see right
+16:39 here. And so if the lead feels in any
+16:42 way that they're being sent, you know,
+16:43 some type of bad link or they just don't
+16:45 trust your message, they will report you
+16:48 and that is going to massively hurt your
+16:50 deliverability moving forward for all
+16:52 texts that you send out. What we want to
+16:54 do is we only want to send a link once a
+16:56 lead has replied to us. And ideally,
+16:58 what we want to do is we want to make
+17:00 that link fit naturally into the
+17:03 conversation that we're having. So if
+17:04 the example that we saw beforehand, you
+17:06 know, with are you still driving an Audi
+17:08 A4, there might be a couple of back and
+17:09 forths where the sales team is
+17:11 continuing the conversation, learning
+17:13 more about the person, their problem,
+17:15 seeing if they have interest in the car
+17:16 warranty, and then presenting a link to
+17:19 book a call, which is going to fit
+17:21 naturally in the conversation. Also, pro
+17:23 tip here. When you do wait to send a
+17:25 link and wait for a reply before sending
+17:27 that link, you'll notice here that it
+17:29 actually attaches a thumbnail preview to
+17:32 your link compared to these first text
+17:34 that didn't get a reply and that came
+17:36 simply with like a normal embedded link
+17:38 right here. Right? Having a thumbnail
+17:40 preview on your link is going to help
+17:41 your lead preview what they're about to
+17:43 click on, which is going to just make
+17:45 them so much more likely to actually
+17:47 follow through and click on that link.
+17:49 Next off is to never sign off on your
+17:51 text. Texting isn't like emailing. I
+17:55 understand why many people do this,
+17:56 right? They've been conditioned to
+17:58 emailing and always writing their best
+17:59 regards and their little signature at
+18:02 the bottom of their email. But with text
+18:03 messaging, that's just not how people
+18:05 interact, right? You don't sign off on
+18:07 your text when you're texting your
+18:08 friends or your partner. So, don't do
+18:11 that on texting either now. What we want
+18:13 to be doing is introducing oursel only
+18:15 once to our lead right at the very
+18:17 beginning, the first ever text message
+18:19 that you send out to them. And it should
+18:21 be in this specific format. Hey, contact
+18:23 name. This is your name from company
+18:26 name. So, we're going to say, "Hey,
+18:27 Trish, this is Tristan from Fitness
+18:29 Biz." Or, "Hey, Sam, it's Andrea's from
+18:31 Cole Gordon's team." We need to keep
+18:33 this super clean in this specific format
+18:36 because of the following reasons. When
+18:39 you introduce yourself in that specific
+18:41 format, it is very possible that if that
+18:43 lead has an iPhone that your name is
+18:46 going to pop up as a Siri suggested
+18:48 contact, which is going to help your
+18:50 lead know exactly who you are very
+18:52 quickly. It's going to give trust to
+18:54 your number, trust to your name, and
+18:56 trust to your picture. Also, if you've
+18:58 included that during your setup, which
+19:00 we're going to be looking at in just a
+19:01 second, but for now, just know that this
+19:03 adds another layer of credibility to
+19:06 that unknown number that they don't
+19:07 know, right? If they're receiving just
+19:08 an unknown number versus if they're
+19:10 receiving a name and a picture and a
+19:13 number, they're far more likely to think
+19:15 that you're an actual person texting
+19:17 them, which you are, even though we
+19:19 might be automating a lot of this in
+19:21 workflows later. Now, if you have an
+19:23 iPhone, what I suggest you do is take a
+19:25 couple of seconds right now, go to your
+19:26 iPhone settings, go into your iCloud
+19:28 settings, then your personal
+19:30 information, and make sure that you have
+19:31 a full name under your shared name here.
+19:34 And also, I would suggest that you add
+19:36 an actual picture of yourself. This
+19:37 could be a selfie. This could be a
+19:39 professional LinkedIn picture. So that
+19:40 when your contact is shared to your lead
+19:42 via that Siri suggested contact that it
+19:44 will come with your name and your
+19:47 picture. Next off is that we don't want
+19:49 to sound corporate because corporate
+19:51 signals business texting and we are a
+19:53 person texting, right? So everything
+19:55 that you would normally put in an email
+19:57 to sound corporate like I hope you're
+19:59 doing well today, many thanks, best
+20:01 regards, just remove those completely
+20:03 from your text messages. These are never
+20:06 going to be used when you text your
+20:07 friends. So, don't use them when you
+20:09 text your leads. What we want to be
+20:10 doing to not sound corporate is
+20:12 mimicking human style texting. There's a
+20:15 couple of things that you could actually
+20:16 do right now to mimic that, right? You
+20:18 could just, first of all, be yourself.
+20:19 Go check your last conversations and see
+20:21 exactly how you text. Or here are some,
+20:23 you know, couple of examples of things
+20:25 that I purposely do in my text campaigns
+20:28 to make sure that they don't sound
+20:29 corporate and to make sure that they
+20:31 sound like they're coming from a real
+20:32 person. So the first thing that I like
+20:34 to do is to use capital and lowercase
+20:37 letters. So on my phone, what I normally
+20:39 do is I deactivate auto capitalization.
+20:42 That way I have full control on what I
+20:44 want to capitalize and what I don't want
+20:45 to capitalize. And what this could look
+20:47 like in a text is, you know, just right
+20:49 here won't have the capitalization and
+20:51 then we're going to start with a
+20:52 capitalization afterwards. This seems
+20:54 like I made a little mistake in my text,
+20:56 which is so human and clearly is not
+20:59 something that an automation would do,
+21:01 which is exactly what we're trying to
+21:02 achieve by writing good SMS copy. The
+21:05 other thing that you could do is you
+21:06 could use abbreviations. So, anything
+21:08 right now that you abbreviate when you
+21:10 text your friends, use the same
+21:11 abbreviations when you are texting your
+21:13 leads. So, I like to use, you know, for
+21:15 dates, Monday, Monday, Tuesday, wed. Um,
+21:18 and I also like to use thanks, no
+21:20 problem, let me know for your
+21:22 information and stuff like that. Next
+21:23 off is to stop the opt out. No matter
+21:26 how good you are at copywriting, no
+21:29 matter how good you are at trying to
+21:30 hide it, it will always be there. Your
+21:33 lead will always see it. It is always
+21:36 buried at the bottom of the text, right?
+21:37 So their eyes have been subconsciously
+21:40 trained to look right at the bottom of
+21:42 the text to know if it's an automated
+21:44 text or a business text or if it's a
+21:46 real person reaching out. And so by
+21:48 including it, no matter the format of
+21:49 it, no matter the copy of it, you are
+21:51 signifying to your lead that this is
+21:54 probably a business or probably an
+21:56 automation firing off this text. Now,
+21:58 the only way to remove that opt- out
+22:00 language entirely from your text
+22:02 messages, which is something that I'm
+22:03 literally telling you you have to do, if
+22:05 not, people will know that they are
+22:07 automated, is you need to switch your
+22:08 channel from an A2P channel to a P2P
+22:11 channel, like we talked about before,
+22:12 right? A2P is regulating SMS. That's why
+22:16 you have to include the opt- out
+22:17 language. But if you switch to a P2P
+22:20 channel such as iMessage, there are
+22:22 others such as WhatsApp or Telegram or
+22:24 either, you know, a normal Android
+22:26 texting. But because most of your leads
+22:29 are probably on iPhones, it just makes
+22:31 sense here to be texting a P2B channel
+22:33 like iMessage because you're going to
+22:34 reach the bigger majority of them with
+22:36 this channel. So you could see right
+22:38 here that on iMessage, the opt- out
+22:40 language isn't required. And so you
+22:42 could keep that conversational feel to
+22:44 your text and guarantee that they're
+22:46 going to reply to you because they don't
+22:48 think that you are automated or a
+22:49 business texting them. Next is that not
+22:51 everything needs to be a text. And I
+22:54 think that's something that most of us
+22:55 forget when we start texting our leads.
+22:57 We think that everything just has to be
+22:59 a plain text because that's what our
+23:01 current texting software offers us. But
+23:04 you know, why not include some videos in
+23:06 your text campaigns? Put a face to all
+23:08 of those reminders and all of those
+23:09 texts that you're sending out. You could
+23:11 also add things such as a voice message
+23:12 to switch up the format a little. Let
+23:14 them hear your voice before they hop on
+23:16 a call with you. And you could also use
+23:18 gifts and memes here, which are
+23:20 something that are just so relatable to
+23:21 your lead because they probably interact
+23:23 with them on a daily. So sending them
+23:25 one is just going to get them feeling
+23:27 that you're a real human that's reaching
+23:28 out and that you have, you know, some
+23:30 humor in you. Now, great copy is only
+23:32 the first step in getting replies
+23:33 because even the most human sounding
+23:35 messages could feel automated if they
+23:37 hit at the wrong time or they get fired
+23:39 off too aggressively. So, next I need to
+23:41 show you how to time and sequence your
+23:43 text and your follow-ups to maximize
+23:45 your chances of getting a reply. So, the
+23:47 number one rule of SMS timing and
+23:49 sequencing is this. Your messages need
+23:51 to feel like there's a real person
+23:52 that's sitting behind their phone,
+23:54 actually reading the conversation
+23:55 thread, thinking about what to say next,
+23:57 and choosing the right moment to reach
+23:59 out, not just thisuler that's firing off
+24:01 texts off at specific intervals on
+24:03 autopilot. So, to do that, we need to
+24:05 talk about speed to lead, right? This is
+24:07 when a lead opts into your funnel and
+24:09 you want to text them first thing
+24:11 because they're at their highest level
+24:13 of intent. What I suggest doing is
+24:15 texting these people 3 to 5 minutes
+24:17 after opt-in. You could either do this,
+24:19 you know, on your phone manually if
+24:21 you're very good at getting to these
+24:23 leads that quickly or obviously you
+24:24 could have some type of automation
+24:26 that's set up as you can see right here.
+24:28 But the sweet spot is really 3 to 5
+24:29 minutes. Anything over 5 minutes, it's
+24:32 possible that the lead can get
+24:33 distracted, go back to scrolling, find
+24:35 one of your competitors, which is
+24:37 something that, you know, we don't want.
+24:38 We want to get to them as soon as
+24:40 possible. But anything under three
+24:42 minutes is going to make it seem like it
+24:44 was impossible that a real human is the
+24:47 one that's reaching out, right? Because
+24:48 only a system could reach out that fast,
+24:50 see the text, and then shoot another
+24:52 text out. So 3 to 5 minutes is the
+24:54 perfect sweet spot. Then when it comes
+24:57 to replying after getting a reply, so if
+25:00 you're following good SMS copy, like we
+25:01 saw before, you should be expecting a
+25:03 reply. And it wouldn't be wise for you
+25:06 to just reply to that text within 15
+25:08 seconds or have an automation setup to
+25:10 just fire off a text super quickly
+25:12 because once again that could be
+25:14 automated or could come across as being
+25:16 automated. So the sweet spot here is 1
+25:18 to two minutes. That's going to give you
+25:20 the time or in your lead's mind give you
+25:22 the time to read the text. You know,
+25:24 think about what you want to respond,
+25:26 take the time to actually type that out
+25:27 and then send that text message. Next
+25:29 off we have the 5second rule. So,
+25:32 between any text messages that you send,
+25:34 if you are double texting, which is
+25:36 something that we saw before, I
+25:38 absolutely recommend because it mimics
+25:40 human-like texting, I always suggest
+25:42 that you add a 5-second delay between
+25:45 your texts because that makes it seem
+25:47 once again as if you were typing,
+25:49 clicked send, and then started typing
+25:51 again, and then click send again. And
+25:53 the other really nice thing about using
+25:55 a 5-second delay between your text is
+25:57 that you could get typing indicators to
+25:59 pop up on your lead's phone when you
+26:01 text them, depending on the device that
+26:03 you're on or depending on the device
+26:04 that they're on. And seeing typing
+26:06 indicators pop up in the conversation is
+26:09 an instant signal that this has to be
+26:12 coming from a human or from a person,
+26:14 which I'll be showing you later on.
+26:16 Doesn't necessarily mean that because
+26:17 we're going to be able to automate this.
+26:19 But once again, from the lead's
+26:21 perspective, there is no reason to doubt
+26:24 that this is actually you that's sitting
+26:26 at your desk typing out these messages
+26:28 and clicking on send. Next off is to
+26:30 never text on the hour. So what I mean
+26:33 by this is most businesses that I see
+26:35 always send reminders out through their
+26:37 workflows and their automations at on
+26:40 the hour times. You know, they're going
+26:41 to send it 24 hours before the upcoming
+26:44 appointment. They're going to send it 1
+26:46 hour before the upcoming appointment. 15
+26:49 minutes before the upcoming appointment.
+26:50 And that could come across as automated
+26:53 to our lead who's always receiving a
+26:55 text from you at a specific precise
+26:58 perfect time of the day. What I would be
+27:00 doing instead is sending out texts at
+27:02 imperfect times of the day because
+27:04 humans are imperfect. And if we're
+27:06 actually trying to give the impression
+27:08 that we're a person texting, not an
+27:11 automation, not a business texting, you
+27:13 know, we will respond to that text when
+27:15 we see it and when we have the time to
+27:16 respond to it. So that could be at very
+27:18 odd times of the day. So in your
+27:19 workflows, I would always suggest
+27:21 adding, you know, some little delay in
+27:23 your minutes or in your hours to not
+27:25 make it always on a perfect time because
+27:27 in our case, imperfect timing actually
+27:29 ends up being perfect timing. You could
+27:31 actually see it right here on any text
+27:33 message that is sent to your lead, it's
+27:34 actually going to come with a timestamp.
+27:36 And so you could imagine if you're
+27:38 sending five, six, seven follow-ups
+27:40 always at perfect times and it's always
+27:41 showing that perfect time to your lead.
+27:43 Subconsciously, they could be
+27:45 associating you to automation, even
+27:47 though it seems like a very, very subtle
+27:49 detail. Next on our list is as much as
+27:51 possible to try and get three replies
+27:53 back from our lead. And I'm going to
+27:54 show you exactly why in just a second.
+27:56 So, we have to remember that when we
+27:58 first reach out to our lead, the first
+28:00 ever text message that we send out to
+28:01 someone, our user or recipient or a lead
+28:04 will always have the possibility to
+28:06 report us as junk. And it literally
+28:09 takes one or two of these report junks
+28:11 to officially poison our number and kill
+28:14 our deliverability of our SMS campaigns
+28:16 from that phone number moving forward.
+28:17 So at all cost, we either have to make
+28:20 sure that our lead doesn't click that
+28:22 button or even better than that, which
+28:24 I'm going to show you, is make that
+28:26 button disappear from the conversation
+28:28 entirely. So, something that I
+28:30 discovered pretty recently is that if
+28:32 you get three replies back from your
+28:33 lead on your first initial text outreach
+28:35 to them, that report junk button is
+28:38 going to disappear from the conversation
+28:40 for good. So, whether you text them a
+28:42 month from now, 3 months from now, or 2
+28:45 years from now, that report junk button
+28:47 will never be there again, which is just
+28:49 going to save you so many troubles with
+28:51 SMS deliverability in the future. So, as
+28:54 much as possible, what I would try doing
+28:55 is optimizing for that three replies.
+28:58 Optimize for that three replies before
+29:00 moving into your pitch, before moving
+29:02 into asking them to book an appointment
+29:04 or before asking them anything. Right?
+29:07 What we should be concentrating on is
+29:08 building a dialogue, building a
+29:10 conversation, getting three super easy
+29:12 replies from them. You could literally
+29:14 take some of the questions that you have
+29:16 right now on your website or in your
+29:18 lead capture form and just incorporate
+29:20 them into your text conversation. Make
+29:22 it super easy for them to give you three
+29:24 replies, then move on to whatever you
+29:26 want to present, whether that's, you
+29:28 know, to book an appointment or if you
+29:29 have an offer that you're trying to
+29:30 sell, whatever it may be. Next is the
+29:32 four follow-ups rule. So, we have to
+29:34 consider that out of the leads that
+29:35 we're texting, some of them won't reply
+29:37 to us, right? Some of them might ghost
+29:39 us. And what we don't want to be doing
+29:40 is sending them backto backto back
+29:43 follow-ups like this because that's
+29:45 what's going to lead them to click the
+29:46 report junk button or even worse it's
+29:48 going to send a red flag to the carrier
+29:51 to Apple to block your text moving
+29:53 forward. So the rule that we have to
+29:54 respect is that after four texts without
+29:56 a reply you need to switch the channel.
+29:59 You know go email them, go phone call
+30:01 them, go DM them. Do not continue
+30:04 sending out text after four messages
+30:07 without a reply. Next is introducing
+30:09 pattern interrupts to your text message
+30:11 follow-ups whenever a lead is ghosting
+30:14 you. So, we just saw that you should
+30:15 never go over four follow-ups without a
+30:18 reply. But ideally, you don't get there.
+30:21 And I'm going to tell you exactly why.
+30:23 So, we could introduce pattern
+30:25 interrupts such as videos, voice
+30:27 messages, and gifts and memes. All
+30:29 things that we saw beforehand when we
+30:31 looked at copy that are going to get
+30:33 your lead stopping the scroll and
+30:35 actually looking at your messages and
+30:36 engaging with you. What we have to
+30:38 consider is that not all of our leads
+30:40 are the same, right? Some people might
+30:42 prefer a text to consume information.
+30:44 Some people might prefer a video. Some
+30:46 people might prefer an image or a voice
+30:48 message. And so, as much as possible, if
+30:50 we're able to accommodate all those
+30:52 different types of formats in our
+30:54 follow-ups, the better success we're
+30:56 going to see in getting a reply back
+30:57 from our leads. Also, a little pro tip
+30:59 here for when your lead is not
+31:01 responding to your text. What I do
+31:03 suggest doing is bumping your last
+31:05 question rather than double texting the
+31:07 lead or asking them some new question
+31:09 because then you're just stacking on
+31:11 question after question after question
+31:13 which is going to make it very hard for
+31:14 the lead to know what to respond to you.
+31:16 So bump your last question exactly like
+31:18 you see here and that should get you a
+31:20 reply. So now you've got the copy, the
+31:22 timing and the sequencing principles
+31:24 that make your text feel human at scale.
+31:26 What's missing are the actual flows and
+31:27 the systems that your business should be
+31:29 running on SMS to book more
+31:31 appointments, get leads to show up to
+31:33 them, and convert them to sales. Every
+31:35 business needs these four SMS flows
+31:37 built out. Doesn't matter what you sell
+31:39 or what industry you're in. So, you're
+31:40 going to have an opt-in speed to lead
+31:42 flow, a booking confirmation flow, a
+31:44 showup flow, and a post call follow-up
+31:46 flow. Together, they cover the complete
+31:48 life cycle of a lead from the moment
+31:50 they first opt in to closing. So, the
+31:52 first flow that we're going to check out
+31:54 is going to be our opt-in speed to lead
+31:55 flow. And the goal of this flow is to
+31:57 get a text sent out to our lead as soon
+31:59 as they opt in and get a conversation
+32:01 going with them. So, what exactly is
+32:03 going to trigger this flow? It's going
+32:04 to be any type of optin. This could be a
+32:07 website opt-in. It could be an ad optin,
+32:10 a VSSL optin, or just any other type of
+32:13 opt-in funnel that you might be running
+32:14 inside of your business. Right now,
+32:16 before sending out our first text to our
+32:18 lead, we are going to be waiting exactly
+32:20 3 minutes. And we saw this in the timing
+32:22 and sequencing chapter of this video
+32:25 where three to five minutes here is the
+32:27 perfect speed to lead during our opt-in
+32:29 flow. And the reason why is that
+32:31 anywhere over five minutes, you know, we
+32:33 might lose our lead, right? They're no
+32:35 longer at their highest level of intent.
+32:37 They might go back to scrolling. They
+32:38 might find a competitor and that
+32:40 wouldn't be good. And anything under 3
+32:42 minutes could come across as an
+32:44 automated system, right? It's nearly
+32:46 impossible for a human to get that
+32:48 opt-in and to text a lead under just a
+32:51 couple of minutes. So that's why 3
+32:53 minutes here is my perfect sweet spot.
+32:55 Then the first text message that we send
+32:57 out to our lead is going to be separated
+32:59 into two text. The first text is going
+33:02 to be an introduction and the second
+33:03 text is going to be our low friction
+33:05 question. In our introduction, what
+33:07 we're doing here is we are following the
+33:09 exact format that we saw before. You are
+33:12 simply introducing yourself and your
+33:14 business. That is it. So you're going to
+33:16 say, "Hey, contact first name." It's
+33:18 your name with your company name. And
+33:20 the reason that you have to follow this
+33:22 exact format on your first initial
+33:24 outreach to a lead is because this could
+33:26 get picked up by Siri suggested contact.
+33:29 So Siri could suggest, you know, your
+33:31 name and your profile picture to that
+33:33 lead along with your business phone
+33:35 number, which is just going to help so
+33:37 much in terms of your lead trusting you
+33:39 and thinking that you are a human
+33:41 reaching out. even though we know that
+33:42 this is an automation that is actually
+33:44 running in the background. Then you're
+33:46 going to wait 5 seconds for those little
+33:48 typing indicators to pop up on your
+33:50 lead's phone. And message number two is
+33:52 going to be our low friction question
+33:53 that is basically going to guarantee a
+33:56 reply from our lead. So we're going to
+33:57 say, "Just looked over your form. What
+33:59 made you want to check this out?" Right?
+34:00 Our lead just saw an ad of ours. They
+34:03 just got onto our website. They clearly
+34:05 have interest for what we have to offer
+34:07 or the service that we're about to give
+34:08 them. So asking them here, "What made
+34:10 you want to check this out?" is super
+34:11 low friction. They could answer to us,
+34:13 you know, in less than one line and
+34:15 that's what's going to open up the
+34:16 dialogue with us and allow us to
+34:18 continue the conversation with that
+34:19 lead. So once you send that text, what
+34:22 you're going to then do is you're going
+34:23 to wait for a reply for 45 minutes.
+34:25 You're going to give that lead 45
+34:27 minutes to reply to you. If they did end
+34:30 up replying to you, we're going to send
+34:32 ourselves an internal Slack notification
+34:34 here. And this is basically just going
+34:36 to ping us internally to say, "Hey, this
+34:38 lead responded. This is your opportunity
+34:40 to go into the conversation and nurture
+34:42 the conversation even more. So, ask
+34:45 follow-up questions to that lead and
+34:46 start developing a relationship with
+34:48 that lead before you know the next step
+34:50 in your funnel, whether that's booking
+34:52 something or whether that's, you know,
+34:54 selling them something. If they didn't
+34:56 respond to that first text within 45
+34:59 minutes, we are going to tag them as
+35:01 someone that opted in and never replied.
+35:04 And this is something that we're going
+35:05 to see a little later in this video. The
+35:07 re-engagement flow that we're going to
+35:09 be building for leads that opted in and
+35:11 never replied to our text. So, a series
+35:13 of follow-ups that are going to go out
+35:15 to this lead to make sure that they end
+35:17 up replying to us because, well, we paid
+35:20 for these leads, right? So, the worst
+35:21 thing that could happen is for us just
+35:23 to lose them and have paid top dollar to
+35:25 get them into our funnel and for them to
+35:27 never have replied to us. All right, so
+35:29 the next flow that we're going to check
+35:30 out is going to be our booking
+35:32 confirmation flow. And the goal of this
+35:34 flow is to get a text sent out to our
+35:37 lead as soon as they book an appointment
+35:38 with us. Whether that is, you know, an
+35:40 in-person event, whether that's a
+35:42 webinar, whether that's a demo call, or
+35:45 any other type of appointment that you
+35:46 might be running inside of your business
+35:48 right now. So, how exactly is this flow
+35:50 going to get triggered? It is going to
+35:52 be an appointment booked. So, this could
+35:54 be, you know, through any type of
+35:55 scheduling software that you might be
+35:57 using, whether that's eyeclosed or
+35:58 calendarly or even Google calendar. What
+36:01 we're going to do exactly like the
+36:02 opt-in flow that we saw before is we are
+36:04 going to wait 3 minutes before sending
+36:06 out our first text and then we're going
+36:08 to look at the copy of our first text.
+36:10 So, we're going to be using the same
+36:12 exact introduction as we did in the
+36:14 opt-in flow because we never reached out
+36:16 to this lead before, right? This is the
+36:18 first time they're booking an
+36:19 appointment with us. So, we want to
+36:20 introduce ourselves in this specific
+36:22 format and get picked up by Siri
+36:24 suggested contact. Wait 5 seconds for
+36:26 those typing indicators. And then our
+36:28 copy of our second text is once again a
+36:30 low friction question that's going to
+36:31 guarantee a reply. So we're going to
+36:32 say, "Just got your call booked in. Is
+36:34 this a good place to send some action
+36:36 items before we meet?" Right? This is a
+36:39 very, very low friction question. We're
+36:41 almost guaranteeing that the lead is
+36:43 going to reply yes or yeah, because they
+36:45 showed some interest to booking and so
+36:47 they at least, you know, want to know
+36:48 what they're going to be talking about
+36:49 on that call that's coming up. The other
+36:51 thing that I want you to notice in the
+36:52 copy of this message is first of all I
+36:54 didn't capitalize you know the little
+36:56 just that's here and we saw this in our
+36:58 copy chapter of this video making the
+37:01 small little mistakes here are just so
+37:03 human right it looks like I was typing I
+37:06 made a typo and then I corrected myself
+37:09 afterwards by adding a capital letter
+37:11 here these are really really tiny
+37:13 details but I'm telling you they stack
+37:15 on to each other for our lead from our
+37:17 lead's perspective it's very tough for
+37:19 them to know that this is automated
+37:20 because of those tiny little details
+37:22 that I'm adding to my copy. Now, after
+37:24 we send those two texts out, we are then
+37:26 going to wait for a reply exactly like
+37:28 the opt-in funnel for 45 minutes. If the
+37:31 lead does end up replying to our text,
+37:33 we are going to send oursel an internal
+37:35 Slack notification so that we can jump
+37:38 into the conversation and start
+37:40 nurturing the relationship. Right? This
+37:42 is an opportunity for you before the
+37:44 call to learn more about the lead, to
+37:46 get to know about their problems, to get
+37:48 to know about their pain points, to get
+37:50 to know about their fears about going
+37:52 forward with your business. And these
+37:53 are all things that are going to help
+37:54 you so much pre-all, right? Because then
+37:57 you get to the call ready. You get to
+37:59 the call with all the information that
+38:01 you need to ideally be able to close on
+38:03 that call because you did all the work
+38:05 beforehand. So internal Slack
+38:07 notification to get into that
+38:08 conversation. Start talking to that lead
+38:10 manually because there's so much that
+38:13 automation could do, right? Sales is a
+38:15 relationship game. It is important for
+38:17 you to not automate everything here and
+38:19 for you to show up and actually talk to
+38:21 the leads. What we're also going to do
+38:23 on this booking confirmation flow, and
+38:24 that makes it slightly different from
+38:26 our opt-in flow that we saw before, is
+38:29 once we've sent out that first text, we
+38:31 got that reply, we then sent that
+38:33 internal Slack notification, we're going
+38:34 to wait 2 minutes here before sending
+38:36 another text. And we are waiting exactly
+38:39 2 minutes here because we want to make
+38:40 it seem like we received that text from
+38:42 our lead. We took the time to read it
+38:44 and then to type out our answer and then
+38:46 clicked on send. And 2 minutes is really
+38:49 the sweet spot for that. The second text
+38:51 that we're going to be sending out is
+38:52 exactly this. We're going to say, "All
+38:53 right, I'll send those over in a
+38:55 second." And that's actually true
+38:57 because you're going to then receive
+38:58 that Slack notification, go to the
+39:00 conversation, and send those action
+39:01 items over. Whether that's like a video
+39:03 that they have to check out before the
+39:04 call or go accept the calendar
+39:07 invitation on your Gmail, whatever your
+39:09 action items are. We're then going to
+39:10 wait 5 seconds and we're going to get
+39:12 another question going to start learning
+39:15 about the lead. So, we're going to say,
+39:16 "By the way, what kind of business do
+39:18 you have?" Right? Everyone loves to talk
+39:21 about their business and so by asking
+39:23 this type of question, we are just
+39:25 keeping the lead on their phone until we
+39:27 get there and until we reply to them.
+39:29 Now, you're also going to notice that if
+39:31 the lead didn't reply within 45 minutes,
+39:33 we are going to assign a tag to them.
+39:35 And this tag once again is going to be
+39:36 super important for a re-engagement
+39:39 campaigns that we're going to be looking
+39:40 at a little later in this video. So, for
+39:42 now, just know that we assigned a tag
+39:44 that says, "Hey, they booked an
+39:45 appointment and never replied." So, the
+39:47 next flow that we're going to check out
+39:48 is going to be our show up flow. And the
+39:51 goal of this flow is basically
+39:53 guaranteeing that your lead is going to
+39:55 show up to your appointment, whether
+39:57 that's an in-person appointment, a
+39:58 webinar, or a demo call, or any other
+40:01 type of call that you might be running
+40:02 inside of your business. And we are
+40:04 going to be sending a series of texts,
+40:06 of videos, of voice messages, and of
+40:09 gifts to guarantee that that lead is
+40:12 committing to show up and will show up
+40:14 to your call. So, what exactly is going
+40:16 to trigger this specific flow? It's
+40:17 going to be an appointment confirmed for
+40:19 any type of call that you might be
+40:20 running inside of your business. And
+40:22 then we're going to delay our first text
+40:23 message sent to our lead by exactly 22.3
+40:27 hours before the event start time. And
+40:29 this is very intentional here. We saw
+40:32 this in the timing and sequencing. We
+40:34 don't want to be texting on the hour all
+40:36 the time because that could come across
+40:37 as automated. So 22.3 hour here is
+40:41 imperfect. But for our scenario here,
+40:43 it's actually perfect timing, right?
+40:45 Because it makes it very hard for our
+40:47 lead to know if this is an automation
+40:49 running or if this is actually me on my
+40:51 phone texting whenever I want to send
+40:52 them a reminder. So 22.3 hours before
+40:55 the call, we are then going to send them
+40:57 a video. Not a plain text, a video. And
+41:00 we're going to take a look at what that
+41:01 video is. Hey, what's going on? just
+41:03 sending over this little video to share
+41:05 what we're going to be talking about on
+41:07 our call tomorrow. We're going to be
+41:08 talking about X, Y, and Zed. And if you
+41:11 have any questions before that or any
+41:13 topics that you want to cover tomorrow
+41:15 when we talk, just text me right here
+41:18 and yeah, I'll let you know. So, this
+41:20 should be a super loweffort type of
+41:22 video to make. Pick up your phone,
+41:23 [snorts] put it in selfie video, just
+41:25 say hi to your lead, talk about what
+41:27 you're going to be covering on your
+41:29 upcoming call. And this should not be
+41:31 scripted at all. This should just be you
+41:33 showing up in front of your camera and
+41:35 doing quick little video and sending
+41:37 that off to your lead. What this is
+41:38 going to do to your lead is first of
+41:40 all, we're switching up the format,
+41:42 right? We're not always sending plain
+41:43 text. We're sending a video which people
+41:45 are much more likely to interact with.
+41:47 And the second thing that we're doing is
+41:48 we're finally putting a face to all of
+41:50 these reminders. And that's going to
+41:52 help so much in building trust with your
+41:54 lead because now they know what you look
+41:56 like and that makes them much more
+41:57 comfortable then to show up to the call
+41:59 that you have booked with them. So once
+42:01 we then sent that video, our second
+42:03 reminder that's going to go out is going
+42:05 to happen 43 minutes before the call.
+42:07 Not 1 hour before the call, 43 minutes
+42:10 in perfect timing all the time. And what
+42:12 we're going to be sending here is a
+42:14 voice memo this time that we could
+42:16 listen to right here. Hey, what's up?
+42:18 We've got our call coming up in just
+42:19 about 45 minutes from now. What I'm
+42:21 going to do is I'm going to text you the
+42:23 Zoom link that you could join either
+42:24 from your computer or directly from your
+42:26 phone. And if you have any problems
+42:28 joining it, just text me back and we'll
+42:30 get that sorted. See you there. So, once
+42:32 again here, just saying a little hello
+42:34 to our lead. Now, we're putting a voice
+42:36 to all of those reminders. And really,
+42:38 we're just switching up the format
+42:40 constantly, right? Not all of our leads
+42:42 are the same. They interact and engage
+42:45 with different types of formats. Some
+42:46 like video, some like plain text, some
+42:48 people like voice memos. So, we're just
+42:50 trying to accommodate everyone by
+42:52 sending all of these different types of
+42:53 formats. So that voice memo 43 minutes
+42:56 before the call. Now after we send that
+42:58 voice memo, we're going to send another
+43:00 reminder six minutes before the event
+43:02 start time. And this time it's going to
+43:03 be plain text. So we're going to say,
+43:05 "Hey, I'm in the call. Here's the Zoom
+43:07 link to join. Wait 5 seconds and then
+43:09 send the Zoom link." Now, it's so
+43:11 important here to send the Zoom link
+43:13 directly in the text conversation
+43:15 because we are making it nearly
+43:17 impossible for a lead not to join,
+43:19 right? It happens so often that people
+43:22 are ready for calls, their computer
+43:23 breaks, their Zoom has to update, or
+43:26 they're just not sitting at their
+43:27 computer, so they decide, hey, I'm not
+43:29 going to join this call. By sending the
+43:30 Zoom link here, you are just telling
+43:32 your lead, hey, if something happens or
+43:35 if you're not able to join, don't worry
+43:37 about it. I just want to talk to you.
+43:38 So, get onto the Zoom call and make it
+43:40 super easy for them to do that by
+43:42 sending the Zoom link directly to their
+43:44 phone because, you know, their phone
+43:45 most likely is working. The final
+43:47 reminder that we're going to be sending
+43:48 out is going to be exactly one minute
+43:50 before the call. This is possible that
+43:52 your lead is already in the call. Um,
+43:54 and that's totally fine if this gets
+43:56 triggered. But if they're not in the
+43:58 call yet, they will be receiving a gift
+44:00 and it's going to say it's go time. This
+44:02 is just to show a little bit of
+44:03 personality, show that you are excited
+44:05 for the call, and this is going to get
+44:07 them hyped to to join you on that call.
+44:10 What we're also going to add to that
+44:11 gift is just a little text message right
+44:13 after that's going to say, "Text me here
+44:14 if you have any problems joining the
+44:16 call." Once again, just reminding the
+44:18 lead that, hey, we're here. Just text
+44:20 me. Just call me if you're having any
+44:21 problems or if you can't show up because
+44:24 that way we can note that down and I
+44:26 could reschedu or um get you onto the
+44:29 call if you're having troubles with
+44:30 joining the Zoom link. So, that is
+44:32 pretty much it in terms of reminders
+44:34 that we'll be sending out for the show
+44:35 up flow. You'll also notice that I have
+44:37 a branch down here asking if the lead
+44:40 showed or didn't show. So, what this is
+44:42 going to do, it's going to allow us to
+44:44 tag our contacts accordingly. If they
+44:46 did show up to the call, I always like
+44:47 to assign my contacts as being someone
+44:49 that booked an appointment and showed.
+44:51 And then on this side of the branch, if
+44:53 they didn't show, that they appointment
+44:55 booked and no showed. And once again, we
+44:58 are going to be looking at the
+44:59 re-engagement flow for people who booked
+45:01 an appointment and didn't show later in
+45:03 this video. All right. So, the next flow
+45:05 that we're going to check out is our
+45:06 post call follow-up flow. And the goal
+45:08 of this flow is really simple. We want
+45:10 to keep a dialogue between us and the
+45:13 lead even after the appointment to make
+45:16 sure that they end up closing with our
+45:18 business. So, what's going to trigger
+45:20 this specific flow? It's going to be an
+45:22 appointment completed. So, the second
+45:23 that your appointment is done, it's then
+45:26 going to trigger this exact workflow.
+45:28 Then we're going to wait exactly 3
+45:30 minutes like we did in all the other
+45:32 flows before texting that lead. So as
+45:34 soon as their call finishes, 3 minutes
+45:36 later they're going to be receiving this
+45:38 specific text. So what I like to send
+45:39 them is a little cheers emoji just
+45:41 celebrating the fact that we had that
+45:43 call. Waiting 5 seconds and then we're
+45:45 going to ask them this specific
+45:47 question. We're going to say, "Where did
+45:48 we land for you after all that?" And
+45:51 this question is one that I really like
+45:53 asking, especially via text message,
+45:55 because it's going to allow the lead to
+45:58 self-reflect and verbalize their
+46:01 position on your offer or on whatever
+46:04 you just presented to them. And that's
+46:06 super important here because we want
+46:08 this to be sent right after the call so
+46:10 that we always stay top of mind, right?
+46:12 We want to keep a conversation going
+46:14 with our lead the second that the call
+46:16 finishes because they might be in a very
+46:18 excited state right now and we want them
+46:20 to be able to, you know, verbalize that
+46:23 to us. And also on the flip side, if
+46:25 they're not in an excited state, if
+46:27 there's something that didn't go right
+46:28 on that call, if they have any fears
+46:30 that they want to share with you, this
+46:31 would be the opportunity for them to do
+46:33 that. And that's something that we do
+46:35 want them doing because we want to be
+46:37 able to then go back in and potentially,
+46:39 you know, continue the conversation,
+46:41 alleviate their fears, and yeah, just do
+46:43 your job in ultimately closing them.
+46:45 We're then going to wait for a reply for
+46:47 45 minutes. And then depending on if
+46:49 they replied or not, if they did reply,
+46:51 we're going to send ourselves an
+46:52 internal Slack notification to go back
+46:54 into that conversation and keep a
+46:56 dialogue going with that lead. Right? We
+46:58 just mentioned that the lead might be
+47:00 super excited or not so excited about
+47:02 the call that just happened. And this is
+47:04 your opportunity to dive deep into the
+47:06 exact emotion or the self-reflection
+47:08 that the lead is having right there.
+47:10 Oftentimes, you'll be receiving
+47:11 questions after that demo call or after
+47:13 that appointment. So, this is your
+47:15 opportunity to go in there and to answer
+47:17 those follow-up questions. Something
+47:18 that I like to do very often is in those
+47:20 follow-ups, if the lead asks me a
+47:22 question to reply with like a video
+47:24 demonstration, I'll pick up my phone,
+47:26 fill my screen, walk them through a
+47:27 specific feature or walk them through a
+47:29 dashboard or whatever they're asking.
+47:31 So, that's something that I highly
+47:32 suggest you do, too, is just go in and
+47:34 make sure that you are talking to that
+47:36 lead up until the point where they are
+47:37 closing. If they didn't reply to your
+47:39 text within 45 minutes, we are then
+47:41 going to assign them as someone who
+47:42 showed and is now ghosting us. And we
+47:45 are going to have a re-engagement lead
+47:46 that we're going to be checking out in
+47:48 just a couple of minutes, which is going
+47:49 to walk you through exactly how to bring
+47:51 those people back into your funnel,
+47:53 bring them back ultimately closing with
+47:56 your business. So, now that we're
+47:57 getting leads to show up and are
+47:58 converting them into sales, there's
+48:00 still one more hidden gold mine that 99%
+48:02 of businesses could tap into instantly
+48:04 to add more revenue to their bottom
+48:06 line. So, let me show you what that is
+48:08 and how to build it. Right now, sitting
+48:10 in your CRM, there are hundreds, maybe
+48:11 even thousands of leads who have raised
+48:13 their hand at some point, right? They
+48:15 opted in. Maybe they even booked a call.
+48:17 Maybe they had a conversation with your
+48:19 team and then they went cold. They just
+48:21 ghosted you. So, you moved on. You wrote
+48:23 them off and you assumed that they just
+48:25 weren't interested. Those leads aren't
+48:27 dead, though. They're just dormant. And
+48:29 the difference matters because dead
+48:30 means gone forever. And dormant means
+48:33 that they just need the right message at
+48:35 the right moment to get them back into
+48:37 your funnel. So, here's what most
+48:38 businesses do when they try to wake up
+48:39 those leads. They send a mass email
+48:42 blast to the whole cold list or they
+48:44 fire off a generic Greenbubble SMS that
+48:46 reads like an obvious re-engagement
+48:48 campaign and well, it gets ghosted again
+48:50 or worse, it gets flagged as spam.
+48:52 Because a cold lead who hasn't heard
+48:54 from you in 3 months can smell a
+48:55 broadcast from a mile away. The reason
+48:57 re-engagement works when it's done right
+48:59 is because it doesn't feel like a
+49:00 re-engagement. It feels like a genuine
+49:02 personal check-in from a person who
+49:04 remembered them. That's the entire game.
+49:06 And when you get that right, the results
+49:08 speak for themselves. Let me just show
+49:09 you a real example here in my CRM. So,
+49:12 what we're looking at here is an
+49:13 opportunity where a lead actually opted
+49:15 in to our website on February 24th and
+49:19 was sent the speed tole opt-in flow to
+49:21 get a conversation going with that lead
+49:23 as you could see right here. And we
+49:24 actually got that lead after having a
+49:26 conversation with them to book a demo
+49:28 call with us. They didn't show up to
+49:30 that demo call as you could see right
+49:31 here. The outcome of that call was a
+49:33 no-show. And this is where most people
+49:35 would just abandon. They would write
+49:36 this lead off. But that's not what we
+49:38 did here. We sent them a series of
+49:41 re-engagement follow-ups, right? And I'm
+49:43 just going to show you quickly what
+49:44 re-engagement done right actually looks
+49:47 like. It is tons of follow-ups. We're
+49:49 talking videos, plain text, voice
+49:51 messages, calls, links that are sent,
+49:53 gifts up until the point where you are
+49:56 actually closing this lead. And that's
+49:58 exactly what happened in this case. If
+50:00 we scroll up top here, we're going to
+50:01 see that this lead closed for exactly
+50:04 $1,000 MRR. That's a $1,000 MR added to
+50:09 the business from a lead that most
+50:10 people would have written off after that
+50:12 first cancellation. That's what a
+50:14 perfectly timed re-engagement sequence
+50:15 looks like in practice. So now, before
+50:17 we build the flow, there's one thing
+50:19 that you need to understand. And how you
+50:21 re-engage them should reflect that.
+50:23 Someone who opted in and ghosted you is
+50:26 totally different from someone who
+50:27 showed up to a call and ghosted you
+50:29 during the closing process. And each one
+50:31 of those requires a slightly different
+50:33 angle because the reason they went cold
+50:35 is totally different. When you segment
+50:37 your list that way, your re-engagement
+50:39 hits so much harder than a
+50:40 one-sizefits-all blast. So, let me show
+50:42 you exactly how to build this. The
+50:44 sequence, the segmentation, and the
+50:46 messages that actually bring people
+50:47 back. So, the first re-engagement flow
+50:49 that we're going to look at is the
+50:50 scenario when a lead opted into our
+50:53 funnel and never replied to us. That's
+50:55 when we assign them the tag in this flow
+50:57 right here. Our re-engagement flow is
+50:59 going to get triggered when that tag is
+51:01 assigned. And the first text that we're
+51:03 going to send our lead after 45 minutes
+51:05 of not getting a response, right? That's
+51:07 exactly what we'd put in the opt-in
+51:09 speed to lead flow. So 45 minutes, if we
+51:11 don't get a response, we're going to be
+51:12 sending this text and we're going to be
+51:14 saying this is contact first name. As an
+51:16 example, we would say this is John,
+51:19 right? And funny enough, this works
+51:21 really quite well. This actually gets a
+51:23 ton of replies based off of the data
+51:25 that I have. And the reason why is that
+51:27 you are calling out their name. So they
+51:29 might have missed your other follow-ups.
+51:31 When they do receive this is John right
+51:33 on their lock screen, they will click on
+51:35 it and they will then go see the
+51:37 previous messages that you had sent them
+51:40 which are these ones right here. You
+51:41 know what made you want to check this
+51:43 out? So when they see their name just
+51:45 point it out on their lock screen,
+51:47 they're much more likely to respond.
+51:48 Once we send that follow-up text, what
+51:50 we're going to then be doing is waiting
+51:52 2 hours for another reply. If that lead
+51:54 does reply within those two hours,
+51:56 internal Slack notification to oursel to
+51:58 go back into the conversation and get
+52:00 them to the next stage of the funnel.
+52:02 So, keep having a conversation with
+52:03 them, keep following up manually. And if
+52:06 they don't reply after 2 hours, we're
+52:08 going to be sending them a bump here,
+52:10 not a new low friction question because
+52:12 then we would just be stacking question
+52:14 after question after question and making
+52:16 it impossible for our lead to know which
+52:18 question to answer to. Instead, we are
+52:20 going to bump our last question, which
+52:23 is exactly this one. And the bump
+52:25 actually works. We saw this in the
+52:27 timing and sequencing portion of this
+52:29 video, right? It's a pattern interrupt.
+52:32 It is so casual for a person to send the
+52:35 bump. And so, at this point, the lead
+52:37 will pretty much know that we are not a
+52:39 business or we are not a automation
+52:41 sending this because no automation would
+52:43 ever send a bump to a lead. So, this
+52:45 works super well. send the bump and then
+52:47 we are going to wait for another reply
+52:49 for 24 hours. This time if we get a
+52:52 reply internal Slack notification, if
+52:54 they didn't reply after 24 hours, we are
+52:57 going to be sending them this exact
+52:58 text, which is our final attempt at
+53:00 getting our lead back into the funnel.
+53:02 We are going to say, "Must not be
+53:03 contact first names number. My bad." So,
+53:06 it's going to be must not be John's
+53:08 number. My bad. This is our final
+53:10 attempt at trying to get the lead to
+53:12 realize that, hey, we are actually
+53:14 trying to get your attention. And if
+53:16 this is not your number, if this is not
+53:17 your name, I'm so sorry about that.
+53:19 You'll notice that we pretty much
+53:21 stopped after four to five follow-ups
+53:23 here because that's the rule. If we
+53:24 didn't get a reply after four to five
+53:26 follow-ups, this is our sign that we
+53:28 absolutely have to stop following up via
+53:31 text message and switch to another
+53:33 channel, whether that be emailing,
+53:35 whether that be calling, because now we
+53:36 are now jeopardizing two things. First,
+53:39 our number being blocked by carriers
+53:40 because they're seeing too many
+53:41 follow-ups without a response. And
+53:43 second, are a lead just simply tapping
+53:45 that report junk button because they're
+53:47 tired of hearing from you. All right, so
+53:49 the second re-engagement flow that we're
+53:50 going to take a look at is the scenario
+53:52 where a lead booked an appointment but
+53:54 didn't show to an appointment even
+53:56 though we sent them all this series of
+53:58 texts, gifts, and voice messages and
+54:00 videos that you saw before. What exactly
+54:02 is going to trigger that exact
+54:04 re-engagement flow? It's going to be the
+54:06 tagged appointment booked plus no-show
+54:08 tag. And the first text that we're going
+54:10 to send to that lead is this. Hey,
+54:12 contact first name. just missed you on
+54:14 our call. We're gonna wait five seconds
+54:15 and then we're gonna say, "I could send
+54:17 you a rescheduling link here." Yeah. So,
+54:19 what we're doing here is we're actually
+54:21 going back to our low friction question
+54:24 because we want to guarantee that we get
+54:26 a conversation restarted with our lead,
+54:28 right? This is a lead that we already
+54:30 texted beforehand. They probably replied
+54:32 to us because they booked an
+54:34 appointment, but now we just want to get
+54:35 a dialogue back with the lead because at
+54:38 this point, we don't know what happened
+54:39 with the lead. They maybe are not
+54:41 interested anymore. They maybe forgot
+54:42 about the call. Maybe they even found a
+54:44 competitor. And so our goal here is
+54:46 going back to that mental model of okay,
+54:48 I need to understand what happened. And
+54:50 the only way to understand what happened
+54:52 is to get a dialogue going with your
+54:54 lead. If you don't have a conversation
+54:56 going and you're not getting replies,
+54:58 you will never reach that lead and know
+54:59 what happened. So low friction question.
+55:01 Ask them this. This should pretty much
+55:03 guarantee a reply at that point. If they
+55:05 do reply to your text within 2 hours,
+55:08 we're going to wait for that reply for 2
+55:09 hours. if they do reply to that text
+55:11 internal Slack notification to get back
+55:13 into that call and start texting that
+55:15 lead. And if they also do reply within
+55:18 that first two hours, what we're going
+55:20 to do is wait 2 minutes here once again
+55:22 because we want to send another text.
+55:24 So, we're waiting 2 minutes before
+55:25 sending another text out. And we're
+55:27 going to say grab a time here and send
+55:29 the event booking link directly in the
+55:32 conversation. Notice that the event
+55:35 booking link here is going to come with
+55:36 a thumbnail preview. So, just make sure
+55:38 that whenever you set up your Calendarly
+55:40 link or your eye closed link or your
+55:42 Google calendar link to test this out
+55:44 first to make sure that it comes with a
+55:46 nice preview of what the lead is about
+55:48 to click on, which is going to make them
+55:49 so much more likely to click on that
+55:51 link and get scheduled with you again.
+55:53 Now, if they don't reply within that
+55:56 first two hours, we're going to be
+55:57 sending them another bump, exactly like
+55:59 what we did in our flow before, which is
+56:02 bumping this last question up here. So,
+56:04 we're not introducing a new question. We
+56:06 are simply bumping, not double texting.
+56:09 Then we are going to wait 24 hours for a
+56:12 reply. If the lead does reply to our
+56:15 text, we're going to jump back to the
+56:16 internal notification, send them the
+56:18 booking link, and if they don't reply to
+56:21 that text within 24 hours in that bump,
+56:23 we're going to send them a gift. And
+56:26 this is literally my favorite gift to
+56:28 use. We're going to say, "Are you
+56:30 ghosting me?" This gift works so well
+56:33 because it gives some humor to the
+56:35 conversation, right? Everyone has been
+56:37 ghosted before. You are now putting a
+56:39 funny image of a ghost into the
+56:42 conversation. This is a clear pattern
+56:44 interrupt. This is what's going to make
+56:45 your lead stop the scroll, actually look
+56:48 at your message, actually reply to you.
+56:49 So, send this and you'll probably get a
+56:51 haha, I'm so sorry, let me rebook. We're
+56:53 going to wait for a reply for 3 days.
+56:55 Now, if they do reply to that text, once
+56:57 again, we're going to jump them to the
+56:59 internal Slack notification and to the
+57:01 booking link that is being sent. And if
+57:03 they don't reply to you, this is our
+57:04 final attempt at getting the lead to
+57:07 reply. We're going to say, I'll let you
+57:08 grab a time here once you are ready.
+57:10 Wait 5 seconds and send them the event
+57:13 booking link. So, at this point, it is
+57:15 totally okay to send them the link even
+57:18 though they didn't respond to us. The
+57:20 reason why is that we've already had a
+57:22 conversation thread with this lead,
+57:23 right? They might be on vacation. They
+57:26 might be somewhere where they can't
+57:27 respond to us. And so we'll just say,
+57:29 "Hey, take the time that you need and
+57:32 we'll be here once you are ready." Now,
+57:34 once again, you'll notice that we are
+57:36 following our rule of four follow-ups
+57:38 without a reply. And that is so
+57:40 important here to protect our phone
+57:42 number and protect our deliverability on
+57:45 the long term. So, the next
+57:46 re-engagement flow that we're going to
+57:48 look at is the scenario where a lead
+57:50 showed up to an appointment but ended up
+57:52 ghosting us during the closing process.
+57:55 Right? Just as a reminder, what we had
+57:57 sent here is we asked, "Where did we
+57:59 land for you after all of that?" Which
+58:00 had the goal of getting the lead to
+58:02 self-reflect and to verbalize their
+58:04 position. Now, if they didn't respond to
+58:06 that, it's going to trigger this
+58:08 specific re-engagement flow, which is
+58:10 triggered by the tag added being
+58:12 appointment showed but ghosted us. What
+58:14 we're going to send as the first text is
+58:16 a simple bump. We are bumping the
+58:18 question right here. Where did we land
+58:21 for you? After all of that, what we're
+58:23 then going to do is wait for a reply for
+58:25 24 hours this time. After an
+58:27 appointment, a lead sometimes has to
+58:29 take the time to review the call, go
+58:31 talk to their partner, go talk to their
+58:33 spouse, whatever it has to be. So, we're
+58:35 giving them enough time to do that. And
+58:37 if they do reply and within 24 hours,
+58:39 we're sending oursel an internal
+58:41 notification to go back into that
+58:43 conversation and keep talking. If they
+58:45 didn't respond within 24 hours, we are
+58:47 going to send them a gift. And this gift
+58:49 here is going to be a you there type of
+58:52 gift. Add a little bit of humor to your
+58:55 text message campaigns. And that's just
+58:57 going to help so much in reminding your
+58:59 lead that you're a real person behind
+59:01 these text messages who's actually
+59:03 interested in helping solving their
+59:05 problems and pointing them in the right
+59:07 direction. So add this gift works
+59:09 really, really well. We are then going
+59:11 to wait 3 days this time before sending
+59:14 our next follow-up. So if they replied,
+59:16 internal Slack notification, get back
+59:17 into the conversation. But then if they
+59:19 didn't reply within 3 days, we're going
+59:21 to be sending them a voice message right
+59:23 here. Hey, what's up? So, how you
+59:25 feeling about our last call? So, once
+59:27 again, we're just reiterating the
+59:29 question about, you know, how are they
+59:30 feeling about the call? We want to
+59:32 understand why aren't they responding to
+59:34 us? Is it because of, you know, pricing
+59:37 issues? Is it your offer that they don't
+59:39 like? Is it that they haven't talked to
+59:41 their partner yet? We just want to know
+59:42 and we want to have as much information
+59:44 as possible so that we know what to do
+59:46 next. Then, if they did reply after 7
+59:48 days, here internal Slack notification
+59:50 for you to get back into the
+59:51 conversation. If they didn't reply after
+59:54 7 days, this is going to be our final
+59:55 attempt at getting them back into our
+59:57 funnel. This is my favorite message to
+59:59 send and that gets tons of responses and
+1:00:02 gets tons of people back re-engaged into
+1:00:04 our funnel. Giving up on the outcome
+1:00:07 they were chasing two little eyes. So,
+1:00:09 this could be here giving up on losing
+1:00:12 weight for the summer or giving up on 40
+1:00:15 new leads this month, something like
+1:00:17 that where they will have to
+1:00:19 self-reflect and see if they are ready
+1:00:20 to actually give this up. So, you've got
+1:00:23 the full system now, the strategy, the
+1:00:25 flows, the copy, the timing, and you now
+1:00:27 know how to reactivate what's already in
+1:00:29 your database. The last piece is making
+1:00:31 sure that all of this keeps working
+1:00:33 together and keeps getting better. So in
+1:00:35 order to measure the performance of our
+1:00:37 entire SMS system and identify what to
+1:00:39 improve in it and how to scale it, we
+1:00:41 first have to understand the metric that
+1:00:42 actually matters the most here and that
+1:00:44 is replies. Right? Replies are king in
+1:00:47 our SMS system and we have to do
+1:00:49 everything possible to optimize for
+1:00:51 replies because if we do so we are going
+1:00:53 to win. Everything goes downstream from
+1:00:56 getting a reply. Once you get a reply
+1:00:58 from a lead, you've now opened an
+1:01:01 opportunity to have a conversation with
+1:01:03 the lead. learn more about them, learn
+1:01:05 more about their business, learn more
+1:01:06 about the problems that they're facing
+1:01:08 in your business. And that's what's
+1:01:09 going to lead you to being able to
+1:01:11 present an appointment and get them to
+1:01:13 book. And then after you follow up,
+1:01:14 after that booking, you're going to get
+1:01:16 them committed to showing up. And then
+1:01:18 they will follow through with the right
+1:01:19 follow-up strategy, right, that we saw
+1:01:21 before to actually showing up to that
+1:01:23 appointment, which is ultimately going
+1:01:24 to generate some revenue for your
+1:01:26 business. So everything goes downstream
+1:01:28 from replies. The problem is that I see
+1:01:32 most businesses optimizing for the wrong
+1:01:34 metric. They are always optimizing for
+1:01:36 delivery rates because that's what their
+1:01:38 SMS platform currently supports. The
+1:01:40 problem with delivery rates is that they
+1:01:42 don't give us any information. We saw
+1:01:45 with the iOS 26 update that just because
+1:01:47 a message got delivered doesn't
+1:01:49 necessarily mean that it has been seen
+1:01:51 by your recipient. It could just be
+1:01:53 buried in one of those folders like the
+1:01:55 unknown senders folder or the spam
+1:01:56 folder. So your delivery rate is 100%
+1:01:59 but none of your text messages are
+1:02:01 getting seen. So that's why replies are
+1:02:03 the best signal of a healthy SMS system
+1:02:06 and we have to optimize them at all
+1:02:08 cost. So when I'm looking at a healthy
+1:02:10 account and a healthy average response
+1:02:12 rate on SMS, it should be anything over
+1:02:15 45%. Now, with everything that we
+1:02:17 explored on our video today on how to
+1:02:19 write good SMS copy, how to time it
+1:02:21 correctly, how to sequence it correctly,
+1:02:23 we should be looking and you should be
+1:02:24 achieving numbers closer to 70 75 80%.
+1:02:27 That's really exceptional in terms of a
+1:02:29 good average response rate across
+1:02:31 iMessage and SMS. So, you can see this
+1:02:34 dashboard right over here. Average
+1:02:35 response rate was 75% which is a very,
+1:02:38 very good response rate considering that
+1:02:40 we did everything right in our SMS
+1:02:42 system. Now, the other health sign that
+1:02:44 you should be looking for is a very
+1:02:46 clear difference between your average
+1:02:48 response rate on SMS and your average
+1:02:50 response rate on iMessage. You should at
+1:02:52 least be seeing a 2x increase on your
+1:02:55 iMessage response rate as compared to
+1:02:57 your SMS response rate because these two
+1:02:59 channels are different. With SMS, you
+1:03:01 are regulated by A2P. You're forced to
+1:03:04 slap that opt out language on your text.
+1:03:06 You're forced to limit the keywords or
+1:03:08 the copy of your text. Whereas with
+1:03:09 iMessage, you don't have those limits.
+1:03:11 And that's why we're able to see much
+1:03:13 more human-like inner texting outreach
+1:03:15 with iMessage and therefore why we
+1:03:17 should be seeing a bigger gap between
+1:03:19 the average response rate on iMessage as
+1:03:21 compared to your average response rate
+1:03:23 on SMS. Here's what a less healthy
+1:03:25 account would look like. So first you
+1:03:27 would have a response rate that is under
+1:03:29 the 45% mark. If you see that, it should
+1:03:32 raise a flag to you that something in
+1:03:34 your strategy is not working. Is it your
+1:03:36 copy? Is it the delay between your
+1:03:38 messages? Is it the fact that you're
+1:03:40 only using SMS and not using iMessage?
+1:03:42 Is it the fact that people are replying
+1:03:44 stop to you and opting out of your
+1:03:46 funnels? You know, those are all signs
+1:03:48 of a poor response rate. Now, when it
+1:03:50 comes to the gap between your SMS and
+1:03:52 your iMessage response rate, this is
+1:03:53 also something that we could spot is a
+1:03:55 problem in a less healthy account. If
+1:03:58 your iMessage and SMS response rate are
+1:04:00 hovering around the same numbers,
+1:04:02 something is probably wrong here. If
+1:04:04 it's only like a 0.5 increase with
+1:04:06 iMessage over SMS, there's probably
+1:04:09 something in your copy that's wrong.
+1:04:11 What I've seen from most businesses that
+1:04:13 I've monitored that have a very close
+1:04:15 gap between the SMS and the iMessage
+1:04:18 response rate is that normally they're
+1:04:20 just copying the exact same copy for SMS
+1:04:23 and for iMessage. They're not trying to
+1:04:25 optimize for the channel, not trying to
+1:04:26 optimize copy for iMessage. They're just
+1:04:29 taking the flows, taking the automations
+1:04:30 that they have with SMS right now, which
+1:04:32 have, you know, the big clunky text,
+1:04:34 which have the links in the first
+1:04:36 message, which has the reply stop to opt
+1:04:39 out at the bottom of their text, and
+1:04:40 they're just slapping that on an
+1:04:41 iMessage channel. And that is why
+1:04:43 normally, sure, you could get a couple
+1:04:45 of more positive responses from your
+1:04:46 leads, but you won't see that two to
+1:04:48 three increase that we see with a
+1:04:50 healthy account. Now, the other thing
+1:04:52 that you do want to be checking is
+1:04:53 consistency in your SMS system and in
+1:04:56 your outreach. We can see right here a
+1:04:57 sign of a very healthy account. The past
+1:05:00 365 days, an average response rate of
+1:05:03 62%. This means the business was
+1:05:05 literally texting every single day,
+1:05:07 whether that be through flows,
+1:05:08 sequences, funnels, or just manual
+1:05:10 outreach and conversations with their
+1:05:12 lead. And we could see a clear
+1:05:13 definition between iMessage copy and SMS
+1:05:16 copy across the 365 days. This means for
+1:05:20 365 days, the people in this account
+1:05:23 were consistently using the SMS system
+1:05:25 that we talked about today, optimizing
+1:05:27 for replies, making sure that iMessage
+1:05:30 copy is different from SMS copy, and
+1:05:32 always making sure that they're using
+1:05:33 the right sequencing and the right
+1:05:35 timing when reaching out to their leads.
+1:05:37 So achieving these types of results
+1:05:39 comes from implementing everything that
+1:05:40 we saw in the video today from the copy
+1:05:42 to optimizing the channel, the
+1:05:44 sequencing and the timing, but it also
+1:05:46 comes from testing everything in your
+1:05:48 account and seeing what affects your
+1:05:49 reply rate the most. And there's
+1:05:51 multiple different AB tests that you
+1:05:52 could be running inside of your SMS
+1:05:54 system to optimize it. So the first one
+1:05:56 is optimizing your conversational
+1:05:58 starters. So, whenever a lead opts in or
+1:06:00 books an appointment with you and you're
+1:06:02 trying to text them and get them to
+1:06:04 reply to you, to open up a dialogue,
+1:06:06 that's something that you could AB test
+1:06:08 to figure out which copy works the best
+1:06:10 for your specific niche, your specific
+1:06:12 industry, and your specific lead. The
+1:06:13 other thing that you could test out is
+1:06:15 formats, right? Once they reply to you,
+1:06:17 what are you going to send them as a
+1:06:19 follow-up? Do they rather something that
+1:06:20 is visual, like a video? Do they rather
+1:06:22 just have a quick voice note? Or do they
+1:06:25 rather plain text? So, I'll give you an
+1:06:27 example here of what that could look
+1:06:28 like. Right here, we have three
+1:06:29 conversational starters that are
+1:06:30 completely different. The first one here
+1:06:32 is asking, "How many years have you been
+1:06:34 in sales?" The second one is asking,
+1:06:36 "What kind of business do you have?" And
+1:06:38 the third one is asking, "I could send
+1:06:39 you a video of what we'll talk about
+1:06:41 here." Yeah. And one of these will
+1:06:43 resonate more with your specific leads.
+1:06:46 And all leads are different, but within
+1:06:48 your business, your leads will most
+1:06:50 likely be somewhat the same. So once you
+1:06:52 figure out the perfect copy and AB test
+1:06:55 that and see the spike in reply rates,
+1:06:57 you should most likely stick to that.
+1:06:59 Second thing, also the formats here. Are
+1:07:01 your leads going to be more receptive to
+1:07:03 engaging with a video, to a voice
+1:07:05 message or to a text? If I'm thinking
+1:07:07 about, you know, millennials or Gen Zed,
+1:07:09 I can guarantee you that they're going
+1:07:10 to be more receptive to listening to a
+1:07:12 voice note for a long explanation on
+1:07:14 something or a video. Whereas maybe if
+1:07:16 you're working with people over 50, they
+1:07:18 might rather just receiving plain text
+1:07:20 for them to just read. The other thing
+1:07:22 that you are able to AB test in your
+1:07:24 sequence is timing and sequencing of
+1:07:27 your follow-ups and of your reminders.
+1:07:29 So, we talked about how we don't always
+1:07:31 want to be on the hour on a reminders.
+1:07:33 And this is a test that you could do
+1:07:34 yourself in your own SMS system to see
+1:07:37 if it's actually right that when you do
+1:07:39 not send text on the hour, do you see a
+1:07:41 spike in reply rates? Right? I've been
+1:07:43 tracking this across thousands and
+1:07:45 thousands of conversations. I could tell
+1:07:47 you right now, it does make an effect on
+1:07:49 the micro level. And I want you to see
+1:07:51 that, too. So, go and test that out.
+1:07:53 Now, when you're looking at your
+1:07:54 reporting dashboard on your reply rates,
+1:07:56 what you should be looking for when
+1:07:58 you're optimizing for these small little
+1:08:00 variables is spikes or dips in your
+1:08:03 reply rate. So, if you test one variable
+1:08:06 at a time on a specific day, it is
+1:08:09 possible that you see a spike and this
+1:08:10 is a very good health sign that whatever
+1:08:12 you tested is working. And if you see a
+1:08:15 dip here, this might be a sign that hey,
+1:08:17 that test didn't work or I actually know
+1:08:19 that, hey, that copy, that
+1:08:20 conversational starter or that sequence
+1:08:22 timing was not the right one. So, you go
+1:08:25 and optimize the next day and switch
+1:08:27 that up. Now, the test that you should
+1:08:29 absolutely run in your business, no
+1:08:31 matter what, is just looking at an AB
+1:08:33 test between iMessage response rates and
+1:08:35 SMS response rates. This is probably the
+1:08:38 most important one that you should be
+1:08:39 testing inside of your business right
+1:08:41 now to first figure out which ones of
+1:08:43 your leads have iMessage and which ones
+1:08:45 have SMS and see the actual impact on
+1:08:48 your reply rate when you send each one
+1:08:50 individually. So, just to give you an
+1:08:52 idea of what this could look like,
+1:08:54 you're going to have a combined reply
+1:08:56 rate across SMS and iMessage. This is
+1:08:58 something that you should report on. But
+1:09:00 then when you go on the micro level and
+1:09:02 you actually look at individual reply
+1:09:04 rates from SMS and from iMessage,
+1:09:06 they're going to tell a completely
+1:09:08 different story, right? You're going to
+1:09:09 see probably that your SMS only reply
+1:09:11 rate is much lower, 34% is in this
+1:09:15 example as compared to your iMessage
+1:09:17 response rate, which would be at least
+1:09:18 two to three times better than your SMS
+1:09:22 response rate. Now, as you start testing
+1:09:24 and as you start making these micro
+1:09:26 adjustments in your SMS system and start
+1:09:28 optimizing for replies, things will
+1:09:30 break as you scale it. And what's going
+1:09:32 to break first? It's going to be your
+1:09:34 phone number health. With more and more
+1:09:36 text going through your SMS system,
+1:09:38 whether that's manual outreach or
+1:09:40 whether that's through sequences or
+1:09:41 workflows or automations, you're going
+1:09:43 to have more leads that are going to
+1:09:44 click the report junk button. And that's
+1:09:46 something that we have to be very, very
+1:09:48 careful for because it only takes just a
+1:09:50 few reports to poison your number for
+1:09:52 good. The other thing that's going to
+1:09:53 break first in your SMS system is going
+1:09:55 to be your inbox management and your
+1:09:57 conversation visibility. If you're
+1:09:59 getting more leads to reply to you,
+1:10:01 that's more conversations that you have
+1:10:02 to manage or your team has to manage.
+1:10:04 And having visibility across all of
+1:10:06 those conversations in real time synced
+1:10:08 into your system or your CRM is going to
+1:10:10 become a really big bottleneck. So, how
+1:10:14 exactly do we adapt to that scale and
+1:10:16 make sure that those things don't break?
+1:10:18 So, first things first, if you are a
+1:10:19 solo business owner that is getting less
+1:10:21 than five leads a day in your business
+1:10:23 and you want to incorporate them in your
+1:10:25 SMS outreach and your sequences and your
+1:10:27 flows, I would suggest you doing this
+1:10:29 directly on your personal phone. This is
+1:10:31 something that could be handled on your
+1:10:33 personal phone before it breaks because
+1:10:35 it's such low volume, right? Whenever a
+1:10:37 lead opts in, you could easily receive a
+1:10:39 notification for that and then just go
+1:10:40 ahead and text them directly on your
+1:10:42 phone and just track overall
+1:10:44 conversation performance and reply rates
+1:10:46 yourself via your personal device. Where
+1:10:48 this gets more interesting though and
+1:10:49 where we see things breaking is between
+1:10:51 5 to 50 leads per day that you want to
+1:10:54 be texting in your business. So, if
+1:10:55 you're a small sales team, if you have
+1:10:57 maybe a setter and a closer and a sales
+1:10:59 rep, what you don't want them doing is
+1:11:01 texting from their personal devices. If
+1:11:04 they are texting from their personal
+1:11:05 devices, you have no visibility on
+1:11:08 conversation performance. You can't know
+1:11:10 the reply rates. You don't have access
+1:11:12 to the actual follow-ups that were sent
+1:11:14 because those are all stored on a
+1:11:16 personal device. So, what you ideally
+1:11:18 need is a virtual phone line that's
+1:11:20 going to be assigned to all of your
+1:11:21 sales team. And you don't need many
+1:11:23 phone lines for that just yet. You could
+1:11:24 just assign one virtual phone line.
+1:11:27 ideally an iMessage iPhone phone line
+1:11:29 that is virtual stored in the cloud that
+1:11:31 your team could work off of text or
+1:11:34 leads on and report on reply rates on
+1:11:36 that virtual phone line. Things get even
+1:11:38 more interesting when you start looking
+1:11:40 at bigger use cases. If you're getting
+1:11:42 more than 50 leads opting into your
+1:11:44 funnels, to your website, if you're
+1:11:47 doing any type of booking flows, webinar
+1:11:49 flows, and you need to text a lot of
+1:11:51 people at once, once again, don't get
+1:11:53 your sales reps to text through their
+1:11:54 personal devices. What you need is a
+1:11:57 multi-verirtual phone line setup, which
+1:11:59 means that in an account, you're going
+1:12:01 to have multiple phone lines that are
+1:12:02 assigned to your reps. And each reps
+1:12:04 will only have visibility on their phone
+1:12:06 line or on the leads that they were
+1:12:08 assigned to you. Then ideally in your
+1:12:10 setup two, what you could have is
+1:12:12 someone like a sales manager that will
+1:12:13 have visibility across all conversation
+1:12:15 performance, all leads, and be able to
+1:12:17 make those tweaks in copy and make those
+1:12:19 tweaks in the workflows to optimize
+1:12:22 their iMessage and their SMS reply rate
+1:12:24 across their entire SMS system and their
+1:12:27 entire SMS follow-up systems. So, here's
+1:12:29 the thing that I want you to actually
+1:12:30 internalize before you close this video.
+1:12:33 SMS isn't just another marketing channel
+1:12:35 that you're adding to your stack. It's
+1:12:36 the thing that makes everything else
+1:12:38 work better. Sales, I mean, is a
+1:12:41 relationship game. And the entire game
+1:12:42 starts with one thing. Getting your
+1:12:44 leads to respond. Not click, not open,
+1:12:47 but respond. Because the moment the lead
+1:12:49 replies to your message, the
+1:12:51 relationship has started. They're no
+1:12:52 longer just a name in a CRM. They're a
+1:12:55 conversation. And conversations show up
+1:12:57 and conversations close. When your SMS
+1:13:00 is dialed in, your shore rates go up
+1:13:02 because your leads actually feel
+1:13:03 committed before the call. Your sales
+1:13:05 team closes more because they're talking
+1:13:07 to people who are actually warm. And
+1:13:08 your ad spend works harder because the
+1:13:10 leads you're paying for are actually
+1:13:12 converting instead of going cold in a
+1:13:14 database somewhere. I said it at the
+1:13:16 very beginning of this video. SMS is the
+1:13:18 single easiest and highest ROI marketing
+1:13:21 channel that you could plug into your
+1:13:22 business today. And now you understand
+1:13:24 exactly why. It's not about blasting
+1:13:26 text into the void. It's about building
+1:13:28 the one thing that every other part of
+1:13:30 your sales process depends on. a real
+1:13:33 conversation with a real human being who
+1:13:36 actually wants to hear from you. Now
+1:13:37 you've got the complete system, the
+1:13:38 strategy, the flows, the copy, the
+1:13:41 timing, all of it. But if you want to
+1:13:43 see me actually build one of these
+1:13:44 sequences from scratch, step by step, in
+1:13:46 real time, click this video here because
+1:13:48 I walk you through the exact SMS flow
+1:13:50 that's generated the most revenue across
+1:13:52 every business I've worked with. I break
+1:13:55 down every single message, why it's
+1:13:57 worked the way it is, and how the timing
+1:13:58 is set up. It's the sequence that makes
+1:14:00 people respond. I'll see you there.0:00 Here's exactly how I run my SMS
+0:01 marketing for my eight and nine-figure
+0:03 brands. My name is Max, I run Well Copy,
+0:05 and we work with over 100 plus seven- to
+0:06 nine-figure brands on a monthly basis,
+0:08 [music] running all their emails, their
+0:09 text messages, and their subscription
+0:11 programs. You can check out this brand
+0:12 right here, $604,000 coming [music] from
+0:14 SMS in the past 30 days. You can check
+0:16 out this brand right here, past 30 days,
+0:18 $952,000 [music]
+0:19 from SMS. Here's another brand here, a
+0:21 little bit smaller, but $231,000
+0:25 All of these being roughly 10 to 20%
+0:26 [music]
+0:26 of the store's total revenue. We all
+0:28 know SMS can be very impactful. Inboxes
+0:30 are becoming more cluttered, and
+0:31 everybody responds to SMS. It has a 98%
+0:33 open rate. Most [music] brands
+0:34 significantly under-stand, especially
+0:36 eight- nine-figure brands, and they do
+0:38 the wrong thing. So many holes in their
+0:39 SMS marketing strategy. So I'm just
+0:40 going to show you exactly what we do for
+0:42 our brands. This is a complete [music]
+0:43 road map to scaling your SMS program.
+0:45 Not holding anything back, and I'm going
+0:46 to shoot through this as quick as
+0:48 possible to make sure you're paying
+0:49 attention. Step one is going to be the
+0:50 platform that you choose. [music] So I'm
+0:52 going to keep this very, very simple for
+0:53 you. Prioritize doing SMS within the
+0:55 platform that you're doing email. If
+0:56 you're doing email on Klaviyo, try to
+0:58 have your SMS in Klaviyo. If you have
+0:59 email on Omnisend, try to do SMS there.
+1:01 If you have email on Attentive, try to
+1:02 do SMS there. It's just so much easier
+1:04 to have everything consolidated into one
+1:06 place. The problem is a lot of times
+1:07 this can be more expensive. So what I
+1:08 highly recommend you do is you get a
+1:10 quote from your current email provider.
+1:11 In most cases, it's going to be Klaviyo.
+1:12 To be like, "Hey, how much can it
+1:14 [music] cost for me to do SMS?" And then
+1:15 go to the main competitors, which are
+1:17 going to be Attentive and Postscript.
+1:18 [music] You could look at like other
+1:19 ones like One Text, but I prefer just
+1:22 the big dogs. And just go to them, be
+1:23 like, "Hey, this is what Klaviyo quoted
+1:24 me at. What's the best you guys can do?"
+1:26 And try to get these people to compete
+1:27 on their prices. Klaviyo, Attentive,
+1:28 Postscript, they're all great. platform
+1:30 does not matter. They're all going to
+1:32 sell you on all these different benefits
+1:34 that the other platform doesn't have,
+1:35 but these are all benefits and little AI
+1:37 features that you're probably never
+1:38 going to use, and so you should not
+1:39 stress over it. Just pick a platform.
+1:41 The basics will drive 99% of your
+1:43 revenue. Don't overcomplicate this. I
+1:45 get asked about it all the time, so I
+1:46 just wanted to address that up front.
+1:47 Doesn't matter what platform you use.
+1:48 Now let's get to the real first pillar
+1:50 of SMS marketing and getting it to
+1:51 perform, growing your list. Your SMS
+1:53 list is only going to make you as much
+1:55 money as the amount of people in your
+1:56 list. So you need to make sure you're
+1:57 growing the out of it. So this
+1:58 means using pop-up forms growing your
+2:01 SMS list. [music] Even if you do not
+2:03 currently have an SMS list, start
+2:05 collecting emails in your pop-up form. I
+2:06 see so many brands just asking for email
+2:08 cuz they're like, "Oh, I don't have an
+2:09 SMS list." But what happens a year from
+2:10 now when you want to have an SMS list
+2:12 and you want to market to people?
+2:13 [music] You're going to have zero list.
+2:15 If today you start gathering SMS and
+2:16 down the line you actually want to use
+2:18 it, you're going to have a large list
+2:19 already that you can pull from and use.
+2:21 So make sure that you're gathering SMS,
+2:23 and I'm going to show you how to set
+2:24 this up and have it be an optimized way.
+2:26 So you can use pop-up forms in your
+2:27 native email platform. Most people, it's
+2:29 going to be Klaviyo, and that's
+2:30 completely fine. But I highly recommend
+2:31 you get set up on Olia for pop-up forms.
+2:33 Best pop-up forms, oliapopups.com,
+2:35 that's what I'm going to be showing in
+2:36 this video, because you're going to get
+2:37 significantly higher opt-in rates.
+2:39 Usually opt-in rates in Klaviyo will be
+2:40 like 3 to 4%. [music] We can see here
+2:42 what we have is a 9% submit rate for
+2:44 phone on Olia for this brand. And this
+2:46 is honestly pretty low compared to what
+2:48 we usually get, cuz this offer isn't a
+2:50 very good offer for this brand. But
+2:51 typically we sit at like 16%, [music]
+2:53 which is crazy high. 16% of your ad
+2:55 traffic being able to get their phone
+2:56 number is huge, cuz then we can convert
+2:58 them for cheap. Let's go over best
+3:00 practices for getting our SMS growth
+3:02 rate, which for this brand is getting
+3:04 5.9 thousand new phone numbers a month.
+3:07 So if we go over to campaigns here, we
+3:08 can build our form. So I'm just going to
+3:09 do some sort of test right here, and
+3:11 then we're going to show how to make
+3:12 sure that our SMS section is optimized.
+3:15 So if we go in, we created this test, we
+3:17 can create this pop-up with their simple
+3:19 builder right here. And they just have a
+3:21 ton of templates that absolutely wreck.
+3:23 And so you can pick what one's your
+3:24 favorite. I always recommend starting
+3:25 with some sort of quiz. This is what
+3:26 works in 2026. We don't ask for the
+3:28 email address or phone number right off
+3:30 the bat. So I'm just going to take this
+3:31 one for example. It's a simple quiz
+3:33 format, and you can see right here it
+3:34 gives the discount with this wording,
+3:35 "You've got 10% off." It asks somebody a
+3:37 question, and then it's going to go into
+3:39 like sort of like asking somebody for
+3:40 their email. So just go through these
+3:42 steps, like having to add your logo
+3:43 right here. I'm just going to skip
+3:45 through this so you guys can kind of
+3:46 like see [music] what the final end
+3:47 product looks like with the optimized
+3:49 phone section. All right, so here we are
+3:51 with the form. We can see the builder.
+3:53 This is what the flow looks like. You've
+3:54 got 10% off. We ask a question. We
+3:56 engage with the customer first before we
+3:58 get their email address. Now what we
+3:59 want to change here just for like email
+4:01 sake. We don't want to tell people
+4:02 "Continue" because then people are going
+4:04 to think, "Oh, continue, [music] I'm
+4:05 going to have to enter my phone number."
+4:06 So I'm just going to close out of this
+4:07 form now. Change the button to "Claim
+4:09 now." And this is where we optimize then
+4:11 for our phone number rate. Most people
+4:13 use copy right here being like, "Sign up
+4:16 for texts to get be the first to know
+4:18 about news and whatnot." But then
+4:19 nobody's going to submit that. Instead,
+4:21 you want to use language like "Finish
+4:22 signing up [music] with text to activate
+4:24 your discount." So somebody's like, "I
+4:25 already gave them my email address. Like
+4:27 I made it this far. I need to activate
+4:29 my discount." So then you get the phone
+4:30 number. And it [music] works at a much
+4:32 higher rate. Use this wording. Do not
+4:33 say something like "Get exclusive deals,
+4:36 da da da." Just continue the offer and
+4:37 be like, "Hey, finish signing up with
+4:39 text to activate your discount." I've
+4:40 not seen a marginal impact of getting a
+4:42 increased discount for SMS. Some people
+4:44 will be like, "Max, what about What if
+4:45 you offer an extra 5% off for getting
+4:47 SMS?" I really haven't seen a meaningful
+4:49 impact, so I wouldn't do it. [music]
+4:50 Just keep it something like this,
+4:51 "Finish signing up with text to activate
+4:52 your discount." And then just a simple
+4:53 section like this, which Olia helps you
+4:56 walk you through this. If you're on
+4:57 Klaviyo, we recommend that you have this
+4:59 just shop now button. But if you use
+5:00 Postscript or Attentive, then there's a
+5:03 different sort of like setup. But when
+5:04 you're building it out with the sections
+5:06 that I was just doing, maybe we can put
+5:07 it on the screen here what that looks
+5:09 like. It was in the last step of the
+5:11 builder. Then that's all that you want
+5:13 to do, and that is all you need to have
+5:14 an optimized [music] list growth system
+5:16 for SMS. And this is the exact system
+5:18 that's getting us 6,000 new SMS
+5:20 subscribers every single month with
+5:22 [music] this style of form on Olia. Now
+5:24 we have our list set up, and we're going
+5:25 to be growing our list every single
+5:27 month with an optimized system. Guys, I
+5:28 cannot stress enough how important that
+5:30 pop-up form is. Most pop-up forms I
+5:32 review have like a 5 to 6% submit rate.
+5:34 But what I just showed you right there
+5:36 can get you a 15%. [music] That's three
+5:37 times the number of leads and three
+5:39 times your list growth. Make sure you
+5:40 have that locked in. Now let's get into
+5:41 the actual SMS messaging. There are two
+5:43 types of messages with SMS. We have
+5:45 [music] our automations, and then we
+5:46 have our blasts, our campaigns that we
+5:48 send to the list at a specific time.
+5:49 Let's talk about our SMS messaging
+5:51 first. SMS is completely different than
+5:53 email. With email, you can send a ton of
+5:55 nurture content. You can send people
+5:56 messages every single day, and they're
+5:58 not going to unsubscribe at high rates.
+6:00 Unsubscribe rates on email are something
+6:02 like 0.3%. But unsubscribe on SMS can be
+6:05 upwards of 3% [music] to 5%. Crazy high.
+6:08 You cannot do nurture content on SMS.
+6:10 It's a lot more intrusive. So we need to
+6:11 be very strategic about the messages
+6:13 that we do send to people. We want to
+6:14 send a lot less on SMS, and we want to
+6:16 make sure we're really intentional about
+6:18 what we're saying, and it's worth the
+6:19 customer's time, cuz they're going to
+6:21 get a ding on their phone from what we
+6:23 send. So it's really easy to piss people
+6:24 off there. Some other things to
+6:25 consider. SMS marketing is much more
+6:27 expensive than email. [music] An email
+6:29 costs literally a fraction of a cent to
+6:30 send, but an SMS can cost literally 1
+6:33 cent to 2 cents to 3 cents per message
+6:35 you send. It's a lot more expensive.
+6:37 Typically, it's something like 1 and 1/2
+6:38 cents per send, depending on your
+6:40 platform and your plan. But once you get
+6:41 to a list of like 100,000 people, that's
+6:43 a lot of money for every cent. So you
+6:45 need to be careful of a few different
+6:46 things. Number one, your message length.
+6:48 The longer your message is, the more
+6:50 it's going to cost. So make sure you're
+6:51 looking at the credits that you're
+6:52 using. And I'll walk you through it some
+6:54 examples here shortly. Number two,
+6:55 emojis. Emojis take up very large space
+6:58 in your messages. [music] One emoji is
+7:00 equivalent to around 60 to 70 characters
+7:03 in an SMS message. And to save on costs,
+7:05 we want to make sure that we have less
+7:07 than 160 characters in our messages.
+7:08 [music] And an emoji will take upwards
+7:10 of 60. So it takes up a lot of space. So
+7:12 you have to be careful on that if you
+7:13 want to save on costs. Number three,
+7:15 your images inside of your SMS
+7:17 marketing. The second you add an image
+7:18 to a text message, it goes from an SMS
+7:21 to an MMS. [music] And an MMS is three
+7:24 times more expensive than an SMS. So if
+7:26 I were to send a text message with an
+7:27 image to somebody, it's going to cost me
+7:29 three times more. [music] And so you
+7:30 better be confident in the messages that
+7:32 you're sending. It usually isn't worth
+7:33 the ROI to send an image [music] in your
+7:35 messages, but sometimes once you are at
+7:38 scale, it can be worth it based on the
+7:40 profit that it [music] generates you.
+7:41 Let me show you an example. Here's an
+7:43 example right here where we have this
+7:45 top variation which had an image in the
+7:48 message, and then this bottom variation
+7:50 that did not have an image in the
+7:51 message. We see that the one with the
+7:53 image generated about 1.3 times more
+7:56 revenue. But this message cost three
+7:59 times more to send. And so the ROI was
+8:01 technically worse. This costed us a
+8:03 couple hundred dollars to send, and this
+8:04 only costed us like $100 to send. But
+8:06 when you look at net profit, it actually
+8:08 was [music] worth it. So this costed
+8:10 $100 to send, this costed $300. So
+8:12 costed us $200 to make [music] $1300
+8:15 back. It ended up working out in this
+8:17 case. But you really do want to be
+8:18 careful and don't use images too often,
+8:20 cuz a lot of times [music] it doesn't
+8:21 play out this way. This is another
+8:23 example right here. An SMS message
+8:25 without an image, and then an SMS
+8:26 message with an image. We can see the
+8:28 one without the image had $620 in
+8:32 revenue, while the one with the image
+8:33 $1200 in revenue. This is a low sample
+8:35 size, but it is a good indication again,
+8:37 and it's consistent with what we usually
+8:39 see. [music] In this case, again, it
+8:40 generated more net profit. One thing
+8:42 that's interesting with image-based SMS
+8:44 is they typically have lower clicks,
+8:45 [music] because people see the image in
+8:48 the message, and whether it's showing
+8:50 the product or whatever, if somebody
+8:51 clicks that message, they're a lot more
+8:53 high intent. So you see like the one
+8:54 without the image, we're teasing a
+8:56 little bit more the click, being like,
+8:57 "Hey, click here to view the product."
+8:59 [music] Whereas this one is like click
+8:59 here to buy. You usually get higher
+9:01 intent. So usually you'll get lower
+9:02 clicks, but more revenue. Again, this
+9:04 one costed about three times more, but
+9:06 we were able to make $600 more. This
+9:08 only costed about $15 more to send, cuz
+9:10 this was low volume. So $15 to send, but
+9:13 $600, that's a win for our client. So
+9:15 make sure to test using SMS and MMS and
+9:17 track your costs, cuz again, it doesn't
+9:19 always play out this way. Just another
+9:20 thing just to show you again the
+9:22 messaging and how simple you have to be.
+9:24 You can take a look at Grooons for
+9:25 example. They're a nine-figure brand and
+9:27 some of their SMS messaging. Look at how
+9:29 they rarely use images, and it's short
+9:31 and snappy. You might be wondering, "Why
+9:32 don't they make longer SMS messages?"
+9:34 Well, you have to have your SMS messages
+9:36 be under 160 characters in order to
+9:39 [music] save costs. If you go to 161
+9:41 characters, that email technically is
+9:42 two SMS, and you have to pay double for
+9:44 it. That's why we see so many just
+9:46 quick, snappy SMS. However, [music] at
+9:48 key times, they will send something like
+9:51 this. They dropped a new flavor of
+9:53 Grooons, and so they included an image,
+9:55 cuz that's an important [music] SMS.
+9:56 That is the right strategy to use. For
+9:58 important things, include an image.
+10:00 Again, example right here, new product
+10:02 releasing, and then also their
+10:03 abandonment flow right here. You can see
+10:05 I took a look at the product, and I went
+10:06 to their cart, so you can see that they
+10:08 included an image right there. That's
+10:09 high impact. And then, their welcome
+10:11 flow right here. You can see the images
+10:12 that they include in the welcome flow,
+10:14 showing different infographics and how
+10:16 they differentiate from different
+10:17 competitors. And then after that, they
+10:19 kind of drop it, and they go to just
+10:20 plain text based. Be very intentional
+10:22 about the images that you use. Now,
+10:23 there's a lot of nuance to this, and
+10:25 this isn't just like just take exactly
+10:27 what I say and use it. We have some
+10:29 brands where we send daily SMS because
+10:30 it makes [music] sense for them. We have
+10:31 some where we have super intricate
+10:33 flows. This is just a starting point.
+10:35 Make sure to test on your own and look
+10:37 at your own brand context. If you want
+10:38 help building an SMS strategy for your
+10:40 brand, book a call below. Now, we've
+10:41 talked about growing your list. Now,
+10:42 we've talked about the messaging and the
+10:43 style of your messaging. Let's get into
+10:45 technical strategy. There are two types
+10:46 of messages. We have our flows, which
+10:48 are automations, and then we have our
+10:49 campaigns, which are going to be the
+10:51 one-time blasts that we send to our
+10:53 list. First, let's talk about our flows.
+10:55 Really, there are five key flows that
+10:56 every single eight- and nine-figure
+10:57 brands need to have at an absolute
+10:59 minimum. We need our welcome flow. We
+11:00 need the abandoned site flow. We need
+11:02 the browse abandon. We need the cart
+11:04 abandon. We need the checkout abandon.
+11:05 Then we need some sort of post-purchase
+11:07 and replenishment or winback sort of
+11:09 flow to get people to come back once
+11:10 they've already bought from us. Let's go
+11:12 through one by one. First, let's start
+11:13 off with the welcome flow, which is
+11:14 going to be somebody joining your email
+11:15 list from the pop-up form, and you
+11:17 probably are giving them a discount. So,
+11:18 the whole goal of this flow is to get
+11:20 somebody to buy off the discount and
+11:22 introduce somebody to the brand. Lots of
+11:23 different directions that you can go
+11:24 here. suggest keeping it really, really
+11:26 simple. What we typically do is we send
+11:28 three SMS. We're going to have the intro
+11:30 SMS being like, "Hey, here's your
+11:32 discount." Then we're going to have a
+11:33 little bit more of an educational or
+11:35 sort of follow-up message 2 days later.
+11:38 And then third, we're going to do an
+11:39 absolute last chance 2 days later after
+11:41 that. So, day one, we're going to send
+11:42 the intro. Day three, we're going to
+11:44 send a reminder with some information.
+11:46 And day five, we're going to do an
+11:47 absolute last chance. [music] We found
+11:48 that we want to have this tight window
+11:50 right here rather than delaying SMS to
+11:52 send like 2 [music] weeks. We want to
+11:54 send people messages right after they
+11:55 signed up while they're warm. You could
+11:57 absolutely go the more aggressive route
+11:58 like Groen's right here where they send
+12:00 a message every single day. And so, they
+12:01 have this like, "Hey, welcome to the
+12:03 Groen's family right here. Here's your
+12:04 discount for 52% off." Important to just
+12:06 get straight to the point with your
+12:08 first message. People just signed up for
+12:09 the discount. Just [music] give them
+12:10 that. And then you could send a couple
+12:12 of educational messages if you want.
+12:14 They follow the same sort of like
+12:15 structure that I laid out, but they send
+12:16 a message every single day. So, then
+12:18 they go with the more educational one
+12:19 right here, reminder of the discount,
+12:21 and then another SMS message reminding
+12:23 of the discount before they just
+12:24 continued to follow up on the 52% off.
+12:27 Here's just a super simple template for
+12:29 doing two SMS. [music] Just welcome to
+12:30 this brand. Add a quick remark like,
+12:32 "Here, we're focused on delivering you
+12:34 clean ingredients. Use code welcome 20
+12:36 for 20% off your first order. Shop now."
+12:38 That's perfect. And then you can wait 5
+12:40 days or something before you have
+12:41 [music] the last chance. Just super
+12:43 simple. "Hey there, notice you signed up
+12:44 but haven't shopped 20% off yet. Don't
+12:46 miss. This is about to expire. [music]
+12:47 Shop now." Super simple. And then you
+12:49 could add a third SMS kind of in the
+12:50 middle right here with a little bit of
+12:52 brand information. Just super quick,
+12:54 snappy. Here's a great example of an
+12:56 initial welcome SMS from Elite. "Hey,
+12:58 we're Elite. Here's some brand
+12:59 information. Here's your discount."
+13:01 Super simple [music] right here. This
+13:03 could also work as a great SMS message
+13:05 number two. You just remove this and
+13:07 then use this as an SMS number two.
+13:09 Serves as a great reminder. And this is
+13:10 what I would consider just like sort of
+13:12 like the best layout for SMS right here
+13:15 from Wild. They have the initial welcome
+13:16 message right here when you sign up.
+13:18 "Hey, welcome. 20% off. Use this
+13:20 discount." Not giving them any extra
+13:21 information. Just take this discount.
+13:23 Click right here. And then this was a
+13:25 campaign, and this was a checkout
+13:26 abandon email, so we can ignore this.
+13:28 This was the next SMS welcome, which got
+13:30 sent 3 days later, which is perfectly
+13:32 fine, 2 to 3 days. And they say, "Don't
+13:34 forget to use this discount. 20% off.
+13:36 Here's the discount code." That's
+13:37 perfect. And then 2 days later, they
+13:39 send the final reminder. "Last reminder
+13:40 to save 20%. Use this discount code."
+13:42 [music] That's perfect. That's all you
+13:44 need, especially even as an eight- and
+13:45 nine-figure brand. Keep it dead simple.
+13:47 However, I would highly recommend AB
+13:49 testing including images like this to
+13:51 see if they significantly increase
+13:52 conversions and they're worth the cost.
+13:54 That is going to be your welcome flow.
+13:55 Next up, we have our four abandonment
+13:57 flows. We have the site abandon flow,
+13:59 which is going to be anybody who goes to
+14:00 your website, but they don't actually
+14:02 view any product [music] pages. They
+14:03 just browse the website. We have the
+14:05 browse abandon flow, which is somebody
+14:07 who actually views a physical product
+14:09 page. They click on a product, and they
+14:10 look at the actual product page. Third,
+14:13 we have the cart abandon flow, which is
+14:14 going to be anybody who goes to add an
+14:16 item to their cart. They add an item to
+14:17 their cart, and then they leave. Then
+14:18 you have the checkout abandon flow,
+14:20 which is going to be anybody goes
+14:21 [music] to checkout and then leaves. All
+14:22 of these flows are going to be super
+14:24 simple because technically in the US,
+14:26 it's illegal to send more than one SMS
+14:28 message in an abandonment flow. Yeah,
+14:30 you can see it from Klaviyo right here.
+14:32 You can only use one SMS per recipient
+14:34 in the cart abandon flow, and then it
+14:35 has to be within 48 hours of the event.
+14:37 Of course, that person needs to have
+14:38 consent. [music] And so, really, these
+14:40 messages can just be super, super dead
+14:42 simple. Browse abandon, you could just
+14:44 do something literally as simple as
+14:45 this. Wait 60 minutes from the browse
+14:47 event, and then have your eye on
+14:48 something. You've good taste. Keep
+14:50 shopping. Alternatively, you could add
+14:52 an MMS image of the product that they
+14:54 left behind. But something like this is
+14:55 perfectly fine. Keep it simple. [music]
+14:57 Don't use too much text. Just get people
+14:59 back on the website. Same thing for cart
+15:01 and checkout. Something as simple as
+15:03 this. It looks like you forgot something
+15:04 in your cart. Finish your order. Don't
+15:06 need to get too complicated. If you want
+15:07 to get aggressive, you could say, "Hey,
+15:08 like your order is ready to ship." Or
+15:10 like, "We can only save your cart for so
+15:11 long." Just keep it super [music]
+15:13 simple. And then test including the
+15:15 image of the product versus not. I
+15:16 highly recommend as well, you can split
+15:18 [music] based on if somebody has bought
+15:20 from you before in the past or not.
+15:22 hasn't bought from you, then give them
+15:23 their welcome discount. This is for
+15:25 example what Wild did for me. You could
+15:27 see that they said, "Use code
+15:28 wildwelcome20 at checkout to get 20%
+15:30 off" because I had abandoned my
+15:32 checkout. And that's definitely high
+15:33 leverage that I think eight- and
+15:34 nine-figure brands [music] should do in
+15:35 their abandonments. But still, keep it
+15:37 super simple. Notice how simple this is.
+15:39 And just do that for all of your
+15:40 abandonments. Site abandon, browse
+15:41 abandon, cart abandon, and checkout
+15:43 abandon. Now, let's get to the last
+15:44 flow, which is going to be a
+15:45 post-purchase replenishment or winback
+15:47 flow. This just varies so much brand to
+15:49 brand that it's really hard for me to
+15:50 like create a verified like set
+15:52 template. But let's kind of like walk
+15:53 through the key points that I would
+15:55 recommend sending a message. You could
+15:56 put this in one flow if you want. Like
+15:58 somebody places an order, have all of
+16:00 the winback messages in one flow. The
+16:02 first key point that I'd like to send a
+16:04 message is going to be around a couple
+16:05 days after the order is delivered. So, I
+16:07 like to send an SMS maybe like day 10 to
+16:09 14. [music]
+16:10 The person has got the product, and
+16:11 maybe they're in the honeymoon phase.
+16:12 That's when I like to hit them with some
+16:14 sort of cross-sell or upsell or
+16:15 something like, "Hey, are you liking
+16:16 this product? [music] You should buy
+16:18 again or try this product." Send some
+16:20 sort of SMS like that to try to get
+16:21 people to come back. That would be SMS
+16:23 one. Optional is going to be SMS two,
+16:24 which is only going to be for
+16:26 replenishment brands. You want to send
+16:27 another SMS message around the time that
+16:29 somebody might be running low with your
+16:31 product. So, if I was Athletic Greens
+16:33 for example, and [music] people take my
+16:36 product once a day, and it lasts them 30
+16:38 days, and it takes 7 days to deliver the
+16:39 product, then I would send an SMS
+16:41 message on something like day 35 being
+16:43 like, "Hey, are you running low? Re-up.
+16:45 Place another order." And that right
+16:47 there, that simple reminder is perfect.
+16:48 You could add offers if you want. I
+16:50 don't recommend adding offers until
+16:51 later down the line. And those two are
+16:53 really all that you need for like the
+16:54 initial [music] period. The thing you
+16:56 have to remember is that people are also
+16:57 receiving your campaigns if you're
+16:58 sending SMS campaigns. So, I don't like
+17:00 to oversend too much in [music] my
+17:01 post-purchase period. Those two
+17:02 well-timed messages are perfect. And now
+17:04 we'll get into like the longer-term
+17:05 [music] winback, which is somebody
+17:06 places an order, and they haven't placed
+17:08 another in like 60 to 90 days. Or
+17:10 typically like the good rule of thumb is
+17:12 take the average time in between
+17:14 purchases and multiply it times two for
+17:16 your brand. For example, if the average
+17:18 time between purchases for my store is
+17:21 45 days, then I want to trigger my
+17:23 actual winback
+17:24 >> [music]
+17:24 >> offers and more aggressive messaging at
+17:26 day 90. And this is where I would insert
+17:28 just two simple SMS with some sort of
+17:30 flash offer. So, if I was Athletic
+17:32 Greens here, then maybe I'd do some
+17:34 offer like, "Hey, 30% [music] off." And
+17:35 I would trigger that on whatever double
+17:37 the average time between orders is. So,
+17:39 say it was 45, then on day 90, I would
+17:42 introduce, "Hey, get 30% off just cuz we
+17:44 miss you. Here's an exclusive discount
+17:45 code. It lasts for 72 hours." [music]
+17:47 Send that. Wait 2 days, and then have,
+17:49 "Hey, last chance." That's all you need
+17:51 right there. All the other automations
+17:53 and whatnot, like everything is going to
+17:54 come down to these four basics, and
+17:55 these basics are going to make you a lot
+17:56 of money. Like this brand for example,
+17:58 those exact flows that I showed you,
+18:00 $517,000.
+18:01 So, here's this brand for example. We
+18:03 can see the revenue numbers of these
+18:05 different flows. We can see 293K from
+18:07 the welcome series, the cart abandon
+18:09 picking up $107,000
+18:11 in January, $46,000 from the browse
+18:13 abandon, the cart abandon from
+18:15 retention, 20,000, and then session
+18:18 abandon, which is site abandon, picking
+18:19 up 13 grand right there. Just super
+18:21 simple flows right here driving a lot of
+18:23 revenue. For your flows, test your time
+18:25 delays, test your offers, and test using
+18:28 images versus not using images. It's
+18:30 really that simple. Now, let's go to our
+18:31 campaigns, which are going to be the
+18:33 blasts that we send to our list at
+18:35 specific times. These differ from our
+18:37 flows because we're just blasting this
+18:39 out to our list. We're sending it at a
+18:40 specific time or day. My tip for SMS
+18:42 campaigns is I typically don't like to
+18:45 go over two SMS campaigns per week for
+18:47 the typical sort of brand setup. For the
+18:49 average brand, I recommend two-ish per
+18:51 [music] week. For brands that want to be
+18:52 super aggressive with acquisition, a
+18:54 brand like Groen's who is spending a
+18:56 ton on acquisition, I'm totally
+18:58 fine with sending an SMS every single
+19:00 day to people who have never bought from
+19:01 you before. For people who have bought
+19:03 from you before, if you have a brand
+19:04 that does one-time purchases or
+19:05 subscription, I recommend easing down on
+19:08 how often you send to those people.
+19:09 Especially if somebody's actively
+19:10 subscribed in your subscription brand,
+19:12 you shouldn't send them any text
+19:13 messages. For the people who have bought
+19:14 from you before, you can ease up a
+19:16 little bit. They've already tried you,
+19:17 and you don't need to be as aggressive.
+19:18 But in general, most brands, I recommend
+19:21 two SMS blasts per week. The strategy
+19:23 here with SMS campaigns is make your
+19:25 messages worth receiving. Do not do
+19:27 nurture content. Don't try to send
+19:29 testimonials to get people to convert.
+19:30 That just doesn't work on SMS, and in
+19:32 the long term, it's really just going to
+19:33 hurt you cuz you're going to get high
+19:35 unsubscribe rates. [music] Save SMS for
+19:36 big things like back in stock, new
+19:38 product releases, sales, private events,
+19:41 and insider details or information.
+19:43 That's what we want to use SMS for. We
+19:44 can take a look at the performance of
+19:46 recent campaigns for this brand right
+19:48 here. You can see the revenue across all
+19:50 of these different campaigns. [music]
+19:51 You can see this right here was a launch
+19:53 campaign. So, obviously, you want to
+19:55 send an SMS about that. And then, there
+19:56 was just a reminder for that launch a
+19:58 couple days later. So, this was sent on
+20:00 the 4th, and then this was sent on the
+20:01 6th. This is [music] perfect. And then,
+20:03 a special sale. This was a flash sale
+20:05 specific to the SMS list, which I love
+20:07 doing those sorts of offers. So, there
+20:09 was an SMS on the 8th, and then at 10th,
+20:10 there's an SMS on the 8th for that.
+20:12 That's awesome SMS messaging to include.
+20:14 And then, this is like more of a nurture
+20:16 content, but it's something that's
+20:17 timely. It's not like best sellers of
+20:20 like all time. What they do here is
+20:21 focus on urgency. These are the products
+20:23 that are selling super fast this week.
+20:25 [music] That urgency-based stuff is what
+20:27 you can send on SMS and get decent
+20:28 engagement. And then, again, a sale
+20:30 message on the 12th, which is perfect.
+20:32 And this is more of like a nurture
+20:34 campaign right here. This was like a
+20:35 reminder on like a past product release,
+20:37 which you can get away with. I would
+20:39 probably reframe it more of like a back
+20:41 in stock to make it seem like [music]
+20:42 super super like important, something
+20:44 like that. But, it generated like the
+20:46 clearly the least compared to the
+20:47 others. And it got a lot more
+20:49 unsubscribes. So, it's something to be
+20:50 very mindful of is sending these sorts
+20:51 of messages. Then you can see a launch
+20:53 right here. And then, something super
+20:54 timely, the trend alerts, the like, "Yo,
+20:56 big news, this is happening right now."
+20:58 That's the stuff you can send with SMS,
+21:00 and you can see the performance [music]
+21:01 and why it did so well. The quick, fast,
+21:03 urgent, important messages, that's
+21:05 [music] what you should send on SMS. Do
+21:06 not force out SMS if you don't have to.
+21:08 I'd rather you save sends for big
+21:10 announcements and whatnot, so people
+21:11 aren't unsubscribing. [music]
+21:12 But, at minimum, you should for sure be
+21:14 working out at least one SMS campaign
+21:16 per week. Again, I recommend two. Now,
+21:18 here's the sending frequency of the
+21:20 nine-figure brand. You can see he's
+21:21 sending on the 26th, then the 28th, then
+21:24 the 1st, the 3rd, the 8th, the 10th, the
+21:26 12th, the 13th. And now, this is like
+21:28 Valentine's Day sale, where they get
+21:29 more aggressive in sending like two a
+21:31 day, and then sending one a day, but
+21:33 then going back to the regular frequency
+21:35 before a big sale push right here. This
+21:37 is sort of like the nine-figure
+21:38 frequency that a lot more brands will do
+21:40 is making sure they send kind of like
+21:42 every other day. And then, for big
+21:43 pushes, doing an SMS every single day,
+21:45 which that's fine if you have a big
+21:47 enough list. And [music] because these
+21:48 big brands just have a lot of going
+21:50 on, so they have a lot of stuff they can
+21:51 send messages about. So, this would be
+21:53 like an example calendar right here of
+21:55 just like doing a social media giveaway
+21:57 one week, October collection launch if
+21:59 you have that, and then do like a
+22:00 running low, even if the product isn't
+22:02 necessarily [music] running low, and
+22:03 then a restock. Restocks work really
+22:05 well on SMS, even if you don't
+22:06 necessarily restock a product, say
+22:08 restock, and then like a flash sale and
+22:10 doubling up right here. Like, this would
+22:11 be like a standard sort of calendar. I
+22:12 would maybe up the frequency a little
+22:14 bit, but it's kind of like [music] a
+22:15 baseline to go off of. And here's one
+22:17 more example of a brand where we did
+22:19 over $100,000 over SMS [music] in 1
+22:22 month with just five SMS. We had a
+22:24 collection coming out, and so what we
+22:26 did right here was we did a pre-order
+22:28 collection on SMS. It did really well.
+22:30 And then, we had an offer that we did
+22:32 just like a quick offer right here, free
+22:34 X on orders above X. [music] And this
+22:36 was exclusive to the email and SMS
+22:38 lists. And then, we had a restock on a
+22:40 past collection, which didn't actually
+22:42 restock, but we just framed it as a
+22:43 restock because restocks just do really
+22:46 well, and they have urgency. And then,
+22:47 we did a reminder. And then, we had the
+22:49 collection launch right here for this
+22:50 pre-order. [music] And that's all that
+22:51 we did for this month. You could see the
+22:53 performance doing over $100,000. I just
+22:55 wanted to show another example. And this
+22:57 right here, these messages contributed
+22:58 to 16% [music] of that total store
+23:00 revenue on the month. When you're
+23:01 intentional about your messages and
+23:02 you're consistent with growing your
+23:03 list, you can have these [music] sorts
+23:05 of numbers. I have this doc that breaks
+23:06 down all this SMS stuff and gives you
+23:08 the templates and whatnot. You should go
+23:09 to wellcopy.net/sms. [music]
+23:11 You can get it for free. Also included
+23:13 is there's this campaign swipe file,
+23:15 which I can briefly show you to show you
+23:16 like the content [music] on the inside,
+23:18 but really, do not complicate your SMS
+23:20 messages. Literally, stuff like this is
+23:22 what makes the most money. Let's briefly
+23:23 talk about segmentation as well. A lot
+23:25 of people get way too segmented on their
+23:27 SMS, and I prefer not to. I prefer to
+23:30 blast the list. I usually make the most
+23:32 amount of money that way. So, you can
+23:33 see like for this brand right here, we
+23:34 send to all subscribers, and then we
+23:36 just have this exclusion list right
+23:38 here, which is just going to be
+23:39 unengaged people. And that's what I
+23:40 recommend for the majority of your SMS
+23:42 sends. A lot of people will have engaged
+23:44 SMS lists, like anybody who's clicked an
+23:46 SMS in the past 90 days, but I see a lot
+23:48 of people buy from SMS who have
+23:50 literally never clicked an SMS. A lot of
+23:52 times, people will see a message, and
+23:53 then they'll go to the website on their
+23:55 own and then place an order. And so, I
+23:57 highly recommend sending to all your
+23:58 subscribers, but then just having an
+24:00 exclusion list, and then cleaning your
+24:01 list every month. I recommend something
+24:03 like this, like somebody has received a
+24:05 text at least 15 times, but they've
+24:07 never ever [music] clicked after 15.
+24:09 Typically, that's where you can exclude
+24:11 them from most your messages. But, if at
+24:13 any point anybody ever clicked an SMS,
+24:15 even if it was [music] 2 years ago, they
+24:17 are going to continue receiving most my
+24:18 emails. But, I just don't want to keep
+24:20 sending somebody a message if after 15
+24:22 times they don't click, because again,
+24:25 SMS is expensive, [music] and so we have
+24:26 to be mindful of this. So, a simple one
+24:28 like this can really be impactful. And
+24:30 then, for maybe one of our SMS messages
+24:32 on the month, I'll just blast it to the
+24:35 whole [music] entire list. Like, for
+24:36 example, this one, there was no
+24:37 exclusion. It was just sent to all
+24:39 subscribers. That's where I would do
+24:41 like the big announcements and the big
+24:42 stuff like this being a New Year's Eve
+24:44 sale. So, for segmentation, just send it
+24:46 to your whole list with some exclusions
+24:48 based on if somebody has engaged, but
+24:51 they've received a ton of messages, and
+24:52 that's really all you need to do for
+24:54 SMS. Don't try to get too cute with your
+24:56 [music] engaged segments. And then,
+24:57 every so often, send to the whole list.
+24:58 And that's a complete process for SMS
+25:00 marketing for eight- and nine-figure
+25:02 brands. If you're a subscription brand,
+25:03 then you'd love this video of me
+25:04 breaking down how we manage subscription
+25:06 brands for our clients and generate them
+25:08 a ton more profit by making
+25:10 customers stay longer. You should watch
+25:11 that video, and I'll see you over there.
+25:12 Thank you so much for watching.
+0:00 Alex Hermosi runs a portfolio of
+0:01 companies doing over $200 million a year
+0:03 and the lead principle he repeats more
+0:05 than any other isn't let's get more
+0:08 leads, it's follow up faster and never
+0:10 let a lead go cold. Now, I've built my
+0:13 own marketing company to over $200,000 a
+0:15 month and I can tell you the one thing
+0:17 nobody sending texts [music] at scale
+0:19 wants to hear and that's do your
+0:20 messages actually land on your
+0:22 prospect's phone. So, here's Hermosi's
+0:24 lead and follow up playbook rebuilt for
+0:25 someone sending mass volume every single
+0:27 day. Let's get right into it. So,
+0:29 principle number one is speed to lead.
+0:31 Now, Hermosi points to a business owner
+0:33 who gets to every single lead within 5
+0:35 60 seconds and closes 55% of them.
+0:38 Whereas most companies will take days to
+0:39 follow up with a lead. Now, when you
+0:41 scale that up and you've got tens of
+0:42 thousands of lead coming in off of your
+0:44 initial text, fast isn't a person
+0:46 dialing, it's your entire sending
+0:48 infrastructure. The real question is
+0:50 whether your platform fires a reply on
+0:52 the first touch the instant a lead
+0:53 replies across your entire inflow all at
+0:56 once or whether it quietly drips those
+0:58 texts over the next 6 to 12 hours while
+1:00 those leads go cold. And if you know
+1:02 anything about sending bulk SMS in
+1:04 regards to A2P, your volume is always
+1:06 capped at the campaign and brand level.
+1:08 So, at volume, speed is literally a
+1:10 throughput problem. The bottleneck just
+1:12 moved from your staff to your sending
+1:14 infrastructure. So, let me show you how
+1:16 this works at scale. I use a platform
+1:18 called Send Evo. Now, as you can see
+1:21 inside the dashboard over the last 3
+1:22 days, we've sent about 2.6 million.
+1:24 We're usually about at a million per day
+1:26 on this particular account, but as you
+1:28 can see every metric is broken down from
+1:30 delivery rate to opt-out rate to
+1:31 response rate the total campaigns we
+1:33 have live. It's broken down on a per day
+1:35 and per week basis. We can see the top
+1:38 failure reasons over here. We can see
+1:39 our outbound versus inbound messages
+1:42 going out and incoming. We can see our
+1:44 delivery rate. Every little metric is
+1:46 broken down on a campaign, delivery,
+1:49 opt-out rate and response rate, which in
+1:51 the SMS world matters a lot. And let me
+1:53 show you how this works in regards to
+1:55 speed to lead. So, if I go to SMS blast
+1:57 over here, you can see all of the
+1:59 campaigns I have currently running. So,
+2:01 on these particular campaigns I've
+2:03 blasted out 23,000, 23,000, 245,000.
+2:07 A lot of these campaigns we just blasted
+2:09 out all at once hitting our entire list
+2:11 all at once. So, as you can see when we
+2:13 go over to conversations, you'll see an
+2:15 inflow of conversations coming into here
+2:18 all at once. And the most important
+2:20 thing is that these messages are
+2:22 actually landing and that we are
+2:23 replying like you can see here within a
+2:25 timely manner to these prospects. And
+2:28 keep this in mind because this is the
+2:29 one thing that's going to remain true
+2:30 throughout this entire video, which is
+2:32 speed literally only counts if your
+2:34 messages are actually landing on your
+2:36 prospect's phone. So, principle number
+2:38 two is the money is in the follow-up.
+2:40 So, Homosi is blunt, most people quit
+2:42 way too early, you know, five, six,
+2:44 seven touches before they even stop.
+2:46 But, let's be honest, you're not
+2:47 following up with a million leads by
+2:49 hand. So, the leverage at scale is quite
+2:51 literally automation. Every contact gets
+2:53 a full five to seven touches and the key
+2:55 is to get an AI that handles the entire
+2:56 back end and the back and forth with
+2:58 your prospects. And the moment someone
+3:00 replies, the sequence stops and that
+3:02 lead gets logged into your CRM all
+3:04 automatically. So, you can actually do
+3:06 this right on Send Evo. If you go to
+3:08 artificial intelligence over here, you
+3:10 select a sub account that you want to
+3:12 run it from,
+3:13 switch the sub account. And under here,
+3:15 you can see everything from enabling the
+3:17 bot to [music] you can even test your
+3:19 own bot. You can set the parameters as
+3:21 to how fast it replies to people, how
+3:24 many conversations and how many message
+3:25 threads it will go back and forth with
+3:27 them. Uh you can set the entire
+3:29 personality, the tone, what the
+3:30 objective is. And the goal is to have
+3:33 these leads handled within side 30 to 60
+3:36 seconds so that when they reply, the AI
+3:38 bot follows up with them and it logs
+3:40 them in our CRM as a lead, right? And
+3:42 then it also adds tags so that you can
+3:44 go back and create what's called like
+3:45 reactivation lists. So, if I go back to
+3:47 conversations, you can see within side
+3:49 here how fast the leads are being
+3:52 responded to. So, obviously a lot of
+3:54 this information will be blurred out
+3:55 just to keep things private, but again,
+3:57 you can see that all these leads are
+3:59 being handled in a timely manner. And
+4:02 again, I can't iterate this enough, but
+4:03 all of this only matters if every one of
+4:05 your texts actually reaches your phone.
+4:08 And you need an actual platform that can
+4:10 actually handle and sustain this volume
+4:12 at scale and deliver the text to the end
+4:14 user. So, principle number three is
+4:16 reactivate the list you already have.
+4:18 Now, Homozie's line is there's actual
+4:20 gold in your phone, which is the people
+4:23 who already know you. And most operators
+4:25 ignore this entirely chasing new data.
+4:27 And when you're sending mass volume,
+4:29 this is the single cheapest send you'll
+4:31 ever make because you're already paying
+4:32 per message, you're already paying per
+4:33 new record, but a reactivation campaign
+4:36 to a dormant list of people who already
+4:38 opted in costs almost nothing. And on
+4:40 top of that, it converts way better than
+4:42 any cold traffic ever will. So, one
+4:44 re-engagement send to your entire list
+4:46 can literally outperform a month of
+4:48 buying fresh new numbers. So, let me
+4:50 show you how fast you guys can do this
+4:52 on Send Evo. So, if we come over to Send
+4:54 Evo, we click on lists, and from here
+4:56 what we can do is we can create a new
+4:58 list. And you have two options. You can
+5:00 obviously upload a CSV file or create
+5:02 one from existing contacts. So, that's a
+5:04 separate video. We can go into contacts
+5:06 and create them manually. But under
+5:08 list, what I'm going to do is just
+5:09 upload a CSV file. I'll name it
+5:12 reactivation list. All right, click
+5:14 next, upload CSV. And what you would do
+5:16 here is you would just drag and drop
+5:17 your CSV file into here. And then from
+5:19 there, you would just do the same thing.
+5:21 You go to SMS blast, and once you're in
+5:23 SMS blast, you would click add a new
+5:25 blast. And once you're in blast, you can
+5:27 name the blast whatever you'd like. I'll
+5:29 call it reactivation campaign just to
+5:30 keep it congruent with my list.
+5:33 Campaign, I will select a campaign cuz
+5:35 I'm just going to choose single campaign
+5:36 for now. I will click a phone number
+5:38 that I have purchased. And then the
+5:41 contact list, I will just choose the
+5:43 contact list I just created called
+5:45 reactivation list, and then click next.
+5:47 And you have a few options here when
+5:48 you're inside SMS Blast. So, you can
+5:50 obviously just send all your messages at
+5:52 once. It's what a lot of guys do if they
+5:54 have the infrastructure properly built
+5:56 out, they're able to send millions of
+5:57 texts all at once. Or you can rate the
+6:00 sending limit. So, you can send every 5
+6:02 minutes, every 20 minutes, you can send
+6:03 a certain amount of messages. So, let's
+6:05 call it you want to send 10,000 per day,
+6:07 and you want to drip that out over an
+6:09 8-hour period, you just reverse engineer
+6:10 the numbers, and our system will uh
+6:13 deliver that out for you. You can also
+6:15 schedule a campaign. So, instead of
+6:17 blasting right off the rip, you can also
+6:19 just schedule. So, if I want to launch
+6:20 this at, call it, 9:00 a.m. tomorrow,
+6:23 you would just choose that. And then
+6:24 you're also able to set a delivery
+6:26 window. Once those parameters are
+6:27 selected, you just click next. And when
+6:29 you click next, you'll land on this page
+6:31 where you can actually create your
+6:32 message template. So, of course, you can
+6:34 already select a pre-selected message
+6:36 template that you've already created, or
+6:38 you can just manually type out the blast
+6:39 that you, or the message that you want
+6:41 to send out within this blast. And on
+6:42 top of that, you can also uh add in
+6:45 custom fields, right? So, first name,
+6:46 last name. If you actually put all this
+6:48 information, and you have all that data
+6:49 from your prospects, uh obviously first
+6:52 name, last name, email, phone number,
+6:53 company, etc., address, uh you can
+6:56 actually state all of that in the
+6:57 message. So, you know, you're not
+6:58 manually doing that one by one. On top
+7:01 of that, you can also add a label when a
+7:03 contact replies. So, let's say a contact
+7:05 replies positively, you can add a
+7:07 positive reply label. This is more or
+7:08 less just here for organization
+7:10 purposes. That way, again, you can
+7:13 create these reactivation lists uh later
+7:15 down the line. And same thing goes here,
+7:16 right? You can add them to a list. That
+7:19 way, you can continuously reactivating
+7:21 and reactivating your uh previous list
+7:23 of positive replies. Once that's done,
+7:25 you would actually just create a blast
+7:27 And depending on what you set during
+7:29 your scheduling time, all these messages
+7:31 would either go out at once or drip out
+7:33 over a scheduled time period, like you
+7:35 set in the settings. So, if you're
+7:37 pushing serious volume, the setup for
+7:39 this infrastructure and the pricing are
+7:41 quite a bit different. And if you want
+7:43 to be able to send millions of texts per
+7:44 day as well as custom SMS pricing 90%
+7:48 cheaper than any text platform on the
+7:49 market, then there's a link below in the
+7:51 description and the comments to book a
+7:53 call so you can get a custom SMS quote
+7:55 as well as this entire infrastructure
+7:57 capable of sending millions of texts per
+7:59 day built entirely done for you. So,
+8:01 principle number four is lead with
+8:03 value, not buy now. So, this is the one
+8:05 thing that decides whether you still
+8:06 have a business within 6 months is you
+8:08 lead with value, not buy now. And what I
+8:10 mean by that is Hormozi's rule is you
+8:12 give value first. So, you give people
+8:14 something genuinely useful so they
+8:16 actually want to hear from you. And at
+8:18 small scale, that's a nice to have. It's
+8:19 not really necessary. But at a million
+8:21 texts per day or more, it's literally
+8:23 survival. And the reason why is because
+8:25 the carriers score you like a credit
+8:27 score. So, they watch your complaint
+8:28 rates, your opt-out rates in real time.
+8:30 If you blast a message that says buy
+8:32 now, buy now to a million people all at
+8:35 once who half remember you from 6 to 12
+8:37 months ago, opt-out rates and spam
+8:40 reports spike through the roof. And the
+8:41 carriers read that as nobody wants this.
+8:44 And what they'll start to do is start to
+8:45 filter you. So, you paid for a million
+8:47 texts, but you only reached a fraction
+8:49 of that. And this is where Sendivo's
+8:50 dashboard comes into play. Like as you
+8:52 can see here, we sent over a million
+8:53 messages on this particular account.
+8:55 96.7 delivery rate. Opt-out rate is
+8:58 crucial. Like I like to be around under
+9:00 5%. Anything like over 5, 6%, you start
+9:03 raising flags with the carriers.
+9:05 Response rate generally in this space,
+9:07 you know, anywhere between 3 to 10% is
+9:09 pretty common. And then you can see how
+9:11 many campaigns we have live on this
+9:13 particular account. And if I navigate to
+9:15 all sub-accounts down here, you can see
+9:16 that we have much bigger metrics
+9:18 obviously cuz this is taking into
+9:19 account all the accounts that we have.
+9:21 Um but 89.4% at 2.6 million, about a
+9:24 million a day like I said. 2.74% opt-out
+9:27 rate. And then a 2.82% response rate
+9:30 over 132 campaigns. And then everything
+9:33 broken down on a daily basis, on a
+9:35 weekly basis. How many messages are
+9:37 actually getting delivered? How many are
+9:38 failing? What is the failure reason,
+9:40 right? Data is a big issue in this space
+9:42 as well. Um obviously, you want to clean
+9:44 your data, make sure that you have good
+9:45 data, accurate phone numbers, etc. And
+9:47 then, everything on a per campaign and
+9:50 per sub account basis broken down for
+9:51 you so that you know every single text
+9:53 message you're sending is actually
+9:55 landing on your prospect's phone. So,
+9:57 obviously, I recommend you send
+9:58 something people actually want, a real
+10:00 answer, a genuine offer, something
+10:01 useful, and your complaints stay low,
+10:04 your reputation stays high, and your
+10:06 volume keeps landing. And again, at mass
+10:08 volume, the number one thing that's
+10:10 going to hold you back is literally the
+10:11 platform you're sending on. So, like I
+10:13 said, if you want an SMS platform
+10:15 capable of sending millions of text per
+10:17 day, there's a link below to sign up for
+10:18 Send Evo. And if you're a mass volume
+10:20 sender, call it anything over 500,000
+10:22 messages a month, use that same link to
+10:25 book a call, and we'll get you a custom
+10:26 quote at our absolute lowest cost per
+10:28 text rate compared to platforms like
+10:30 Twilio. So, book your call, get your
+10:31 custom pricing, and let's get your
+10:33 volume landing. I'll see you on the next
+10:35 one.
+
+
