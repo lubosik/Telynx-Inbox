@@ -17,12 +17,17 @@
  */
 
 const express = require('express');
-const { logAuditSafely } = require('../lib/audit/log');
+const { logAudit, logAuditSafely } = require('../lib/audit/log');
 const { CampaignNotReadyError, CampaignRequestError } = require('../lib/campaigns/service');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
+const { SegmentRuleDraftError } = require('../lib/campaigns/segment-rule-writer');
 const { prepareSegmentChangeNotifications } = require('../lib/campaigns/segment-notifications');
 
-const CREATE_BODY_KEYS = new Set(['kind', 'name', 'description', 'members', 'definitionKey']);
+const CREATE_BODY_KEYS = new Set(['kind', 'name', 'description', 'purpose', 'members', 'definitionKey']);
+const REMOVE_BODY_KEYS = new Set(['mode', 'reason']);
+const RULE_DRAFT_BODY_KEYS = new Set(['description']);
+const RULE_PREVIEW_BODY_KEYS = new Set(['rules', 'selfSegmentKey']);
+const RULE_CREATE_BODY_KEYS = new Set(['name', 'description', 'rules']);
 const MEMBER_BODY_KEYS = new Set(['phone', 'contactPhone', 'contactId', 'contactID', 'name', 'reason']);
 const OVERRIDE_BODY_KEYS = new Set([
   'phone', 'contactPhone', 'overrideType', 'reason', 'contactId', 'contactID', 'name'
@@ -37,9 +42,16 @@ function rejectUnknownKeys(body, allowed, message) {
 
 function sendError(res, error) {
   if (error instanceof CampaignRequestError || error instanceof CampaignNotReadyError || error?.status) {
-    return res.status(error.status || 400).json({
+    const body = {
       error: error.message, code: error.code || 'INVALID_SEGMENT_REQUEST'
-    });
+    };
+    // A rule rejection is only useful if it says WHICH rule and why. These are
+    // the validator's own reasons, built from constants in
+    // lib/campaigns/segment-rule-schema.js: a dimension id, an operator name,
+    // a limit, or a product name the operator themselves typed. No customer
+    // value and no fragment of a model's reply travels in them.
+    if (Array.isArray(error.errors) && error.errors.length) body.errors = error.errors;
+    return res.status(error.status || 400).json(body);
   }
   console.error('[SEGMENTS] Request failed:', error?.code || 'internal_error');
   return res.status(500).json({
@@ -74,7 +86,8 @@ async function auditSegment(eventType, req, segment, details = {}) {
 function createSegmentRouter({
   service,
   segmentNotificationSender,
-  auditWriter
+  auditWriter,
+  segmentRemovalAuditWriter
 } = {}) {
   const segments = service || createSegmentService();
   // Lazy, like routes/campaigns.js: constructing this router in a unit test
@@ -83,6 +96,9 @@ function createSegmentRouter({
   const notifySegmentChange = segmentNotificationSender || ((...args) =>
     require('../lib/apns-notify').sendSegmentChangeNotifications(...args));
   const writeAudit = auditWriter || logAuditSafely;
+  // Removal is the one segment action whose audit row must exist before the
+  // effect. logAudit, not logAuditSafely: no row, no delete.
+  const removalAuditWriter = segmentRemovalAuditWriter || logAudit;
   const router = express.Router();
 
   /**
@@ -118,11 +134,85 @@ function createSegmentRouter({
     } catch (error) { return sendError(res, error); }
   });
 
+  // ── Describing a segment in words ─────────────────────────────────────────
+  //
+  // Three steps, in this order, and the order is the feature:
+  //
+  //   POST /rules/draft    a sentence in, DRAFT RULES out. Saves nothing.
+  //   POST /rules/preview  rules in, a real count and a sample out. Saves
+  //                        nothing.
+  //   POST /rules          rules in, a segment out. This is the only one that
+  //                        writes, and it is reached only after a person has
+  //                        read the rules in plain English.
+  //
+  // The model never creates a segment and never returns people. Splitting the
+  // three is what makes that structural rather than a promise: the drafting
+  // endpoint has no code path to a write, and the writing endpoint has no code
+  // path to a model.
+  //
+  // All three require campaigns.manage. A Support Agent cannot build a
+  // segment, and the policy table says so in lib/route-policy.js.
+
+  router.post('/rules/draft', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const input = rejectUnknownKeys(
+        req.body, RULE_DRAFT_BODY_KEYS,
+        'Only description may be provided. Customer data is server-owned and is never accepted here.'
+      );
+      const result = await segments.draftRules({ description: input.description });
+      return res.json(result);
+    } catch (error) {
+      if (error instanceof SegmentRuleDraftError) {
+        return res.status(error.status || 400).json({ error: error.message, code: error.code });
+      }
+      return sendError(res, error);
+    }
+  });
+
+  router.post('/rules/preview', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const input = rejectUnknownKeys(
+        req.body, RULE_PREVIEW_BODY_KEYS,
+        'Only rules and selfSegmentKey may be provided.'
+      );
+      return res.json(await segments.previewRules(input));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  router.post('/rules', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const input = rejectUnknownKeys(
+        req.body, RULE_CREATE_BODY_KEYS,
+        'Only name, description and rules may be provided.'
+      );
+      const result = await segments.createFromRules(input, req.actor);
+      await auditSegment('campaign.segment.created', req, result.segment, {
+        summary: `Created the described segment ${segmentName(result.segment)}`,
+        newState: { kind: 'automatic', member_count: 0 },
+        metadata: {
+          segment_key: result.segment.key,
+          segment_kind: 'automatic',
+          detector: 'rules',
+          rule_version: result.segment.ruleVersion,
+          // The rule shape, so the Activity Center can answer "what was this
+          // segment built from" without storing the rules twice.
+          rule_match: result.ruleSet.match,
+          rule_condition_count: result.ruleSet.conditions.length,
+          rule_dimensions: [...new Set(result.ruleSet.conditions.map(item => item.dimension))].sort()
+        }
+      });
+      return res.status(201).json(result);
+    } catch (error) { return sendError(res, error); }
+  });
+
   router.post('/', async (req, res) => {
     try {
       const input = rejectUnknownKeys(
         req.body, CREATE_BODY_KEYS,
-        'Only kind, name, description, definitionKey and members may be provided.'
+        'Only kind, name, description, purpose, definitionKey and members may be provided.'
       );
       // The kind is chosen once, at creation, and the database refuses to
       // change it afterwards. Automatic means the engine owns membership;
@@ -153,7 +243,12 @@ function createSegmentRouter({
         metadata: {
           segment_key: result.segment.key,
           segment_kind: 'manual',
-          member_count: result.memberCount
+          member_count: result.memberCount,
+          // The purpose is stored on the row and readable from the segment
+          // screen. The audit metadata records only that one was given, so the
+          // append-only log does not become a second, undeletable copy of
+          // operator free text about customers.
+          purpose_recorded: Boolean(result.segment.purpose)
         }
       });
       return res.status(201).json(result);
@@ -243,6 +338,144 @@ function createSegmentRouter({
           segment_id: String(req.params.id),
           override_type: result.override.overrideType,
           reason: result.override.revokeReason
+        }
+      });
+      return res.json(result);
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Who could be added to this segment.
+   *
+   * `campaigns.manage`, not `campaigns.read`. This endpoint exists for one
+   * reason: to stage an add or a force include. A Support Agent can never
+   * perform either, and handing them a list of people they cannot act on is a
+   * route with no reader. Segment membership itself stays readable at
+   * `GET /:id`, which is the question they do get asked.
+   *
+   * The exclusion of current members happens in the service, before paging.
+   * See the comment on `candidates()` for why filtering the visible page would
+   * not be a fix.
+   */
+  router.get('/:id/candidates', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(await segments.candidates(req.params.id, req.query));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Remove a segment from the list.
+   *
+   * DESTROY OR ARCHIVE IS NOT THE CALLER'S DECISION.
+   *   A hand-made list of phone numbers that no campaign ever used, that the
+   *   engine never ran on, that nobody overrode, and where nobody wrote down
+   *   why any named person is in it, records no decision about anybody. It is
+   *   somebody trying the feature out, and having no way to remove it is a
+   *   papercut rather than a safeguard. That one is genuinely deleted.
+   *
+   *   Everything else is part of the answer to "who did we message and why".
+   *   An override names a person, an author and a reason and survives every
+   *   recompute. A recompute run is the engine's own record of what it decided.
+   *   A member row carrying a written reason is the same class of thing as an
+   *   override. A campaign built against the segment makes it the record of who
+   *   that campaign was aimed at. Any of those and the segment is archived: it
+   *   leaves the working list, the row stays, and `?archived=true` still finds
+   *   it.
+   *
+   *   The body may ask for `mode: "archive"`. It may NOT ask for a delete.
+   *   delete_sms_campaign_segment has no force path and repeats every blocker
+   *   inside the transaction, so a segment that gets a campaign or an override
+   *   between the preview below and the statement ends up archived, not gone.
+   *
+   * AUDIT ORDER. The row is written BEFORE the destructive statement, with
+   *   `logAudit` so a failed write refuses the delete outright. After the
+   *   delete there is nothing left to describe. Over-recording an attempt that
+   *   then failed is a bookkeeping error; under-recording a destruction that
+   *   succeeded is a hole in the audit trail, and only one of those is
+   *   recoverable.
+   */
+  router.delete('/:id', async (req, res) => {
+    try {
+      const input = rejectUnknownKeys(
+        req.body, REMOVE_BODY_KEYS, 'Only mode and reason may be provided.'
+      );
+      const requestedMode = input.mode === 'archive' ? 'archive' : 'auto';
+      const reason = typeof input.reason === 'string' ? input.reason.slice(0, 500) : null;
+      const preview = await segments.deletionPreview(req.params.id);
+      const willDelete = requestedMode !== 'archive' && preview.destructible === true;
+
+      if (willDelete) {
+        const proof = await removalAuditWriter({
+          eventType: 'campaign.segment.deleted',
+          req,
+          entityId: preview.segment.id,
+          summary: `Deleted ${segmentName(preview.segment)}; it held no campaign, no engine run, no override and no written reason about anybody`,
+          previousState: {
+            kind: preview.segment.kind, member_count: preview.segment.memberCount
+          },
+          metadata: {
+            segment_key: preview.segment.key,
+            segment_kind: preview.segment.kind,
+            member_count: preview.segment.memberCount,
+            reason
+          },
+          fingerprint: `segment-deleted:${preview.segment.id}`
+        });
+        if (!proof?.recorded && proof?.reason !== 'duplicate') {
+          throw Object.assign(new Error('Segment deletion audit was not recorded.'), {
+            code: 'SEGMENT_DELETE_AUDIT_REQUIRED', status: 503
+          });
+        }
+      }
+
+      const result = await segments.remove(
+        req.params.id, { mode: requestedMode, reason }, req.actor
+      );
+
+      if (result.outcome === 'archived') {
+        await auditSegment('campaign.segment.archived', req, preview.segment, {
+          summary: `Archived ${segmentName(preview.segment)}; it carries a record of a decision and cannot be deleted`,
+          previousState: { kind: preview.segment.kind, archived: false },
+          newState: { kind: result.kind, archived: true },
+          metadata: {
+            segment_key: preview.segment.key,
+            segment_kind: preview.segment.kind,
+            requested_mode: requestedMode,
+            blockers: result.blockers,
+            reason
+          },
+          fingerprint: `segment-archived:${preview.segment.id}`
+        });
+      } else if (!willDelete) {
+        // The preview said archive, the RPC destroyed it. That means the two
+        // disagree about the rules, which is a bug worth shouting about rather
+        // than a row worth writing quietly.
+        console.error('[SEGMENTS] Deletion preview and delete_sms_campaign_segment disagreed; the row is gone and unaudited.');
+      }
+
+      return res.json(result);
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Put an archived segment back.
+   *
+   * Archiving has to be reversible or it is a slower delete, and an operator
+   * who cannot undo it reaches for the destructive path instead. Nothing was
+   * removed by the archive, so nothing is rebuilt here.
+   */
+  router.post('/:id/restore', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const result = await segments.restore(req.params.id, req.actor);
+      await auditSegment('campaign.segment.restored', req, result.segment, {
+        summary: `Restored ${segmentName(result.segment)} to the working list`,
+        previousState: { archived: true },
+        newState: { archived: false, member_count: result.segment.memberCount },
+        metadata: {
+          segment_key: result.segment.key,
+          segment_kind: result.segment.kind
         }
       });
       return res.json(result);

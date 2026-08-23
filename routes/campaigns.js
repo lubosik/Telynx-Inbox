@@ -10,6 +10,9 @@ const {
 } = require('../lib/campaigns/service');
 const { createCampaignGenerationService } = require('../lib/campaigns/generation-service');
 const { CopyDraftError, draftCandidates } = require('../lib/campaigns/copy-writer');
+const {
+  createOpportunityPortfolioService
+} = require('../lib/campaigns/opportunity-portfolio');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -116,7 +119,8 @@ function createCampaignRouter({
   campaignNotificationSender,
   generationAuditWriter,
   campaignDeletionAuditWriter,
-  copyDrafter
+  copyDrafter,
+  opportunityPortfolio
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -132,6 +136,10 @@ function createCampaignRouter({
   const deletionAuditWriter = campaignDeletionAuditWriter || logAudit;
   // Injectable so route tests never construct an OpenRouter client.
   const drafter = copyDrafter || draftCandidates;
+  // Lazily constructed for the same reason: building it must not require
+  // database or WooCommerce credentials, and the first read happens inside the
+  // handler. The instance is per-router so its cache is shared across requests.
+  const portfolio = opportunityPortfolio || createOpportunityPortfolioService();
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -146,6 +154,40 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.reviewCount());
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * WHERE THE REVENUE ACTUALLY IS, at portfolio level.
+   *
+   * Literal before /:id, so Express never reads "opportunities" as a campaign
+   * id, and declared literally in lib/route-policy.js for the same reason.
+   *
+   * campaigns.read, not campaigns.manage. It writes nothing, sends nothing,
+   * creates no campaign and creates no draft: it counts customers and reports
+   * what has already happened. A Support Agent who can see a segment can see
+   * why it matters.
+   *
+   * `?refresh=true` recomputes from WooCommerce and Supabase rather than
+   * serving the cached picture. It remains a read: the debounce inside the
+   * service is what stops a held-down refresh control becoming a load test.
+   *
+   * Not audited, because nothing changes. See the same reasoning on
+   * POST /copy-suggestions.
+   */
+  router.get('/opportunities', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const unknown = Object.keys(req.query || {}).filter(key => key !== 'refresh');
+      if (unknown.length) {
+        throw new CampaignRequestError(
+          'The opportunity portfolio accepts refresh only. Every population, rate and figure in it '
+          + 'is server-owned and cannot be supplied by a caller.',
+          'CAMPAIGN_OPPORTUNITY_INPUT_REJECTED', 400
+        );
+      }
+      const refresh = String(req.query?.refresh ?? '') === 'true';
+      return res.json(await portfolio.current({ refresh }));
     } catch (error) { return sendError(res, error); }
   });
 

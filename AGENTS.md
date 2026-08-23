@@ -62,6 +62,16 @@ client.
 - `docs/analytics/`: revenue-claim methodology, implementation architecture,
   and the provisional historical audit. Read the methodology before changing
   attribution rules or displaying revenue.
+- `lib/campaigns/segment-rule-schema.js` is the CLOSED grammar a described
+  segment may be expressed in, and `segment-rule-validator.js` is the gate
+  every rule set passes through, whether it came from a model or from a client.
+  Nothing downstream builds a query: `segment-rule-evaluator.js` switches over
+  the same closed dimension list and reads properties of records
+  `segment-facts.js` built in memory, which is why an invented field has
+  nothing to reach. A dimension added to the schema needs a rendering, an
+  evaluation branch and a sample in `test/campaign-segment-rule-validator.test.js`,
+  and two of those three fail the suite if you forget them. `.env.example`
+  carries `SEGMENT_AI_BUILDER_ENABLED`, off unless it is exactly `true`.
 - `docs/campaigns/`, `lib/campaigns/`, `routes/campaigns.js`: campaign research,
   deterministic opportunity and attribution policies, draft/review APIs, and
   the fail-closed delivery foundation. `scripts/campaigns-migration.sql` must
@@ -71,6 +81,124 @@ client.
   cadence analysis. It prints no customer or product identity and never writes.
   `scripts/dry-run-campaign-opportunities.js` accepts only a local fixture and
   prepares draft outputs without importing a database or provider client.
+  `scripts/dry-run-campaign-proposals.js` is the same idea for campaign
+  proposals: two local fixtures, one of them standing in for the model reply,
+  no database and no OpenRouter client.
+- `docs/campaigns/OPPORTUNITY-PROPOSALS.md`, `lib/campaigns/proposal-*.js`,
+  `routes/campaign-proposals.js`: turning a detected cohort opportunity into
+  several reviewable campaign proposals. Apply
+  `scripts/campaign-proposals-migration.sql` before deploying the route. The
+  brake is `CAMPAIGN_OPPORTUNITY_PROPOSALS_ENABLED`, off unless it is exactly
+  `true`. **A proposal is not a campaign.** The model writes only the wording;
+  the mechanism, the audience, the offer structure and every number are
+  deterministic. Read the doc before changing what a proposal may show: the
+  opportunity shape in it is an ASSUMED contract with the cohort detector, and
+  `lib/campaigns/opportunity-contract.js` is the single adapter to change if
+  the detector lands with different field names. Two guards in
+  `lib/campaigns/proposal-guards.js` are load-bearing and each is applied at
+  three call sites on purpose: copy that failed the validator is never
+  surfaced, and nothing becomes a campaign without a named human accepting it.
+  Accepting produces an ordinary campaign `draft` and nothing more.
+- `lib/campaigns/product-identity.js`, `lib/campaigns/product-catalogue.js`:
+  which catalogue product a historical order line item is. Legacy
+  `sms_orders.items` rows carry `{sku, name}` and no Woo identifiers, so the
+  detectors used to discard 2,334 of 2,343 paid line items and every automatic
+  segment was empty; that was misread as a consent problem, and consent gates
+  sending rather than segmenting. Resolution is EQUALITY ONLY — Woo IDs, SKU,
+  catalogue name, a curated reviewed alias table, then canonical component-set
+  equality — with no prefix, substring, edit distance or model, and ambiguity
+  resolves to nothing. Dose variants share a parent for CADENCE and stay
+  separate for STOCK; combination products are one identity and are never
+  decomposed into their components. Unresolved items are counted in
+  `sourceCoverage.productIdentity`, never absorbed. The catalogue cache is
+  invalidated by the product webhook first and `CAMPAIGN_CATALOGUE_TTL_MS`
+  second, and a provider failure keeps the last snapshot marked `stale` rather
+  than throwing. It produces stock ROWS and never product EVENTS: a first
+  sighting of "in stock" is not a restock. Read
+  `docs/campaigns/SEGMENTATION-METHODOLOGY.md` before changing a matching rule.
+- `scripts/dry-run-campaign-identity.js`: read-only, aggregate-only. Reads the
+  live database and the Woo catalogue, prints resolution counts and detector
+  populations, and writes nothing. It prints catalogue product names and SKUs,
+  which are public shop content, and no customer identity. Its
+  support-clearance pass is an explicitly labelled counterfactual measuring
+  reach, not permission.
+- `lib/campaigns/segment-contactability.js` and the `clearance` option on
+  `buildGenerationInput()`: the split between WHO MATCHES THIS PATTERN and MAY
+  WE CONTACT THIS PERSON. Segment membership is behaviour only. It must never
+  read consent, STOP, DND, quiet hours or support clearance, because gating it
+  on the empty `sms_customer_commercial_eligibility` table made all four
+  automatic segments read zero and look like a broken engine. Sending is
+  unchanged: `clearance: 'gate'` is the default and is the historical
+  behaviour, and only the named wrapper `buildSegmentationInput()` reaches
+  observe mode. Its output is stamped `segmentationOnly` and
+  `prepareOpportunityDraftRun()` THROWS on that stamp, so a widened view can
+  never become a widened send. Contactability is reused from
+  `lib/campaigns/eligibility.js`, computed at READ time, put ON the member row
+  and never used to filter it, and never stored or hashed into
+  `computedSetDigest()`. Do not add a `contactable` column; a stale one is what
+  somebody later mistakes for permission.
+- `scripts/dry-run-segment-membership.js`: read-only, aggregate-only, and with
+  NO counterfactual. Live per-segment counts, the contactability breakdown, and
+  the funnel from paid order to segment member. Use it, not the identity dry
+  run, when the question is how many people are in a segment.
+- `lib/campaigns/buyer-cohorts.js`, `docs/campaigns/BUYER-COHORTS.md`: the
+  BUYER COHORTS. A COHORT IS DECIDED AT THE CUSTOMER LEVEL, NEVER THE
+  CUSTOMER-PRODUCT LEVEL. Somebody who bought BPC-157 once and GHK-Cu once is a
+  repeat customer with two one-time products; counting customer-product pairs
+  turns 504 real one-time buyers into an imaginary 1,300. `orderCount` comes
+  from `buildCustomerFacts()` and counts distinct paid ORDERS per person.
+  Repeat behaviour here is CROSS-PRODUCT, which is why the same-product reorder
+  engine finds about nine people out of 781 buyers and is not broken.
+  Tenure cuts are 30/90/365 days, FROZEN in `COHORT_CALIBRATION` rather than
+  recomputed live, because a segment whose meaning shifts nightly makes "why is
+  this person in this list" unanswerable. Drift is reported, never applied:
+  re-freezing means editing the constant and bumping
+  `BUYER_COHORT_RULE_VERSION`. There is deliberately no RFM grid, no propensity
+  score and no dormant-over-a-year cohort; `COHORTS_NOT_BUILT` records each
+  omission and its reason and the endpoint returns it, so the absence is
+  visible rather than looking like a gap. Cohorts are first-class entries in
+  `segment-definitions.js` carrying `source: 'buyer_cohorts'`, and
+  `segment-service.js` dispatches on that one field into
+  `buildBuyerCohortFacts()`. Membership is behaviour, never permission, exactly
+  as for every other automatic segment.
+- `lib/campaigns/opportunity-sizing.js`: the honesty boundary, and the reason
+  this feature is safe to show an owner. Three results exist and no fourth:
+  `observed()`, `project()` and `refuse()`. A projection CANNOT be constructed
+  without the rate's sample, a named source from a closed set and a stated
+  claim, it returns RANGES and never a point, and it carries no `value`,
+  `total`, `amount` or `revenue` key, so there is nothing a template can print
+  on its own and have it read as a fact. `assertNoHeadlineFigure()` walks the
+  whole payload and throws rather than shipping one.
+  **`incremental_from_contact` refuses by construction.** No promotional
+  campaign has ever been delivered here and the commercial contact ledger is
+  empty, so every observed rate is what customers do ANYWAY. Presenting it as
+  campaign revenue would claim credit for the baseline. Do not add a default
+  rate, a flag or an override; hand `project()` a measured uplift with a real
+  sample and the refusal becomes a projection on its own.
+- `lib/campaigns/opportunity-detector.js`: portfolio-level findings, not
+  per-person ones. Rates are CONDITIONAL on tenure: a rate measured from day
+  zero is dominated by people who returned in week one, and not one of them is
+  still in a one-time-buyer cohort. A cohort spanning every tenure is refused a
+  rate entirely rather than quoted an averaged one. Tenure cohorts quote the
+  rate anchored at their own lower boundary, which errs HIGH on purpose,
+  because a do-nothing baseline is a hurdle a campaign must clear and an
+  understated hurdle flatters the campaign.
+- `lib/campaigns/opportunity-portfolio.js`, `GET /api/campaigns/opportunities`:
+  the refresh. Read-only, no table, no migration, no persisted snapshot. The
+  computation is a pure function of `readAuthoritativeGenerationSources()`, so
+  the cache is in-process and disposable; persisting it would create a second
+  copy of the truth. A failed refresh serves the previous payload with
+  `freshness.stale` set rather than emptying the screen. `server.js` starts it
+  60 seconds after boot, unconditionally, because it cannot send.
+- `scripts/dry-run-buyer-cohorts.js`: read-only, aggregate-only, no customer
+  identity. Live cohort populations, the organic return baseline, and every
+  finding with its assumption and every refusal printed in full. Run this, not
+  the segment membership dry run, when the question is where the revenue is.
+- `scripts/seed-product-inventory-baseline.js`: writes one current-stock row per
+  purchasable catalogue unit into `sms_product_inventory`, so a later webhook
+  has a `previous` to compare against. Read-only unless given BOTH `--persist`
+  and `PRODUCT_INVENTORY_SEED_APPROVED=YES`. It never overwrites an existing
+  row and never writes a product event.
 - `scripts/onboarding-migration.sql` and `docs/onboarding/`: server-owned,
   role-aware first-time tour state. Existing accounts are deliberately
   ineligible; future named accounts start at `not_started`.
@@ -148,13 +276,57 @@ client.
   no RLS. Fixing that needs its own deliberate migration reviewing every reader
   of that table; do not fold it into this file.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
+- `scripts/segment-lifecycle-migration.sql`: NOT applied yet. Adds
+  `sms_campaign_segments.purpose`, backfills it, and creates
+  `delete_sms_campaign_segment` / `restore_sms_campaign_segment`. It DROPs the
+  nine-argument `create_sms_campaign_segment` and replaces it with a
+  ten-argument version, deliberately rather than adding an overload, so apply
+  it in the SAME window as the matching deploy: in the gap the running backend
+  gets PGRST202 on segment CREATION only, which `databaseError()` already turns
+  into the friendly not-ready message. Reads, member edits, overrides and
+  recomputes are untouched by the gap. It adds no permission key, so it cannot
+  cause a startup crash loop.
+- A SEGMENT is removed the same way a campaign is: `delete_sms_campaign_segment`
+  decides, the caller cannot ask for the destructive path, and the audit row is
+  written before the effect with the hard-failing `logAudit`. Destruction is
+  reachable only for a segment that no campaign was built against, that the
+  engine never ran on, that carries no override row (revoked ones count), and
+  where no member row carries a written reason. Bare membership is deliberately
+  not a blocker: a hand-picked list of phone numbers records no decision about
+  anybody. Everything else archives, and the archive is reversible.
+- TWO KINDS OF REASON, AND THEY MUST NOT BE MERGED. A manual segment carries one
+  required `purpose`, captured at creation, that explains everybody in it. A
+  per-person reason lives on the member row's `inclusion_evidence` and on
+  `sms_campaign_segment_overrides.reason`, and answers a different question
+  about one named human. The second is the whole record on an AUTOMATIC segment,
+  where somebody is overruling the engine, and automatic segments have no
+  purpose at all because their detector definition is it. A database CHECK
+  enforces that split.
+- `GET /api/segments/:id/candidates` is the add-someone picker and the only
+  segment GET that is not `campaigns.read`. It subtracts current members BEFORE
+  paging; do not filter membership in the client, because the picker is paged
+  and the client holds one page of a set that runs to thousands of rows. People
+  with an active exclude override come back separately in `held`, never hidden:
+  a database trigger refuses to add them, so hiding them would leave a missing
+  name with no explanation.
 - `ios/ViciInbox/UI/SegmentsView.swift`, `SegmentDetailView.swift`: the client
   for `routes/segments.js`, reached from the Growth tab's third control,
   "Audiences". All evidence interpretation lives in
   `ios/ViciInbox/Core/SegmentModels.swift` rather than in a view, precisely so
   it lands in the Foundation layer that can be type-checked locally. The copy
   rule is the same as the notification module's: no em dashes, and an override
+  is never described as a membership edit. A removal confirmation must not
+  promise an outcome: the server chooses delete or archive and the sentence
+  shown afterwards is built from the response.
   is never described as a membership edit.
+- `ios/ViciInbox/UI/SegmentRuleBuilderView.swift` and
+  `ios/ViciInbox/Core/SegmentRuleModels.swift`: describing a segment in plain
+  words. The model DRAFTS RULES; it never creates a segment and never returns
+  people. The order is enforced in `SegmentRuleBuilderModel.canSave`, not in a
+  view: no preview of the current rules, no Save, and editing a rule takes the
+  preview away again. `SegmentRuleModels.swift` is the only segment file with a
+  `CodingKeys` map, because the wire key for a comparison is literally
+  `operator`.
 - `ios/project.yml`: human-readable XcodeGen source of truth.
 - `ios/ViciInbox.xcodeproj`: generated project committed for cloud CI.
 - `ios/scripts/generate-xcodeproj.py`: deterministic generator used on this
@@ -262,6 +434,7 @@ swiftc -typecheck \
   ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
   ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
   ios/ViciInbox/Core/CampaignArchiveModels.swift ios/ViciInbox/Core/SegmentModels.swift \
+  ios/ViciInbox/Core/SegmentRuleModels.swift \
   ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
   ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift

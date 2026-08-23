@@ -52,6 +52,11 @@ function reorderCandidate(phone, options = {}) {
 
 test('the catalogue is a closed, stable set of keys', () => {
   assert.deepEqual(SEGMENT_DEFINITION_KEYS, [
+    // The buyer cohorts. Customer-level, and computed from
+    // buildBuyerCohortFacts rather than the per-product engine input.
+    'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',
+    'one_time_lapsed', 'one_time_multi_product', 'one_time_slipping',
+    // The reorder and win-back detectors.
     'reorder_approaching', 'reorder_due', 'reorder_due_high_confidence', 'winback_qualified'
   ]);
   for (const entry of segmentCatalogue()) {
@@ -63,6 +68,57 @@ test('the catalogue is a closed, stable set of keys', () => {
   }
   assert.equal(segmentDefinition('does_not_exist'), null);
   assert.throws(() => computeSegmentMembers('does_not_exist', {}), /Unknown segment definition/);
+});
+
+/**
+ * The catalogue copy is read by the team, not by a statistician. It used to say
+ * "relative MAD at or below 0.25 with no outlying intervals", which is accurate
+ * and unreadable. These are the rules that stop that coming back.
+ */
+test('every segment reads in plain language', () => {
+  // Vocabulary that belongs in reorder-cadence.js and nowhere a person looks.
+  const statistics = [
+    'mad', 'median', 'interval', 'intervals', 'cadence', 'confidence', 'outlier',
+    'outliers', 'outlying', 'variance', 'deviation', 'percentile', 'coefficient',
+    'quantile', 'threshold', 'multiplier', 'qualifies', 'qualified', 'eligible'
+  ];
+  // Copy is a compliance surface on a peptide business. Nothing here may read
+  // as advice about a person's health.
+  const clinical = [
+    'dose', 'doses', 'dosage', 'treatment', 'therapy', 'therapeutic', 'cure',
+    'cures', 'heal', 'heals', 'healing', 'symptom', 'symptoms', 'patient',
+    'patients', 'diagnose', 'prescribe', 'prescription', 'clinical'
+  ];
+
+  for (const entry of segmentCatalogue()) {
+    const copy = `${entry.name} ${entry.description}`;
+    assert.ok(!/[\u2013\u2014]/.test(copy), `${entry.key} must not use a dash for a sentence break`);
+    for (const word of [...statistics, ...clinical]) {
+      assert.ok(
+        !new RegExp(`\\b${word}\\b`, 'i').test(copy),
+        `${entry.key} copy must not say "${word}"`
+      );
+    }
+    // Plain is not vague. A one-liner cannot carry who is in the group, how
+    // sure the timing is, and when you would use it.
+    assert.ok(entry.description.length >= 120, `${entry.key} description is too thin to be useful`);
+    // sms_campaign_segments caps name at 160 and description at 1000.
+    assert.ok(entry.name.length <= 160 && entry.description.length <= 1000);
+  }
+});
+
+/**
+ * The owner could not tell `reorder_due` and `reorder_due_high_confidence`
+ * apart and suspected they were the same segment. They are not: one is a strict
+ * subset of the other. Each description has to name the other one, so the
+ * relationship is visible on the screen rather than in this repository.
+ */
+test('the two reorder-due segments explain themselves against each other', () => {
+  const wide = segmentDefinition('reorder_due');
+  const tight = segmentDefinition('reorder_due_high_confidence');
+  assert.notEqual(wide.name, tight.name);
+  assert.ok(wide.description.includes(tight.name), 'the wider list must name the tighter one');
+  assert.ok(tight.description.includes(wide.name), 'the tighter list must name the wider one');
 });
 
 test('reorder_due_high_confidence agrees exactly with calculateReorderCadence', () => {

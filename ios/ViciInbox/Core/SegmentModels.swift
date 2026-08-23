@@ -133,12 +133,34 @@ struct SegmentRecord: Codable, Identifiable, Hashable {
     let ruleVersion: String?
     let memberCount: Int
     let lastComputedAt: String?
+    /// Why this manual segment exists. Written once, by the person who created
+    /// it, and shown as the explanation for everybody in it.
+    ///
+    /// Always nil on an automatic segment: its detector definition IS its
+    /// purpose, and the database refuses a second one. Nil on a manual segment
+    /// only where the row predates the requirement.
+    ///
+    /// THIS IS NOT THE PER-PERSON REASON. `SegmentOverride.reason` and the
+    /// `reason` inside a member's inclusion evidence answer a different
+    /// question, about one named human rather than about the group, and both
+    /// still exist. Do not merge them into this.
+    let purpose: String?
     let archivedAt: String?
+    let archivedByUserId: FlexibleID?
+    let archiveReason: String?
     let createdAt: String
     let updatedAt: String
 
     var isArchived: Bool { archivedAt?.isEmpty == false }
     var lastComputedDate: Date? { ServerDate.parse(lastComputedAt) }
+    var archivedDate: Date? { ServerDate.parse(archivedAt) }
+
+    /// The purpose, if there is one worth showing.
+    var statedPurpose: String? {
+        guard let purpose else { return nil }
+        let trimmed = purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     /// What the row says under the name. Never a raw key: "reorder_due" is a
     /// database value and the person reading this screen did not choose it.
@@ -431,8 +453,13 @@ enum SegmentNumberText {
 /// Stored inclusion evidence, read as a sentence and a short checklist.
 ///
 /// This is the thing the research says nobody in the market does well: not "you
-/// are in the Reorder segment" but "you order about every 30 days, your last
-/// order was on 22 July, so the next one was expected around 21 August".
+/// are in the Reorder segment" but "Alex usually orders every 30 days or so.
+/// The last one was on 22 July, which puts the next around 21 August."
+///
+/// Every string in here is written to be read out loud by somebody who has
+/// never seen the arithmetic. No median, no MAD, no confidence score, no em
+/// dash. The numbers that survive are the ones a person can picture: days,
+/// dates and counts.
 ///
 /// Nothing here recomputes anything. Every value is read from the row the
 /// engine wrote at the time, which is also why `ruleVersion` is shown: an old
@@ -503,9 +530,16 @@ struct SegmentInclusionEvidence: Hashable {
 
     /// One short paragraph, written from the reader's side of the screen.
     /// `personName` is used verbatim, so pass a display name rather than a key.
-    func headline(personName: String) -> String {
+    ///
+    /// `segmentPurpose` is the SEGMENT's one reason, passed in by the caller
+    /// because it lives on the segment row and not on this member's evidence.
+    /// It is deliberately additive: the per-person note, when there is one, is
+    /// still said out loud underneath it.
+    func headline(personName: String, segmentPurpose: String? = nil) -> String {
         if let source, source.hasPrefix("manual") {
-            return manualHeadline(personName: personName, source: source)
+            return manualHeadline(personName: personName,
+                                  source: source,
+                                  segmentPurpose: segmentPurpose)
         }
         switch detector {
         case "reorder": return reorderHeadline(personName: personName)
@@ -518,36 +552,59 @@ struct SegmentInclusionEvidence: Hashable {
         }
     }
 
-    private func manualHeadline(personName: String, source: String) -> String {
-        let opening = source == "manual_override_include"
-            ? "\(personName) was forced into this segment by a person."
-            : "\(personName) was added to this segment by hand."
-        if let reason {
-            return "\(opening) The reason given was: \(reason)"
+    /// Two reasons, in the order somebody would ask for them.
+    ///
+    /// The segment's purpose comes first because it is true of everybody here
+    /// and it is the common case: one sentence, written once, that explains the
+    /// whole group. The per-person note comes second and only when it exists,
+    /// because "added at her request on 12 Aug" says something the group
+    /// purpose cannot. Collapsing the two would lose the second one.
+    ///
+    /// On an automatic segment `segmentPurpose` is always nil, so a force
+    /// include reads exactly as it did before: the person's own reason, or the
+    /// plain statement that nobody recorded one.
+    private func manualHeadline(personName: String,
+                                source: String,
+                                segmentPurpose: String?) -> String {
+        var sentences: [String] = [
+            source == "manual_override_include"
+                ? "\(personName) was forced into this segment by a person."
+                : "\(personName) was added to this segment by hand."
+        ]
+        let purpose = segmentPurpose?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let purpose, !purpose.isEmpty {
+            sentences.append("This segment is for: \(purpose)")
         }
-        return "\(opening) No reason was recorded."
+        if let reason {
+            sentences.append("Note about \(personName): \(reason)")
+        } else if purpose == nil || purpose?.isEmpty == true {
+            sentences.append("No reason was recorded.")
+        }
+        return sentences.joined(separator: " ")
     }
 
     private func reorderHeadline(personName: String) -> String {
         var sentences: [String] = []
         if let median = medianIntervalDays {
             let basis = cadenceSource == "product"
-                ? "Customers who buy this product reorder about every \(SegmentNumberText.days(median))."
-                : "\(personName) orders about every \(SegmentNumberText.days(median))."
+                ? "\(personName) has not ordered often enough for us to read a pattern of their own, so we go by other customers, who buy this again every \(SegmentNumberText.days(median)) or so."
+                : "\(personName) usually orders every \(SegmentNumberText.days(median)) or so."
             sentences.append(basis)
         }
         if let last = SegmentDateText.day(lastOrderAt), let expected = SegmentDateText.day(expectedAt) {
-            sentences.append("The last order was on \(last), so the next one was expected around \(expected).")
+            sentences.append("The last one was on \(last), which puts the next around \(expected).")
         } else if let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("The last order was on \(last).")
+            sentences.append("The last one was on \(last).")
         }
         switch state {
         case "overdue":
-            sentences.append("That window has already passed.")
+            sentences.append("That date has gone by, so they are past due.")
         case "due":
-            sentences.append("That window is open now.")
+            sentences.append("That is about now.")
         case "approaching":
-            sentences.append("The window has not opened yet, so this is for planning rather than contact.")
+            sentences.append("That is close but not here yet, so this is one to get ready for rather than send to.")
+        case "not_due":
+            sentences.append("That is still a way off.")
         default:
             break
         }
@@ -560,18 +617,19 @@ struct SegmentInclusionEvidence: Hashable {
     private func winbackHeadline(personName: String) -> String {
         var sentences: [String] = []
         if let median = medianIntervalDays {
-            sentences.append("\(personName) used to order about every \(SegmentNumberText.days(median)).")
+            sentences.append("\(personName) used to order every \(SegmentNumberText.days(median)) or so.")
         } else {
-            sentences.append("\(personName) is a repeat customer who has stopped ordering.")
+            sentences.append("\(personName) bought regularly and has stopped.")
         }
         if let days = daysSinceLastOrder, let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("There has been no order for \(SegmentNumberText.days(days)), since \(last).")
+            sentences.append("There has been nothing since \(last), which is \(SegmentNumberText.days(days)) ago.")
         } else if let days = daysSinceLastOrder {
-            sentences.append("There has been no order for \(SegmentNumberText.days(days)).")
+            sentences.append("There has been nothing for \(SegmentNumberText.days(days)).")
         } else if let last = SegmentDateText.day(lastOrderAt) {
-            sentences.append("The last order was on \(last).")
+            sentences.append("The last one was on \(last).")
         }
-        sentences.append("That is long enough past their normal gap to count as lapsed.")
+        sentences.append("That is far enough past their usual gap that they count as gone quiet.")
+        sentences.append("Anyone it would be tactless to approach was left out before this list was built.")
         return sentences.joined(separator: " ")
     }
 
@@ -595,48 +653,68 @@ struct SegmentInclusionEvidence: Hashable {
             facts.append(SegmentFact(label: label, value: value))
         }
 
-        if detector == "winback" {
-            add("Lifetime orders", lifetimePurchaseCount.map(SegmentNumberText.count))
+        let isWinback = detector == "winback"
+        if isWinback {
+            add("Orders in total", lifetimePurchaseCount.map(SegmentNumberText.count))
         } else {
             add("Orders on record", purchaseCount.map(SegmentNumberText.count))
         }
-        add("Typical gap between orders", medianIntervalDays.map(SegmentNumberText.days))
-        add("Gaps measured", intervalsObserved.map(SegmentNumberText.count))
-        add("How steady that pattern is", confidenceText)
+        // A product level pattern is not this person's pattern, and a label that
+        // says "usually orders every" over somebody else's number is a lie the
+        // reader has no way to catch.
+        let borrowed = cadenceSource == "product"
+        let gapLabel = isWinback ? "Used to order every"
+            : borrowed ? "Other customers order every" : "Usually orders every"
+        add(gapLabel, medianIntervalDays.map(SegmentNumberText.days))
+        add(borrowed ? "Gaps measured across those customers" : "Gaps we measured",
+            intervalsObserved.map(SegmentNumberText.count))
+        add("How regular that is", confidenceText)
         add("Worked out from", cadenceSourceText)
-        add("Usual variation", madDays.flatMap { $0 > 0 ? "plus or minus \(SegmentNumberText.days($0))" : nil })
+        add("How much the gap moves", madDays.flatMap { $0 > 0 ? "about \(SegmentNumberText.days($0)) either way" : nil })
         add("Last order", SegmentDateText.day(lastOrderAt))
-        add("Days since that order", daysSinceLastOrder.map(SegmentNumberText.days))
-        add("Next order expected", SegmentDateText.day(expectedAt))
-        add("Expected window", expectedRange)
-        add("Where they are in that window", stateText)
+        add("Time since then", daysSinceLastOrder.map(SegmentNumberText.days))
+        add("Next one expected around", SegmentDateText.day(expectedAt))
+        add("Reasonable window", expectedRange)
+        add("Where they stand", stateText)
         add("Product", productName)
-        add("Qualified on", SegmentDateText.day(text("eligibleAt")))
-        add("Contact cooldown ended", SegmentDateText.day(text("cooldownEndsAt")))
-        add("Stops qualifying", SegmentDateText.day(text("expiresAt")))
+        add("Counted as gone quiet on", SegmentDateText.day(text("eligibleAt")))
+        add("Free to contact again since", SegmentDateText.day(text("cooldownEndsAt")))
+        add("Drops off this list on", SegmentDateText.day(text("expiresAt")))
         add("Added", SegmentDateText.day(addedAt))
         if let extra = additionalMatches, extra >= 1 {
             let count = Int(extra.rounded())
-            add("Also matched on", count == 1 ? "1 other product" : "\(count) other products")
+            add(isWinback ? "Also gone quiet on" : "Also due on",
+                count == 1 ? "1 other product" : "\(count) other products")
         }
-        add("Rules version", ruleVersion)
+        add("Rules used", ruleVersion)
         return facts
     }
 
+    /// A win back row carries no expected date, so the reorder wording that ends
+    /// in "the date" would be describing something the reader cannot see.
     private var confidenceText: String? {
+        let isWinback = detector == "winback"
         switch confidence {
-        case "high":     return "High. Their orders are very evenly spaced"
-        case "moderate": return "Moderate. Their orders are roughly evenly spaced"
-        case "none":     return "Not enough history to call it steady"
-        default:         return nil
+        case "high":
+            return isWinback
+                ? "Very. The gaps between their orders barely moved"
+                : "Very. The gaps barely change, so the date should be close"
+        case "moderate":
+            return isWinback
+                ? "Fairly. The gaps between their orders moved around a bit"
+                : "Fairly. The gaps move around a bit, so treat the date as a rough one"
+        case "none":
+            return "Not enough orders yet to call it regular"
+        default:
+            return nil
         }
     }
 
     private var cadenceSourceText: String? {
         switch cadenceSource {
         case "personal": return "Their own order history"
-        case "product":  return "How other customers reorder this product"
-        case "none":     return "No reliable pattern"
+        case "product":  return "How often other customers reorder this product"
+        case "none":     return "No pattern we could use"
         default:         return nil
         }
     }
@@ -659,20 +737,20 @@ struct SegmentInclusionEvidence: Hashable {
         switch detector {
         case "reorder":
             return [
-                "They place another order. That starts a fresh cycle and the expected window moves with it.",
-                "They are contacted about this order.",
-                "The product stops being in stock.",
-                "Their commercial eligibility record stops being current and clear.",
-                "Somebody holds them out of this segment."
+                "They order again. The clock starts over and the expected date moves with it.",
+                "Somebody messages them about this order.",
+                "The product goes out of stock.",
+                "Their permission to be sent marketing stops being current and clear.",
+                "Somebody holds them out of this segment by hand."
             ]
         case "winback":
-            var reasons = ["They place another order."]
+            var reasons = ["They order again."]
             if let expires = SegmentDateText.day(text("expiresAt")) {
-                reasons.append("This qualification lapses on \(expires).")
+                reasons.append("They drop off this list on \(expires) if nothing changes before then.")
             }
-            reasons.append("They are contacted, which starts the win back cooldown.")
-            reasons.append("Their commercial eligibility record stops being current and clear.")
-            reasons.append("Somebody holds them out of this segment.")
+            reasons.append("They are contacted as a win back, which keeps them off this list for the next six months.")
+            reasons.append("Their permission to be sent marketing stops being current and clear.")
+            reasons.append("Somebody holds them out of this segment by hand.")
             return reasons
         default:
             return []
@@ -682,11 +760,11 @@ struct SegmentInclusionEvidence: Hashable {
     private var stateText: String? {
         switch state {
         case "due":         return "Due now"
-        case "overdue":     return "Overdue"
-        case "approaching": return "Approaching, not due yet"
+        case "overdue":     return "Past due"
+        case "approaching": return "Nearly due, not there yet"
         case "not_due":     return "Not due yet"
-        case "contacted":   return "Already contacted for this order"
-        case "suppressed":  return "Held back"
+        case "contacted":   return "Already contacted about this order"
+        case "suppressed":  return "Held back for now"
         default:            return nil
         }
     }
@@ -703,6 +781,9 @@ struct SegmentMemberInput: Hashable {
     let phone: String
     let name: String?
     let contactID: String?
+    /// The optional note about THIS person, not the segment's purpose. The
+    /// wire key is still `reason` because that is what the server reads and
+    /// what every existing member row already carries.
     let reason: String?
 
     init(phone: String, name: String? = nil, contactID: String? = nil, reason: String? = nil) {
@@ -719,4 +800,182 @@ struct SegmentMemberInput: Hashable {
         if let reason, !reason.isEmpty { body["reason"] = reason }
         return body
     }
+}
+
+// MARK: - Who can be added
+
+/// `GET /api/segments/:id/candidates`.
+///
+/// WHY THIS ENDPOINT EXISTS AT ALL.
+///   The picker used to read `/api/contacts` and show everybody, so people
+///   already in the segment were offered again. Subtracting them in the client
+///   would only have hidden the ones on the page being looked at: the list is
+///   paged and searchable, and a member on page three would still have been
+///   offered one scroll later. The server subtracts first and pages second,
+///   which is also the only way `total` and `hasMore` can be true statements.
+///
+/// `campaigns.manage`, not `campaigns.read`. It exists to stage an add or a
+/// force include, and a Support Agent can do neither.
+struct SegmentCandidate: Codable, Identifiable, Hashable {
+    let contactPhone: String
+    let contactId: FlexibleID?
+    let contactName: String?
+    /// `available` today. Decoded as a string rather than an enum so a state
+    /// added by a later server cannot blank the whole picker.
+    let state: String?
+
+    var id: String { contactPhone }
+
+    var displayName: String {
+        guard let contactName,
+              !contactName.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return PhoneFormatter.pretty(contactPhone)
+        }
+        return contactName
+    }
+
+    var memberInput: SegmentMemberInput {
+        SegmentMemberInput(phone: contactPhone,
+                           name: contactName,
+                           contactID: contactId?.rawValue)
+    }
+}
+
+/// Somebody a person deliberately held out of an automatic segment.
+///
+/// Not the same state as "not a member", and deliberately not hidden. A
+/// standing exclusion outlives every recompute until it is revoked, so the only
+/// honest thing to do when their name would otherwise appear in the picker is
+/// to show the decision and who made it. Adding them is refused by a database
+/// trigger anyway, so hiding them would produce a name that simply is not there
+/// and no way to find out why.
+struct SegmentHeldCandidate: Codable, Identifiable, Hashable {
+    let contactPhone: String
+    let contactId: FlexibleID?
+    let contactName: String?
+    let override: SegmentOverride?
+
+    var id: String { contactPhone }
+
+    var displayName: String {
+        guard let contactName,
+              !contactName.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return PhoneFormatter.pretty(contactPhone)
+        }
+        return contactName
+    }
+
+    /// "Held out by Lubosi on 12 August 2026." The author is resolved by the
+    /// caller for the same reason `SegmentOverride` does it: a Support Agent
+    /// cannot read the team list at all.
+    func heldSentence(author: String) -> String {
+        guard let override else { return "Held out of this segment by a person." }
+        let when = override.createdDate.map { " on \(SegmentDateText.day($0))" } ?? ""
+        return "Held out by \(author)\(when)."
+    }
+
+    var reason: String? {
+        guard let reason = override?.reason,
+              !reason.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return reason
+    }
+}
+
+struct SegmentCandidatePage: Codable, Hashable {
+    let items: [SegmentCandidate]
+    let page: Int
+    let pageSize: Int
+    let total: Int
+    let hasMore: Bool?
+}
+
+struct SegmentCandidateResponse: Codable, Hashable {
+    let segment: SegmentRecord
+    let candidates: SegmentCandidatePage
+    let held: [SegmentHeldCandidate]?
+    let heldTotal: Int?
+    /// How many people matching this search were taken off the list because
+    /// they are already in the segment. Shown, rather than left as a silent
+    /// difference between what was searched for and what came back.
+    let alreadyInCount: Int?
+    let memberCount: Int?
+    let search: String?
+
+    var heldPeople: [SegmentHeldCandidate] { held ?? [] }
+
+    var alreadyInSentence: String? {
+        guard let alreadyInCount, alreadyInCount > 0 else { return nil }
+        return alreadyInCount == 1
+            ? "1 person matching this search is already in this segment and is not listed."
+            : "\(alreadyInCount.formatted()) people matching this search are already in this segment and are not listed."
+    }
+}
+
+// MARK: - Removing a segment
+
+/// `DELETE /api/segments/:id`.
+///
+/// THE CLIENT DOES NOT DECIDE WHICH OF THE TWO HAPPENS.
+///   It may ask for `mode: "archive"`. It may not ask for a deletion.
+///   `delete_sms_campaign_segment` has no force path and repeats every blocker
+///   inside its own transaction, so a segment that gains an override or a
+///   campaign between the tap and the statement ends up archived rather than
+///   gone. The outcome in the response is the answer, not the request.
+struct SegmentRemovalResponse: Codable, Hashable {
+    let outcome: String
+    let segmentId: String?
+    let blockers: [String]?
+    let name: String?
+    let kind: SegmentKind?
+    let membersRemoved: Int?
+
+    var wasDeleted: Bool { outcome == "deleted" }
+    var blockerList: [String] { blockers ?? [] }
+
+    /// What to tell the person who pressed the button. An archive is not a
+    /// failure and must not read like one.
+    func outcomeSentence(segmentName: String) -> String {
+        if wasDeleted { return "\(segmentName) was deleted." }
+        return "\(segmentName) was archived. It has left the list and nothing about it was destroyed."
+    }
+
+    /// Why it was archived rather than deleted, in the operator's language and
+    /// with the duplicate engine blockers collapsed into one line.
+    var explanations: [String] {
+        var seen = Set<String>()
+        var lines: [String] = []
+        for blocker in blockerList {
+            let sentence = SegmentBlockerText.sentence(blocker)
+            if seen.insert(sentence).inserted { lines.append(sentence) }
+        }
+        return lines
+    }
+}
+
+/// The blocker tokens `delete_sms_campaign_segment` returns, as sentences.
+///
+/// Each one names a thing that is part of the answer to "who did we message and
+/// why". None of them is a rule about size or tidiness.
+enum SegmentBlockerText {
+    static func sentence(_ blocker: String) -> String {
+        switch blocker {
+        case "already_archived":
+            return "It was already archived, so it was left that way."
+        case "campaign_reference":
+            return "A campaign was built against it, which makes it the record of who that campaign was aimed at."
+        case "engine_has_run", "recompute_history":
+            return "The engine has worked out who belongs in it at least once, and those runs are its record of what it decided."
+        case "override_history":
+            return "Somebody forced a person in, or held one out. That decision and any reversal of it stay readable."
+        case "member_reasons":
+            return "Somebody wrote down why a named person is in it."
+        default:
+            return "It holds a record of a decision somebody made."
+        }
+    }
+}
+
+/// `POST /api/segments/:id/restore`.
+struct SegmentRestoreResponse: Codable, Hashable {
+    let segment: SegmentRecord
 }

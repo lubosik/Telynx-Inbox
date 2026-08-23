@@ -61,6 +61,7 @@ final class SegmentListModel: ObservableObject {
     /// The catalogue key currently being turned on, so its row can show
     /// progress and cannot be tapped twice.
     @Published private(set) var startingKey: String?
+    @Published private(set) var isRemoving = false
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -146,13 +147,27 @@ final class SegmentListModel: ObservableObject {
         await load(reset: true)
     }
 
+    /// Announce a segment created by another screen.
+    ///
+    /// `SegmentRuleBuilderView` owns its own model and does its own two calls,
+    /// so it has nowhere to put the confirmation. Without this the list simply
+    /// reappears with one more row on it, and silence after a save reads as a
+    /// failure.
+    func noteSegmentCreated(_ segment: SegmentRecord) {
+        statusMessage = "\(segment.name) is now being tracked."
+    }
+
     /// Returns the new segment on success so the caller can navigate into it.
+    ///
+    /// `purpose` is required by the server and by the form. It is the one
+    /// reason a manual segment carries, and it becomes the explanation shown
+    /// for every person in it.
     func createManual(name: String,
-                      description: String?,
+                      purpose: String,
                       members: [SegmentMemberInput]) async -> SegmentRecord? {
         do {
             let response = try await APIClient.shared.createManualSegment(name: name,
-                                                                          description: description,
+                                                                          purpose: purpose,
                                                                           members: members)
             errorMessage = nil
             let count = response.memberCount ?? members.count
@@ -164,6 +179,88 @@ final class SegmentListModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return nil
+        }
+    }
+
+    /// Remove a segment, and report which of the two things actually happened.
+    ///
+    /// THE CLIENT DOES NOT DECIDE. It may ask for the archive; it may never ask
+    /// for the deletion. A segment that no campaign used, that the engine never
+    /// ran on, that nobody overrode and where nobody wrote down why a named
+    /// person is in it is destroyed. Everything else is archived, and the
+    /// server says which and why. So the confirmation this follows must warn
+    /// about the destructive possibility, and the message afterwards must
+    /// report the outcome rather than repeat the request.
+    @discardableResult
+    func remove(_ segment: SegmentRecord, archiveOnly: Bool = false) async -> Bool {
+        guard !isRemoving else { return false }
+        isRemoving = true
+        defer { isRemoving = false }
+        do {
+            let result = try await APIClient.shared.removeSegment(id: segment.id,
+                                                                  archiveOnly: archiveOnly)
+            errorMessage = nil
+            var message = result.outcomeSentence(segmentName: segment.name)
+            if !result.wasDeleted, let why = result.explanations.first {
+                message += " \(why)"
+            }
+            statusMessage = message
+            await load(reset: true)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+}
+
+// MARK: - The archive
+
+/// Archived segments, on their own screen.
+///
+/// They leave the working list and they do not leave the database, which is the
+/// whole difference between archiving and deleting. If there were no way to
+/// look at them the archive would be indistinguishable from a slow delete, and
+/// an operator who cannot find a segment again will reach for the destructive
+/// path next time.
+@MainActor
+final class SegmentArchiveModel: ObservableObject {
+    @Published private(set) var segments: [SegmentRecord] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isActing = false
+    @Published var errorMessage: String?
+    @Published var statusMessage: String?
+
+    var isEmpty: Bool { segments.isEmpty && !isLoading }
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let page = try await APIClient.shared.fetchSegments(page: 1,
+                                                                pageSize: 100,
+                                                                includeArchived: true)
+            // The server returns live rows alongside archived ones when asked
+            // for both, so this screen keeps only the ones it is about.
+            segments = page.items.filter(\.isArchived)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func restore(_ segment: SegmentRecord) async {
+        guard !isActing else { return }
+        isActing = true
+        defer { isActing = false }
+        do {
+            _ = try await APIClient.shared.restoreSegment(id: segment.id)
+            statusMessage = "\(segment.name) is back on the list."
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
@@ -229,6 +326,92 @@ final class SegmentContactPickerModel: ObservableObject {
         } catch {
             guard requestID == id else { return }
             searchProblem = "Contacts could not be loaded. Try again."
+        }
+    }
+}
+
+/// Who can still be added to one existing segment.
+///
+/// A different model from `SegmentContactPickerModel` on purpose, and the
+/// difference is the whole fix. That one is for a segment that does not exist
+/// yet, where nobody can already be a member and `/api/contacts` is the right
+/// source. This one is for a segment that does exist, so the question is not
+/// "who are our contacts?" but "who is not already in this?", and only the
+/// server can answer that: membership runs to thousands of rows, the list is
+/// paged, and subtracting inside the page the phone happens to be holding would
+/// hide the members on screen and leave the rest one scroll away.
+///
+/// It also carries `held`, the people a person deliberately excluded. Those are
+/// shown rather than dropped. A standing exclusion is a decision somebody made,
+/// the database refuses to add them while it stands, and reversing it is a real
+/// thing to want to do from here.
+@MainActor
+final class SegmentCandidatePickerModel: ObservableObject {
+    @Published var search = ""
+    @Published private(set) var candidates: [SegmentCandidate] = []
+    @Published private(set) var held: [SegmentHeldCandidate] = []
+    @Published private(set) var alreadyInSentence: String?
+    @Published private(set) var isSearching = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMore = false
+    @Published private(set) var problem: String?
+
+    let segmentID: String
+    private var requestID = UUID()
+    private var nextPage = 2
+    private let pageSize = 50
+
+    init(segmentID: String) {
+        self.segmentID = segmentID
+    }
+
+    var isEmpty: Bool { candidates.isEmpty && held.isEmpty && !isSearching }
+
+    func load() async {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = UUID()
+        requestID = id
+        isSearching = true
+        defer { if requestID == id { isSearching = false } }
+        do {
+            let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
+                                                                             search: query,
+                                                                             page: 1,
+                                                                             pageSize: pageSize)
+            // A slower earlier keystroke must not overwrite a faster later one.
+            guard requestID == id else { return }
+            candidates = response.candidates.items
+            held = response.heldPeople
+            alreadyInSentence = response.alreadyInSentence
+            hasMore = response.candidates.hasMore ?? false
+            nextPage = 2
+            problem = nil
+        } catch {
+            guard requestID == id else { return }
+            problem = error.localizedDescription
+        }
+    }
+
+    func loadMoreIfNeeded(after candidate: SegmentCandidate) async {
+        guard candidate.id == candidates.last?.id, hasMore, !isLoadingMore else { return }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = requestID
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
+                                                                             search: query,
+                                                                             page: nextPage,
+                                                                             pageSize: pageSize)
+            guard requestID == id else { return }
+            let known = Set(candidates.map(\.id))
+            candidates.append(contentsOf: response.candidates.items.filter { !known.contains($0.id) })
+            hasMore = response.candidates.hasMore ?? false
+            nextPage += 1
+            problem = nil
+        } catch {
+            guard requestID == id else { return }
+            problem = error.localizedDescription
         }
     }
 }
@@ -370,6 +553,47 @@ final class SegmentDetailModel: ObservableObject {
         }
     }
 
+    /// Force somebody in who is not in this segment at all.
+    ///
+    /// The same call as the force include on a member's own page, reached from
+    /// the picker instead. Before this the only way to pin a person was to find
+    /// them already listed, so pinning somebody the engine had never matched
+    /// was unreachable, which is the case the feature is most for.
+    func forceInclude(_ candidate: SegmentCandidate, reason: String?) async {
+        await setOverride(phone: candidate.contactPhone,
+                          displayName: candidate.displayName,
+                          overrideType: .include,
+                          reason: reason)
+    }
+
+    /// Remove this segment.
+    ///
+    /// Returns the sentence describing what ACTUALLY happened, or nil on
+    /// failure. The screen is about to be popped, so the message has to travel
+    /// to whoever is still on screen rather than being shown here: the caller
+    /// hands it to the list. And it has to be the server's answer, not the
+    /// request, because a segment that gains an override between the tap and
+    /// the statement is archived rather than deleted.
+    func remove(archiveOnly: Bool) async -> String? {
+        guard let segment, !isActing else { return nil }
+        isActing = true
+        defer { isActing = false }
+        do {
+            let result = try await APIClient.shared.removeSegment(id: segmentID,
+                                                                  archiveOnly: archiveOnly)
+            errorMessage = nil
+            var message = result.outcomeSentence(segmentName: segment.name)
+            if !result.wasDeleted, let why = result.explanations.first {
+                message += " \(why)"
+            }
+            return message
+        } catch {
+            statusMessage = nil
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     /// One mutation, one reload. The list is reread from the server rather than
     /// patched locally: an override changes the member count, the override
     /// lists and sometimes membership itself, and the server already knows all
@@ -434,5 +658,272 @@ final class SegmentMemberDetailModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Describing a segment in words
+
+/// What the builder is currently showing.
+///
+/// Four of the five are not rules. That is deliberate: an ambiguous sentence
+/// and a sentence about something the system does not record are ordinary,
+/// expected outcomes, and presenting either as an error would teach the
+/// operator that the feature is broken when it is being careful.
+enum SegmentRuleBuilderStage: Equatable {
+    /// Nothing has been asked yet.
+    case empty
+    /// Rules exist and can be read, edited, previewed and saved.
+    case rules
+    /// The sentence had more than one reading. These are the questions.
+    case question([String])
+    /// This system does not record what was asked for.
+    case unanswerable(String)
+    /// The model wrote something outside the grammar. These are the reasons.
+    case rejected([SegmentRuleProblem])
+}
+
+/// The describe-a-segment screen.
+///
+/// THE ORDER IS ENFORCED HERE, NOT ONLY IN THE INTERFACE
+///   `canSave` is false until a preview of the CURRENT rules has come back.
+///   Editing a rule clears the preview, so an operator cannot change "at least
+///   3" to "at least 1" and save without looking again. The whole point of the
+///   feature is that nobody ships a segment without seeing who is in it.
+///
+/// WHY THE PLAIN ENGLISH IS NEVER RENDERED ON THIS SIDE
+///   `describeRuleSet()` on the server produces both the sentence and the
+///   per-condition lines, and those lines are index-aligned with the
+///   conditions. Rendering a second version here would be a second source of
+///   truth that could disagree with the one that runs. So a local edit marks
+///   the rendering stale rather than patching it, and the next preview brings
+///   back a rendering of what will actually execute.
+@MainActor
+final class SegmentRuleBuilderModel: ObservableObject {
+    @Published var description = ""
+    @Published var name = ""
+
+    @Published private(set) var stage: SegmentRuleBuilderStage = .empty
+    @Published private(set) var ruleSet: SegmentRuleSet?
+    @Published private(set) var plainEnglish: SegmentRulePlainEnglish?
+    @Published private(set) var preview: SegmentRulePreviewResponse?
+    @Published private(set) var warnings: [SegmentRuleProblem] = []
+
+    @Published private(set) var isDrafting = false
+    @Published private(set) var isPreviewing = false
+    @Published private(set) var isSaving = false
+    @Published var errorMessage: String?
+
+    /// True when a rule changed after the last preview. The preview is kept on
+    /// screen but marked out of date, because hiding it would lose the only
+    /// number the operator has to compare against.
+    @Published private(set) var editedSincePreview = false
+
+    var isBusy: Bool { isDrafting || isPreviewing || isSaving }
+
+    var hasRules: Bool { (ruleSet?.conditions.isEmpty == false) }
+
+    /// The one guard that matters. No preview of these exact rules, no save.
+    var canSave: Bool {
+        hasRules
+            && preview != nil
+            && !editedSincePreview
+            && !trimmedName.isEmpty
+            && trimmedName.count <= 160
+            && !isBusy
+    }
+
+    var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var trimmedDescription: String {
+        description.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Mirrors `assertDescription()` in lib/campaigns/segment-rule-writer.js so
+    /// an obvious mistake is caught before a round trip. The server remains the
+    /// authority; this only saves a wasted call.
+    var descriptionProblem: String? {
+        let text = trimmedDescription
+        if text.isEmpty { return nil }
+        if text.count < 8 { return "That is too short to work from. Describe the audience in a sentence." }
+        if text.count > 400 { return "Keep it under 400 characters." }
+        if text.range(of: "[<>{}\\[\\]`|^~]", options: .regularExpression) != nil {
+            return "Write it as plain words. Brackets, braces and backticks are not accepted."
+        }
+        if text.range(of: "[$£€]\\s*\\d", options: .regularExpression) != nil {
+            return "Write money as words, for example 500 dollars."
+        }
+        return nil
+    }
+
+    var canDraft: Bool {
+        !trimmedDescription.isEmpty && descriptionProblem == nil && !isBusy
+    }
+
+    // MARK: Drafting
+
+    /// One tap: draft the rules, then immediately run them.
+    ///
+    /// Two calls rather than one, for the same reason `startTracking` makes two:
+    /// the endpoints do genuinely different things and only one of them can be
+    /// slow for a reason the operator understands. If the draft succeeds and the
+    /// preview fails, the rules are kept and the failure is reported. Losing a
+    /// good draft because the count could not be read would be the wrong trade.
+    func draftAndPreview() async {
+        guard canDraft else { return }
+        isDrafting = true
+        errorMessage = nil
+        let sentence = trimmedDescription
+
+        let response: SegmentRuleDraftResponse
+        do {
+            response = try await APIClient.shared.draftSegmentRules(description: sentence)
+        } catch {
+            isDrafting = false
+            errorMessage = error.localizedDescription
+            return
+        }
+        isDrafting = false
+
+        switch response.outcome {
+        case .drafted(let rules, let english):
+            ruleSet = rules
+            plainEnglish = english
+            warnings = response.warnings ?? []
+            stage = .rules
+            editedSincePreview = false
+            preview = nil
+            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                name = Self.suggestedName(from: sentence)
+            }
+            await runPreview()
+        case .question(let questions):
+            clearRules()
+            stage = .question(questions)
+        case .unanswerable(let because):
+            clearRules()
+            stage = .unanswerable(because)
+        case .rejected(let problems):
+            clearRules()
+            stage = .rejected(problems)
+        }
+    }
+
+    /// The dry run, on demand. Nothing here writes.
+    func runPreview() async {
+        guard let rules = ruleSet, !rules.conditions.isEmpty, !isPreviewing, !isSaving else { return }
+        isPreviewing = true
+        defer { isPreviewing = false }
+        do {
+            let result = try await APIClient.shared.previewSegmentRules(rules)
+            preview = result
+            plainEnglish = result.plainEnglish
+            // The server returns the validated, canonical rules. Adopting them
+            // keeps the local copy identical to what a save would store, so
+            // "what I looked at" and "what I saved" cannot diverge.
+            ruleSet = result.ruleSet
+            warnings = result.warnings ?? []
+            editedSincePreview = false
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: Editing
+
+    func setMatch(_ match: SegmentRuleMatch) {
+        guard let rules = ruleSet, rules.match != match else { return }
+        ruleSet = rules.settingMatch(match)
+        markEdited()
+    }
+
+    func update(_ condition: SegmentRuleCondition, at index: Int) {
+        guard let rules = ruleSet, rules.conditions.indices.contains(index) else { return }
+        guard rules.conditions[index] != condition else { return }
+        ruleSet = rules.replacing(at: index, with: condition)
+        markEdited()
+    }
+
+    /// Removing the last rule is refused. A rule set with no conditions would
+    /// match everybody, and the server refuses it too.
+    func remove(at index: Int) {
+        guard let rules = ruleSet, rules.conditions.count > 1 else {
+            errorMessage = "A segment needs at least one rule. Describe it again to start over."
+            return
+        }
+        ruleSet = rules.removing(at: index)
+        markEdited()
+    }
+
+    var canRemoveConditions: Bool { (ruleSet?.conditions.count ?? 0) > 1 }
+
+    private func markEdited() {
+        editedSincePreview = true
+        // The rendering belonged to the rules as they were. Keeping it next to
+        // an edited rule would put a sentence on screen that is no longer true.
+        plainEnglish = nil
+    }
+
+    // MARK: Saving
+
+    /// Save, then work out who is in it.
+    ///
+    /// Two calls, exactly like turning on a catalogue segment: the create call
+    /// stores an empty automatic segment and the recompute fills it. A failed
+    /// recompute does not undo the save, so the outcome says what did and did
+    /// not happen rather than implying the whole thing failed.
+    func save() async -> SegmentRecord? {
+        guard canSave, let rules = ruleSet else { return nil }
+        isSaving = true
+        defer { isSaving = false }
+
+        let created: SegmentRuleCreationResponse
+        do {
+            created = try await APIClient.shared.createSegmentFromRules(
+                name: trimmedName,
+                description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                rules: rules
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+
+        do {
+            _ = try await APIClient.shared.recomputeSegment(id: created.segment.id)
+            errorMessage = nil
+        } catch {
+            errorMessage = "\(created.segment.name) was saved, but working out who is in it did not finish. Open it and try Update membership."
+        }
+        return created.segment
+    }
+
+    // MARK: Housekeeping
+
+    func startOver() {
+        clearRules()
+        stage = .empty
+        description = ""
+        name = ""
+        errorMessage = nil
+    }
+
+    private func clearRules() {
+        ruleSet = nil
+        plainEnglish = nil
+        preview = nil
+        warnings = []
+        editedSincePreview = false
+    }
+
+    /// A first guess at a name, from the operator's own words. Only ever a
+    /// starting point: the field is editable and the save requires one.
+    static func suggestedName(from sentence: String) -> String {
+        let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let capped = trimmed.count <= 60 ? trimmed : String(trimmed.prefix(57)) + "..."
+        return capped.prefix(1).uppercased() + capped.dropFirst()
     }
 }

@@ -644,15 +644,21 @@ actor APIClient {
     }
 
     /// `POST /api/segments` with `kind: "manual"`, `campaigns.manage`.
+    ///
+    /// `purpose` is REQUIRED and the server answers 400
+    /// `SEGMENT_PURPOSE_REQUIRED` without it. It is the segment's one reason,
+    /// written once and shown as the explanation for everybody in it. It is not
+    /// the per-person note, which travels on each `SegmentMemberInput` and says
+    /// something different about one named human.
     func createManualSegment(name: String,
-                             description: String?,
+                             purpose: String,
                              members: [SegmentMemberInput]) async throws -> SegmentCreationResponse {
-        var body: [String: Any] = [
+        let body: [String: Any] = [
             "kind": "manual",
             "name": name,
+            "purpose": purpose,
             "members": members.map(\.requestBody)
         ]
-        if let description, !description.isEmpty { body["description"] = description }
         return try await segmentDecoded(post("/api/segments", body: body))
     }
 
@@ -724,6 +730,109 @@ actor APIClient {
         try await segmentDecoded(
             post("/api/segments/\(encodedPathSegment(id))/recompute", body: [:], timeout: 90)
         )
+    }
+
+    /// `GET /api/segments/:id/candidates`, `campaigns.manage`.
+    ///
+    /// People already in the segment are removed by the SERVER, before paging.
+    /// Do not re-filter here: the client holds one page and the membership it
+    /// would be subtracting can run to ten thousand rows, so a client-side
+    /// filter would hide the members on screen and leave every other one a
+    /// scroll away. That was the bug.
+    ///
+    /// `held` is separate on purpose. Somebody with an active exclude override
+    /// is not a member, but they are not simply absent either, and re-adding
+    /// them is a real thing to want to do.
+    func fetchSegmentCandidates(id: String,
+                                search: String = "",
+                                page: Int = 1,
+                                pageSize: Int = 50) async throws -> SegmentCandidateResponse {
+        var items = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize))
+        ]
+        if !search.isEmpty { items.append(URLQueryItem(name: "search", value: search)) }
+        return try await decodedGET("/api/segments/\(encodedPathSegment(id))/candidates",
+                                    queryItems: items)
+    }
+
+    /// `DELETE /api/segments/:id`, `campaigns.manage`.
+    ///
+    /// The body may carry `mode: "archive"` and a reason. It may NOT ask for a
+    /// deletion: `delete_sms_campaign_segment` has no force path. Whether the
+    /// row was destroyed or archived is in the RESPONSE, and the interface must
+    /// read it from there rather than assuming the request got what it asked
+    /// for. A segment that gains an override between the tap and the statement
+    /// is archived, and that is a correct answer rather than a failure.
+    func removeSegment(id: String,
+                       archiveOnly: Bool = false,
+                       reason: String? = nil) async throws -> SegmentRemovalResponse {
+        var body: [String: Any] = [:]
+        if archiveOnly { body["mode"] = "archive" }
+        if let reason, !reason.isEmpty { body["reason"] = reason }
+        return try await segmentDecoded(
+            delete("/api/segments/\(encodedPathSegment(id))", body: body)
+        )
+    }
+
+    /// `POST /api/segments/:id/restore`, `campaigns.manage`. The inverse of an
+    /// archive. Nothing was removed by the archive, so nothing is rebuilt here.
+    @discardableResult
+    func restoreSegment(id: String) async throws -> SegmentRestoreResponse {
+        try await segmentDecoded(
+            post("/api/segments/\(encodedPathSegment(id))/restore", body: [:])
+        )
+    }
+
+    // MARK: - Describing a segment in words
+
+    /// `POST /api/segments/rules/draft`, `campaigns.manage`.
+    ///
+    /// A sentence in, DRAFT RULES out. Nothing is saved and nobody is returned:
+    /// the model drafts rules for a person to read, and a separate call runs
+    /// them. Four outcomes come back with HTTP 200, and three of them are not
+    /// rules; see `SegmentRuleDraftResponse.outcome`. An ambiguous sentence is
+    /// answered with questions, and that is a success, not a failure.
+    ///
+    /// Given a longer timeout than the default 20 seconds because it waits on a
+    /// model. It writes nothing, so a client-side timeout costs only the wait.
+    func draftSegmentRules(description: String) async throws -> SegmentRuleDraftResponse {
+        try await segmentDecoded(
+            post("/api/segments/rules/draft", body: ["description": description], timeout: 45)
+        )
+    }
+
+    /// `POST /api/segments/rules/preview`, `campaigns.manage`. THE DRY RUN.
+    ///
+    /// Runs the rules over the real data and answers with a count, a small
+    /// sample and the warnings. It saves nothing, which is the whole point: the
+    /// operator sees "this matches 41 people" before committing to anything.
+    ///
+    /// Reads the same authoritative order history the draft generator does, over
+    /// the whole workspace, so it gets the same 90-second timeout a recompute
+    /// gets.
+    func previewSegmentRules(_ rules: SegmentRuleSet,
+                             selfSegmentKey: String? = nil) async throws -> SegmentRulePreviewResponse {
+        var body: [String: Any] = ["rules": rules.requestBody()]
+        if let selfSegmentKey, !selfSegmentKey.isEmpty { body["selfSegmentKey"] = selfSegmentKey }
+        return try await segmentDecoded(post("/api/segments/rules/preview", body: body, timeout: 90))
+    }
+
+    /// `POST /api/segments/rules`, `campaigns.manage`. The only one that writes.
+    ///
+    /// Membership is NOT computed here. The segment is saved empty and a
+    /// recompute fills it, exactly like a catalogue segment, which is why
+    /// `SegmentRuleBuilderModel` calls `recomputeSegment` straight afterwards.
+    ///
+    /// `description` is the operator's own sentence, kept as a record of what
+    /// they asked for. The description shown under the segment's name is the
+    /// server's rendering of the rules, never this.
+    func createSegmentFromRules(name: String,
+                                description: String?,
+                                rules: SegmentRuleSet) async throws -> SegmentRuleCreationResponse {
+        var body: [String: Any] = ["name": name, "rules": rules.requestBody()]
+        if let description, !description.isEmpty { body["description"] = description }
+        return try await segmentDecoded(post("/api/segments/rules", body: body, timeout: 45))
     }
 
     /// Validates and decodes one segment response.
@@ -1317,6 +1426,21 @@ actor APIClient {
             // if it sent one — it knows which of the two rules it applied.
             if let message = json["error"] as? String, !message.isEmpty { return message }
             return "An Owner cannot change another Owner's role or deactivate them. Ask them to make this change from their own account."
+        case "SEGMENT_AI_BUILDER_DISABLED":
+            // The server's own sentence names an environment variable, which
+            // is the right thing to say to whoever runs the deployment and the
+            // wrong thing to put in front of an operator.
+            return SegmentRuleCopy.disabled
+        case "SEGMENT_RULES_INVALID":
+            // The reasons are the useful part. They are the validator's own
+            // sentences, built from dimension names and limits, and they say
+            // which rule was refused and why.
+            if let problems = json["errors"] as? [[String: Any]] {
+                let reasons = problems.compactMap { $0["reason"] as? String }
+                if !reasons.isEmpty { return reasons.joined(separator: " ") }
+            }
+            if let message = json["error"] as? String, !message.isEmpty { return message }
+            return "Those rules were not accepted."
         case "OWNER_ROLE_REQUIRES_OWNER":
             if let message = json["error"] as? String, !message.isEmpty { return message }
             return "Only an Owner can grant or remove the Owner role."
