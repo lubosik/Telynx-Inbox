@@ -89,7 +89,8 @@ function createCampaignRouter({
   auditApprovalWriter,
   generationService,
   campaignNotificationSender,
-  generationAuditWriter
+  generationAuditWriter,
+  campaignDeletionAuditWriter
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -100,6 +101,9 @@ function createCampaignRouter({
   const notifyCampaignReview = campaignNotificationSender || ((...args) =>
     require('../lib/apns-notify').sendCampaignReadyNotifications(...args));
   const writeGenerationAudit = generationAuditWriter || logAuditSafely;
+  // Deletion is the one campaign action whose audit row must exist before the
+  // effect. logAudit, not logAuditSafely: no row, no delete.
+  const deletionAuditWriter = campaignDeletionAuditWriter || logAudit;
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -288,6 +292,90 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.dryRun(req.params.id));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Remove a campaign from the list.
+   *
+   * DESTROY OR ARCHIVE IS NOT THE CALLER'S DECISION.
+   *   A draft that was never submitted, never approved, never scheduled and
+   *   whose recipients never reached a provider is somebody's abandoned
+   *   experiment. It proves nothing and keeping it forever is clutter, so it
+   *   is genuinely deleted.
+   *
+   *   Anything else is evidence. An approval row records who authorised a
+   *   promotional send and against which frozen audience hash. A recipient
+   *   with a provider message id is the only proof that a specific customer
+   *   was messaged, and the revenue attribution chain hangs off it. Deleting
+   *   those would destroy the answer to "did we have permission, and who
+   *   said so?" That campaign is archived: it leaves the working list, the row
+   *   stays, and `?archived=true` still finds it.
+   *
+   *   The body may ask for `mode: "archive"`. It may NOT ask for a delete.
+   *   delete_sms_campaign has no force path, and it repeats every blocker
+   *   check inside the transaction, so a campaign that gets approved between
+   *   the preview below and the statement ends up archived rather than gone.
+   *
+   * AUDIT ORDER. The row is written BEFORE the destructive statement, with
+   *   `logAudit` so a failed write refuses the delete outright. After the
+   *   delete there is nothing left to describe. Over-recording an attempt that
+   *   then failed is a bookkeeping error; under-recording a destruction that
+   *   succeeded is a hole in the audit trail, and only one of those is
+   *   recoverable.
+   */
+  router.delete('/:id', async (req, res) => {
+    try {
+      const requestedMode = req.body?.mode === 'archive' ? 'archive' : 'auto';
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null;
+      const preview = await campaigns.deletionPreview(req.params.id);
+      const willDelete = requestedMode !== 'archive' && preview.destructible === true;
+
+      if (willDelete) {
+        const proof = await deletionAuditWriter({
+          eventType: 'campaign.deleted',
+          req,
+          entityId: preview.campaign.id,
+          summary: `Deleted the unapproved draft ${campaignSummaryName(preview.campaign)}`,
+          previousState: { status: preview.campaign.status, revision: preview.campaign.revision },
+          metadata: {
+            campaign_type: preview.campaign.campaign_type,
+            workflow_category: preview.campaign.workflow_category,
+            revision: preview.campaign.revision,
+            reason
+          },
+          fingerprint: `campaign-deleted:${preview.campaign.id}`
+        });
+        if (!proof?.recorded && proof?.reason !== 'duplicate') {
+          throw Object.assign(new Error('Campaign deletion audit was not recorded.'), {
+            code: 'CAMPAIGN_DELETE_AUDIT_REQUIRED', status: 503
+          });
+        }
+      }
+
+      const result = await campaigns.remove(req.params.id, { mode: requestedMode, reason }, req.actor);
+
+      if (result.outcome === 'archived') {
+        await auditCampaign('campaign.archived', req, preview.campaign, {
+          summary: `Archived ${campaignSummaryName(preview.campaign)}; it holds approval or delivery evidence and cannot be deleted`,
+          previousState: { status: preview.campaign.status, archived: false },
+          newState: { status: result.status, archived: true },
+          metadata: {
+            revision: preview.campaign.revision,
+            requested_mode: requestedMode,
+            blockers: result.blockers,
+            reason
+          },
+          fingerprint: `campaign-archived:${preview.campaign.id}`
+        });
+      } else if (!willDelete) {
+        // The preview said archive, the RPC destroyed it. That means the two
+        // disagree about the rules, which is a bug worth shouting about rather
+        // than a row worth writing quietly.
+        console.error('[CAMPAIGNS] Deletion preview and delete_sms_campaign disagreed; the row is gone and unaudited.');
+      }
+
+      return res.json(result);
     } catch (error) { return sendError(res, error); }
   });
 
