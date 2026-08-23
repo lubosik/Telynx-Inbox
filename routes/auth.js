@@ -222,12 +222,12 @@ function createAuthRouter({ authz, client, invitationStore, emailChangeStore, au
    * Write an audit row, but only for an event type the catalogue knows.
    *
    * The twin of `auditIfRegistered` in routes/users.js, and here for the same
-   * reason: `logAudit` throws on an unregistered type, and
-   * `team.member.email_changed` is not in lib/audit/event-types.js yet. That
-   * file is owned elsewhere. The call site below is complete and starts writing
-   * rows the moment the type is registered; until then it logs one warning
-   * naming the missing type rather than failing a confirmation that has already
-   * committed in the database.
+   * reason. `team.member.email_changed` IS registered in
+   * lib/audit/event-types.js, so the call site below writes a real row. The
+   * guard stays because that file is owned elsewhere and `logAudit` throws on
+   * an unregistered type: if the type is ever removed, a confirmation that has
+   * ALREADY committed in the database must not turn into a 500. One warning
+   * naming the missing type is the correct degradation.
    */
   async function auditIfRegistered(input) {
     if (!eventDefinition(input.eventType)) {
