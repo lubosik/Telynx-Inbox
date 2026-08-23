@@ -47,16 +47,51 @@ Automatic segments come from a closed catalogue, not free-form filters. An
 arbitrary predicate would mean "why is this person here" had as many answers as
 there had been edits.
 
-| key | what it holds |
-|---|---|
-| `reorder_due_high_confidence` | Own purchase history is stable (relative MAD at or below 0.25, no outliers) and the reorder window has arrived |
-| `reorder_due` | Inside or past the expected window on any reliable cadence, personal or product level |
-| `reorder_approaching` | Window opens soon. For planning, not contact |
-| `winback_qualified` | Reliable cadence, three or more lifetime orders, no order for the later of 60 days or 1.75x their interval, outside the 180 day cooldown |
+| key | shown as | what it holds | the arithmetic underneath |
+|---|---|---|---|
+| `reorder_due_high_confidence` | Due to reorder, best timing | Due or past due, and the pattern the date rests on barely moves | `eligible` and `cadence.confidence === 'high'`: relative MAD at or below 0.25 with zero outlying gaps |
+| `reorder_due` | Due to reorder, everyone due | Due or past due on any usable pattern, their own or the product's | `eligible`: state `due` or `overdue` on a reliable cadence, personal or product level |
+| `reorder_approaching` | Nearly due to reorder | Close to their usual moment but not there yet | state `approaching`: inside the early half of the expected window |
+| `winback_qualified` | Good customers who have stopped | Repeat buyers who have gone quiet, minus anyone it would be tactless to contact | reliable cadence, 3 or more lifetime orders, lapsed beyond max(60 days, 1.75x median), no complaint, refund, recent negative support, open opportunity or 180 day cooldown |
 
 `GET /api/segments` returns the saved segments plus an `available` list of
 catalogue entries not yet saved, so the client offers them without a second
 call. A key is stored on live rows: renaming one orphans a segment.
+
+### Why the names read the way they do
+
+The keys are for the database. The names and descriptions in
+`segment-definitions.js` are for somebody who has never opened this repository
+and never will. The previous copy said "relative MAD at or below 0.25 with no
+outlying intervals", which is true and useless: nobody outside these files knows
+what a relative MAD is, and nobody should have to. The rule now is that a
+description says who is in the group, how sure the timing is, and when you would
+use it, using numbers a person can picture. It may not claim more certainty than
+the arithmetic supports, it carries no em dash, and it never strays anywhere near
+a health claim.
+
+### The two "due to reorder" segments are not the same thing
+
+They looked identical because both were called "reorder due" and the only
+distinguishing words were "high confidence", which describes the DATA rather
+than the decision an operator has to make. They were kept apart rather than
+merged, because the relation between them is real:
+`reorder_due_high_confidence` is a strict subset of `reorder_due`, filtered on
+how evenly spaced the pattern is.
+`test/campaign-segment-definitions.test.js` asserts the subset relation
+directly, so merging would have thrown away a genuinely tighter list rather than
+removing a duplicate.
+
+Watch one thing that the old description got wrong. `confidence` describes
+whichever cadence was actually used, and `calculateReorderCadence` falls back to
+the product level cadence when a person's own history is too thin. So a person
+CAN be in the high confidence segment on an aggregate pattern rather than on
+their own. "Best timing" is true of both cases. "Their own purchase history" was
+not, and is why that phrase is now banned from the description.
+
+Names and descriptions are copied onto `sms_campaign_segments` when a catalogue
+entry is saved, so a segment already saved under the old wording keeps it until
+somebody edits the row. New saves pick the new copy up immediately.
 
 ## Per-member evidence
 
