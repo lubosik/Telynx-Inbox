@@ -5,7 +5,7 @@ const cors    = require('cors');
 const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path    = require('path');
-const { verifyConnection }    = require('./db');
+const { supabase, verifyConnection } = require('./db');
 const { checkAndSendDeliverySMS, pollForCarrierScans } = require('./routes/webhook-shipstation');
 const { processScheduledQueue } = require('./flows/utils');
 const { startRecordingRetentionJob } = require('./lib/private-recordings');
@@ -282,6 +282,56 @@ function startDeliveryCheck() {
   }, SIX_HOURS);
 }
 
+// Campaign delivery. Registered only when CAMPAIGNS_LIVE_SEND_ENABLED is
+// exactly "true", so with the flag off there is no timer, no claim, and no
+// provider client in the process at all. The database refuses to hand out work
+// regardless; this keeps the loop from existing in the first place.
+//
+// Claim recovery runs on its own slower timer even when sending is disabled,
+// because rows abandoned by an earlier run should still be resolved after the
+// feature is switched back off.
+function startCampaignDelivery() {
+  let deliverBatch, liveSendEnabled, recoverExpiredClaims, sendSMS;
+  try {
+    ({ deliverBatch, liveSendEnabled, recoverExpiredClaims } =
+      require('./lib/campaigns/delivery-worker'));
+    ({ sendSMS } = require('./telnyx'));
+  } catch (err) {
+    // A campaign feature that is off for this workspace must never be able to
+    // stop the inbox, the dialler or order SMS from starting.
+    console.error('[CAMPAIGN SEND] Delivery loop not started:', err.message);
+    return;
+  }
+
+  const TWO_MINUTES = 2 * 60 * 1000;
+  const FIFTEEN_MINUTES = 15 * 60 * 1000;
+
+  setInterval(async () => {
+    try { await recoverExpiredClaims({ client: supabase }); }
+    catch (err) { console.error('[CAMPAIGN SEND] Claim recovery error:', err.message); }
+  }, FIFTEEN_MINUTES);
+
+  if (!liveSendEnabled(process.env)) {
+    console.log('[CAMPAIGN SEND] Live sending is off; no delivery loop started.');
+    return;
+  }
+
+  console.log('[CAMPAIGN SEND] Live sending is ON. Delivery loop running every 2 minutes.');
+  setInterval(async () => {
+    try {
+      const summary = await deliverBatch({ client: supabase, send: sendSMS });
+      if (summary.claimed > 0) {
+        console.log(
+          `[CAMPAIGN SEND] claimed=${summary.claimed} accepted=${summary.accepted} `
+          + `uncertain=${summary.uncertain} skipped=${summary.skipped}`
+        );
+      }
+    } catch (err) {
+      console.error('[CAMPAIGN SEND] Delivery error:', err.message);
+    }
+  }, TWO_MINUTES);
+}
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
@@ -303,6 +353,7 @@ app.listen(PORT, async () => {
   startScheduledQueue();
   startShipmentPoll();
   startDeliveryCheck();
+  startCampaignDelivery();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);
