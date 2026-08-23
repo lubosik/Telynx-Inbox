@@ -220,38 +220,41 @@ actor APIClient {
 
     /// `POST /api/users/me/email` with `{ "email": String }`.
     ///
-    /// Starts a change; it does not perform one. The server is expected to mail
-    /// a confirmation link to the NEW address and leave the account signed in
-    /// under the old one until that link is followed. That ordering is the
-    /// whole safety property: a typo cannot lock somebody out of their own
-    /// account, because the address that has not been proven never becomes the
-    /// address that signs in.
+    /// Starts a change; it does not perform one. The server mails a
+    /// confirmation link to the NEW address, mails a heads-up to the OLD one,
+    /// and leaves the account answering to the old address until the link is
+    /// opened. That ordering is the whole safety property: an address that has
+    /// not been proven never becomes the address that signs in, so a typo
+    /// cannot lock anybody out and a borrowed session cannot be made permanent.
     ///
-    /// Falls back to the address that was submitted when the server returns no
-    /// body, so the "check your new address" screen always has something to
-    /// name.
+    /// The reply is identical whether the requested address was free or already
+    /// belongs to somebody, deliberately, so that this cannot be used to test
+    /// whether an account exists. Nothing in this client may add a check that
+    /// reintroduces that: do not pre-validate the address against the team
+    /// directory, and do not reword `message` into a promise that the link was
+    /// definitely sent.
+    ///
+    /// Calling it again with the same address is also the resend path — the
+    /// server cancels the open request and issues a fresh link, because two
+    /// live links to two different addresses is the exact state the flow
+    /// exists to prevent.
+    @discardableResult
     func requestEmailChange(to email: String) async throws -> EmailChangeRequestResult {
         let trimmed = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let (data, response) = try await post("/api/users/me/email", body: ["email": trimmed])
         try validate(data: data, response: response)
-        if let result = try? decoder.decode(EmailChangeRequestResult.self, from: data),
-           result.pendingEmail != nil {
-            return result
-        }
-        return EmailChangeRequestResult.pending(trimmed)
+        return (try? decoder.decode(EmailChangeRequestResult.self, from: data))
+            ?? EmailChangeRequestResult(message: nil, expiresInHours: nil)
     }
 
-    /// `POST /api/users/me/email/resend`. No body; the server already knows
-    /// which change is outstanding.
-    func resendEmailChange() async throws {
-        let (data, response) = try await post("/api/users/me/email/resend", body: [:])
-        try validate(data: data, response: response)
-    }
-
-    /// `DELETE /api/users/me/email`. Abandons an outstanding change and leaves
+    /// `POST /api/users/me/email/cancel`. Abandons an open request and leaves
     /// the current address exactly as it was.
+    ///
+    /// Idempotent, and deliberately silent about whether there was anything to
+    /// cancel: the same 200 either way, for the same reason the request
+    /// endpoint is uniform.
     func cancelEmailChange() async throws {
-        let (data, response) = try await delete("/api/users/me/email")
+        let (data, response) = try await post("/api/users/me/email/cancel", body: [:])
         try validate(data: data, response: response)
     }
 

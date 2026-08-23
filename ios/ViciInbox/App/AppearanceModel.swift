@@ -93,6 +93,12 @@ final class AppearanceModel: ObservableObject {
     /// unrecognised identifier degrades to.
     @Published private(set) var accountTimeZoneIdentifier: String?
 
+    /// True when the identifier above is the server's own fallback rather than
+    /// a zone this person picked. The settings footer says which, because a
+    /// schedule silently running on somebody else's idea of evening is the one
+    /// failure of this feature that could not be worked out from the screen.
+    @Published private(set) var accountTimeZoneIsDefault = false
+
     /// The scheme to hand to `preferredColorScheme`. Nil means "follow iOS".
     var resolvedColorScheme: ColorScheme? {
         switch preference {
@@ -112,6 +118,19 @@ final class AppearanceModel: ObservableObject {
     /// settings screen can name the source honestly.
     var usesAccountTimeZone: Bool {
         AppearanceTimeZoneResolver.usesAccountTimeZone(accountIdentifier: accountTimeZoneIdentifier)
+    }
+
+    /// Where the times are being read: the person's own account setting, the
+    /// workspace default the server supplied, or this device.
+    enum TimeZoneSource {
+        case account
+        case workspaceDefault
+        case device
+    }
+
+    var timeZoneSource: TimeZoneSource {
+        guard usesAccountTimeZone else { return .device }
+        return accountTimeZoneIsDefault ? .workspaceDefault : .account
     }
 
     /// When the appearance will next flip, for the settings footer. Nil when
@@ -162,11 +181,14 @@ final class AppearanceModel: ObservableObject {
     /// Takes the raw identifier rather than a `TimeZone` so the caller does not
     /// have to decide what an unknown one means; that decision belongs to
     /// `AppearanceTimeZoneResolver` and is the same everywhere.
-    func applyAccountTimeZone(_ identifier: String?) {
+    func applyAccountTimeZone(_ identifier: String?, isDefault: Bool = false) {
         let cleaned = identifier?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalised = (cleaned?.isEmpty ?? true) ? nil : cleaned
-        guard normalised != accountTimeZoneIdentifier else { return }
+        let changed = normalised != accountTimeZoneIdentifier
+            || isDefault != accountTimeZoneIsDefault
+        guard changed else { return }
         accountTimeZoneIdentifier = normalised
+        accountTimeZoneIsDefault = isDefault
         reevaluate()
     }
 

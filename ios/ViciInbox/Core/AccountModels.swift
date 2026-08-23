@@ -62,28 +62,40 @@ struct AuthUser: Codable, Identifiable, Hashable {
     let viaLegacySession: Bool?
     let onboarding: AccountOnboardingState?
 
-    /// The account's own IANA timezone, e.g. `Europe/London`.
+    /// The account's IANA timezone id, e.g. `Europe/London`.
     ///
-    /// Optional in every sense: an older backend omits it, a newly created
-    /// account may not have one yet, and the value is not trusted to be a real
-    /// identifier. Everything that reads it goes through
-    /// `AppearanceTimeZoneResolver`, which falls back to the device timezone
-    /// for absent, blank and unrecognised values alike. Nothing in the app
-    /// fails because this is missing.
+    /// `GET /api/users/me` sends this as an OBJECT, not a string:
+    /// `{ id, label, region, offsetMinutes, offsetLabel, abbreviation,
+    /// isDefault }`. Only the id is modelled here, because the id is the only
+    /// part the app acts on — the rest is display text the server computed for
+    /// a picker this client does not show. A bare string is accepted too, so
+    /// the field survives being flattened later or arriving from another
+    /// surface.
     ///
-    /// Three spellings are accepted on the wire because the identity envelope
-    /// is not consistent about casing elsewhere either — `actor` vs `user` in
-    /// `AuthResponse` is the same problem — and a field that silently decodes
-    /// to nil would look exactly like a person who has not set one.
+    /// Optional despite the server documenting it as always present. A build
+    /// that assumed presence would break against any older deployment, and the
+    /// only cost of tolerating nil is one fallback that already had to exist:
+    /// everything reading this goes through `AppearanceTimeZoneResolver`, which
+    /// degrades to the device timezone for absent, blank and unrecognised
+    /// values alike.
     let timeZone: String?
 
-    /// An email change that has been requested but not yet confirmed from the
-    /// new address. Present only while one is outstanding.
+    /// True when the server supplied its own fallback rather than a zone this
+    /// person chose. Lets the settings screen say where the times came from
+    /// instead of implying a choice that was never made.
+    let timeZoneIsDefault: Bool?
+
+    /// An outstanding email change, if the server ever reports one.
     ///
-    /// The address here is the NEW one. The signed-in identity keeps answering
-    /// with the old `email` until the link is followed, which is what makes the
-    /// "check your new address" state safe: nothing about the account has
-    /// actually moved yet.
+    /// It currently never does, and that is deliberate on its side rather than
+    /// an omission: `POST /api/users/me/email` answers identically whether the
+    /// requested address was free or already belongs to somebody, so that the
+    /// endpoint cannot be used to test whether an account exists. Exposing a
+    /// pending address on the identity would reintroduce exactly that oracle.
+    ///
+    /// Kept, decoded tolerantly, and read if it ever appears — but nothing in
+    /// the app depends on it. `ProfileEditorModel` holds the pending address
+    /// locally instead, which is the only place it can safely live.
     let pendingEmail: String?
 
     var name: String { displayName ?? email ?? "Signed in" }
@@ -124,8 +136,9 @@ struct AuthUser: Codable, Identifiable, Hashable {
         isLegacyShared = try? container.decodeIfPresent(Bool.self, forKey: .isLegacyShared)
         viaLegacySession = try? container.decodeIfPresent(Bool.self, forKey: .viaLegacySession)
         onboarding = try? container.decodeIfPresent(AccountOnboardingState.self, forKey: .onboarding)
-        timeZone = AuthUser.firstNonEmpty(in: container,
-                                          keys: [.timeZone, .timeZoneSnake, .timezoneLowercase])
+        let zone = AuthUser.decodeTimeZone(from: container)
+        timeZone = zone.id
+        timeZoneIsDefault = zone.isDefault
         pendingEmail = AuthUser.firstNonEmpty(in: container,
                                               keys: [.pendingEmail, .pendingEmailSnake])
     }
@@ -145,8 +158,34 @@ struct AuthUser: Codable, Identifiable, Hashable {
         try container.encodeIfPresent(isLegacyShared, forKey: .isLegacyShared)
         try container.encodeIfPresent(viaLegacySession, forKey: .viaLegacySession)
         try container.encodeIfPresent(onboarding, forKey: .onboarding)
+        // Re-emitted as the bare id rather than as the server's object. Nothing
+        // in this app posts an identity back, and a partial copy of a structure
+        // the server owns would be worse than a plain string.
         try container.encodeIfPresent(timeZone, forKey: .timeZone)
         try container.encodeIfPresent(pendingEmail, forKey: .pendingEmail)
+    }
+
+    /// Reads the timezone from whichever shape arrived: the documented object,
+    /// or a bare identifier string.
+    private static func decodeTimeZone(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> (id: String?, isDefault: Bool?) {
+        struct Envelope: Decodable {
+            let id: String?
+            let isDefault: Bool?
+        }
+        for key in [CodingKeys.timeZone, .timeZoneSnake, .timezoneLowercase] {
+            if let envelope = try? container.decodeIfPresent(Envelope.self, forKey: key),
+               let raw = envelope.id {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return (trimmed, envelope.isDefault) }
+            }
+            if let raw = try? container.decodeIfPresent(String.self, forKey: key) {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return (trimmed, nil) }
+            }
+        }
+        return (nil, nil)
     }
 
     /// First key that carries a non-blank string, or nil.
@@ -165,53 +204,39 @@ struct AuthUser: Codable, Identifiable, Hashable {
     }
 }
 
-/// The outcome of asking to change the signed-in account's email address.
+/// The answer to `POST /api/users/me/email`.
 ///
-/// ASSUMED CONTRACT — the backend for this is being built in parallel. The
-/// shape here is deliberately forgiving: every field is optional and the app
-/// falls back to the address it just submitted, so a server that answers
-/// `202 {}` still produces the correct "check your new address" screen.
+/// Note what is NOT here: the pending address. The server returns the same body
+/// whether the requested address was free or already taken, on purpose, so that
+/// this endpoint cannot be used to discover whether an account exists. The
+/// client therefore remembers the address it submitted rather than being told
+/// it back, and `message` is deliberately non-committal — show it verbatim
+/// rather than rewriting it into a promise the server did not make.
 struct EmailChangeRequestResult: Decodable, Hashable {
-    /// The address the confirmation link was sent to. The account has NOT
-    /// moved to it yet.
-    let pendingEmail: String?
-    /// When the link stops working, if the server says.
-    let expiresAt: String?
-
-    init(pendingEmail: String?, expiresAt: String?) {
-        self.pendingEmail = pendingEmail
-        self.expiresAt = expiresAt
-    }
+    /// The server's own sentence. Shown as-is.
+    let message: String?
+    /// How long the confirmation link lasts.
+    let expiresInHours: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case pendingEmail
-        case pendingEmailSnake = "pending_email"
-        case email
-        case expiresAt
-        case expiresAtSnake = "expires_at"
+        case message
+        case expiresInHours
+        case expiresInHoursSnake = "expires_in_hours"
+    }
+
+    init(message: String?, expiresInHours: Int?) {
+        self.message = message
+        self.expiresInHours = expiresInHours
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        func value(_ keys: [CodingKeys]) -> String? {
-            for key in keys {
-                guard let raw = try? container.decodeIfPresent(String.self, forKey: key) else { continue }
-                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { return trimmed }
-            }
-            return nil
-        }
-        pendingEmail = value([.pendingEmail, .pendingEmailSnake, .email])
-        expiresAt = value([.expiresAt, .expiresAtSnake])
-    }
-}
-
-extension EmailChangeRequestResult {
-    /// The result to use when the server accepted the change but returned no
-    /// usable body. The address is the one that was just submitted, which is
-    /// the only thing the screen actually needs to name.
-    static func pending(_ email: String) -> EmailChangeRequestResult {
-        EmailChangeRequestResult(pendingEmail: email, expiresAt: nil)
+        let raw = try? container.decodeIfPresent(String.self, forKey: .message)
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+        message = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        expiresInHours = (try? container.decodeIfPresent(Int.self, forKey: .expiresInHours))
+            ?? (try? container.decodeIfPresent(Int.self, forKey: .expiresInHoursSnake))
+            ?? nil
     }
 }
 
