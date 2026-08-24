@@ -735,6 +735,16 @@ struct SegmentManualEditorView: View {
                 await picker.loadContacts()
             }
         }
+        .assistantDraftOwner(
+            source: .segment,
+            isDirty: !name.isEmpty || !purpose.isEmpty || picker.selectedCount > 0,
+            onDiscard: {
+                name = ""
+                purpose = ""
+                picker.discardLocalDraft()
+                dismiss()
+            }
+        )
     }
 
     private func save() {

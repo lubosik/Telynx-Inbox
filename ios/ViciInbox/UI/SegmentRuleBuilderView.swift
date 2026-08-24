@@ -84,6 +84,15 @@ struct SegmentRuleBuilderView: View {
                 Text(model.errorMessage ?? "Please try again.")
             }
         }
+        .assistantDraftOwner(
+            source: .segment,
+            isDirty: !model.description.isEmpty || !model.name.isEmpty || model.hasRules,
+            onDiscard: {
+                editing = nil
+                model.startOver()
+                dismiss()
+            }
+        )
     }
 
     // MARK: - Describing
@@ -526,6 +535,25 @@ struct SegmentRuleConditionEditor: View {
                 }
             }
         }
+        .assistantDraftOwner(
+            source: .segment,
+            isDirty: updatedCondition() != target.condition,
+            onDiscard: {
+                restoreOriginalValues()
+                dismiss()
+            }
+        )
+    }
+
+    private func restoreOriginalValues() {
+        let condition = target.condition
+        singleNumber = condition.singleNumber ?? 0
+        rangeLow = condition.numberRange?.low ?? 0
+        rangeHigh = condition.numberRange?.high ?? 0
+        let today = Date()
+        singleDate = condition.singleDate.flatMap(SegmentRuleDate.date(from:)) ?? today
+        rangeFrom = condition.dateRange.flatMap { SegmentRuleDate.date(from: $0.from) } ?? today
+        rangeTo = condition.dateRange.flatMap { SegmentRuleDate.date(from: $0.to) } ?? today
     }
 
     /// A stepper for whole-number rules and a decimal field for the rest. The

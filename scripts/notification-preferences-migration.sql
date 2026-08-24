@@ -46,6 +46,7 @@
 --                          one thing is how somebody ends up receiving what
 --                          they turned off.
 --   campaign_proposals     sendCampaignReadyNotifications()
+--   referrals              sendReferralNotifications()
 --   new_releases           sendReleaseNotification()
 --
 -- SAFETY
@@ -67,8 +68,9 @@
 --   Dropping it returns every account to the defaults above, which is the
 --   pre-change behaviour. It cannot affect sign-in, permissions, messaging,
 --   call handling or campaign delivery: the application treats a missing table
---   exactly as it treats a missing row for the three discretionary categories
---   and fails open for the two operational ones. See lib/notifications/preferences.js.
+--   according to the category's explicit failure mode. Existing operational
+--   alerts fail open; new referral/digest alerts fail closed. See
+--   lib/notifications/preferences.js.
 
 BEGIN;
 
@@ -79,10 +81,16 @@ CREATE TABLE IF NOT EXISTS sms_user_notification_preferences (
   missed_calls          boolean     NOT NULL DEFAULT true,
   daily_digest          boolean     NOT NULL DEFAULT true,
   campaign_proposals    boolean     NOT NULL DEFAULT true,
+  referrals             boolean     NOT NULL DEFAULT true,
   new_releases          boolean     NOT NULL DEFAULT true,
   created_at            timestamptz NOT NULL DEFAULT now(),
   updated_at            timestamptz NOT NULL DEFAULT now()
 );
+
+-- Existing installations predate the referral preference. Keep this additive
+-- and re-runnable; an absent row still resolves to the same default.
+ALTER TABLE sms_user_notification_preferences
+  ADD COLUMN IF NOT EXISTS referrals boolean NOT NULL DEFAULT true;
 
 COMMENT ON TABLE sms_user_notification_preferences IS
   'Per-ACCOUNT notification opt-outs, so the choice follows the person to a new '

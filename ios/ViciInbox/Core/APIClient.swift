@@ -31,7 +31,7 @@ enum APIError: LocalizedError {
     case badResponse(Int)
     case unauthorised
     case decoding
-    case server(String)
+    case server(String, statusCode: Int? = nil, code: String? = nil)
     case transport(Error)
 
     var errorDescription: String? {
@@ -39,7 +39,7 @@ enum APIError: LocalizedError {
         case .badResponse(let code): return "Server returned \(code)."
         case .unauthorised:          return "Wrong password, or the session expired."
         case .decoding:              return "Unexpected response from the server."
-        case .server(let message):   return message
+        case .server(let message, _, _): return message
         case .transport(let err):    return err.localizedDescription
         }
     }
@@ -164,6 +164,27 @@ actor APIClient {
             }
         }
         return lastKnownUser
+    }
+
+    /// A fail-closed identity read for Assistant evidence navigation.
+    ///
+    /// Unlike `loadCurrentUser()`, this never falls back to a cached identity.
+    /// A citation may open private records only when the server has just
+    /// confirmed the same named account, role and permissions that initiated
+    /// the tap.
+    func fetchCurrentUserStrict() async throws -> AuthUser {
+        let (data, response) = try await get("/api/users/me")
+        try validate(data: data, response: response)
+        if let user = try? decoder.decode(AuthUser.self, from: data) {
+            lastKnownUser = user
+            return user
+        }
+        if let wrapped = try? decoder.decode(AuthResponse.self, from: data),
+           let user = wrapped.identity {
+            lastKnownUser = user
+            return user
+        }
+        throw APIError.decoding
     }
 
     /// Persists a first-run tour decision on the authenticated account.
@@ -540,6 +561,28 @@ actor APIClient {
     func fetchCampaignReviewCount() async throws -> Int {
         let result: CampaignReviewCount = try await decodedGET("/api/campaigns/review-count")
         return result.count
+    }
+
+    /// Reads only the unapproved proposal review queue. The status is fixed in
+    /// app code so this screen cannot be repurposed to expose accepted or
+    /// dismissed proposal history. Server policy independently requires
+    /// `campaigns.manage` for this GET.
+    func fetchProposedCampaignProposals(page: Int = 1,
+                                        pageSize: Int = 50) async throws -> CampaignProposalPage {
+        try await decodedGET("/api/campaign-proposals", queryItems: [
+            URLQueryItem(name: "status", value: "proposed"),
+            URLQueryItem(name: "page", value: String(max(1, page))),
+            URLQueryItem(name: "pageSize", value: String(min(50, max(1, pageSize))))
+        ])
+    }
+
+    /// The aggregate-only opportunity portfolio. `refresh=false` is explicit:
+    /// an Assistant read may consume the server's labelled cached snapshot but
+    /// must never force a WooCommerce and database recomputation.
+    func fetchAssistantOpportunityPortfolio() async throws -> AssistantOpportunityPortfolioWire {
+        try await decodedGET("/api/campaigns/opportunities", queryItems: [
+            URLQueryItem(name: "refresh", value: "false")
+        ])
     }
 
     func fetchCampaign(id: String) async throws -> CampaignDetailResponse {
@@ -944,6 +987,14 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    // MARK: - Assistant capability
+
+    /// The only assistant-specific backend call in Phase 4. It is a
+    /// permission-gated capability document, not a prompt or model endpoint.
+    func fetchAssistantStatus() async throws -> AssistantCapabilityStatus {
+        try await decodedGET("/api/assistant/status")
+    }
+
     // MARK: - Analytics
 
     func fetchAnalyticsOverview(query: AnalyticsQuery) async throws -> AnalyticsOverview {
@@ -1107,6 +1158,18 @@ actor APIClient {
 
     // MARK: - Audit trail
 
+    /// Aggregate Activity Center counts only. Unlike the feed response, this
+    /// endpoint transfers no state snapshots, metadata, contact identity,
+    /// device information or human-written summary.
+    func fetchAssistantAuditSummary(from: Date? = nil,
+                                    to: Date? = nil) async throws -> AssistantAuditSummary {
+        var items: [URLQueryItem] = []
+        let formatter = ISO8601DateFormatter()
+        if let from { items.append(URLQueryItem(name: "from", value: formatter.string(from: from))) }
+        if let to { items.append(URLQueryItem(name: "to", value: formatter.string(from: to))) }
+        return try await decodedGET("/api/audit/summary", queryItems: items)
+    }
+
     /// `GET /api/audit`. `nextCursor` is opaque paging state; the caller keeps
     /// it and hands it back rather than computing page numbers.
     func fetchAudit(category: AuditCategory = .all,
@@ -1156,6 +1219,78 @@ actor APIClient {
         struct Wrapped: Decodable { let items: [AuditActor] }
         if let wrapped = try? decoder.decode(Wrapped.self, from: data) { return wrapped.items }
         throw APIError.decoding
+    }
+
+    // MARK: - Conversation referrals
+
+    func fetchReferralRecipients() async throws -> ReferralRecipientsResponse {
+        try await decodedGET("/api/referrals/recipients")
+    }
+
+    func fetchReferrals(box: ReferralBox,
+                        includeResolved: Bool = true) async throws -> [ReferralRecord] {
+        let response: ReferralListResponse = try await decodedGET(
+            "/api/referrals",
+            queryItems: [
+                URLQueryItem(name: "box", value: box.rawValue),
+                URLQueryItem(name: "includeResolved", value: includeResolved ? "true" : "false")
+            ]
+        )
+        return response.items
+    }
+
+    func fetchReferral(id: String) async throws -> ReferralDetailResponse {
+        try await decodedGET("/api/referrals/\(encodedPathSegment(id))")
+    }
+
+    func createReferral(contactPhone: String,
+                        recipient: ReferralComposerDraft.Recipient,
+                        note: String) async throws -> ReferralRecord {
+        var body: [String: Any] = [
+            "contactPhone": contactPhone,
+            "note": note
+        ]
+        switch recipient {
+        case .teammate(let id):
+            body["targetKind"] = ReferralTargetKind.directed.rawValue
+            body["targetUserId"] = id
+        case .anyAdmin:
+            body["targetKind"] = ReferralTargetKind.anyAdmin.rawValue
+        }
+        return try await referralMutation(path: "/api/referrals", body: body)
+    }
+
+    func claimReferral(id: String) async throws -> ReferralRecord {
+        try await referralMutation(path: "/api/referrals/\(encodedPathSegment(id))/claim", body: [:])
+    }
+
+    func reassignReferral(id: String,
+                          targetUserID: String,
+                          note: String) async throws -> ReferralRecord {
+        try await referralMutation(
+            path: "/api/referrals/\(encodedPathSegment(id))/reassign",
+            body: ["targetUserId": targetUserID, "note": note]
+        )
+    }
+
+    func handBackReferral(id: String, note: String) async throws -> ReferralRecord {
+        try await referralMutation(
+            path: "/api/referrals/\(encodedPathSegment(id))/hand-back",
+            body: ["note": note]
+        )
+    }
+
+    func resolveReferral(id: String) async throws -> ReferralRecord {
+        try await referralMutation(path: "/api/referrals/\(encodedPathSegment(id))/resolve", body: [:])
+    }
+
+    private func referralMutation(path: String, body: [String: Any]) async throws -> ReferralRecord {
+        let (data, response) = try await post(path, body: body)
+        try validate(data: data, response: response)
+        guard let result = try? decoder.decode(ReferralMutationResponse.self, from: data) else {
+            throw APIError.decoding
+        }
+        return result.referral
     }
 
     // MARK: - Team
@@ -1495,7 +1630,9 @@ actor APIClient {
             if response.statusCode == 401 { throw APIError.unauthorised }
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             if let message = Self.readableMessage(from: json, statusCode: response.statusCode) {
-                throw APIError.server(message)
+                throw APIError.server(message,
+                                      statusCode: response.statusCode,
+                                      code: json?["code"] as? String)
             }
             throw APIError.badResponse(response.statusCode)
         }

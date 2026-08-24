@@ -150,12 +150,15 @@ private struct TeamMemberView: View {
     @EnvironmentObject private var session: SessionModel
     @Environment(\.dismiss) private var dismiss
     @State private var selectedRole: String
+    @State private var savedRole: String
     @State private var confirmingDeactivate = false
 
     init(member: TeamMember, model: TeamModel) {
         self.member = member
         _model = ObservedObject(wrappedValue: model)
-        _selectedRole = State(initialValue: member.role ?? RoleCatalog.seeds.first ?? "agent")
+        let initialRole = member.role ?? RoleCatalog.seeds.first ?? "agent"
+        _selectedRole = State(initialValue: initialRole)
+        _savedRole = State(initialValue: initialRole)
     }
 
     private var actor: TeamActor {
@@ -194,11 +197,15 @@ private struct TeamMemberView: View {
                 .disabled(isBusy || blockingReason != nil)
 
                 Button {
-                    Task { _ = await model.changeRole(of: member, to: selectedRole) }
+                    Task {
+                        if await model.changeRole(of: member, to: selectedRole) {
+                            savedRole = selectedRole
+                        }
+                    }
                 } label: {
                     if isBusy { ProgressView() } else { Text("Save role") }
                 }
-                .disabled(isBusy || blockingReason != nil || selectedRole == (member.role ?? ""))
+                .disabled(isBusy || blockingReason != nil || selectedRole == savedRole)
             } header: {
                 Text("Role")
             } footer: {
@@ -242,6 +249,15 @@ private struct TeamMemberView: View {
         } message: {
             Text("They lose access to the inbox immediately.")
         }
+        .assistantDraftOwner(
+            source: .account,
+            isDirty: selectedRole != savedRole,
+            onDiscard: {
+                selectedRole = savedRole
+                confirmingDeactivate = false
+                dismiss()
+            }
+        )
     }
 
     /// The member's own role is always offered, even if this client has never
@@ -272,6 +288,7 @@ private struct InviteSheet: View {
     @State private var name = ""
     @State private var email = ""
     @State private var role = ""
+    @State private var initialRole = ""
     @State private var isWorking = false
     @State private var copied = false
 
@@ -358,9 +375,24 @@ private struct InviteSheet: View {
             }
             .onAppear {
                 let options = model.assignableRoles(for: actor)
-                if role.isEmpty { role = options.first ?? RoleCatalog.seeds.first ?? "agent" }
+                if role.isEmpty {
+                    role = options.first ?? RoleCatalog.seeds.first ?? "agent"
+                    initialRole = role
+                }
             }
         }
+        .assistantDraftOwner(
+            source: .account,
+            isDirty: model.newInvitation == nil &&
+                (!name.isEmpty || !email.isEmpty || role != initialRole),
+            onDiscard: {
+                name = ""
+                email = ""
+                role = ""
+                model.newInvitation = nil
+                dismiss()
+            }
+        )
     }
 }
 

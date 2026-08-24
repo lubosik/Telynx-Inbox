@@ -6,7 +6,7 @@
  * THE ONE PROPERTY THAT MATTERS MOST is that a stored `false` is honoured in
  * every case, on every category, whatever else is going wrong. A toggle that
  * does not actually stop the push is worse than no toggle, and the whole reason
- * the check lives at delivery in lib/apns-notify.js rather than at the five
+ * the check lives at delivery in lib/apns-notify.js rather than at the six
  * call sites that decide to notify is that a future sender cannot then forget.
  *
  * THE SECOND is that an ABSENT answer is not a `false`. A missing table during
@@ -61,7 +61,7 @@ function device(overrides = {}) {
 test('the category list is closed and every entry is explained', () => {
   assert.deepEqual(CATEGORY_KEYS, [
     'new_customer_messages', 'missed_calls', 'daily_digest',
-    'campaign_proposals', 'new_releases'
+    'campaign_proposals', 'referrals', 'new_releases'
   ]);
   for (const entry of NOTIFICATION_CATEGORIES) {
     assert.ok(entry.label && entry.label.length > 2, `${entry.key} needs a label`);
@@ -92,8 +92,9 @@ test('every category has a declared failure mode and the new one fails closed', 
   assert.equal(CATEGORY_FAILURE_MODE.missed_calls, 'open');
   assert.equal(CATEGORY_FAILURE_MODE.campaign_proposals, 'open');
   assert.equal(CATEGORY_FAILURE_MODE.new_releases, 'open');
-  // The one that ships with the table has nothing to regress.
+  // Categories introduced with this table have nothing to regress.
   assert.equal(CATEGORY_FAILURE_MODE.daily_digest, 'closed');
+  assert.equal(CATEGORY_FAILURE_MODE.referrals, 'closed');
 });
 
 // ── Resolution ──────────────────────────────────────────────────────────────
@@ -174,6 +175,7 @@ test('an unreadable preference keeps existing alerts flowing and holds the new o
   assert.equal(deviceAccepts(device(), 'campaign_proposals', unavailable), true);
   assert.equal(deviceAccepts(device(), 'new_releases', unavailable), true);
   assert.equal(deviceAccepts(device(), 'daily_digest', unavailable), false);
+  assert.equal(deviceAccepts(device(), 'referrals', unavailable), false);
 });
 
 test('no accounts means no query at all', async () => {

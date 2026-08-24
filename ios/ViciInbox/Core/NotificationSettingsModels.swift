@@ -31,6 +31,7 @@ enum NotificationCategory: String, CaseIterable, Identifiable, Codable, Hashable
     case missedCalls = "missed_calls"
     case dailyDigest = "daily_digest"
     case campaignProposals = "campaign_proposals"
+    case referrals = "referrals"
     case newReleases = "new_releases"
 
     var id: String { rawValue }
@@ -44,6 +45,7 @@ enum NotificationCategory: String, CaseIterable, Identifiable, Codable, Hashable
         case .missedCalls: return "Missed calls"
         case .dailyDigest: return "Daily summary"
         case .campaignProposals: return "Campaigns ready to review"
+        case .referrals: return "Conversation referrals"
         case .newReleases: return "New releases"
         }
     }
@@ -58,6 +60,8 @@ enum NotificationCategory: String, CaseIterable, Identifiable, Codable, Hashable
             return "Once a day, only when a segment moved enough to matter."
         case .campaignProposals:
             return "When a draft or a proposal is waiting for a decision."
+        case .referrals:
+            return "When a teammate hands you a customer conversation."
         case .newReleases:
             return "When a new build of this app is available."
         }
@@ -69,6 +73,7 @@ enum NotificationCategory: String, CaseIterable, Identifiable, Codable, Hashable
         case .missedCalls: return "phone.arrow.down.left.fill"
         case .dailyDigest: return "chart.line.uptrend.xyaxis"
         case .campaignProposals: return "megaphone.fill"
+        case .referrals: return "person.2.fill"
         case .newReleases: return "sparkles"
         }
     }
@@ -97,12 +102,14 @@ struct NotificationPreferences: Codable, Hashable {
     var missedCalls: Bool
     var dailyDigest: Bool
     var campaignProposals: Bool
+    var referrals: Bool
     var newReleases: Bool
 
     static let allOn = NotificationPreferences(newCustomerMessages: true,
                                                missedCalls: true,
                                                dailyDigest: true,
                                                campaignProposals: true,
+                                               referrals: true,
                                                newReleases: true)
 
     /// The wire keys are snake case, which is what the database columns are
@@ -112,6 +119,7 @@ struct NotificationPreferences: Codable, Hashable {
         case missedCalls = "missed_calls"
         case dailyDigest = "daily_digest"
         case campaignProposals = "campaign_proposals"
+        case referrals = "referrals"
         case newReleases = "new_releases"
     }
 
@@ -119,11 +127,13 @@ struct NotificationPreferences: Codable, Hashable {
          missedCalls: Bool,
          dailyDigest: Bool,
          campaignProposals: Bool,
+         referrals: Bool,
          newReleases: Bool) {
         self.newCustomerMessages = newCustomerMessages
         self.missedCalls = missedCalls
         self.dailyDigest = dailyDigest
         self.campaignProposals = campaignProposals
+        self.referrals = referrals
         self.newReleases = newReleases
     }
 
@@ -144,6 +154,7 @@ struct NotificationPreferences: Codable, Hashable {
         missedCalls = read(.missedCalls)
         dailyDigest = read(.dailyDigest)
         campaignProposals = read(.campaignProposals)
+        referrals = read(.referrals)
         newReleases = read(.newReleases)
     }
 
@@ -154,6 +165,7 @@ struct NotificationPreferences: Codable, Hashable {
             case .missedCalls: return missedCalls
             case .dailyDigest: return dailyDigest
             case .campaignProposals: return campaignProposals
+            case .referrals: return referrals
             case .newReleases: return newReleases
             }
         }
@@ -163,6 +175,7 @@ struct NotificationPreferences: Codable, Hashable {
             case .missedCalls: missedCalls = newValue
             case .dailyDigest: dailyDigest = newValue
             case .campaignProposals: campaignProposals = newValue
+            case .referrals: referrals = newValue
             case .newReleases: newReleases = newValue
             }
         }

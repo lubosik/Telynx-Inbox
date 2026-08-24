@@ -6,6 +6,8 @@ struct ViciInboxApp: App {
     @StateObject private var session = SessionModel()
     @StateObject private var appearance = AppearanceModel()
     @StateObject private var onboarding = OnboardingCoordinator()
+    @StateObject private var router = AppRouter.shared
+    @StateObject private var assistantSpeech = AssistantSpeechCoordinator()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -14,6 +16,8 @@ struct ViciInboxApp: App {
                 .environmentObject(session)
                 .environmentObject(appearance)
                 .environmentObject(onboarding)
+                .environmentObject(router)
+                .environmentObject(assistantSpeech)
                 // `resolvedColorScheme`, not `preference.colorScheme`: the
                 // Scheduled preference has no fixed answer and the model is the
                 // only thing that knows what time it is.

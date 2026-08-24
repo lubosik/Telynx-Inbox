@@ -429,6 +429,10 @@ final class CampaignEditorModel: ObservableObject {
     let existingID: String?
     private var contactRequestID = UUID()
     private let existingRecipientMetadata: [String: CampaignRecipientInput]
+    private let initialTitle: String
+    private let initialMessage: String
+    private let initialRecipientsText: String
+    private let initialAudienceMode: CampaignAudienceMode
 
     init(campaign: CampaignRecord? = nil, recipients: [CampaignRecipient] = []) {
         var metadata: [String: CampaignRecipientInput] = [:]
@@ -442,17 +446,57 @@ final class CampaignEditorModel: ObservableObject {
                 source: recipient.inclusionSource
             )
         }
-        existingID = campaign?.id
-        title = campaign?.title ?? ""
-        message = campaign?.proposedMessage ?? ""
-        audienceMode = campaign == nil ? .selectedContacts : .manualNumbers
-        existingRecipientMetadata = metadata
-        recipientsText = recipients
+        // Resolved into locals BEFORE anything is assigned to self.
+        //
+        // `title`, `message`, `recipientsText` and `audienceMode` are
+        // @Published, so reading one back is a property access through `self`.
+        // Swift forbids that until every stored property is initialised, and
+        // `initialTitle = title` was exactly that read. It parses cleanly and
+        // fails to compile, which is why it survived the local parse check and
+        // only surfaced on the Xcode gate.
+        //
+        // Assigning both the published property and its baseline from the same
+        // local also removes the possibility of the two drifting apart, which
+        // is what `hasUnsavedDraftChanges` compares.
+        let resolvedTitle = campaign?.title ?? ""
+        let resolvedMessage = campaign?.proposedMessage ?? ""
+        let resolvedAudienceMode: CampaignAudienceMode =
+            campaign == nil ? .selectedContacts : .manualNumbers
+        let resolvedRecipientsText = recipients
             .filter(\.selected)
             // Phone-only editing cannot be corrupted by a saved contact name
             // containing a comma. Matching metadata is restored below.
             .map(\.contactPhone)
             .joined(separator: "\n")
+
+        existingID = campaign?.id
+        title = resolvedTitle
+        message = resolvedMessage
+        audienceMode = resolvedAudienceMode
+        existingRecipientMetadata = metadata
+        recipientsText = resolvedRecipientsText
+        initialTitle = resolvedTitle
+        initialMessage = resolvedMessage
+        initialRecipientsText = resolvedRecipientsText
+        initialAudienceMode = resolvedAudienceMode
+    }
+
+    var hasUnsavedDraftChanges: Bool {
+        guard savedCampaign == nil else { return false }
+        return title != initialTitle || message != initialMessage ||
+            recipientsText != initialRecipientsText || audienceMode != initialAudienceMode ||
+            !selectedContacts.isEmpty
+    }
+
+    func discardLocalDraft() {
+        contactRequestID = UUID()
+        title = initialTitle
+        message = initialMessage
+        recipientsText = initialRecipientsText
+        audienceMode = initialAudienceMode
+        selectedContacts.removeAll()
+        contactSearch = ""
+        step = .type
     }
 
     var titleCount: Int { title.count }

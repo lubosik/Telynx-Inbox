@@ -17,6 +17,7 @@ enum Permission {
     static let automationRead   = "automation.read"
     static let automationCancel = "automation.cancel"
     static let analyticsRead    = "analytics.read"
+    static let assistantUse     = "assistant.use"
     static let auditRead        = "audit.read"
     /// Listing team members. Held by Owner and Admin, deliberately NOT by
     /// `agent` in scripts/rbac-migration.sql. It is checked before the segment
@@ -37,6 +38,9 @@ enum Permission {
     static let campaignsApprove = "campaigns.approve"
     static let campaignsLaunch  = "campaigns.launch"
     static let campaignsCancel  = "campaigns.cancel"
+    static let referralRead     = "referral.read"
+    static let referralCreate   = "referral.create"
+    static let referralAct      = "referral.act"
 }
 
 struct AuthUser: Codable, Identifiable, Hashable {

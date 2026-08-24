@@ -14,24 +14,8 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     @Published private(set) var hasDeviceToken = false
     @Published private(set) var isRegisteredWithBackend = false
     @Published private(set) var lastError: String?
-    @Published private(set) var pendingConversationPhone: String?
-    /// A top-level `screen` value from a tapped notification, e.g. the release
-    /// announcement's `"analytics"`. Consumed by MainTabView.
-    @Published private(set) var pendingScreen: String?
-    /// Optional exact campaign destination. Current coalesced review alerts may
-    /// omit it; single-campaign alerts can add either `campaignId` or the legacy
-    /// snake-case spelling without requiring another client release.
-    @Published private(set) var pendingCampaignID: String?
-    /// Optional exact segment destination, from a segment-change push. The
-    /// payload key is `segmentID`, spelled exactly that way by
-    /// `segmentChangePayload` in lib/apns-notify.js; the snake-case spelling is
-    /// accepted too so a future server-side rename cannot strand this build.
-    @Published private(set) var pendingSegmentID: String?
     @Published private(set) var campaignRefreshSequence = 0
     @Published private(set) var inboxRefreshSequence = 0
-    /// Set when iOS itself asks the app to show its own notification settings,
-    /// through `.providesAppNotificationSettings`. Consumed by RootView.
-    @Published private(set) var wantsNotificationSettings = false
 
     private let installationDefaultsKey = "vici.apns.installation-id"
     private var deviceToken: String?
@@ -127,10 +111,18 @@ final class MessageNotificationManager: NSObject, ObservableObject {
             hiddenPreviewsBodyPlaceholder: "Daily summary",
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([digest])
+        let referral = UNNotificationCategory(
+            identifier: Self.referralCategory,
+            actions: [],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: "Conversation referral",
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([digest, referral])
     }
 
     static let digestCategory = "SEGMENT_DIGEST"
+    static let referralCategory = "REFERRAL"
     static let digestReviewAction = "SEGMENT_DIGEST_REVIEW"
     static let digestSnoozeAction = "SEGMENT_DIGEST_SNOOZE"
 
@@ -208,52 +200,6 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(request) { error in
             if error != nil { Log.push("digest snooze could not be scheduled") }
         }
-    }
-
-    func queueConversation(phone: String) {
-        pendingConversationPhone = phone
-    }
-
-    func consumePendingConversation() {
-        pendingConversationPhone = nil
-    }
-
-    func queueScreen(_ screen: String) {
-        pendingScreen = screen
-    }
-
-    func consumePendingScreen() {
-        pendingScreen = nil
-    }
-
-    func queueCampaign(id: String?) {
-        pendingCampaignID = id?.trimmingCharacters(in: .whitespacesAndNewlines)
-        campaignRefreshSequence &+= 1
-    }
-
-    func consumePendingCampaignRoute() {
-        pendingCampaignID = nil
-        // Only the campaign destination is cleared here. Clearing an unrelated
-        // pending screen would swallow a segment route that arrived in the same
-        // payload, and this method runs whether or not it matched.
-        if pendingScreen?.lowercased() == "campaigns" { pendingScreen = nil }
-    }
-
-    func queueSegment(id: String?) {
-        pendingSegmentID = id?.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    func consumePendingSegmentRoute() {
-        pendingSegmentID = nil
-        if pendingScreen?.lowercased() == "segments" { pendingScreen = nil }
-    }
-
-    func requestNotificationSettings() {
-        wantsNotificationSettings = true
-    }
-
-    func consumeNotificationSettingsRequest() {
-        wantsNotificationSettings = false
     }
 
     /// Reconciles the message half of the badge with the server-backed unread
@@ -379,17 +325,31 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // The inbox may already be onscreen, but an audible banner is still
         // valuable for a shared business inbox.
-        let screen = notification.request.content.userInfo["screen"] as? String
+        let userInfo = notification.request.content.userInfo
+        let screen = userInfo["screen"] as? String
+        let campaignID = (userInfo["campaignId"] as? String)
+            ?? (userInfo["campaign_id"] as? String)
+        let segmentID = (userInfo["segmentID"] as? String)
+            ?? (userInfo["segmentId"] as? String)
+            ?? (userInfo["segment_id"] as? String)
+        let referralID = (userInfo["referralID"] as? String)
+            ?? (userInfo["referralId"] as? String)
+            ?? (userInfo["referral_id"] as? String)
         Task { @MainActor in
-            // A named destination is never a message. Treating one as a message
-            // inflates the unread badge with something no conversation can
-            // clear. "segments" joined this list when segment-change pushes
-            // shipped; without it a segment alert made the inbox look unread.
-            switch screen?.lowercased() {
-            case "campaigns", "segments":
+            switch AppNotificationRouteParser.foregroundKind(
+                screen: screen,
+                campaignID: campaignID,
+                segmentID: segmentID,
+                referralID: referralID
+            ) {
+            case .campaign:
                 MessageNotificationManager.shared.noteCampaignActivity()
-            default:
+            case .message:
                 MessageNotificationManager.shared.noteIncomingMessage()
+            case .navigation:
+                // A release, analytics or settings destination is not a message
+                // and cannot be cleared by opening a conversation.
+                break
             }
         }
         completionHandler([.banner, .list, .sound, .badge])
@@ -404,7 +364,7 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             openSettingsFor notification: UNNotification?) {
         Task { @MainActor in
-            MessageNotificationManager.shared.requestNotificationSettings()
+            AppRouter.shared.queue(.notificationSettings)
         }
     }
 
@@ -436,32 +396,32 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         let segmentID = (userInfo["segmentID"] as? String)
             ?? (userInfo["segmentId"] as? String)
             ?? (userInfo["segment_id"] as? String)
+        let referralID = (userInfo["referralID"] as? String)
+            ?? (userInfo["referralId"] as? String)
+            ?? (userInfo["referral_id"] as? String)
 
-        guard (phone?.isEmpty == false) || (screen?.isEmpty == false) ||
-                (campaignID?.isEmpty == false) || (segmentID?.isEmpty == false) else {
+        guard let route = AppNotificationRouteParser.route(
+            screen: screen,
+            phone: phone,
+            campaignID: campaignID,
+            segmentID: segmentID,
+            referralID: referralID
+        ) else {
             completionHandler()
             return
         }
 
         Task { @MainActor in
             let manager = MessageNotificationManager.shared
-            if let phone, !phone.isEmpty {
+            switch route {
+            case .conversation:
                 manager.noteIncomingMessage()
-                manager.queueConversation(phone: phone)
+            case .campaign, .segment, .growth(.campaigns), .growth(.audiences):
+                manager.noteCampaignActivity()
+            default:
+                break
             }
-            if screen?.lowercased() == "campaigns" || campaignID?.isEmpty == false {
-                manager.queueCampaign(id: campaignID)
-            }
-            if screen?.lowercased() == "segments" || segmentID?.isEmpty == false {
-                manager.queueSegment(id: segmentID)
-            }
-            if let screen, !screen.isEmpty {
-                manager.queueScreen(screen)
-            } else if campaignID?.isEmpty == false {
-                manager.queueScreen("campaigns")
-            } else if segmentID?.isEmpty == false {
-                manager.queueScreen("segments")
-            }
+            AppRouter.shared.queue(route)
             completionHandler()
         }
     }

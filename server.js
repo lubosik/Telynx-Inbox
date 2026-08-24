@@ -152,6 +152,7 @@ app.use('/api/send',          requireAuth, sendLimiter, require('./routes/send')
 app.use('/api/upload',        requireAuth, require('./routes/upload'));
 app.use('/api/react',         requireAuth, sendLimiter, require('./routes/react')(broadcastSSE));
 app.use('/api/conversations', requireAuth, require('./routes/conversations'));
+app.use('/api/referrals',     requireAuth, require('./routes/referrals')());
 app.use('/api/intelligence',  requireAuth, require('./routes/intelligence'));
 app.use('/api/sync',          requireAuth, require('./routes/sync'));
 app.use('/api/contacts',      requireAuth, require('./routes/contacts'));
@@ -161,6 +162,7 @@ app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
+app.use('/api/assistant',     requireAuth, require('./routes/assistant')());
 app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')());
 // Its own mount rather than a path under /api/campaigns: a proposal is not a
 // campaign, and keeping the two apart means no literal proposal path can ever

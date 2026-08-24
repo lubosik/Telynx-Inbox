@@ -128,6 +128,9 @@ CREATE TABLE IF NOT EXISTS sms_permissions (
 
 INSERT INTO sms_permissions (key, resource, action, description, is_destructive) VALUES
   ('conversation.read',       'conversation',  'read',    'Read the shared inbox and conversation threads.', false),
+  ('referral.read',           'referral',      'read',    'Read conversation referrals in which this account may participate.', false),
+  ('referral.create',         'referral',      'create',  'Refer a visible conversation to an eligible named teammate.', false),
+  ('referral.act',            'referral',      'act',     'Claim or act on a referral when its ownership rules allow it.', false),
   ('message.send',            'message',       'send',    'Send SMS/MMS, upload media, and send tapback reactions.', false),
   ('contact.read',            'contact',       'read',    'Read contact records and order context.', false),
   ('contact.write',           'contact',       'write',   'Create and edit contact records.', false),
@@ -140,6 +143,7 @@ INSERT INTO sms_permissions (key, resource, action, description, is_destructive)
   ('call.recording.play',     'call.recording','play',    'Play an archived call recording.', false),
   ('call.recording.control',  'call.recording','control', 'Start or stop recording on a live call.', false),
   ('analytics.read',          'analytics',     'read',    'View revenue analytics and attribution drill-downs.', false),
+  ('assistant.use',           'assistant',     'use',     'Use the native on-device read-only assistant.', false),
   ('campaigns.read',          'campaign',      'read',    'Read campaigns, review counts and recipient previews.', false),
   ('campaigns.manage',        'campaign',      'manage',  'Create and edit campaign drafts and submit them for review.', true),
   ('campaigns.approve',       'campaign',      'approve', 'Approve or reject a frozen campaign revision.', true),
@@ -183,6 +187,7 @@ ON CONFLICT DO NOTHING;
 -- legacy: identical to admin, on purpose. See the ROLLOUT NOTE at the top.
 INSERT INTO sms_role_permissions (role_key, permission_key)
 SELECT 'legacy', key FROM sms_permissions WHERE key <> 'user.manage.owner'
+  AND key NOT IN ('assistant.use', 'referral.read', 'referral.create', 'referral.act')
 ON CONFLICT DO NOTHING;
 
 -- agent (Support Agent): day-to-day inbox work and nothing else. In
@@ -191,6 +196,9 @@ ON CONFLICT DO NOTHING;
 INSERT INTO sms_role_permissions (role_key, permission_key)
 SELECT 'agent', key FROM sms_permissions WHERE key IN (
   'conversation.read',
+  'referral.read',
+  'referral.create',
+  'referral.act',
   'message.send',
   'contact.read',
   'contact.write',

@@ -60,10 +60,23 @@ struct ChangePasswordView: View {
     }
 
     var body: some View {
-        switch mode {
-        case .voluntary: voluntaryBody
-        case .forced:    forcedBody
+        Group {
+            switch mode {
+            case .voluntary: voluntaryBody
+            case .forced:    forcedBody
+            }
         }
+        .assistantDraftOwner(
+            source: .account,
+            isDirty: !currentPassword.isEmpty || !newPassword.isEmpty || !confirmation.isEmpty,
+            onDiscard: {
+                focused = nil
+                currentPassword = ""
+                newPassword = ""
+                confirmation = ""
+                if case .voluntary = mode { dismiss() }
+            }
+        )
     }
 
     // MARK: - Voluntary, pushed from the account menu

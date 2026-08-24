@@ -70,6 +70,15 @@ struct ProfileEditorView: View {
         } message: {
             Text(model.errorMessage ?? "Please try again.")
         }
+        .assistantDraftOwner(
+            source: .account,
+            isDirty: model.hasUnsavedDraftChanges,
+            onDiscard: {
+                focusedField = nil
+                model.name = session.currentUser?.displayName ?? ""
+                model.newEmail = ""
+            }
+        )
     }
 
     // MARK: - Name
@@ -286,6 +295,11 @@ final class ProfileEditorModel: ObservableObject {
     /// Set once the fields have been seeded, so a later identity refresh cannot
     /// overwrite half-typed text.
     private var hasPrimed = false
+    private var primedName = ""
+
+    var hasUnsavedDraftChanges: Bool {
+        hasPrimed && (name != primedName || !newEmail.isEmpty)
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -357,6 +371,7 @@ final class ProfileEditorModel: ObservableObject {
         guard !hasPrimed else { return }
         hasPrimed = true
         name = user?.displayName ?? ""
+        primedName = name
     }
 
     func refresh(session: SessionModel) async {
@@ -378,6 +393,7 @@ final class ProfileEditorModel: ObservableObject {
             // confirmation.
             let stored = session.currentUser?.displayName ?? trimmed
             name = stored
+            primedName = stored
             nameConfirmation = "Saved as \(stored)."
             errorMessage = nil
         } catch {
