@@ -54,7 +54,9 @@ struct AssistantView: View {
                         VStack(spacing: 22) {
                             AssistantOrb(phase: model.phase,
                                          tint: preferences.orbTint,
-                                         size: preferences.orbSize)
+                                         size: preferences.orbSize,
+                                         isListening: speech.phase == .listening
+                                             || speech.phase == .finalizing)
                                 .padding(.top, 24)
 
                             AssistantStatusCopy(
@@ -330,6 +332,11 @@ private struct AssistantOrb: View {
     /// see `orbColor`.
     var tint: AssistantOrbTint = .brand
     var size: AssistantOrbSize = .standard
+    /// Capture is a separate state machine from reasoning, so listening cannot
+    /// be read off `phase`. Passed in rather than inferred, because the orb
+    /// showing "hearing you" while the microphone is closed would be a lie the
+    /// user acts on.
+    var isListening: Bool = false
 
     /// Every circle and the glyph scale from one diameter, so the three sizes
     /// stay in proportion rather than needing three sets of hand-picked numbers.
@@ -337,6 +344,26 @@ private struct AssistantOrb: View {
     private var middle: CGFloat { outer * 0.81 }
     private var core: CGFloat { outer * 0.61 }
     private var glyph: CGFloat { outer * 0.195 }
+
+    /// Drives the motion. One value, so the three states cannot animate out of
+    /// step with each other.
+    @State private var animating = false
+
+    /// WHY EACH STATE MOVES THE WAY IT DOES
+    ///   Listening breathes slowly and steadily, so a person can see the phone
+    ///   is hearing them without being hurried. Thinking pulses faster, which
+    ///   reads as work rather than as a hang. Speaking moves in a regular
+    ///   rhythm so the orb is visibly the thing producing the sound. Everything
+    ///   else is still, because motion with no meaning is just noise and it is
+    ///   what makes an idle screen feel unfinished.
+    private var pulse: (scale: CGFloat, duration: Double)? {
+        if isListening { return (1.06, 1.4) }
+        switch phase {
+        case .thinking: return (1.10, 0.7)
+        case .speaking: return (1.05, 0.5)
+        default:        return nil
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -362,6 +389,17 @@ private struct AssistantOrb: View {
                 .foregroundStyle(.white)
                 .accessibilityHidden(true)
         }
+        .scaleEffect(animating && pulse != nil ? (pulse?.scale ?? 1) : 1)
+        .animation(
+            pulse.map { .easeInOut(duration: $0.duration).repeatForever(autoreverses: true) }
+                ?? .easeOut(duration: 0.2),
+            value: animating
+        )
+        // Restarted on every phase change so a new state begins its own rhythm
+        // rather than inheriting the tail of the previous one.
+        .onChange(of: phase) { _ in restartMotion() }
+        .onChange(of: isListening) { _ in restartMotion() }
+        .onAppear { animating = pulse != nil }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
     }
@@ -373,6 +411,14 @@ private struct AssistantOrb: View {
     /// state would let somebody choose a theme in which a broken assistant
     /// looks exactly like a working one. The accent applies to the resting,
     /// listening and speaking states, which is where it is actually seen.
+    /// Restarted rather than left running, so a new state begins its own
+    /// rhythm instead of inheriting the tail of the previous one.
+    private func restartMotion() {
+        animating = false
+        guard pulse != nil else { return }
+        DispatchQueue.main.async { animating = true }
+    }
+
     private var orbColor: Color {
         switch phase {
         case .disabled, .unavailable: return .secondary

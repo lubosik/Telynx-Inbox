@@ -89,7 +89,18 @@ test('push to talk is bounded, explicit, accessible, and typed fallback remains'
   assert.match(VIEW, /Open microphone settings/);
   assert.match(COORDINATOR, /30_000_000_000/);
   assert.doesNotMatch(VIEW, /\.task\s*\{[^}]*beginPushToTalk/);
-  const a11yAction = VIEW.slice(VIEW.indexOf('.accessibilityAction {'), VIEW.indexOf('.onChange(of: phase)'));
+  // Anchored to the accessibility action itself rather than to whatever
+  // modifier happens to follow it. The orb gained its own `.onChange(of:
+  // phase)` for the listening animation, which sits earlier in the file, and
+  // slicing to the first match silently emptied this check.
+  const a11yStart = VIEW.indexOf('.accessibilityAction {');
+  assert.ok(a11yStart >= 0, 'the push to talk accessibility action must exist');
+  const a11yAction = VIEW.slice(a11yStart, VIEW.indexOf('.onChange(of: phase)', a11yStart));
+  assert.ok(a11yAction.length > 0, 'the accessibility action slice must not be empty');
+  // Toggling off is checked before the enabled guard, so VoiceOver can always
+  // stop a capture that is already running even if the control has since been
+  // disabled underneath it.
+  assert.ok(a11yAction.indexOf('if isPressed') >= 0 && a11yAction.indexOf('guard isEnabled') >= 0);
   assert.ok(a11yAction.indexOf('if isPressed') < a11yAction.indexOf('guard isEnabled'));
 });
 

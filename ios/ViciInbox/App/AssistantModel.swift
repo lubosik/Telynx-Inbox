@@ -369,7 +369,21 @@ final class AssistantPreferences: ObservableObject {
     @Published var orbSize: AssistantOrbSize {
         didSet { defaults.set(orbSize.rawValue, forKey: Keys.size) }
     }
-    /// nil means automatic. A stored identifier means the operator picked it.
+    /// The chosen voice's display name, remembered alongside its id purely so
+    /// the Settings row can say "Elise" instead of an opaque identifier without
+    /// a network call every time the screen opens.
+    @Published var pinnedVoiceName: String? {
+        didSet {
+            if let pinnedVoiceName {
+                defaults.set(pinnedVoiceName, forKey: Keys.pinnedVoiceName)
+            } else {
+                defaults.removeObject(forKey: Keys.pinnedVoiceName)
+            }
+        }
+    }
+
+    /// nil means the server default, which is Elise. A stored identifier means
+    /// the operator chose one from the library.
     @Published var pinnedVoiceIdentifier: String? {
         didSet {
             if let pinnedVoiceIdentifier {
@@ -386,6 +400,7 @@ final class AssistantPreferences: ObservableObject {
         static let tint = "assistant_preference_orb_tint"
         static let size = "assistant_preference_orb_size"
         static let pinnedVoice = "assistant_preference_pinned_voice"
+        static let pinnedVoiceName = "assistant_preference_pinned_voice_name"
     }
 
     private let defaults: UserDefaults
@@ -400,6 +415,7 @@ final class AssistantPreferences: ObservableObject {
         orbTint = AssistantOrbTint(rawValue: defaults.string(forKey: Keys.tint) ?? "") ?? .brand
         orbSize = AssistantOrbSize(rawValue: defaults.string(forKey: Keys.size) ?? "") ?? .standard
         pinnedVoiceIdentifier = defaults.string(forKey: Keys.pinnedVoice)
+        pinnedVoiceName = defaults.string(forKey: Keys.pinnedVoiceName)
     }
 
     var voicePreference: AssistantVoicePreference {

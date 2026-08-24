@@ -894,7 +894,6 @@ private struct TimeZonePickerView: View {
 /// switch that reads On produced nothing.
 struct AssistantSettingsView: View {
     @ObservedObject private var preferences = AssistantPreferences.shared
-    @StateObject private var preview = AssistantVoicePreview()
 
     var body: some View {
         List {
@@ -913,17 +912,14 @@ struct AssistantSettingsView: View {
         }
         .navigationTitle("Assistant")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { preview.reload() }
-        .onDisappear { preview.stop() }
     }
 
     private var voiceSection: some View {
         Section {
-            Picker("Voice", selection: voiceBinding) {
-                Text("Automatic").tag(String?.none)
-                ForEach(preview.voices) { voice in
-                    Text(voice.title).tag(String?.some(voice.identifier))
-                }
+            NavigationLink {
+                AssistantVoiceLibraryView()
+            } label: {
+                LabeledContent("Voice", value: preferences.pinnedVoiceName ?? "Elise")
             }
 
             Picker("Speaking rate", selection: $preferences.speakingRate) {
@@ -932,28 +928,10 @@ struct AssistantSettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
-
-            Button {
-                preview.play(identifier: preferences.pinnedVoiceIdentifier,
-                             rate: preferences.speakingRate)
-            } label: {
-                HStack {
-                    Label(preview.isSpeaking ? "Stop" : "Preview voice",
-                          systemImage: preview.isSpeaking ? "stop.fill" : "play.fill")
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-            .disabled(preview.voices.isEmpty)
         } header: {
             Text("Voice")
         } footer: {
-            // Naming the source of the list prevents the obvious support
-            // question: somebody who has heard a better voice on another phone
-            // needs to know it is a download, not a missing feature.
-            Text(preview.voices.isEmpty
-                 ? "No speech voices are installed on this iPhone yet."
-                 : "These are the voices installed on this iPhone. Automatic picks the best one for your language and improves on its own if you add a better one. iOS Settings, Accessibility, Spoken Content has more to download.")
+            Text("Search hundreds of voices and hear each one before you choose. Answers are spoken in the cloud, so this needs a connection. Without one the assistant falls back to the iPhone's built in voice.")
         }
     }
 
@@ -986,99 +964,204 @@ struct AssistantSettingsView: View {
     }
 }
 
-/// Lists the installed voices and speaks a sample.
+
+// MARK: - Assistant voice library
+
+/// Search the voice library and hear one before choosing it.
 ///
-/// Deliberately its own synthesiser rather than the assistant's. The assistant
-/// owns an audio session shared with the dialler, and a Settings preview must
-/// not be able to interrupt a live call or leave that session in a state the
-/// call path did not expect.
-@MainActor
-private final class AssistantVoicePreview: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
-    struct Voice: Identifiable, Equatable {
-        let identifier: String
-        let title: String
-        var id: String { identifier }
-    }
+/// WHY THESE VOICES AND NOT THE BUILT IN ONES
+///   The owner's verdict on the synthetic presets was that they sound
+///   generated, and he was right. These are cloned from real people, and
+///   `usedBy` is the honest signal for which held up in real products: a voice
+///   thousands of builders shipped is one that survived contact with listeners.
+///
+/// PREVIEW COSTS NOTHING
+///   Each voice ships a sample clip, so auditioning plays that rather than
+///   synthesising fresh audio. Browsing forty voices would otherwise burn a
+///   meaningful slice of the monthly character budget on nobody listening
+///   properly.
+struct AssistantVoiceLibraryView: View {
+    @ObservedObject private var preferences = AssistantPreferences.shared
+    @StateObject private var model = AssistantVoiceLibraryModel()
+    @Environment(\.dismiss) private var dismiss
 
-    @Published private(set) var voices: [Voice] = []
-    @Published private(set) var isSpeaking = false
-
-    private let synthesizer = AVSpeechSynthesizer()
-
-    override init() {
-        super.init()
-        synthesizer.delegate = self
-    }
-
-    func reload() {
-        let installed = AVSpeechSynthesisVoice.speechVoices()
-        let preferred = Set(Locale.preferredLanguages.map { Self.language($0) })
-        voices = installed
-            // Only voices in a language this person actually reads. The full
-            // list is over a hundred entries and picking a Finnish voice to
-            // read English is not a choice anybody means to make.
-            .filter { preferred.contains(Self.language($0.language)) }
-            .sorted {
-                if $0.quality.rawValue != $1.quality.rawValue {
-                    return $0.quality.rawValue > $1.quality.rawValue
+    var body: some View {
+        List {
+            Section {
+                Picker("Voice", selection: $model.gender) {
+                    Text("Anyone").tag("")
+                    Text("Female").tag("female")
+                    Text("Male").tag("male")
                 }
-                return $0.name < $1.name
+                .pickerStyle(.segmented)
+                Picker("Accent", selection: $model.accent) {
+                    Text("Any accent").tag("")
+                    Text("British").tag("british")
+                    Text("American").tag("american")
+                    Text("Australian").tag("australian")
+                }
             }
-            .map { Voice(identifier: $0.identifier, title: Self.title(for: $0)) }
-    }
 
-    func play(identifier: String?, rate: AssistantSpeakingRate) {
-        if isSpeaking {
-            stop()
-            return
+            if preferences.pinnedVoiceIdentifier != nil {
+                Section {
+                    Button("Use the default voice") {
+                        preferences.pinnedVoiceIdentifier = nil
+                        preferences.pinnedVoiceName = nil
+                        dismiss()
+                    }
+                }
+            }
+
+            if let message = model.errorMessage {
+                Section {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(ViciTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Try again") { Task { await model.load() } }
+                }
+            } else if model.isLoading && model.voices.isEmpty {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Finding voices").foregroundStyle(.secondary)
+                    }
+                }
+            } else if model.voices.isEmpty {
+                Section {
+                    Text("No voices match that. Try a different search.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Section {
+                    ForEach(model.voices) { voice in
+                        row(voice)
+                    }
+                } footer: {
+                    Text("Tap to hear a voice. Tap Use to make it the assistant's.")
+                }
+            }
         }
-        let voice = identifier.flatMap(AVSpeechSynthesisVoice.init(identifier:))
-            ?? voices.first.flatMap { AVSpeechSynthesisVoice(identifier: $0.identifier) }
-        guard let voice else { return }
-        // A real sentence this product actually says. "The quick brown fox"
-        // tells you nothing about how the assistant will sound reading numbers.
-        let utterance = AVSpeechUtterance(
-            string: "Three customers are due to reorder. Two campaign proposals are waiting for approval."
-        )
-        utterance.voice = voice
-        utterance.rate = min(
-            AVSpeechUtteranceMaximumSpeechRate,
-            max(AVSpeechUtteranceMinimumSpeechRate,
-                AVSpeechUtteranceDefaultSpeechRate * rate.multiplier)
-        )
-        isSpeaking = true
-        synthesizer.speak(utterance)
+        .searchable(text: $model.query, prompt: "Search voices")
+        .navigationTitle("Assistant voice")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.load() }
+        .onChange(of: model.gender) { _ in Task { await model.load() } }
+        .onChange(of: model.accent) { _ in Task { await model.load() } }
+        .onSubmit(of: .search) { Task { await model.load() } }
+        .onDisappear { model.stopPreview() }
     }
 
-    func stop() {
-        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
-        isSpeaking = false
-    }
+    @ViewBuilder
+    private func row(_ voice: AssistantVoiceOption) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                model.preview(voice)
+            } label: {
+                Image(systemName: model.previewingID == voice.id ? "stop.circle.fill" : "play.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(ViciTheme.tint)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.previewingID == voice.id ? "Stop preview" : "Preview \(voice.name)")
 
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                                       didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false }
-    }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(voice.name).font(.body)
+                Text(voice.subtitle).font(.caption).foregroundStyle(.secondary)
+            }
 
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                                       didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.isSpeaking = false }
-    }
+            Spacer()
 
-    private static func language(_ identifier: String) -> String {
-        String(identifier.replacingOccurrences(of: "_", with: "-")
-            .split(separator: "-").first ?? Substring(identifier)).lowercased()
-    }
-
-    /// e.g. "Serena (Premium), English (United Kingdom)".
-    private static func title(for voice: AVSpeechSynthesisVoice) -> String {
-        let quality: String
-        switch voice.quality {
-        case .premium: quality = " (Premium)"
-        case .enhanced: quality = " (Enhanced)"
-        default: quality = ""
+            if preferences.pinnedVoiceIdentifier == voice.id {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(ViciTheme.tint)
+                    .accessibilityLabel("Selected")
+            } else {
+                Button("Use") {
+                    preferences.pinnedVoiceIdentifier = voice.id
+                    preferences.pinnedVoiceName = voice.name
+                    model.stopPreview()
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
-        let locale = Locale.current.localizedString(forIdentifier: voice.language) ?? voice.language
-        return "\(voice.name)\(quality), \(locale)"
+        .padding(.vertical, 2)
+    }
+}
+
+@MainActor
+private final class AssistantVoiceLibraryModel: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var query = ""
+    @Published var gender = "female"
+    @Published var accent = ""
+    @Published private(set) var voices: [AssistantVoiceOption] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var previewingID: String?
+    @Published var errorMessage: String?
+
+    private var player: AVAudioPlayer?
+    private var loadTask: Task<Void, Never>?
+
+    func load() async {
+        // Newest search wins. Typing four characters must not leave four
+        // requests racing to decide what is on screen.
+        loadTask?.cancel()
+        isLoading = true
+        errorMessage = nil
+        let task = Task { [query, gender, accent] in
+            do {
+                let result = try await APIClient.shared.assistantVoices(
+                    query: query.isEmpty ? nil : query,
+                    gender: gender.isEmpty ? nil : gender,
+                    accent: accent.isEmpty ? nil : accent
+                )
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.voices = result.voices
+                    self.isLoading = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
+        loadTask = task
+        await task.value
+    }
+
+    func preview(_ voice: AssistantVoiceOption) {
+        if previewingID == voice.id { stopPreview(); return }
+        stopPreview()
+        guard let raw = voice.previewUrl, let url = URL(string: raw) else { return }
+        previewingID = voice.id
+        Task { [weak self] in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard let self, self.previewingID == voice.id else { return }
+                await MainActor.run {
+                    self.player = try? AVAudioPlayer(data: data)
+                    self.player?.delegate = self
+                    self.player?.play()
+                }
+            } catch {
+                await MainActor.run { self?.previewingID = nil }
+            }
+        }
+    }
+
+    func stopPreview() {
+        player?.stop()
+        player = nil
+        previewingID = nil
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in self.previewingID = nil }
     }
 }
