@@ -544,20 +544,18 @@ struct SegmentInclusionEvidence: Hashable {
         switch detector {
         case "reorder": return reorderHeadline(personName: personName)
         case "winback": return winbackHeadline(personName: personName)
-        case "back_in_stock", "buyer_cohort":
-            // The backend already writes a finished operator-facing sentence
-            // for these two, so prefer it over anything reconstructed here.
+        case "back_in_stock":
+            // A restock row carries a finished sentence from the backend.
             //
-            // Deliberately NOT routed to reorderHeadline. A restock row does
-            // carry cadence facts, so borrowing that branch would compile and
-            // read plausibly, and it would print "this is one to get ready for
-            // rather than send to" over a segment that exists precisely to be
-            // sent to. Wrong copy that looks right is worse than none.
+            // Deliberately NOT routed to reorderHeadline. It does carry cadence
+            // facts, so borrowing that branch would compile and read plausibly,
+            // and it would print "this is one to get ready for rather than send
+            // to" over a segment that exists precisely to be sent to. Wrong
+            // copy that looks right is worse than none.
             if let written = text("summary"), !written.isEmpty { return written }
-            if isEmpty {
-                return "No evidence was recorded for this membership. That happens when the row predates the current rules."
-            }
-            return "\(personName) is in this segment, and the facts behind it are below."
+            return "\(personName) bought this before, and it is back in stock."
+        case "buyer_cohort":
+            return buyerCohortHeadline(personName: personName)
         default:
             if isEmpty {
                 return "No evidence was recorded for this membership. That happens when the row predates the current rules."
@@ -593,6 +591,69 @@ struct SegmentInclusionEvidence: Hashable {
             sentences.append("Note about \(personName): \(reason)")
         } else if purpose == nil || purpose?.isEmpty == true {
             sentences.append("No reason was recorded.")
+        }
+        return sentences.joined(separator: " ")
+    }
+
+    /// Currency for an evidence sentence. Local on purpose: this file sits in
+    /// the Foundation-only layer that can be type-checked without the iOS SDK,
+    /// and the UI layer's formatter cannot be reached from here without
+    /// dragging SwiftUI into it.
+    private static func money(_ amount: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = amount.rounded() == amount ? 0 : 2
+        return formatter.string(from: NSNumber(value: amount)) ?? String(format: "$%.2f", amount)
+    }
+
+    /// Why somebody is in a buyer cohort, in the words an operator uses.
+    ///
+    /// Written here rather than taken from the row because cohort evidence is a
+    /// set of facts, not a sentence: the backend records order count, the date
+    /// of the only order, its value and how long ago it was, and leaves the
+    /// phrasing to whoever is showing it. Before this existed every one of the
+    /// 1,600 cohort members rendered as "the engine did not record which rule
+    /// matched them", which was untrue. The rule matched. Nobody had written
+    /// the sentence.
+    private func buyerCohortHeadline(personName: String) -> String {
+        var sentences: [String] = []
+
+        let orders = Int(number("orderCount") ?? 1)
+        if let day = SegmentDateText.day(text("onlyOrderAt")) {
+            sentences.append(orders <= 1
+                ? "\(personName) has ordered once, on \(day), and has not been back since."
+                : "\(personName) has ordered \(orders) times, most recently on \(day).")
+        } else {
+            sentences.append(orders <= 1
+                ? "\(personName) has ordered once and has not been back since."
+                : "\(personName) has ordered \(orders) times.")
+        }
+
+        if let days = number("daysSinceOnlyOrder"), days > 0 {
+            sentences.append("That was \(SegmentNumberText.days(days)) ago.")
+        }
+
+        if let value = number("onlyOrderValue"), value > 0 {
+            sentences.append("They spent \(Self.money(value)) that time.")
+        }
+
+        // Whether the thing they chose is still buyable decides whether this is
+        // a campaign or a restocking decision, so it belongs in the summary
+        // rather than buried in the facts underneath.
+        if let purchasable = text("productsStillPurchasable") {
+            switch purchasable {
+            case "none":
+                sentences.append("Nothing they bought is on sale at the moment, so there is nothing to point them at yet.")
+            case "some":
+                sentences.append("Some of what they bought is still on sale.")
+            default:
+                break
+            }
+        }
+
+        if sentences.isEmpty {
+            return "\(personName) matched this group's rules, but the numbers behind it were not recorded."
         }
         return sentences.joined(separator: " ")
     }
