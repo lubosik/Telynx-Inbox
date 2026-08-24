@@ -138,6 +138,33 @@ client.
   restock, and it additionally requires the item to be in stock NOW. Both
   inventory tables are empty in production, so it legitimately returns zero and
   `describeRestockReorderEmptiness()` says which of six things is missing.
+- `lib/campaigns/restock-only.js`, the automatic segment
+  `back_in_stock_other_buyers`: the SAME recorded return, pointed at the rest of
+  that item's buyers, with NO cadence at all. A restock is a fact about our
+  warehouse and needs no timing to be worth saying, which is why
+  `REPEAT-PURCHASE-RESEARCH.md` names it as the one permitted substitute for
+  every banned replenishment reminder. It reuses `qualifyRestockForSegment()`
+  unchanged, so a first sighting is still not a restock and the item must still
+  be in stock now, and it reuses `RESTOCK_REORDER_COPY_BASIS` verbatim, because
+  there is one permitted message and two near-identical constants would drift.
+  **THE TWO BACK-IN-STOCK SEGMENTS ARE DISJOINT, NOT NESTED, AND THAT IS
+  STRUCTURAL.** The reorder pair is nested because both lists answer one
+  question at two levels of certainty and an operator picks one. These two
+  answer the same question about ONE event, so a person in both receives two
+  messages about one restock and the nearly-due one is strictly better timed.
+  `restockOnlyRows()` therefore CALLS `restockReorderPairs()` and subtracts
+  every phone it returns, at the PERSON level, rather than re-stating its rule;
+  a future edit to the pairing propagates here for free and cannot re-create an
+  overlap. `due` and `overdue` are excluded at the person-and-product level
+  exactly as the pairing excludes them, because "Due to reorder, everyone due"
+  already holds those people. `not_due` is deliberately NOT excluded: removing
+  the states another list holds is de-duplication, removing a state no list
+  holds would be a timing rule inside a segment whose whole justification is
+  that a restock needs none, and it would smuggle back a claim about somebody's
+  supply. Every row carries `timingUse: 'exclusion_only'`, `timingRead` and
+  `notInThisList`, so "why is this person not in the better timed list" is
+  answered on the row. `test/campaign-segment-restock-only.test.js` asserts the
+  empty intersection against a fixture holding people in both states.
 - `lib/campaigns/segment-contactability.js` and the `clearance` option on
   `buildGenerationInput()`: the split between WHO MATCHES THIS PATTERN and MAY
   WE CONTACT THIS PERSON. Segment membership is behaviour only. It must never

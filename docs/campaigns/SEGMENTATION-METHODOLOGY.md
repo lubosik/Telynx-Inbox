@@ -63,6 +63,43 @@ Empty is a true answer here. With `sms_product_inventory` and
 find, and `describeRestockReorderEmptiness()` names which of six things is
 missing rather than leaving a nought to be read as a broken engine.
 
+## Back in stock, and no timing at all
+
+`lib/campaigns/restock-only.js` is the automatic segment
+`back_in_stock_other_buyers`: the SAME recorded return, pointed at the rest of
+that item's buyers, with no cadence involved anywhere.
+
+It rests on the observation that made the pairing safe in the first place. "The
+thing you bought is back in stock" is a fact about OUR WAREHOUSE. It is true on
+the day it is observed whatever the recipient's buying looks like, so nothing
+has to be inferred about a person for it to be worth saying.
+`REPEAT-PURCHASE-RESEARCH.md` bans every replenishment reminder and names one
+substitute, a restock notice about our own supply; this is that substitute with
+nothing else attached, which makes it the safest list in the catalogue rather
+than the loosest.
+
+Membership is the transition test, unchanged and imported, minus three things:
+
+1. every phone `restockReorderPairs()` returned, at the PERSON level;
+2. state `due` or `overdue` on the parent product, at the person-and-product
+   level, exactly as the pairing excludes them;
+3. anybody who re-bought THAT EXACT ITEM after the return was observed.
+
+The first is what makes the two back-in-stock segments DISJOINT rather than
+nested, and it is done by calling the pairing rather than by re-stating its
+rule, so the two cannot drift apart and re-overlap. The reorder pair is nested
+because both of those lists answer one question at two levels of certainty;
+these two answer one question about ONE event, so a person in both would receive
+two messages about a single restock. The full argument, including why state
+`not_due` is deliberately KEPT, is in `docs/campaigns/SEGMENTS.md`.
+
+Every member row carries `timingUse: 'exclusion_only'`, a `timingRead` of
+`none`, `not_near` or `not_computed`, and `notInThisList` naming the better
+timed segment, so nobody reading a row has to guess whether that list missed
+this person. `describeRestockOnlyEmptiness()` is the honest empty state, and it
+carries one code the pairing cannot have: everybody who bought the returned item
+is already in a better timed list.
+
 ## Reorder cadence
 
 `lib/campaigns/reorder-cadence.js` uses authoritative, non-cancelled, non-failed, non-fully-refunded purchase timestamps for the exact product or variation. Duplicate timestamps are removed.
@@ -254,3 +291,4 @@ That is a description of the customer base, not a bug. Most Vici buyers have bou
 - These functions do not read Supabase, claim jobs, schedule work, or send SMS. Persistence and concurrency belong in the campaign service and SQL queue.
 - `sms_customer_commercial_eligibility` is empty in production, so `authoritativeSupportState()` answers `unknown` for every phone. That still fails SENDING closed with `support_state_unknown`, which is correct. It no longer fails SEGMENTATION closed: see "Segmentation is not permission" below. `scripts/dry-run-segment-membership.js` reports live membership with no counterfactual anywhere in it.
 - `sms_commerce_product_events` is empty, so back in stock has nobody: there is no recorded out-to-in transition, and current stock is not one. Seeding the inventory baseline is what makes the FIRST future transition detectable rather than swallowed. `back_in_stock_nearly_due` is empty for the same reason and says so, and once a baseline and a real transition exist it can hold at most the buyers of the item that returned who are also in the two-person `reorder_approaching` list.
+- `back_in_stock_other_buyers` is empty for the identical reason and is bounded very differently. It is the same recorded return pointed at the REST of that item's buyers, with no cadence at all, so its ceiling is the buyers of the returned item rather than an intersection with a two-person list. Given that 1,318 of 1,689 person-product groups have exactly one qualifying purchase, nearly every buyer of a returned item falls here rather than into the pairing. The two are DISJOINT by construction and not nested: `restockOnlyRows()` subtracts every phone `restockReorderPairs()` returned, plus `due` and `overdue` on the parent, so no person is ever in both and nobody receives two notices about one return. See `docs/campaigns/SEGMENTS.md` for the full argument, including why somebody who is merely a long way from their next order is deliberately kept.

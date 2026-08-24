@@ -48,6 +48,10 @@ const {
   qualifyingPurchaseTimes
 } = require('../lib/campaigns/reorder-cadence');
 const {
+  describeRestockOnlyEmptiness,
+  restockOnlyRows
+} = require('../lib/campaigns/restock-only');
+const {
   describeRestockReorderEmptiness,
   restockReorderPairs
 } = require('../lib/campaigns/restock-reorder');
@@ -159,8 +163,9 @@ async function run() {
     delete segment.phones;
   }
 
-  // ---- 2b. why the restock pairing is the size it is ----------------------
+  // ---- 2b. why each restock list is the size it is ------------------------
   const restockPairing = restockReorderPairs(input, { now });
+  const restockOnly = restockOnlyRows(input, { now });
 
   // ---- 3. why not more ----------------------------------------------------
   // The funnel from candidate group to segment member. A candidate group is one
@@ -257,6 +262,14 @@ async function run() {
       ...restockPairing.diagnostics,
       explanation: describeRestockReorderEmptiness(restockPairing.diagnostics)
     },
+    // The same, for the list that needs no timing at all. Its own emptiness
+    // has a reason the pairing's cannot have: everybody who bought the thing
+    // may already be in a better timed list, which is the engine working
+    // rather than failing, and a bare nought would not say so.
+    restockOnly: {
+      ...restockOnly.diagnostics,
+      explanation: describeRestockOnlyEmptiness(restockOnly.diagnostics)
+    },
     funnel: {
       candidateGroups: input.reorderCandidates.length,
       peopleWithACandidateGroup: new Set(input.reorderCandidates.map(row => row.phone)).size,
@@ -313,6 +326,18 @@ function report(result) {
   printCounts('reasons a stock change was not a return', result.restockPairing.transitionRejections);
   printCounts('where the buyers of a returned item stood', result.restockPairing.cadenceStates);
   console.log(`  ${result.restockPairing.explanation.sentence}`);
+  console.log('');
+  console.log('2c. BACK IN STOCK, EVERYONE ELSE  (the same event, with no timing at all)');
+  // Every count below except the last is buyer-and-return ROWS, not people.
+  // One person can be a buyer of two items that both came back.
+  console.log(`  genuine return rows                          ${result.restockOnly.genuineTransitionRows}`);
+  console.log(`  rows handed to the nearly due list           ${result.restockOnly.heldByNearlyDue}`);
+  console.log(`  rows handed to the due to reorder list       ${result.restockOnly.heldByDueToReorder}`);
+  console.log(`  rows that ordered that exact item again      ${result.restockOnly.orderedSinceTheReturn}`);
+  console.log(`  repeat returns collapsed into one            ${result.restockOnly.repeatReturnsCollapsed}`);
+  console.log(`  people held here                             ${result.restockOnly.people}`);
+  printCounts('how well we can read their buying (rows)', result.restockOnly.timingReads);
+  console.log(`  ${result.restockOnly.explanation.sentence}`);
   console.log('');
   console.log('3. WHY NOT MORE  (the funnel, live)');
   console.log(`  candidate groups (person x parent product)   ${result.funnel.candidateGroups}`);

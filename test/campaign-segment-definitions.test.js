@@ -53,8 +53,10 @@ function reorderCandidate(phone, options = {}) {
 test('the catalogue is a closed, stable set of keys', () => {
   assert.deepEqual(SEGMENT_DEFINITION_KEYS, [
     // A recorded return to stock, paired with the smaller group of its buyers
-    // who are also close to their own next order.
-    'back_in_stock_nearly_due',
+    // who are also close to their own next order, and DISJOINTLY the rest of
+    // that item's buyers, for whom the return needs no timing to be worth
+    // saying.
+    'back_in_stock_nearly_due', 'back_in_stock_other_buyers',
     // The buyer cohorts. Customer-level, and computed from
     // buildBuyerCohortFacts rather than the per-product engine input.
     'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',
@@ -122,6 +124,25 @@ test('the two reorder-due segments explain themselves against each other', () =>
   assert.notEqual(wide.name, tight.name);
   assert.ok(wide.description.includes(tight.name), 'the wider list must name the tighter one');
   assert.ok(tight.description.includes(wide.name), 'the tighter list must name the wider one');
+});
+
+/**
+ * The reorder pair above is NESTED and says so. The two back-in-stock lists are
+ * DISJOINT and must say so too, because the failure they guard against is
+ * different: both are about one restock, so a person in both receives two
+ * messages about the same event. The membership proof lives in
+ * test/campaign-segment-restock-only.test.js; this is the copy half of it.
+ */
+test('the two back-in-stock segments explain themselves against each other', () => {
+  const timed = segmentDefinition('back_in_stock_nearly_due');
+  const untimed = segmentDefinition('back_in_stock_other_buyers');
+  assert.notEqual(timed.name, untimed.name);
+  assert.ok(timed.description.includes(untimed.name), 'the timed list must name the other one');
+  assert.ok(untimed.description.includes(timed.name), 'the untimed list must name the other one');
+  // Nesting is what the reorder pair does and it is explicitly NOT what these
+  // do, so each description has to rule it out in words an operator reads.
+  assert.match(timed.description, /nobody is ever in both/);
+  assert.match(untimed.description, /nobody is in this list and the nearly due one at the same time/);
 });
 
 test('reorder_due_high_confidence agrees exactly with calculateReorderCadence', () => {
