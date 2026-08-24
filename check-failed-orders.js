@@ -1,9 +1,15 @@
 const { createClient } = require('@supabase/supabase-js');
 const ws = require('ws');
+require('dotenv').config();
+
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+  console.error('SUPABASE_URL and SUPABASE_SERVICE_KEY are required.');
+  process.exit(1);
+}
 
 const supabase = createClient(
-  'https://cckzshsvchhsfsnbycoj.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNja3pzaHN2Y2hoc2ZzbmJ5Y29qIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTExNzg0MCwiZXhwIjoyMDk0NjkzODQwfQ.5yEza04mLlTKuKoljhuYZ2Ezvm6XdG0b3G6e7PhBseQ',
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY,
   { auth: { persistSession: false }, realtime: { transport: ws } }
 );
 
