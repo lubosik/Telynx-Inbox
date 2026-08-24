@@ -1752,4 +1752,46 @@ actor APIClient {
             throw APIError.transport(error)
         }
     }
+
+    // MARK: - Assistant
+
+    /// `POST /api/assistant/converse`, `assistant.use`.
+    ///
+    /// History travels with every question because the server holds no session
+    /// state for a conversation. Keeping it client side means a dropped
+    /// connection or a restarted backend loses nothing, and there is no
+    /// per-user transcript sitting on a server waiting to be a liability.
+    func assistantConverse(question: String,
+                           history: [AssistantConversationTurn]) async throws -> AssistantConverseResponse {
+        let (data, response) = try await post("/api/assistant/converse", body: [
+            "question": question,
+            "history": history.map { ["role": $0.role, "content": $0.content] }
+        ], timeout: 30)
+        try validate(data: data, response: response)
+        return try decoder.decode(AssistantConverseResponse.self, from: data)
+    }
+
+    /// `POST /api/assistant/speak`, `assistant.use`. Returns MP3 bytes.
+    ///
+    /// The ElevenLabs key lives on the server and never in this binary, because
+    /// anything shipped in an app can be extracted, TestFlight included.
+    func assistantSpeak(text: String, voiceID: String?) async throws -> Data {
+        var body: [String: Any] = ["text": text]
+        if let voiceID, !voiceID.isEmpty { body["voiceId"] = voiceID }
+        let (data, response) = try await post("/api/assistant/speak", body: body, timeout: 30)
+        try validate(data: data, response: response)
+        return data
+    }
+
+    /// `GET /api/assistant/voices`, `assistant.use`.
+    func assistantVoices(query: String?, gender: String?, accent: String?) async throws -> AssistantVoiceSearchResponse {
+        var items: [URLQueryItem] = []
+        if let query, !query.isEmpty { items.append(URLQueryItem(name: "q", value: query)) }
+        if let gender, !gender.isEmpty { items.append(URLQueryItem(name: "gender", value: gender)) }
+        if let accent, !accent.isEmpty { items.append(URLQueryItem(name: "accent", value: accent)) }
+        let (data, response) = try await get("/api/assistant/voices", queryItems: items)
+        try validate(data: data, response: response)
+        return try decoder.decode(AssistantVoiceSearchResponse.self, from: data)
+    }
+
 }

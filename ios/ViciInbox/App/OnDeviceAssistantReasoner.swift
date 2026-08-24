@@ -140,3 +140,77 @@ final class OnDeviceAssistantReasoner {
     }
 }
 #endif
+
+// MARK: - Server-backed reasoning
+
+/// Reasoning through Vici's own backend rather than the on-device model.
+///
+/// WHY THIS REPLACED THE ON-DEVICE REASONER
+///   The on-device model is built for narrow structured tasks. What this
+///   product needs is fluid tool calling: hear a sentence phrased any way at
+///   all, choose the right verified lookup, and say the result like a person.
+///   The previous build approximated that with thirteen exact phrases, so
+///   "revenue today" worked and "how's revenue today?" did not.
+///
+/// WHAT THIS CHANGES ABOUT PRIVACY, SAID PLAINLY
+///   The question text now leaves the device. It goes to Vici, which forwards
+///   it through the one privacy boundary the backend already had: approved
+///   models only, Zero Data Retention required, data collection denied, and
+///   sensitive values tokenised before they leave. It is not the same claim as
+///   "nothing leaves this iPhone" and the in-app copy must not pretend it is.
+///
+/// WHAT IT BUYS BACK
+///   Availability stops depending on iOS 26, Apple Intelligence being switched
+///   on, or the device being eligible. Any phone that can reach the server can
+///   use the assistant.
+///
+/// CONVERSATION MEMORY LIVES HERE
+///   `respond` is `(String) async throws -> String` and that signature is not
+///   worth changing. The history is held in this object instead, which is the
+///   right home for it anyway: `reset()` already exists and is already called
+///   when the conversation should be forgotten, so clearing memory and clearing
+///   the transcript stay one action rather than two that can disagree.
+@MainActor
+final class ServerAssistantReasoner {
+    /// Six turns, three exchanges. Enough that "out of those, which is the
+    /// biggest?" resolves, short enough that the request does not grow with the
+    /// conversation. Latency is the thing people notice on a voice interface,
+    /// and an unbounded transcript makes every question slower than the last.
+    private static let maxRememberedTurns = 6
+
+    private var history: [AssistantConversationTurn] = []
+
+    func respond(to text: String) async throws -> String {
+        let answer = try await APIClient.shared.assistantConverse(
+            question: text,
+            history: history
+        )
+        history.append(AssistantConversationTurn(role: "user", content: text))
+        history.append(AssistantConversationTurn(role: "assistant", content: answer.reply))
+        if history.count > Self.maxRememberedTurns {
+            history.removeFirst(history.count - Self.maxRememberedTurns)
+        }
+        return answer.reply
+    }
+
+    func reset() {
+        history.removeAll()
+    }
+}
+
+extension AssistantReasoningOperations {
+    /// The server-backed reasoner, as the shell already expects to consume it.
+    static func serverBacked() -> AssistantReasoningOperations {
+        let reasoner = ServerAssistantReasoner()
+        return AssistantReasoningOperations(
+            // Reasoning is no longer on this device, so there is no model to be
+            // ineligible for. Reachability is decided by the request itself,
+            // and a failed request surfaces as an error the person can act on
+            // rather than as a capability that was never offered.
+            availability: { .available },
+            prewarm: {},
+            respond: { text in try await reasoner.respond(to: text) },
+            reset: { reasoner.reset() }
+        )
+    }
+}

@@ -136,7 +136,14 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     @discardableResult
     func speak(_ text: String, completion: @escaping () -> Void) -> Bool {
         guard !callIsActive else { return false }
-        let started = voiceOutput.speak(text, completion: completion)
+        // Server voice first. It falls back to Apple's synthesiser internally
+        // when the network or the provider cannot deliver, so this call always
+        // results in the answer being spoken by something.
+        let started = voiceOutput.speakWithServerVoice(
+            text,
+            voiceID: AssistantPreferences.shared.pinnedVoiceIdentifier,
+            completion: completion
+        )
         voiceDisclosure = started
             ? "An installed locale-matching Apple voice is selected. Listening quality still needs physical-iPhone review."
             : "No installed locale-matching Apple voice is available. Typed input still works."
@@ -666,7 +673,7 @@ private final class AssistantPCMBufferConverter {
 }
 
 @MainActor
-private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate {
+private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     private static let selectedIdentifierKey = "assistant_selected_voice_identifier"
     private let synthesizer = AVSpeechSynthesizer()
     private let defaults: UserDefaults
@@ -687,6 +694,66 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate 
             synthesizer.mixToTelephonyUplink = false
         }
         synthesizer.delegate = self
+    }
+
+    /// Plays the ElevenLabs audio the server produced, falling back to Apple's
+    /// synthesiser when it cannot.
+    ///
+    /// FALLBACK IS NOT OPTIONAL HERE
+    ///   The voice now depends on a network round trip. A dead connection, an
+    ///   expired credential or a provider outage would otherwise turn a talking
+    ///   assistant into a silent one, and silence on a voice interface reads as
+    ///   a crash. Apple's voice is worse and it is always there, so an answer
+    ///   still gets spoken and the person still learns what the system said.
+    private var audioPlayer: AVAudioPlayer?
+
+    @discardableResult
+    func speakWithServerVoice(_ text: String,
+                              voiceID: String?,
+                              completion: @escaping () -> Void) -> Bool {
+        stop()
+        self.completion = completion
+        queuedUptime = AssistantMonotonicClock.now
+        didRecordStart = false
+
+        Task { [weak self] in
+            do {
+                let data = try await APIClient.shared.assistantSpeak(text: text, voiceID: voiceID)
+                guard let self else { return }
+                try await MainActor.run {
+                    let player = try AVAudioPlayer(data: data)
+                    player.delegate = self
+                    self.audioPlayer = player
+                    self.noteStartedIfNeeded()
+                    player.play()
+                }
+            } catch {
+                // Fall back rather than fail. Recorded as a fallback so a
+                // persistently broken voice shows up as a pattern instead of as
+                // "the assistant seems quiet sometimes".
+                guard let self else { return }
+                await MainActor.run { _ = self.speakLocally(text) }
+            }
+        }
+        return true
+    }
+
+    private func noteStartedIfNeeded() {
+        guard !didRecordStart else { return }
+        didRecordStart = true
+        guard let queuedUptime else { return }
+        // Same metric the synthesiser path records, so the two voices are
+        // measured on one scale and a regression is visible whichever is in use.
+        latencyRecorder.record(
+            .voiceOutputStartProxy,
+            startUptime: queuedUptime,
+            endUptime: AssistantMonotonicClock.now
+        )
+    }
+
+    @discardableResult
+    private func speakLocally(_ text: String) -> Bool {
+        speak(text, completion: completion ?? {})
     }
 
     @discardableResult
@@ -741,7 +808,25 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate 
         return true
     }
 
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.audioPlayer = nil
+            self.finishOnce()
+        }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in
+            self.audioPlayer = nil
+            self.finishOnce()
+        }
+    }
+
     func stop() {
+        if let audioPlayer {
+            audioPlayer.stop()
+            self.audioPlayer = nil
+        }
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }

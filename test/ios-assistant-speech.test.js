@@ -29,14 +29,45 @@ test('Phase 5 preserves iOS 16 and gates the stable on-device API to iOS 26', ()
   assert.match(COORDINATOR, /finalizeAndFinishThroughEndOfInput/);
 });
 
-test('speech remains on device and does not use legacy recognition or new SDK-only helpers', () => {
+// Speech INPUT and speech OUTPUT are now different things and must be judged
+// differently. What you say is captured and recognised entirely on this iPhone.
+// What the assistant says back is synthesised by ElevenLabs through Vici's
+// server, because Apple's voices did not sound human enough to ship.
+//
+// The line that matters, and that these protect: RECORDED AUDIO NEVER LEAVES
+// THE DEVICE. Only the finished answer text is sent, and only outbound.
+test('captured microphone audio never leaves the device', () => {
   for (const forbidden of [
+    // Legacy or server-assisted recognition.
     'SFSpeechRecognizer', 'requestAuthorization', 'DictationTranscriber',
     'AnalyzerInputConverter', 'CaptureInputSequenceProvider',
-    'APIClient', 'URLSession', 'FileManager', 'Data.write', 'Logger(', 'ViciLog.'
-  ]) assert.equal(COORDINATOR.includes(forbidden), false, `forbidden speech behavior: ${forbidden}`);
-  assert.doesNotMatch(COORDINATOR, /\/api\//);
-  assert.doesNotMatch(COORDINATOR, /write\(to:/);
+    // Any route by which a buffer could be persisted or uploaded.
+    'FileManager', 'Data.write', 'write(to:', 'URLSession',
+    'Logger(', 'ViciLog.'
+  ]) {
+    assert.equal(COORDINATOR.includes(forbidden), false, `forbidden speech behavior: ${forbidden}`);
+  }
+  // No audio buffer, sample or recognition result may be handed to the network.
+  for (const forbidden of [/assistantSpeak\([^)]*buffer/i, /assistantSpeak\([^)]*audio/i,
+                           /upload[A-Za-z]*\(/i, /multipart/i]) {
+    assert.doesNotMatch(COORDINATOR, forbidden, 'captured audio must never be uploaded');
+  }
+});
+
+test('the ONLY network call the speech coordinator makes is sending text to be spoken', () => {
+  // Narrow allowance, asserted narrowly. If a second API call appears here it
+  // fails, because the next one added is the one that ships a buffer.
+  const apiCalls = COORDINATOR.match(/APIClient\.shared\.[A-Za-z]+/g) || [];
+  assert.deepEqual([...new Set(apiCalls)], ['APIClient.shared.assistantSpeak'],
+    'speech output may reach the server; nothing else here may');
+  assert.match(COORDINATOR, /assistantSpeak\(text: text/, 'it sends text, not audio');
+});
+
+test('a failed server voice falls back to the local synthesiser rather than going silent', () => {
+  // Silence on a voice interface reads as a crash. Apple's voice is worse and
+  // always present, so the answer is still spoken when the network is not there.
+  assert.match(COORDINATOR, /speakLocally\(text\)/);
+  assert.match(COORDINATOR, /catch \{[\s\S]{0,400}?speakLocally/);
 });
 
 test('microphone disclosure covers calls and point-of-use Assistant dictation', () => {

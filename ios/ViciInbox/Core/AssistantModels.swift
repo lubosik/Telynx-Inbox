@@ -379,3 +379,59 @@ struct AssistantTranscriptEntry: Identifiable, Equatable {
         self.createdAt = createdAt
     }
 }
+
+// MARK: - Server reasoning wire types
+
+/// One remembered turn, sent back so a follow-up resolves against what was
+/// already said. "Out of those, which is the biggest?" is not answerable
+/// without it, and that is the difference between an assistant and a lookup.
+struct AssistantConversationTurn: Codable, Hashable {
+    let role: String
+    let content: String
+}
+
+/// `POST /api/assistant/converse`.
+struct AssistantConverseResponse: Codable, Hashable {
+    let reply: String
+    /// Which verified lookups produced the answer. Empty means the model
+    /// answered from the conversation itself, which is legitimate for a
+    /// follow-up and is also the fastest path.
+    let toolsUsed: [String]?
+    /// True when the loop hit its ceiling without settling on an answer.
+    let refused: Bool?
+    let elapsedMs: Int?
+}
+
+/// One entry in the searchable voice library.
+struct AssistantVoiceOption: Codable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let accent: String?
+    let gender: String?
+    let age: String?
+    let descriptive: String?
+    /// How many builders cloned this voice. The honest proxy for whether it
+    /// sounds like a person: a voice thousands of products shipped is one that
+    /// survived contact with real listeners.
+    let usedBy: Int?
+    let previewUrl: String?
+
+    var subtitle: String {
+        var parts: [String] = []
+        if let accent, !accent.isEmpty { parts.append(accent.capitalized) }
+        if let gender, !gender.isEmpty { parts.append(gender.capitalized) }
+        if let usedBy, usedBy > 0 { parts.append("used by \(AssistantVoiceOption.compact(usedBy))") }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func compact(_ value: Int) -> String {
+        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return "\(value / 1_000)k" }
+        return "\(value)"
+    }
+}
+
+struct AssistantVoiceSearchResponse: Codable, Hashable {
+    let voices: [AssistantVoiceOption]
+    let hasMore: Bool?
+}

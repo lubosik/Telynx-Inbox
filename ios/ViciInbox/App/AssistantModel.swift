@@ -36,7 +36,10 @@ final class AssistantModel: ObservableObject {
     }, reasoning: AssistantReasoningOperations? = nil,
        businessReasoning: AssistantBusinessReasoningOperations? = nil) {
         self.loadCapability = loadCapability
-        self.reasoning = reasoning ?? .systemDefault()
+        // Server backed, not on device. See ServerAssistantReasoner for what
+        // that changes about privacy and what it buys back. Tests still inject
+        // their own operations, so nothing here reaches the network in a test.
+        self.reasoning = reasoning ?? .serverBacked()
         self.businessReasoning = businessReasoning ?? .systemDefault()
     }
 
@@ -156,8 +159,11 @@ final class AssistantModel: ObservableObject {
                 }
                 return AssistantGroundedResponse(text: text, citations: [])
             }
-            if let intent {
-                guard mayUseBusinessTools else { return .unverified }
+            // An exactly-phrased business question still takes the local
+            // grounded path, because that one returns citations the reader can
+            // tap through to. It is a narrow fast path over the same data, not
+            // a different answer.
+            if let intent, mayUseBusinessTools {
                 do {
                     let grounded = try await businessReasoning.respond(intent, submittedText, permissions)
                     try Task.checkCancellation()
@@ -165,17 +171,28 @@ final class AssistantModel: ObservableObject {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    return .unverified
+                    // Fall through to the server rather than giving up. A
+                    // failed fast path should cost accuracy of citation, not
+                    // the answer itself.
                 }
             }
-            let scoped = try await AssistantReasoningScope.answer(to: submittedText) { input in
-                try Task.checkCancellation()
-                let generated = try await reasoning.respond(input)
-                try Task.checkCancellation()
-                return generated
-            }
+
+            // EVERYTHING ELSE GOES TO THE SERVER, AND THAT IS THE WHOLE FIX.
+            //
+            // What used to be here was a gate that recognised eight canned
+            // questions and a handful of greetings, and answered every other
+            // sentence with "I could not verify that from Vici right now".
+            // Since the parser above only matched thirteen exact phrases, that
+            // was almost everything a person actually says out loud.
+            //
+            // The server reasoner has the real tools, checks permissions per
+            // tool, and refuses when no tool can answer. So the gate is not
+            // just unnecessary now, it is strictly worse than the thing behind
+            // it: it was refusing questions the tools can answer.
             try Task.checkCancellation()
-            return AssistantGroundedResponse(text: scoped.text, citations: [])
+            let generated = try await reasoning.respond(submittedText)
+            try Task.checkCancellation()
+            return AssistantGroundedResponse(text: generated, citations: [])
         }
         responseTask = task
 
