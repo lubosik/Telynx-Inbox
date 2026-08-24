@@ -108,6 +108,18 @@ const {
   describeStoredTimeZone,
   effectiveTimeZoneId
 } = require('../lib/timezones');
+// Per-ACCOUNT notification opt-outs, so the choice follows the person to a new
+// device. Read that module's header before touching any of this: the toggles
+// are consulted at DELIVERY in lib/apns-notify.js, not here, and the failure
+// mode for an unreadable preference differs by category on purpose.
+const {
+  CATEGORY_KEYS: NOTIFICATION_CATEGORY_KEYS,
+  NOTIFICATION_CATEGORIES,
+  TABLE: NOTIFICATION_PREFERENCES_TABLE,
+  missingRelation: notificationTableMissing,
+  shapePreferences,
+  validatePreferencePatch
+} = require('../lib/notifications/preferences');
 
 const ADMINISTRATIVE_ROLES = ['owner', 'admin'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -313,6 +325,47 @@ function createUserStore({ client } = {}) {
       });
       const data = unwrap(result, 'decideOnboarding');
       return Array.isArray(data) ? (data[0] || null) : data;
+    },
+
+    /**
+     * This account's notification preferences row, or null when there is none.
+     *
+     * Read on its own for the same reason `getTimezone()` is: the table arrives
+     * with scripts/notification-preferences-migration.sql, and folding it into
+     * getById() would mean that on a server where the migration has not been
+     * applied every team endpoint answers 500. Isolated here, an unapplied
+     * migration costs one endpoint, which reports it honestly.
+     */
+    async getNotificationPreferences(id) {
+      return unwrap(
+        await db()
+          .from(NOTIFICATION_PREFERENCES_TABLE)
+          .select(`user_id, ${NOTIFICATION_CATEGORY_KEYS.join(', ')}`)
+          .eq('user_id', id)
+          .maybeSingle(),
+        'getNotificationPreferences'
+      );
+    },
+
+    /**
+     * Write a partial preference change.
+     *
+     * UPSERT on the primary key, because "has never touched the screen" and
+     * "has a row" must behave identically to the caller and an INSERT-then-
+     * UPDATE dance would have a window in it. `onConflict` is spelled out
+     * rather than inferred: the constraint being merged on is the thing that
+     * makes this safe and it should be visible at the call site.
+     */
+    async setNotificationPreferences(id, patch) {
+      return unwrap(
+        await db()
+          .from(NOTIFICATION_PREFERENCES_TABLE)
+          .upsert({ user_id: id, ...patch, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id' })
+          .select(`user_id, ${NOTIFICATION_CATEGORY_KEYS.join(', ')}`)
+          .maybeSingle(),
+        'setNotificationPreferences'
+      );
     },
 
     async findByEmail(email) {
@@ -1137,6 +1190,163 @@ function createUsersRouter({ store, emailChangeStore, authz, audit, sendMail } =
     // still served behind a session and no shared proxy should hold it.
     res.set('Cache-Control', 'private, max-age=900');
     return res.json(timeZoneCatalogue());
+  });
+
+  // ── Notification preferences ─────────────────────────────────────────────
+  //
+  //   GET   /api/users/me/notifications   read your own
+  //   PATCH /api/users/me/notifications   change some of your own
+  //
+  // WHY THEY ARE UNDER /me AND `permission: null`
+  //   Deciding which alerts reach your own phone is not a permission anybody
+  //   grants anybody. Every actor including a Support Agent may do it, and
+  //   every open endpoint in lib/route-policy.js must sit under /api/users/me
+  //   and take no path parameter, so that an open route can never be pointed at
+  //   another person. Both handlers read `req.actor.id` and nothing else.
+  //
+  // WHY NEITHER IS AUDITED
+  //   Nothing about authority, money or a customer changes. The audit trail
+  //   records who can do what and who messaged whom; "Sarah turned off release
+  //   announcements" is neither, and a row for it would dilute a feed whose
+  //   whole value is that everything in it matters.
+  //
+  // THE SHARED LEGACY IDENTITY IS REFUSED
+  //   Two people are signed in as it. One of them switching off customer
+  //   message alerts would silence the other's phone with no way to tell who
+  //   did it or which of them wanted it, on the one category where a missed
+  //   alert means a customer waiting. Same refusal, and the same reason, as the
+  //   other personal endpoints in this file.
+  //
+  // THE TOGGLE IS APPLIED IN lib/apns-notify.js AT DELIVERY, not here. This
+  // file only stores the answer.
+
+  /** The wire shape, identical on both handlers so a client needs one decoder. */
+  function notificationPayload(row, { available, digest = null, timeZone = null }) {
+    return {
+      preferences: shapePreferences(row),
+      // Sent with the values so the screen can label and explain each row from
+      // the server rather than hard-coding five strings that then drift.
+      categories: NOTIFICATION_CATEGORIES,
+      // `false` means the migration has not been applied. The client shows the
+      // defaults and says the switches are not saveable yet, rather than
+      // offering controls that answer 503 the moment they are touched.
+      available,
+      // THE FREE HEALTH INDICATOR. "Last digest: today at 08:31" on the Settings
+      // screen is how a scheduler that has silently stopped becomes visible
+      // without anybody reading a log. A date that stopped moving is the
+      // symptom, and it is in front of the one person who would notice.
+      digest,
+      // Shown read only next to the digest line. It answers the single most
+      // likely support question, which is "why did this arrive at three in the
+      // morning", and it makes the London to Miami difference visible instead
+      // of mysterious.
+      timeZone
+    };
+  }
+
+  /**
+   * The last few digest runs for this account, as a status line.
+   *
+   * Read through the run ledger rather than recomputed, and never allowed to
+   * fail the request: this is a health indicator sitting beside the controls,
+   * and a settings screen that will not load because a diagnostic read wobbled
+   * is a worse outcome than a settings screen with one missing line.
+   */
+  async function digestStatusFor(actorID) {
+    try {
+      const { recentDigests } = require('../lib/notifications/run-ledger');
+      const { supabase } = require('../db');
+      const history = await recentDigests({ client: supabase, scopeKey: actorID, limit: 5 });
+      if (!history.available) return null;
+      const last = history.runs[0];
+      if (!last) return { lastRunDay: null, lastRunAt: null, lastStatus: null, lastWasSilent: null };
+      return {
+        lastRunDay: last.local_day || null,
+        lastRunAt: last.completed_at || null,
+        lastStatus: last.status || null,
+        // "Nothing was worth sending" is a successful run, and saying so is the
+        // difference between a person trusting the silence and assuming the
+        // feature is broken.
+        lastWasSilent: last.summary?.silent === true,
+        lastReason: last.summary?.reason || null
+      };
+    } catch (error) {
+      console.warn('[USERS] Digest status unavailable:', error?.code || 'unknown');
+      return null;
+    }
+  }
+
+  function notificationsUnavailable(res, error) {
+    console.error(
+      `[USERS] ${NOTIFICATION_PREFERENCES_TABLE} is not present, so notification `
+      + 'preferences could not be read or saved. Apply '
+      + `scripts/notification-preferences-migration.sql (${error?.code || 'unknown'}).`
+    );
+    return fail(
+      res, 503, 'NOTIFICATION_PREFERENCES_UNAVAILABLE',
+      'Notification settings are not available on this server yet. Ask an admin to finish the update.'
+    );
+  }
+
+  function personalActor(req, res) {
+    const actor = req.actor;
+    if (!actor) {
+      fail(res, 401, 'NO_ACTOR', 'Unauthorised');
+      return null;
+    }
+    if (actor.viaLegacySession || actor.isLegacyShared ||
+        actor.id === null || actor.id === undefined) {
+      fail(
+        res, 409, 'NOTIFICATION_PREFERENCES_NOT_PERSONAL',
+        'The shared team login has no personal notification settings. Ask an admin for your own account.'
+      );
+      return null;
+    }
+    return actor;
+  }
+
+  router.get('/me/notifications', async (req, res) => {
+    const actor = personalActor(req, res);
+    if (!actor) return undefined;
+    res.set('Cache-Control', 'no-store, private');
+    const digest = await digestStatusFor(actor.id);
+    const timeZone = effectiveTimeZoneId(await readStoredTimeZone(actor.id));
+    try {
+      const row = await users.getNotificationPreferences(actor.id);
+      return res.json(notificationPayload(row, { available: true, digest, timeZone }));
+    } catch (error) {
+      // A READ degrades rather than refuses: the screen shows the defaults and
+      // says they cannot be saved yet, which is more useful than an error page.
+      // A WRITE must not degrade, because silently discarding somebody's choice
+      // and answering 200 is worse than refusing. Same split as the time zone.
+      if (notificationTableMissing(error)) {
+        return res.json(notificationPayload(null, { available: false, digest, timeZone }));
+      }
+      return sendStoreError(res, error, 'getNotificationPreferences');
+    }
+  });
+
+  router.patch('/me/notifications', async (req, res) => {
+    const actor = personalActor(req, res);
+    if (!actor) return undefined;
+
+    // Refuses an unknown key rather than ignoring it. A client sending
+    // `dailyDigest` instead of `daily_digest` must be told, not answered 200
+    // with nothing changed: a toggle that appears to save and does not is the
+    // exact failure this whole feature exists to avoid.
+    const verdict = validatePreferencePatch(req.body?.preferences ?? req.body);
+    if (!verdict.ok) return fail(res, 400, verdict.code, verdict.message);
+
+    res.set('Cache-Control', 'no-store, private');
+    try {
+      const row = await users.setNotificationPreferences(actor.id, verdict.patch);
+      const digest = await digestStatusFor(actor.id);
+      const timeZone = effectiveTimeZoneId(await readStoredTimeZone(actor.id));
+      return res.json(notificationPayload(row, { available: true, digest, timeZone }));
+    } catch (error) {
+      if (notificationTableMissing(error)) return notificationsUnavailable(res, error);
+      return sendStoreError(res, error, 'setNotificationPreferences');
+    }
   });
 
   // ── POST /api/users/me/onboarding ────────────────────────────────────────

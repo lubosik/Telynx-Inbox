@@ -218,6 +218,46 @@ actor APIClient {
         return nil
     }
 
+    /// `GET /api/users/me/timezones` — every zone this server will accept,
+    /// grouped by region, with the offset each is on right now.
+    ///
+    /// Deliberately not built from `TimeZone.knownTimeZoneIdentifiers` on the
+    /// device: this phone's ICU data and the server's can disagree, and the
+    /// failure that causes is a picker offering a zone the PATCH then rejects.
+    /// The server caches this for fifteen minutes, so re-fetching when the
+    /// picker opens is cheap.
+    func loadTimeZoneCatalogue() async throws -> TimeZoneCatalogue {
+        let (data, response) = try await get("/api/users/me/timezones")
+        try validate(data: data, response: response)
+        return try decoder.decode(TimeZoneCatalogue.self, from: data)
+    }
+
+    /// `PATCH /api/users/me` with `{ "timeZone": String }`, or `null` to clear.
+    ///
+    /// Clearing is not the same as setting one: it returns the account to the
+    /// documented fallback, which is the workspace default when the server has
+    /// one and this device's zone otherwise. Passing nil here sends JSON null,
+    /// not an absent key, because an absent key would mean "leave it alone".
+    ///
+    /// The server stores the CANONICAL spelling, so the returned account may
+    /// carry a differently-cased identifier than the one sent. Callers should
+    /// re-read rather than assume what was stored.
+    @discardableResult
+    func updateTimeZone(_ identifier: String?) async throws -> AuthUser? {
+        let value: Any = identifier.map { $0 as Any } ?? NSNull()
+        let (data, response) = try await patch("/api/users/me", body: ["timeZone": value])
+        try validate(data: data, response: response)
+        if let user = try? decoder.decode(AuthUser.self, from: data) {
+            lastKnownUser = user
+            return user
+        }
+        if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.identity {
+            lastKnownUser = user
+            return user
+        }
+        return nil
+    }
+
     /// `POST /api/users/me/email` with `{ "email": String }`.
     ///
     /// Starts a change; it does not perform one. The server mails a
@@ -256,6 +296,54 @@ actor APIClient {
     func cancelEmailChange() async throws {
         let (data, response) = try await post("/api/users/me/email/cancel", body: [:])
         try validate(data: data, response: response)
+    }
+
+    // MARK: - Notification preferences
+    //
+    // THE SERVER IS WHERE SUPPRESSION HAPPENS. There is no client-side filter
+    // for an alert push: if the backend sends one, iOS displays it whatever a
+    // switch in this app says. These two calls record the person's answer on
+    // their ACCOUNT, so it follows them to a new device, and
+    // `lib/apns-notify.js` consults it immediately before handing a device list
+    // to Apple. Nothing in this client may hide a delivered notification and
+    // call that "off".
+
+    /// `GET /api/users/me/notifications`.
+    ///
+    /// Degrades rather than throwing on an older backend. A 404 means the
+    /// endpoint is not deployed yet, which is indistinguishable from an
+    /// unapplied migration as far as this screen is concerned: both mean "show
+    /// the defaults and say they cannot be saved". Throwing would put an error
+    /// page in front of a settings screen that has useful information on it.
+    func loadNotificationSettings() async -> NotificationSettings {
+        guard let (data, response) = try? await get("/api/users/me/notifications"),
+              (200..<300).contains(response.statusCode),
+              let settings = try? decoder.decode(NotificationSettings.self, from: data) else {
+            return .unavailable
+        }
+        return settings
+    }
+
+    /// `PATCH /api/users/me/notifications` with `{ "preferences": { key: Bool } }`.
+    ///
+    /// Partial by design: only the switch that moved is sent, so two devices
+    /// changing different categories cannot overwrite each other's answer with
+    /// a stale full snapshot.
+    ///
+    /// This one DOES throw. A read may degrade quietly; a write may not,
+    /// because a toggle that appears to save and does not is the exact failure
+    /// this whole feature exists to avoid. The caller puts the switch back and
+    /// says so.
+    @discardableResult
+    func updateNotificationSetting(_ category: NotificationCategory,
+                                   enabled: Bool) async throws -> NotificationSettings {
+        let (data, response) = try await patch("/api/users/me/notifications",
+                                               body: ["preferences": [category.rawValue: enabled]])
+        try validate(data: data, response: response)
+        guard let settings = try? decoder.decode(NotificationSettings.self, from: data) else {
+            throw APIError.server("That setting could not be saved. Try again.")
+        }
+        return settings
     }
 
     func logout() async {

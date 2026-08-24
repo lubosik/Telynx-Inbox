@@ -186,11 +186,16 @@ test('the only endpoints open to any authenticated actor act on the caller\'s ow
   const open = ROUTE_POLICY.filter(entry => entry.permission === null).map(signature).sort();
   assert.deepEqual(open, [
     'GET /api/users/me',
+    // Which alerts reach your own phone. Open because deciding that is not a
+    // permission anybody grants anybody: a Support Agent may switch off release
+    // announcements without asking an Admin. Under /me, and reads req.actor.id.
+    'GET /api/users/me/notifications',
     // The IANA picker list. A constant document with no account state in it,
     // open because choosing your own display time zone is open, and under /me
     // because every open endpoint in this table has to be.
     'GET /api/users/me/timezones',
     'PATCH /api/users/me',
+    'PATCH /api/users/me/notifications',
     'POST /api/users/me/email',
     'POST /api/users/me/email/cancel',
     'POST /api/users/me/onboarding',

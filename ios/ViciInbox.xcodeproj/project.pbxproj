@@ -30,6 +30,7 @@
 		7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */; };
 		46B19C536CF21494312C71FA /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19325CE8AEB5A75468A51A38 /* Log.swift */; };
 		AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20048ACF33742E9925F16EA /* MobileModels.swift */; };
+		8E122556327637AE89AA0A45 /* NotificationSettingsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F3E81DD60A61172C3D1A3A1 /* NotificationSettingsModels.swift */; };
 		65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */; };
 		5A25774B04D2C7A28F1C35E7 /* SegmentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86799FF5058FCB7200B04BE1 /* SegmentModels.swift */; };
 		2394A621C1D33F7C104FBC99 /* SegmentRuleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56127D7565FEE9B0C0910E29 /* SegmentRuleModels.swift */; };
@@ -90,6 +91,7 @@
 		6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperienceModels.swift; sourceTree = "<group>"; };
 		19325CE8AEB5A75468A51A38 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
 		D20048ACF33742E9925F16EA /* MobileModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileModels.swift; sourceTree = "<group>"; };
+		2F3E81DD60A61172C3D1A3A1 /* NotificationSettingsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsModels.swift; sourceTree = "<group>"; };
 		52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaver.swift; sourceTree = "<group>"; };
 		86799FF5058FCB7200B04BE1 /* SegmentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentModels.swift; sourceTree = "<group>"; };
 		56127D7565FEE9B0C0910E29 /* SegmentRuleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentRuleModels.swift; sourceTree = "<group>"; };
@@ -197,6 +199,7 @@
 				6875AB05D944493C6CDA45A7 /* ExperienceModels.swift */,
 				19325CE8AEB5A75468A51A38 /* Log.swift */,
 				D20048ACF33742E9925F16EA /* MobileModels.swift */,
+				2F3E81DD60A61172C3D1A3A1 /* NotificationSettingsModels.swift */,
 				52E139BCC172D24779CCBF97 /* PhotoLibrarySaver.swift */,
 				86799FF5058FCB7200B04BE1 /* SegmentModels.swift */,
 				56127D7565FEE9B0C0910E29 /* SegmentRuleModels.swift */,
@@ -356,6 +359,7 @@
 				7FAFE4677ADC99E895C5821E /* ExperienceModels.swift in Sources */,
 				46B19C536CF21494312C71FA /* Log.swift in Sources */,
 				AF6FF65118E23D1041031AA5 /* MobileModels.swift in Sources */,
+				8E122556327637AE89AA0A45 /* NotificationSettingsModels.swift in Sources */,
 				65B3ADF1E77728CBD4B46C0D /* PhotoLibrarySaver.swift in Sources */,
 				5A25774B04D2C7A28F1C35E7 /* SegmentModels.swift in Sources */,
 				2394A621C1D33F7C104FBC99 /* SegmentRuleModels.swift in Sources */,
