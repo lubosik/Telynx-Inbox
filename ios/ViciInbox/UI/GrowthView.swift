@@ -12,14 +12,7 @@ import SwiftUI
 /// `/api/audit`, reached from the account menu and from the history button in
 /// this tab's toolbar.
 struct GrowthView: View {
-    private enum Route: Hashable {
-        case campaign(String)
-        /// Segment id plus the name to show while it loads. A segment-change
-        /// push carries the id and not the name.
-        case segment(String, String)
-    }
-
-    /// An enum rather than an integer tag, for the same reason `MainTabView.Tab`
+    /// An enum rather than an integer tag, for the same reason `AppTab`
     /// is one: a raw index is a magic number that survives being wrong.
     ///
     /// Named `Segment`, not `Section`, because a nested type called `Section`
@@ -44,31 +37,15 @@ struct GrowthView: View {
     ///   shorter, which is what buys the room, and because it is the word a
     ///   person uses. The screens themselves say segment, because that is what
     ///   the notifications and the rest of the product call them.
-    enum Segment: Int, Hashable, CaseIterable, Identifiable {
-        case automations, campaigns, audiences
-
-        var id: Int { rawValue }
-
-        var label: String {
-            switch self {
-            case .automations: return "Automations"
-            case .campaigns:   return "Campaigns"
-            case .audiences:   return "Audiences"
-            }
-        }
-    }
-
-    @State private var segment: Segment = .automations
-    @State private var path = NavigationPath()
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var onboarding: OnboardingCoordinator
-    @ObservedObject private var notifications = MessageNotificationManager.shared
+    @EnvironmentObject private var router: AppRouter
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $router.growthPath) {
             VStack(spacing: 0) {
-                Picker("Growth section", selection: $segment) {
-                    ForEach(Segment.allCases) { value in
+                Picker("Growth section", selection: $router.growthSection) {
+                    ForEach(GrowthSection.allCases) { value in
                         Text(value.label).tag(value)
                     }
                 }
@@ -81,7 +58,7 @@ struct GrowthView: View {
                 // back to the Growth tab button rather than to a guess.
                 .onboardingTarget(.campaigns)
 
-                switch segment {
+                switch router.growthSection {
                 case .automations: AutomationQueueView()
                 case .campaigns:   CampaignsView()
                 case .audiences:   SegmentsView()
@@ -94,75 +71,158 @@ struct GrowthView: View {
                 // The automation-scoped shortcut into the audit trail. Kept on
                 // the Growth bar rather than inside the queue view so switching
                 // segments cannot leave a stale toolbar item behind.
-                if segment == .automations && session.can(Permission.auditRead) {
+                if router.growthSection == .automations && session.can(Permission.auditRead) {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        NavigationLink {
-                            ActivityLogView(category: .automations)
-                        } label: {
+                        NavigationLink(value: AppRoute.activity(category: AuditCategory.automations.rawValue)) {
                             Image(systemName: "clock.arrow.circlepath")
                         }
                         .accessibilityLabel("Automation activity")
                     }
                 }
             }
-            .navigationDestination(for: Route.self) { route in
+            .navigationDestination(for: AppRoute.self) { route in
                 switch route {
-                case .campaign(let id): CampaignDetailView(campaignID: id)
+                case .campaign(let id):
+                    CampaignDetailView(campaignID: id)
                 case .segment(let id, let name):
-                    SegmentDetailView(segmentID: id, initialName: name)
+                    SegmentDetailView(
+                        segmentID: id,
+                        initialName: name ?? "Segment",
+                        assistantNavigationRoute: .segment(id: id, name: name)
+                    )
+                case .segmentPeople(let id, let name):
+                    SegmentDetailView(segmentID: id,
+                                      initialName: name ?? "Segment",
+                                      focusPeopleOnAppear: true,
+                                      assistantNavigationRoute: .segmentPeople(id: id, name: name))
+                case .campaignProposals:
+                    OffersAndProposalsView(assistantNavigationRoute: .campaignProposals)
+                case .automationHistory(let id):
+                    EntityHistoryView(entityType: "scheduled_message",
+                                      entityID: id,
+                                      title: "Message history")
+                case .activity(let category):
+                    ActivityLogView(category: AuditCategory(rawValue: category) ?? .all)
+                case .opportunities:
+                    AssistantOpportunityEvidenceView()
+                case .campaignAttributions(let campaignID):
+                    CampaignAttributionListView(campaignID: campaignID)
+                default:
+                    EmptyView()
                 }
             }
         }
         .onChange(of: onboarding.currentStep?.target) { target in
-            if target == .campaigns { segment = .campaigns }
-            if target == .growth { segment = .automations }
+            if target == .campaigns { router.growthSection = .campaigns }
+            if target == .growth { router.growthSection = .automations }
         }
-        .onAppear { applyPendingRoute() }
-        .onChange(of: notifications.pendingScreen) { _ in applyPendingRoute() }
-        .onChange(of: notifications.pendingCampaignID) { _ in applyPendingRoute() }
-        .onChange(of: notifications.pendingSegmentID) { _ in applyPendingRoute() }
+    }
+}
+
+/// Read-only substantiation for Assistant opportunity citations. This screen
+/// renders the same cached portfolio as the tool, including staleness,
+/// actionability floors and refusals. It never refreshes the detector and has
+/// no campaign creation or send path.
+struct AssistantOpportunityEvidenceView: View {
+    @State private var portfolio: AssistantOpportunityPortfolioWire?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        List {
+            if isLoading {
+                Section { ProgressView("Loading verified opportunity review...") }
+            } else if let errorMessage {
+                Section {
+                    Label("Opportunity review unavailable",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text(errorMessage).foregroundStyle(.secondary)
+                    Button("Try again") { Task { await load() } }
+                }
+            } else if let portfolio {
+                Section("Verified summary") {
+                    LabeledContent("Findings", value: "\(portfolio.findings.count)")
+                    LabeledContent(
+                        "At or above actionability floor",
+                        value: "\(portfolio.findings.filter { !$0.actionability.belowFloor }.count)"
+                    )
+                    LabeledContent("Sizing refusals", value: "\(portfolio.refusals.count)")
+                    LabeledContent("Computed", value: compactDate(portfolio.computedAt))
+                    if portfolio.freshness.stale {
+                        Label("This stored review is stale. Verify it before acting.",
+                              systemImage: "clock.badge.exclamationmark")
+                            .foregroundStyle(ViciTheme.warning)
+                    }
+                }
+
+                if portfolio.findings.isEmpty {
+                    Section {
+                        Label("No verified findings", systemImage: "checkmark.seal")
+                            .font(.headline)
+                        Text("The current stored review contains no findings.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Section("Findings") {
+                        ForEach(Array(portfolio.findings.prefix(5).enumerated()), id: \.offset) { _, finding in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(label(finding.key)).font(.headline)
+                                LabeledContent("Population", value: "\(finding.population)")
+                                LabeledContent("Actionability floor", value: "\(finding.actionability.floor)")
+                                Text(finding.actionability.belowFloor
+                                     ? "Below the actionability floor"
+                                     : "Meets the actionability floor")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(finding.actionability.belowFloor
+                                                     ? Color.secondary : ViciTheme.tint)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
+                if !portfolio.refusals.isEmpty {
+                    Section("Sizing refusals") {
+                        ForEach(Array(portfolio.refusals.prefix(12).enumerated()), id: \.offset) { _, refusal in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(label(refusal.finding)).font(.subheadline.weight(.semibold))
+                                Text(label(refusal.reason))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Opportunity Evidence")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
     }
 
-    /// A tapped notification names a destination. Campaign pushes have carried
-    /// one since the review queue landed; segment-change pushes carry
-    /// `screen: "segments"` and a `segmentID`, prepared by
-    /// `lib/campaigns/segment-notifications.js`.
-    ///
-    /// Both are handled here rather than in two places, because both consume
-    /// the same `pendingScreen` slot. Before this, a segment push set
-    /// `pendingScreen` to "segments", nothing recognised it, and it was never
-    /// cleared.
-    private func applyPendingRoute() {
-        applyPendingCampaignRoute()
-        applyPendingSegmentRoute()
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            portfolio = try await APIClient.shared.fetchAssistantOpportunityPortfolio()
+        } catch {
+            portfolio = nil
+            errorMessage = "The verified source could not be loaded."
+        }
+        isLoading = false
     }
 
-    private func applyPendingCampaignRoute() {
-        let isCampaignScreen = notifications.pendingScreen?.lowercased() == "campaigns"
-        guard isCampaignScreen || notifications.pendingCampaignID?.isEmpty == false else { return }
-        segment = .campaigns
-        if session.can(Permission.campaignsRead),
-           let campaignID = notifications.pendingCampaignID,
-           !campaignID.isEmpty {
-            path = NavigationPath()
-            path.append(Route.campaign(campaignID))
-        }
-        notifications.consumePendingCampaignRoute()
+    private func label(_ code: String) -> String {
+        code.replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.capitalized }
+            .joined(separator: " ")
     }
 
-    private func applyPendingSegmentRoute() {
-        let isSegmentScreen = notifications.pendingScreen?.lowercased() == "segments"
-        guard isSegmentScreen || notifications.pendingSegmentID?.isEmpty == false else { return }
-        segment = .audiences
-        // The push carries an id and a count, never a name, so the pushed
-        // screen opens on a placeholder title and replaces it the moment the
-        // segment loads. Better than refusing to deep link at all.
-        if session.can(Permission.campaignsRead),
-           let segmentID = notifications.pendingSegmentID,
-           !segmentID.isEmpty {
-            path = NavigationPath()
-            path.append(Route.segment(segmentID, "Segment"))
-        }
-        notifications.consumePendingSegmentRoute()
+    private func compactDate(_ value: String) -> String {
+        guard let date = ServerDate.parse(value) else { return "Verified source time" }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }

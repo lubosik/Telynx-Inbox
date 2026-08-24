@@ -429,6 +429,10 @@ final class CampaignEditorModel: ObservableObject {
     let existingID: String?
     private var contactRequestID = UUID()
     private let existingRecipientMetadata: [String: CampaignRecipientInput]
+    private let initialTitle: String
+    private let initialMessage: String
+    private let initialRecipientsText: String
+    private let initialAudienceMode: CampaignAudienceMode
 
     init(campaign: CampaignRecord? = nil, recipients: [CampaignRecipient] = []) {
         var metadata: [String: CampaignRecipientInput] = [:]
@@ -453,6 +457,28 @@ final class CampaignEditorModel: ObservableObject {
             // containing a comma. Matching metadata is restored below.
             .map(\.contactPhone)
             .joined(separator: "\n")
+        initialTitle = title
+        initialMessage = message
+        initialRecipientsText = recipientsText
+        initialAudienceMode = audienceMode
+    }
+
+    var hasUnsavedDraftChanges: Bool {
+        guard savedCampaign == nil else { return false }
+        return title != initialTitle || message != initialMessage ||
+            recipientsText != initialRecipientsText || audienceMode != initialAudienceMode ||
+            !selectedContacts.isEmpty
+    }
+
+    func discardLocalDraft() {
+        contactRequestID = UUID()
+        title = initialTitle
+        message = initialMessage
+        recipientsText = initialRecipientsText
+        audienceMode = initialAudienceMode
+        selectedContacts.removeAll()
+        contactSearch = ""
+        step = .type
     }
 
     var titleCount: Int { title.count }

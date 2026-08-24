@@ -19,8 +19,8 @@ import Combine
 ///
 /// On a cold launch the continuation handler runs before `RootView` has
 /// appeared, so a value written here can be missed by `onChange` alone. The fix
-/// is the one `MessageNotificationManager.pendingConversationPhone` already
-/// uses in this codebase: park the value, and let the view drain it from both
+    /// is the one `AppRouter.pendingRoute` uses for notification navigation:
+    /// park the value, and let the view drain it from both
 /// `onAppear` and `onChange`.
 ///
 /// The token is a bearer credential. It is never logged, never rendered, and

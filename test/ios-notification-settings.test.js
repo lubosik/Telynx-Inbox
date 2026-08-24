@@ -194,8 +194,8 @@ test('the account timezone is shown read only rather than editable here', () => 
   assert.match(SETTINGS_VIEW, /LabeledContent\("Your timezone", value: zone\)/);
   // Scoped to this screen. SettingsView also holds Appearance, which
   // legitimately has pickers and legitimately reads a time zone.
-  const start = SETTINGS_VIEW.indexOf('private struct NotificationSettingsView');
-  const end = SETTINGS_VIEW.indexOf('private struct SecuritySettingsView');
+  const start = SETTINGS_VIEW.indexOf('struct NotificationSettingsView');
+  const end = SETTINGS_VIEW.indexOf('struct SecuritySettingsView');
   const screen = SETTINGS_VIEW.slice(start, end);
   assert.ok(start >= 0 && end > start, 'the notification screen is still in this file');
   assert.equal(/Picker/.test(screen), false,

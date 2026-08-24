@@ -3,12 +3,13 @@ import Charts
 
 struct AnalyticsView: View {
     let isSelected: Bool
+    @EnvironmentObject private var router: AppRouter
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AnalyticsViewModel()
     @State private var showingCustomRange = false
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $router.analyticsPath) {
             ScrollView {
                 VStack(spacing: 16) {
                     AnalyticsPeriodPicker(selected: model.period) { period in
@@ -27,6 +28,21 @@ struct AnalyticsView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Analytics")
+            .navigationDestination(for: AppRoute.self) { route in
+                switch route {
+                case .analyticsAttributions(let period, let start, let end,
+                                            let scope, let category):
+                    AttributionListView(
+                        query: AnalyticsRouteValues.query(period: period, start: start, end: end),
+                        initialScope: AttributionScope(rawValue: scope) ?? .attributed,
+                        category: category
+                    )
+                case .attributionMethodology:
+                    AttributionMethodologyView()
+                default:
+                    EmptyView()
+                }
+            }
             .accountToolbar()
             .refreshable { await model.load(force: true) }
             .task(id: isSelected) {
@@ -112,11 +128,11 @@ struct AnalyticsView: View {
         }
 
         if overview.availability.paymentRecovery {
-            NavigationLink {
-                AttributionListView(query: model.query,
-                                    initialScope: .attributed,
-                                    category: "payment_recovery")
-            } label: {
+            NavigationLink(value: AnalyticsRouteValues.route(
+                query: model.query,
+                scope: .attributed,
+                category: "payment_recovery"
+            )) {
                 PaymentRecoveryCard(metrics: overview.paymentRecovery, currency: overview.currency)
             }
             .buttonStyle(.plain)
@@ -155,6 +171,39 @@ struct AnalyticsView: View {
             }
         }
     }
+}
+
+/// Stable scalar conversion at the route boundary. The route stores calendar
+/// days rather than a locale-dependent display string.
+private enum AnalyticsRouteValues {
+    static func route(query: AnalyticsQuery,
+                      scope: AttributionScope,
+                      category: String? = nil) -> AppRoute {
+        .analyticsAttributions(
+            period: query.period.rawValue,
+            start: query.start.map { dayFormatter.string(from: $0) },
+            end: query.end.map { dayFormatter.string(from: $0) },
+            scope: scope.rawValue,
+            category: category
+        )
+    }
+
+    static func query(period: String, start: String?, end: String?) -> AnalyticsQuery {
+        AnalyticsQuery(
+            period: AnalyticsPeriod(rawValue: period) ?? .month,
+            start: start.flatMap { dayFormatter.date(from: $0) },
+            end: end.flatMap { dayFormatter.date(from: $0) }
+        )
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 }
 
 private struct RevenueDriversCard: View {
@@ -272,9 +321,7 @@ private struct RevenueImpactCard: View {
     var body: some View {
         AnalyticsCard(emphasized: true) {
             VStack(alignment: .leading, spacing: 16) {
-                NavigationLink {
-                    AttributionListView(query: query, initialScope: .attributed)
-                } label: {
+                NavigationLink(value: AnalyticsRouteValues.route(query: query, scope: .attributed)) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(AnalyticsFormatting.money(overview.revenue.attributedRevenue,
@@ -318,9 +365,7 @@ private struct RevenueImpactCard: View {
                 if overview.revenue.breakdown.influenced.orderCount > 0 ||
                     overview.revenue.influencedRevenue.value != 0 {
                     Divider()
-                    NavigationLink {
-                        AttributionListView(query: query, initialScope: .influenced)
-                    } label: {
+                    NavigationLink(value: AnalyticsRouteValues.route(query: query, scope: .influenced)) {
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Influenced Revenue")
@@ -343,9 +388,7 @@ private struct RevenueImpactCard: View {
 
                 if overview.revenue.breakdown.unattributed.orderCount > 0 {
                     Divider()
-                    NavigationLink {
-                        AttributionListView(query: query, initialScope: .unattributed)
-                    } label: {
+                    NavigationLink(value: AnalyticsRouteValues.route(query: query, scope: .unattributed)) {
                         HStack(alignment: .firstTextBaseline) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Unattributed, correctly excluded")
@@ -372,9 +415,7 @@ private struct RevenueImpactCard: View {
                         .foregroundStyle(.secondary)
                 }
 
-                NavigationLink {
-                    AttributionMethodologyView()
-                } label: {
+                NavigationLink(value: AppRoute.attributionMethodology) {
                     Label("How attribution works", systemImage: "questionmark.circle")
                         .font(.subheadline.weight(.semibold))
                 }

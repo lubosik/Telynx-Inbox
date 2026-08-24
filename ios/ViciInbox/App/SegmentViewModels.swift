@@ -122,6 +122,7 @@ final class SegmentListModel: ObservableObject {
         guard startingKey == nil else { return }
         startingKey = entry.key
         defer { startingKey = nil }
+        let creationCapture = AssistantNavigationContextStore.shared.captureSegmentCreationSession()
 
         let created: SegmentCreationResponse
         do {
@@ -129,6 +130,17 @@ final class SegmentListModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
             return
+        }
+
+        // "The segment you just created" is current-session context, not a
+        // guess from the list. An already-tracked catalogue segment is not a
+        // creation and must never replace that context.
+        if created.didCreate {
+            AssistantNavigationContextStore.shared.recordSuccessfullyCreatedSegment(
+                id: created.segment.id,
+                name: created.segment.name,
+                creationCapture: creationCapture
+            )
         }
 
         var outcome = created.didCreate
@@ -165,10 +177,16 @@ final class SegmentListModel: ObservableObject {
     func createManual(name: String,
                       purpose: String,
                       members: [SegmentMemberInput]) async -> SegmentRecord? {
+        let creationCapture = AssistantNavigationContextStore.shared.captureSegmentCreationSession()
         do {
             let response = try await APIClient.shared.createManualSegment(name: name,
                                                                           purpose: purpose,
                                                                           members: members)
+            AssistantNavigationContextStore.shared.recordSuccessfullyCreatedSegment(
+                id: response.segment.id,
+                name: response.segment.name,
+                creationCapture: creationCapture
+            )
             errorMessage = nil
             let count = response.memberCount ?? members.count
             statusMessage = count == 0
@@ -309,6 +327,14 @@ final class SegmentContactPickerModel: ObservableObject {
 
     func remove(phone: String) {
         selected.removeValue(forKey: phone)
+    }
+
+    func discardLocalDraft() {
+        requestID = UUID()
+        search = ""
+        selected.removeAll()
+        results = []
+        searchProblem = nil
     }
 
     func loadContacts() async {
@@ -925,6 +951,7 @@ final class SegmentRuleBuilderModel: ObservableObject {
         guard canSave, let rules = ruleSet else { return nil }
         isSaving = true
         defer { isSaving = false }
+        let creationCapture = AssistantNavigationContextStore.shared.captureSegmentCreationSession()
 
         let created: SegmentRuleCreationResponse
         do {
@@ -937,6 +964,12 @@ final class SegmentRuleBuilderModel: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
+
+        AssistantNavigationContextStore.shared.recordSuccessfullyCreatedSegment(
+            id: created.segment.id,
+            name: created.segment.name,
+            creationCapture: creationCapture
+        )
 
         do {
             _ = try await APIClient.shared.recomputeSegment(id: created.segment.id)

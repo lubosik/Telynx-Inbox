@@ -176,9 +176,7 @@ struct CampaignsView: View {
 
             Section("Campaigns") {
                 ForEach(model.campaigns) { campaign in
-                    NavigationLink {
-                        CampaignDetailView(campaignID: campaign.id)
-                    } label: {
+                    NavigationLink(value: AppRoute.campaign(id: campaign.id)) {
                         CampaignRow(campaign: campaign,
                                     isArchived: model.isArchived(campaign),
                                     isMutating: model.mutatingID == campaign.id)
@@ -662,9 +660,7 @@ private struct CampaignFinancialSection: View {
                                value: "\((rate * 100).formatted(.number.precision(.fractionLength(0...1))))%")
             }
 
-            NavigationLink {
-                CampaignAttributionListView(campaignID: campaignID)
-            } label: {
+            NavigationLink(value: AppRoute.campaignAttributions(campaignID: campaignID)) {
                 Label("View Order Evidence", systemImage: "doc.text.magnifyingglass")
             }
         } header: {
@@ -695,7 +691,7 @@ private struct CampaignRevenueMetric: View {
     }
 }
 
-private struct CampaignAttributionListView: View {
+struct CampaignAttributionListView: View {
     @StateObject private var model: CampaignAttributionListModel
 
     init(campaignID: String) {
@@ -1071,6 +1067,15 @@ struct CampaignEditorView: View {
                 Text(model.errorMessage ?? "Please try again.")
             }
         }
+        .assistantDraftOwner(
+            source: .campaign,
+            isDirty: model.hasUnsavedDraftChanges,
+            onDiscard: {
+                focusedField = nil
+                model.discardLocalDraft()
+                dismiss()
+            }
+        )
     }
 
     /// Back, Next, Save — the controls that move the wizard along.
@@ -1523,6 +1528,14 @@ private struct CampaignReasonSheet: View {
             }
             .interactiveDismissDisabled(isWorking)
         }
+        .assistantDraftOwner(
+            source: .campaign,
+            isDirty: !reason.isEmpty,
+            onDiscard: {
+                reason = ""
+                dismiss()
+            }
+        )
     }
 }
 
@@ -1530,6 +1543,7 @@ private struct CampaignScheduleSheet: View {
     @Environment(\.dismiss) private var dismiss
     let action: (Date) async -> Void
     @State private var scheduledFor = Date().addingTimeInterval(900)
+    @State private var initialScheduledFor = Date().addingTimeInterval(900)
     @State private var isWorking = false
 
     var body: some View {
@@ -1563,5 +1577,13 @@ private struct CampaignScheduleSheet: View {
             }
             .interactiveDismissDisabled(isWorking)
         }
+        .assistantDraftOwner(
+            source: .campaign,
+            isDirty: abs(scheduledFor.timeIntervalSince(initialScheduledFor)) > 1,
+            onDiscard: {
+                scheduledFor = initialScheduledFor
+                dismiss()
+            }
+        )
     }
 }

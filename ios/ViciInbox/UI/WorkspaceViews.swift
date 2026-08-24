@@ -4,6 +4,7 @@ import AVKit
 struct ContactsView: View {
     @StateObject private var model = ContactsModel()
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var router: AppRouter
     @State private var search = ""
     @State private var showingCreate = false
 
@@ -26,7 +27,7 @@ struct ContactsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $router.contactsPath) {
             Group {
                 if model.isLoading && model.contacts.isEmpty { ProgressView("Loading contacts…") }
                 else if filtered.isEmpty && !businessLineMatchesSearch {
@@ -34,9 +35,7 @@ struct ContactsView: View {
                 } else {
                     List {
                         if businessLineMatchesSearch {
-                            NavigationLink {
-                                BusinessLineDetailView(phone: session.callerNumber)
-                            } label: {
+                            NavigationLink(value: AppRoute.businessLine) {
                                 HStack(spacing: 12) {
                                     InitialsAvatar(name: "Vici Peptides", imageURL: nil)
                                     VStack(alignment: .leading, spacing: 3) {
@@ -54,9 +53,7 @@ struct ContactsView: View {
                         }
 
                         ForEach(filtered) { contact in
-                            NavigationLink {
-                                ContactDetailView(phone: contact.phone, model: model)
-                            } label: {
+                            NavigationLink(value: AppRoute.contact(phone: contact.phone)) {
                                 HStack(spacing: 12) {
                                     InitialsAvatar(name: contact.displayName, imageURL: contact.avatarURL)
                                     VStack(alignment: .leading, spacing: 3) {
@@ -76,6 +73,16 @@ struct ContactsView: View {
                 }
             }
             .navigationTitle("Contacts")
+            .navigationDestination(for: AppRoute.self) { route in
+                switch route {
+                case .businessLine:
+                    BusinessLineDetailView(phone: session.callerNumber)
+                case .contact(let phone):
+                    ContactDetailView(phone: phone, model: model)
+                default:
+                    EmptyView()
+                }
+            }
             .searchable(text: $search, prompt: "Name, phone, or email")
             .accountToolbar()
             .toolbar {
@@ -267,6 +274,21 @@ private struct ContactEditor: View {
                 }
             }
         }
+        .assistantDraftOwner(
+            source: .contact,
+            isDirty: firstName != (contact?.firstName ?? "") ||
+                lastName != (contact?.lastName ?? "") ||
+                phone != (contact?.phone ?? "") ||
+                email != (contact?.email ?? "") || notes != (contact?.notes ?? ""),
+            onDiscard: {
+                firstName = contact?.firstName ?? ""
+                lastName = contact?.lastName ?? ""
+                phone = contact?.phone ?? ""
+                email = contact?.email ?? ""
+                notes = contact?.notes ?? ""
+                dismiss()
+            }
+        )
     }
 }
 
@@ -325,11 +347,7 @@ struct AutomationQueueView: View {
                         // The row itself opens this message's own history:
                         // scheduled by the hold flow at 09:12, cancelled by
                         // Dominic at 14:32.
-                        NavigationLink {
-                            EntityHistoryView(entityType: "scheduled_message",
-                                              entityID: item.id,
-                                              title: "Message history")
-                        } label: {
+                        NavigationLink(value: AppRoute.automationHistory(id: item.id)) {
                             ActivityRow(item: item, date: item.sendAt)
                         }
                         Button {
@@ -417,8 +435,9 @@ private struct ActivityRow: View {
 struct CallsView: View {
     @ObservedObject var model: CallHistoryModel
     @State private var section = 0
+    @EnvironmentObject private var router: AppRouter
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $router.callsPath) {
             VStack(spacing: 0) {
                 Picker("Calls section", selection: $section) {
                     Text("Keypad").tag(0); Text("History").tag(1)

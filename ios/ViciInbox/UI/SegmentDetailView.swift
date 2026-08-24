@@ -27,15 +27,23 @@ struct SegmentDetailView: View {
     @State private var confirmingSegmentRemoval = false
 
     private let initialName: String
+    private let focusPeopleOnAppear: Bool
+    private let assistantNavigationRoute: AppRoute?
     /// Called with the sentence describing what the server actually did, so the
     /// list behind this screen can refresh and say it. This screen is popped
     /// immediately afterwards and cannot say it itself.
     private let onRemoved: ((String) -> Void)?
 
-    init(segmentID: String, initialName: String, onRemoved: ((String) -> Void)? = nil) {
+    init(segmentID: String,
+         initialName: String,
+         focusPeopleOnAppear: Bool = false,
+         assistantNavigationRoute: AppRoute? = nil,
+         onRemoved: ((String) -> Void)? = nil) {
         _model = StateObject(wrappedValue: SegmentDetailModel(segmentID: segmentID))
         _picker = StateObject(wrappedValue: SegmentCandidatePickerModel(segmentID: segmentID))
         self.initialName = initialName
+        self.focusPeopleOnAppear = focusPeopleOnAppear
+        self.assistantNavigationRoute = assistantNavigationRoute
         self.onRemoved = onRemoved
     }
 
@@ -46,7 +54,35 @@ struct SegmentDetailView: View {
             if model.isLoading && model.segment == nil {
                 ProgressView("Loading segment")
             } else if let segment = model.segment {
-                detailList(segment)
+                ScrollViewReader { proxy in
+                    detailList(segment)
+                        .onAppear {
+                            guard let route = assistantNavigationRoute,
+                                  !segment.isArchived else { return }
+                            switch route {
+                            case .segment(let id, _), .segmentPeople(let id, _):
+                                guard id == segment.id else { return }
+                            default:
+                                return
+                            }
+                            guard focusPeopleOnAppear else {
+                                AssistantNavigationCoordinator.shared
+                                    .destinationDidBecomeVisible(route)
+                                return
+                            }
+                            // The requested destination is not merely the
+                            // segment shell. Wait until the loaded people
+                            // section has laid out and the exact anchor has
+                            // been scrolled into view before confirming it.
+                            DispatchQueue.main.async {
+                                proxy.scrollTo("segment-people", anchor: .top)
+                                DispatchQueue.main.async {
+                                    AssistantNavigationCoordinator.shared
+                                        .destinationDidBecomeVisible(route)
+                                }
+                            }
+                        }
+                }
             } else {
                 EmptyState(icon: "exclamationmark.triangle",
                            title: "Segment unavailable",
@@ -301,6 +337,7 @@ struct SegmentDetailView: View {
                 Text("Tap anybody to see exactly why they are here.")
             }
         }
+        .id("segment-people")
     }
 }
 
@@ -892,6 +929,14 @@ private struct SegmentReasonSheet: View {
             }
             .interactiveDismissDisabled(isWorking)
         }
+        .assistantDraftOwner(
+            source: .segment,
+            isDirty: !reason.isEmpty,
+            onDiscard: {
+                reason = ""
+                dismiss()
+            }
+        )
     }
 }
 
@@ -978,6 +1023,16 @@ private struct SegmentAddMemberSheet: View {
             }
             .task { await authors.load(canReadTeam: session.can(Permission.userRead)) }
         }
+        .assistantDraftOwner(
+            source: .segment,
+            isDirty: chosen != nil || !note.isEmpty,
+            onDiscard: {
+                chosen = nil
+                note = ""
+                picker.search = ""
+                dismiss()
+            }
+        )
     }
 
     private var confirmTitle: String {

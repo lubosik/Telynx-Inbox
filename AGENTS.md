@@ -549,12 +549,65 @@ swiftc -frontend -parse ios/ViciInbox/App/*.swift ios/ViciInbox/Core/*.swift ios
 swiftc -typecheck \
   ios/ViciInbox/Core/AccountModels.swift ios/ViciInbox/Core/MobileModels.swift \
   ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
-  ios/ViciInbox/Core/CampaignArchiveModels.swift ios/ViciInbox/Core/SegmentModels.swift \
+  ios/ViciInbox/Core/CampaignArchiveModels.swift \
+  ios/ViciInbox/Core/CampaignProposalModels.swift ios/ViciInbox/Core/SegmentModels.swift \
   ios/ViciInbox/Core/SegmentRuleModels.swift \
   ios/ViciInbox/Core/NotificationSettingsModels.swift \
+  ios/ViciInbox/Core/ReferralModels.swift ios/ViciInbox/Core/AssistantModels.swift \
+  ios/ViciInbox/Core/AssistantPromptCatalog.swift \
+  ios/ViciInbox/Core/AssistantSpeechModels.swift \
+  ios/ViciInbox/Core/AssistantLatencyRecorder.swift \
+  ios/ViciInbox/Core/AssistantNavigationModels.swift \
+  ios/ViciInbox/Core/AssistantBusinessModels.swift \
+  ios/ViciInbox/Core/AssistantEvidenceRegistry.swift \
+  ios/ViciInbox/Core/AssistantGroundedModels.swift \
+  ios/ViciInbox/Core/AssistantBusinessDataSource.swift \
   ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
-  ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift
+  ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift \
+  ios/ViciInbox/App/AppRouter.swift ios/ViciInbox/App/ReferralViewModels.swift \
+  ios/ViciInbox/App/AssistantNavigationCoordinator.swift \
+  ios/ViciInbox/App/OnDeviceAssistantReasoner.swift \
+  ios/ViciInbox/App/OnDeviceAssistantTools.swift ios/ViciInbox/App/AssistantModel.swift
+
+# Executable grounding smoke. It proves deterministic claim selection,
+# generation retention/discard, permission refusal and registry capacity.
+swiftc ios/ViciInbox/Core/AssistantBusinessModels.swift \
+  ios/ViciInbox/Core/AssistantEvidenceRegistry.swift \
+  ios/ViciInbox/Core/AssistantGroundedModels.swift \
+  ios/Tests/AssistantGroundedModelsSmoke.swift \
+  -o /tmp/assistant-grounded-smoke
+/tmp/assistant-grounded-smoke
+
+# Executable shell/grounding lifecycle smoke. It proves malicious no-tool
+# output is rejected, grounded tool failure emits no figures, a failed fresh
+# evidence-tap recheck purges the transcript, and call cancellation wins races.
+swiftc ios/ViciInbox/Voice/CallModels.swift \
+  ios/ViciInbox/Core/MobileModels.swift ios/ViciInbox/Core/ExperienceModels.swift \
+  ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/AccountModels.swift \
+  ios/ViciInbox/Core/AssistantModels.swift ios/ViciInbox/Core/AssistantBusinessModels.swift \
+  ios/ViciInbox/Core/AssistantEvidenceRegistry.swift \
+  ios/ViciInbox/Core/AssistantGroundedModels.swift \
+  ios/ViciInbox/Core/AssistantPromptCatalog.swift \
+  ios/ViciInbox/Core/AssistantLatencyRecorder.swift \
+  ios/ViciInbox/Core/AssistantNavigationModels.swift ios/ViciInbox/App/AppRouter.swift \
+  ios/ViciInbox/App/AssistantNavigationCoordinator.swift \
+  ios/ViciInbox/App/OnDeviceAssistantReasoner.swift \
+  ios/ViciInbox/App/OnDeviceAssistantTools.swift ios/ViciInbox/App/AssistantModel.swift \
+  ios/Tests/AssistantModelSmoke.swift -o /tmp/assistant-model-smoke
+/tmp/assistant-model-smoke
+
+# Executable privacy-preserving Assistant latency aggregate/timing smoke.
+swiftc ios/ViciInbox/Core/AssistantLatencyRecorder.swift \
+  ios/Tests/AssistantLatencyRecorderSmoke.swift \
+  -o /tmp/assistant-latency-smoke
+/tmp/assistant-latency-smoke
+
+# Executable read-only campaign-proposal decoder/paging smoke.
+swiftc ios/ViciInbox/Voice/CallModels.swift ios/ViciInbox/Core/MobileModels.swift \
+  ios/ViciInbox/Core/CampaignProposalModels.swift \
+  ios/Tests/CampaignProposalModelsSmoke.swift -o /tmp/campaign-proposal-models-smoke
+/tmp/campaign-proposal-models-smoke
 plutil -lint ios/ExportOptions.plist ios/ViciInbox/Resources/Info.plist ios/ViciInbox/Resources/ViciInbox.entitlements
 xmllint --noout ios/ViciInbox.xcodeproj/xcshareddata/xcschemes/ViciInbox.xcscheme
 ```

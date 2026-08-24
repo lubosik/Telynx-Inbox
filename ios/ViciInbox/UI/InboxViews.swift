@@ -5,8 +5,7 @@ import UIKit
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @State private var search = ""
-    @State private var path: [ConversationSummary] = []
-    @State private var pendingNotificationPhone: String?
+    @EnvironmentObject private var router: AppRouter
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -21,7 +20,7 @@ struct InboxView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack(path: $router.inboxPath) {
             Group {
                 if model.isLoading && model.conversations.isEmpty {
                     ProgressView("Loading inbox…")
@@ -30,7 +29,7 @@ struct InboxView: View {
                                detail: search.isEmpty ? "Messages will appear here." : "Try another search.")
                 } else {
                     List(filtered) { conversation in
-                        NavigationLink(value: conversation) {
+                        NavigationLink(value: AppRoute.conversation(phone: conversation.phone)) {
                             ConversationRow(conversation: conversation)
                         }
                     }
@@ -39,8 +38,14 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("Inbox")
-            .navigationDestination(for: ConversationSummary.self) { conversation in
-                MessageThreadView(conversation: conversation, model: model)
+            .navigationDestination(for: AppRoute.self) { route in
+                if case .conversation(let phone) = route {
+                    ConversationDestinationView(phone: phone, model: model)
+                } else if case .referral(let id, let phone) = route {
+                    ConversationDestinationView(phone: phone, referralID: id, model: model)
+                } else {
+                    EmptyView()
+                }
             }
             .searchable(text: $search, prompt: "Name or phone")
             // Settings, Team, Activity and Sign out all live behind the account
@@ -60,17 +65,6 @@ struct InboxView: View {
                 get: { model.errorMessage != nil },
                 set: { if !$0 { model.errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(model.errorMessage ?? "Unknown error") }
-            .onAppear {
-                if let phone = notifications.pendingConversationPhone {
-                    pendingNotificationPhone = phone
-                    openPendingConversation()
-                }
-            }
-            .onChange(of: notifications.pendingConversationPhone) { phone in
-                guard let phone else { return }
-                pendingNotificationPhone = phone
-                openPendingConversation()
-            }
             .onChange(of: notifications.inboxRefreshSequence) { _ in
                 Task { await model.load() }
             }
@@ -78,16 +72,39 @@ struct InboxView: View {
                 guard phase == .active else { return }
                 Task { await model.load() }
             }
-            .onChange(of: model.conversations) { _ in openPendingConversation() }
         }
     }
+}
 
-    private func openPendingConversation() {
-        guard let phone = pendingNotificationPhone,
-              let conversation = model.conversations.first(where: { $0.phone == phone }) else { return }
-        path = [conversation]
-        pendingNotificationPhone = nil
-        notifications.consumePendingConversation()
+/// Resolves a stable phone route against the current inbox snapshot. A push can
+/// arrive before the first inbox page, so the destination owns the loading state
+/// instead of requiring the notification delegate to race the list.
+private struct ConversationDestinationView: View {
+    let phone: String
+    var referralID: String? = nil
+    @ObservedObject var model: InboxModel
+
+    private var conversation: ConversationSummary? {
+        model.conversations.first { $0.phone == phone }
+    }
+
+    var body: some View {
+        Group {
+            if let conversation {
+                MessageThreadView(conversation: conversation,
+                                  model: model,
+                                  referralID: referralID)
+            } else if model.isLoading {
+                ProgressView("Loading conversation")
+            } else {
+                EmptyState(icon: "message.badge",
+                           title: "Conversation unavailable",
+                           detail: "This conversation could not be found in the inbox.")
+            }
+        }
+        .task {
+            if conversation == nil { await model.load() }
+        }
     }
 }
 
@@ -132,6 +149,7 @@ private struct ConversationRow: View {
 struct MessageThreadView: View {
     let conversation: ConversationSummary
     @ObservedObject var model: InboxModel
+    var referralID: String? = nil
     // Needed for the call button. Supplied at the app root (ViciInboxApp) and
     // inherited through the NavigationLink that pushes this view.
     @EnvironmentObject private var session: SessionModel
@@ -139,12 +157,18 @@ struct MessageThreadView: View {
     @State private var replyTarget: MessageRecord?
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var imageData: [Data] = []
+    @State private var pickerLoadID = UUID()
     @State private var didInitialScroll = false
+    @State private var showsReferralComposer = false
+    @State private var activeReferralID: String?
 
     private var messages: [MessageRecord] { model.messages[conversation.phone] ?? [] }
 
     var body: some View {
         VStack(spacing: 0) {
+            if let referralID = activeReferralID ?? referralID {
+                ReferralContextBanner(referralID: referralID)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
@@ -223,15 +247,29 @@ struct MessageThreadView: View {
             }
         }
         .onChange(of: pickerItems) { items in
+            let loadID = UUID()
+            pickerLoadID = loadID
             Task {
                 var loaded: [Data] = []
                 for item in items {
                     if let data = try? await item.loadTransferable(type: Data.self) { loaded.append(data) }
                 }
+                guard pickerLoadID == loadID else { return }
                 imageData = loaded
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if session.currentUser?.isSharedTeamLogin == false,
+                   session.can(Permission.referralCreate) {
+                    Button {
+                        showsReferralComposer = true
+                    } label: {
+                        Label("Refer", systemImage: "person.2.fill")
+                    }
+                    .accessibilityHint("Hands this conversation to a teammate without sending a customer message")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Place the call through Telnyx, exactly as the Dialer and the
                 // call-history rows do.
@@ -248,6 +286,23 @@ struct MessageThreadView: View {
                 .disabled(!session.isVoiceReady)
             }
         }
+        .sheet(isPresented: $showsReferralComposer) {
+            ReferralComposerView(conversation: conversation) { referral in
+                activeReferralID = referral.id
+            }
+        }
+        .assistantDraftOwner(
+            source: .message,
+            isDirty: !draft.isEmpty || replyTarget != nil || !pickerItems.isEmpty || !imageData.isEmpty,
+            onDiscard: {
+                draft = ""
+                replyTarget = nil
+                pickerLoadID = UUID()
+                pickerItems = []
+                imageData = []
+                showsReferralComposer = false
+            }
+        )
     }
 
     private func send() {

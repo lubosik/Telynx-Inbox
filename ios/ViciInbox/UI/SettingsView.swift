@@ -12,57 +12,48 @@ struct SettingsView: View {
             Section {
                 SettingsLink(title: "Account",
                              detail: session.currentUser?.name ?? "Shared team login",
-                             symbol: "person.crop.circle") {
-                    AccountSettingsView()
-                }
+                             symbol: "person.crop.circle",
+                             route: .accountSettings)
                 SettingsLink(title: "Appearance",
                              detail: appearance.preference.title,
-                             symbol: appearance.preference.symbol) {
-                    AppearanceSettingsView()
-                }
+                             symbol: appearance.preference.symbol,
+                             route: .appearanceSettings)
                 SettingsLink(title: "Notifications",
                              detail: "Choose which alerts reach this phone",
-                             symbol: "bell.badge.fill") {
-                    NotificationSettingsView()
-                }
+                             symbol: "bell.badge.fill",
+                             route: .notificationSettings)
             }
 
             Section {
                 if session.can(Permission.userManage) {
                     SettingsLink(title: "Team",
                                  detail: "Members, roles and invitations",
-                                 symbol: "person.2.badge.gearshape") {
-                        TeamView()
-                    }
+                                 symbol: "person.2.badge.gearshape",
+                                 route: .team)
                 }
                 SettingsLink(title: "Security",
                              detail: "Password and session access",
-                             symbol: "lock.shield.fill") {
-                    SecuritySettingsView()
-                }
+                             symbol: "lock.shield.fill",
+                             route: .securitySettings)
                 SettingsLink(title: "Messaging & Calling",
                              detail: session.voiceStatusText,
-                             symbol: "message.and.waveform.fill") {
-                    MessagingCallingSettingsView()
-                }
+                             symbol: "message.and.waveform.fill",
+                             route: .messagingCallingSettings)
             }
 
             Section {
                 SettingsLink(title: "Advanced",
                              detail: "Connection diagnostics",
-                             symbol: "stethoscope") {
-                    AdvancedSettingsView()
-                }
+                             symbol: "stethoscope",
+                             route: .advancedSettings)
                 SettingsLink(title: "Help",
                              detail: "App Tour and message guides",
-                             symbol: "questionmark.circle.fill") {
-                    HelpSettingsView()
-                }
+                             symbol: "questionmark.circle.fill",
+                             route: .help)
                 SettingsLink(title: "About",
                              detail: "Version and build information",
-                             symbol: "info.circle.fill") {
-                    AboutSettingsView()
-                }
+                             symbol: "info.circle.fill",
+                             route: .about)
             }
         }
         .listStyle(.insetGrouped)
@@ -71,14 +62,14 @@ struct SettingsView: View {
     }
 }
 
-private struct SettingsLink<Destination: View>: View {
+private struct SettingsLink: View {
     let title: String
     let detail: String
     let symbol: String
-    @ViewBuilder let destination: () -> Destination
+    let route: AppRoute
 
     var body: some View {
-        NavigationLink(destination: destination) {
+        NavigationLink(value: route) {
             HStack(spacing: 13) {
                 Image(systemName: symbol)
                     .foregroundStyle(ViciTheme.tint)
@@ -97,7 +88,7 @@ private struct SettingsLink<Destination: View>: View {
     }
 }
 
-private struct AccountSettingsView: View {
+struct AccountSettingsView: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var appearance: AppearanceModel
 
@@ -176,7 +167,7 @@ private struct AccountSettingsView: View {
     }
 }
 
-private struct AppearanceSettingsView: View {
+struct AppearanceSettingsView: View {
     @EnvironmentObject private var appearance: AppearanceModel
 
     var body: some View {
@@ -341,7 +332,7 @@ private struct AppearanceSettingsView: View {
 /// notification and calls that "off".
 ///
 /// COPY RULE: no em dashes. Two short sentences instead.
-private struct NotificationSettingsView: View {
+struct NotificationSettingsView: View {
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
@@ -557,7 +548,7 @@ private struct NotificationSettingsView: View {
     }
 }
 
-private struct SecuritySettingsView: View {
+struct SecuritySettingsView: View {
     var body: some View {
         List {
             Section {
@@ -571,7 +562,7 @@ private struct SecuritySettingsView: View {
     }
 }
 
-private struct MessagingCallingSettingsView: View {
+struct MessagingCallingSettingsView: View {
     @EnvironmentObject private var session: SessionModel
 
     var body: some View {
@@ -593,12 +584,10 @@ private struct MessagingCallingSettingsView: View {
     }
 }
 
-private struct AdvancedSettingsView: View {
+struct AdvancedSettingsView: View {
     var body: some View {
         List {
-            NavigationLink {
-                DiagnosticsView()
-            } label: {
+            NavigationLink(value: AppRoute.diagnostics) {
                 Label("Diagnostics", systemImage: "waveform.path.ecg")
             }
         }
@@ -607,7 +596,7 @@ private struct AdvancedSettingsView: View {
     }
 }
 
-private struct DiagnosticsView: View {
+struct DiagnosticsView: View {
     @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
 
@@ -635,7 +624,7 @@ private struct DiagnosticsView: View {
     }
 }
 
-private struct HelpSettingsView: View {
+struct HelpSettingsView: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var onboarding: OnboardingCoordinator
 
@@ -675,7 +664,7 @@ private struct HelpSettingsView: View {
     }
 }
 
-private struct AboutSettingsView: View {
+struct AboutSettingsView: View {
     var body: some View {
         List {
             Section("Vici Inbox") {

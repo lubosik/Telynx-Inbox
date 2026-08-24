@@ -71,6 +71,11 @@ struct DialerView: View {
             Spacer(minLength: 16)
         }
         .padding(.horizontal)
+        .assistantDraftOwner(
+            source: .other,
+            isDirty: !number.isEmpty,
+            onDiscard: { number = "" }
+        )
     }
 
     private var canCall: Bool {
