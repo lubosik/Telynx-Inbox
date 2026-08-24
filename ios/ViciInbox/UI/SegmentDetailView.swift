@@ -581,6 +581,14 @@ struct SegmentMemberEvidenceView: View {
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
             LabeledContent("Phone", value: PhoneFormatter.pretty(model.phone))
+            // The way out of the single-audience view of a person. Most people
+            // here are in several audiences and this screen cannot say so,
+            // because it was only asked about one.
+            NavigationLink {
+                SegmentMembershipsView(phone: model.phone, fallbackName: model.displayName)
+            } label: {
+                Label("Every audience they are in", systemImage: "square.stack.3d.up")
+            }
         } header: {
             Text(model.isExcludedNonMember ? "Why they are not here" : "Why they are here")
         }
@@ -1127,5 +1135,152 @@ private struct SegmentAddMemberSheet: View {
             isWorking = false
             dismiss()
         }
+    }
+}
+
+// MARK: - Why is this person here
+
+/// Every audience one person is in, each with its own reason, on one screen.
+///
+/// WHY THIS IS SEPARATE FROM SegmentMemberDetailView
+///   That screen answers "why is this person in THIS segment", correctly, and
+///   keeps the controls that act on that one membership. It is the right screen
+///   when a segment is what you are working on.
+///
+///   It is the wrong screen when a PERSON is what you are working on, because
+///   the audiences overlap. Measured on the live workspace: 1,607 memberships
+///   across 517 people, 511 of them in more than one audience and 205 in four.
+///   Reading them one at a time meant four screens, and nothing on any of the
+///   four said there were three others.
+///
+/// READ ONLY, DELIBERATELY
+///   Every mutating control stays on the per-segment screen. Acting on one
+///   membership from a list of four invites acting on the wrong one, and the
+///   confirmation would have to name which audience anyway. Tapping a card goes
+///   there, where the controls already are and are already scoped.
+struct SegmentMembershipsView: View {
+    @StateObject private var model: SegmentMembershipsModel
+
+    init(phone: String, fallbackName: String) {
+        _model = StateObject(wrappedValue: SegmentMembershipsModel(phone: phone,
+                                                                   fallbackName: fallbackName))
+    }
+
+    var body: some View {
+        List {
+            if let summary = model.summary {
+                Section {
+                    Text(summary.overview(personName: model.displayName))
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                } footer: {
+                    if summary.live.count > 1 {
+                        // The question somebody asks the moment they see four
+                        // cards. Answering it here stops it reading as a fault.
+                        Text("Audiences overlap on purpose. A smaller group is often drawn inside a larger one, so the same person belongs in both and both reasons are true.")
+                    }
+                }
+
+                if !summary.live.isEmpty {
+                    Section("In these audiences now") {
+                        ForEach(summary.live) { entry in
+                            membershipCard(entry)
+                        }
+                    }
+                }
+
+                if !summary.archived.isEmpty {
+                    Section {
+                        ForEach(summary.archived) { entry in
+                            membershipCard(entry)
+                        }
+                    } header: {
+                        Text("Archived audiences")
+                    } footer: {
+                        Text("These are not used for anything. They are shown because this person is still recorded in them.")
+                    }
+                }
+
+                if model.isEmptyResult {
+                    Section {
+                        Text("\(model.displayName) has not matched any audience. That usually means they have not ordered yet.")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else if let message = model.errorMessage {
+                Section {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(ViciTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Try again") { Task { await model.load() } }
+                }
+            } else {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading the reasons").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle(model.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.load() }
+    }
+
+    /// One audience, and why this person is in it.
+    @ViewBuilder
+    private func membershipCard(_ entry: SegmentMembershipEntry) -> some View {
+        // Opens the AUDIENCE, not the per-membership sheet.
+        //
+        // SegmentMemberEvidenceView needs a SegmentDetailModel parent, because
+        // the controls on it act through that screen's state. Constructing a
+        // throwaway parent here to satisfy the initialiser would give those
+        // controls somewhere to write that nothing is listening to, which is
+        // worse than not offering them: the tap would appear to work.
+        //
+        // Going to the audience is also the better answer. From there the
+        // per-person sheet is one tap away, with the state it needs.
+        NavigationLink {
+            SegmentDetailView(segmentID: entry.segment.id, initialName: entry.segment.name)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(entry.segment.name)
+                    .font(.body.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(reason(for: entry))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if entry.isHumanDecision {
+                    Label("Someone put them here by hand", systemImage: "hand.raised.fill")
+                        .font(.caption)
+                        .foregroundStyle(ViciTheme.warning)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    /// The per-person sentence, written by the same code the single-segment
+    /// screen uses. Reusing it is the point: two renderers for one fact drift,
+    /// and the one that drifts is the one explaining why a real customer is
+    /// about to be messaged.
+    private func reason(for entry: SegmentMembershipEntry) -> String {
+        if let member = entry.member {
+            return member.evidence.headline(personName: model.displayName,
+                                            segmentPurpose: entry.segment.statedPurpose)
+        }
+        if entry.activeOverride?.overrideType == .exclude {
+            return "\(model.displayName) is deliberately held out of this audience."
+        }
+        if let purpose = entry.segment.statedPurpose, !purpose.isEmpty {
+            return purpose
+        }
+        return "No reason was recorded for this membership."
     }
 }

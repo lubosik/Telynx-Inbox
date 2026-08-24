@@ -302,6 +302,64 @@ struct SegmentMemberDetail: Codable, Hashable {
     let overrideHistory: [SegmentOverride]
 }
 
+/// One segment a person is in, from `GET /api/segments/members/:phone`.
+///
+/// Deliberately the same shape as `SegmentMemberDetail` plus `archived`, so the
+/// sentence-writing already on `SegmentMember` is reused rather than
+/// reimplemented. Two renderers for one fact drift, and the one that drifts is
+/// always the one explaining why a real customer is about to be messaged.
+struct SegmentMembershipEntry: Codable, Hashable, Identifiable {
+    let segment: SegmentRecord
+    let archived: Bool
+    let member: SegmentMember?
+    let activeOverride: SegmentOverride?
+    let overrideHistory: [SegmentOverride]
+
+    var id: String { segment.id }
+
+    /// True when a person is here because somebody put them here, not because
+    /// they matched anything. Worth saying out loud on the card.
+    var isHumanDecision: Bool {
+        activeOverride != nil && member == nil
+    }
+}
+
+/// Every segment one person is in, each with its own reason.
+///
+/// WHY THIS SCREEN EXISTS
+///   Measured on the live workspace: 1,607 memberships across only 517 people.
+///   511 of those people are in more than one segment and 205 are in four. The
+///   per-segment answer was always correct and always incomplete, because
+///   nothing said there were three more.
+struct SegmentMembershipSummary: Codable, Hashable {
+    let contactPhone: String
+    let memberships: [SegmentMembershipEntry]
+    let total: Int
+
+    // `contactability` is deliberately not decoded, though the endpoint sends
+    // it. This screen answers "which audiences, and why"; whether the person
+    // may be messaged is a different question with its own screen, and no type
+    // for it exists on this side yet. Inventing one here to render a field
+    // nobody asked this screen for is how two half-answers to "can we contact
+    // them" end up on two screens and disagree. Unknown JSON keys are ignored
+    // by Codable, so the endpoint does not have to change.
+
+    var live: [SegmentMembershipEntry] { memberships.filter { !$0.archived } }
+    var archived: [SegmentMembershipEntry] { memberships.filter(\.archived) }
+
+    /// The line at the top of the screen. Says the number first, because that
+    /// is the fact the reader came for and the one nothing else was telling
+    /// them.
+    func overview(personName: String) -> String {
+        let count = live.count
+        switch count {
+        case 0: return "\(personName) is not in any active audience right now."
+        case 1: return "\(personName) is in one audience."
+        default: return "\(personName) is in \(count) audiences, and each one has its own reason."
+        }
+    }
+}
+
 /// `POST /api/segments`. One shape covers both kinds: `created` is present only
 /// for the automatic path (false when the segment already existed, because
 /// saving a catalogue entry is idempotent by key) and `memberCount` only for

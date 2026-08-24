@@ -661,6 +661,53 @@ final class SegmentMemberDetailModel: ObservableObject {
     }
 }
 
+/// Backs the "why is this person here" screen: every audience one person is in,
+/// each with its own reason.
+@MainActor
+final class SegmentMembershipsModel: ObservableObject {
+    @Published private(set) var summary: SegmentMembershipSummary?
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+
+    let phone: String
+    /// Shown while the request is in flight so the screen opens with a name on
+    /// it rather than an empty bar.
+    let fallbackName: String
+
+    init(phone: String, fallbackName: String) {
+        self.phone = phone
+        self.fallbackName = fallbackName
+    }
+
+    /// Prefers a name the engine actually recorded against a membership over
+    /// the one the caller passed in, because the caller's may be a formatted
+    /// phone number when the contact has no name.
+    var displayName: String {
+        summary?.memberships.compactMap { $0.member?.contactName }
+            .first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty })
+            ?? fallbackName
+    }
+
+    /// True once loaded and genuinely in nothing. Distinct from "not loaded
+    /// yet", which must not render as "in no audiences".
+    var isEmptyResult: Bool {
+        guard let summary else { return false }
+        return summary.memberships.isEmpty
+    }
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            summary = try await APIClient.shared.fetchSegmentMemberships(phone: phone)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 // MARK: - Describing a segment in words
 
 /// What the builder is currently showing.

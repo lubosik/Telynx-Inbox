@@ -899,7 +899,11 @@ test('the candidate picker is the one segment GET a Support Agent cannot call', 
     entry.method === 'GET' && entry.path.startsWith('/api/segments') &&
     entry.permission === 'campaigns.read').map(entry => entry.path).sort();
   assert.deepEqual(readable, [
-    '/api/segments', '/api/segments/:id', '/api/segments/:id/members/:phone', '/api/segments/catalogue'
+    '/api/segments', '/api/segments/:id', '/api/segments/:id/members/:phone',
+    // Every segment one person is in. This is the fullest answer to the
+    // question the assertion below names, so it belongs on the readable side
+    // for exactly the reason the others do.
+    '/api/segments/catalogue', '/api/segments/members/:phone'
   ], 'a Support Agent must keep being able to answer "why is this customer being contacted?"');
 });
 

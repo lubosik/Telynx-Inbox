@@ -718,6 +718,16 @@ actor APIClient {
         )
     }
 
+    /// `GET /api/segments/members/:phone`, `campaigns.read`.
+    ///
+    /// Every segment this person is in, each with its own reason. The
+    /// per-segment call above answers a narrower question and stays; this one
+    /// exists because the segments overlap heavily, so one answer at a time was
+    /// correct and incomplete at the same time.
+    func fetchSegmentMemberships(phone: String) async throws -> SegmentMembershipSummary {
+        try await decodedGET("/api/segments/members/\(encodedPathSegment(phone))")
+    }
+
     /// `POST /api/segments` with `kind: "automatic"`, `campaigns.manage`.
     ///
     /// Idempotent by definition key: asking twice returns the existing segment

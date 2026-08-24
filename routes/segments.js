@@ -134,6 +134,24 @@ function createSegmentRouter({
     } catch (error) { return sendError(res, error); }
   });
 
+  // "Why is this person in all of these?" — every segment one person is in,
+  // each with its own reason.
+  //
+  // Registered here, above /:id, for the same reason /catalogue is: "members"
+  // must never be read as a segment id. This path has two parts and /:id has
+  // one, so Express would not confuse them today, but the ordering is what
+  // keeps that true when somebody later adds /:id/something.
+  //
+  // Person-scoped, not segment-scoped, which is the whole point. The
+  // per-segment answer already exists at /:id/members/:phone and is the right
+  // answer to a narrower question.
+  router.get('/members/:phone', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(await segments.personMemberships(req.params.phone));
+    } catch (error) { return sendError(res, error); }
+  });
+
   // ── Describing a segment in words ─────────────────────────────────────────
   //
   // Three steps, in this order, and the order is the feature:
