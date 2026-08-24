@@ -72,6 +72,12 @@ def call(method, path, jwt_token, body=None):
 PROCESSING_TIMEOUT_SECONDS = 900
 PROCESSING_POLL_SECONDS = 20
 
+# Assignment to a beta group is written quickly but reads back slowly. Two
+# minutes is far longer than the lag seen on build 34 and still short enough
+# that a genuinely refused assignment fails the job rather than hanging it.
+DISTRIBUTION_TIMEOUT_SECONDS = 120
+DISTRIBUTION_POLL_SECONDS = 10
+
 
 def await_build(app_id, version, jwt_token):
     """The build with this exact version, once Apple has finished processing it.
@@ -155,12 +161,39 @@ def main():
         {"data": [{"type": "builds", "id": build_id}]})
     print(f"distribute request: {status}")
 
-    status, payload = call("GET", f"/builds/{build_id}?include=betaGroups", jwt_token)
-    groups = [row["id"] for row in
-              payload.get("data", {}).get("relationships", {}).get("betaGroups", {}).get("data", [])]
-    if group_id not in groups:
-        sys.exit(f"build {version} is not assigned to {group_id} — testers cannot install it")
-    print(f"build {version} is distributed to group {group_id}")
+    # THE READ IS EVENTUALLY CONSISTENT, SO ONE GET IS NOT AN ANSWER.
+    #
+    # Build 34 failed this step and was, at that moment, already assigned. The
+    # POST above answered 422, the immediate GET did not list the group yet, and
+    # the job exited 1 on a release that had in fact shipped. Re-running the
+    # publish-only path minutes later printed the SAME 422 and then found the
+    # group present, which is the proof: the write had landed and only the read
+    # was behind.
+    #
+    # So the POST status tells us nothing on its own. 422 covers both "already
+    # assigned" and a genuine refusal, and the end state is the only thing worth
+    # trusting. Poll it instead of sampling it once.
+    #
+    # Failing closed is still right when the group never appears: a build that
+    # testers cannot install must not report success. This only stops a race
+    # being reported as that.
+    deadline = time.time() + DISTRIBUTION_TIMEOUT_SECONDS
+    attempt = 0
+    while True:
+        attempt += 1
+        status, payload = call("GET", f"/builds/{build_id}?include=betaGroups", jwt_token)
+        groups = [row["id"] for row in
+                  payload.get("data", {}).get("relationships", {}).get("betaGroups", {}).get("data", [])]
+        if group_id in groups:
+            print(f"build {version} is distributed to group {group_id}"
+                  + (f" (confirmed on attempt {attempt})" if attempt > 1 else ""))
+            return
+        if time.time() >= deadline:
+            sys.exit(
+                f"build {version} is not assigned to {group_id} after "
+                f"{DISTRIBUTION_TIMEOUT_SECONDS}s — testers cannot install it")
+        print(f"build {version}: group assignment not visible yet, re-checking")
+        time.sleep(DISTRIBUTION_POLL_SECONDS)
 
 
 if __name__ == "__main__":
