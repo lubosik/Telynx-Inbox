@@ -218,6 +218,46 @@ actor APIClient {
         return nil
     }
 
+    /// `GET /api/users/me/timezones` — every zone this server will accept,
+    /// grouped by region, with the offset each is on right now.
+    ///
+    /// Deliberately not built from `TimeZone.knownTimeZoneIdentifiers` on the
+    /// device: this phone's ICU data and the server's can disagree, and the
+    /// failure that causes is a picker offering a zone the PATCH then rejects.
+    /// The server caches this for fifteen minutes, so re-fetching when the
+    /// picker opens is cheap.
+    func loadTimeZoneCatalogue() async throws -> TimeZoneCatalogue {
+        let (data, response) = try await get("/api/users/me/timezones")
+        try validate(data: data, response: response)
+        return try decoder.decode(TimeZoneCatalogue.self, from: data)
+    }
+
+    /// `PATCH /api/users/me` with `{ "timeZone": String }`, or `null` to clear.
+    ///
+    /// Clearing is not the same as setting one: it returns the account to the
+    /// documented fallback, which is the workspace default when the server has
+    /// one and this device's zone otherwise. Passing nil here sends JSON null,
+    /// not an absent key, because an absent key would mean "leave it alone".
+    ///
+    /// The server stores the CANONICAL spelling, so the returned account may
+    /// carry a differently-cased identifier than the one sent. Callers should
+    /// re-read rather than assume what was stored.
+    @discardableResult
+    func updateTimeZone(_ identifier: String?) async throws -> AuthUser? {
+        let value: Any = identifier.map { $0 as Any } ?? NSNull()
+        let (data, response) = try await patch("/api/users/me", body: ["timeZone": value])
+        try validate(data: data, response: response)
+        if let user = try? decoder.decode(AuthUser.self, from: data) {
+            lastKnownUser = user
+            return user
+        }
+        if let wrapped = try? decoder.decode(AuthResponse.self, from: data), let user = wrapped.identity {
+            lastKnownUser = user
+            return user
+        }
+        return nil
+    }
+
     /// `POST /api/users/me/email` with `{ "email": String }`.
     ///
     /// Starts a change; it does not perform one. The server mails a

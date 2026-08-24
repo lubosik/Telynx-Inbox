@@ -1138,3 +1138,81 @@ enum PasswordChangeError: Error, Equatable {
         }
     }
 }
+
+// MARK: - Time zone catalogue
+
+/// One selectable zone, as `GET /api/users/me/timezones` describes it.
+///
+/// Every field is computed by the server rather than by this device, and that
+/// is deliberate. Two clients formatting their own lists from their own ICU
+/// data would offer different sets, and one of them would offer a zone the
+/// server then refuses. What is listed here is exactly what a PATCH will
+/// accept, and the offsets are the server's own, not two devices' guesses.
+struct TimeZoneOption: Codable, Identifiable, Hashable {
+    /// The IANA identifier, e.g. `Europe/London`. This is what gets stored.
+    let id: String
+    /// A human label, e.g. `London`.
+    let label: String
+    /// The grouping heading, e.g. `Europe`.
+    let region: String
+    /// Minutes from UTC right now. Cosmetic; the server sends 0 rather than
+    /// null when its runtime cannot answer, so this never fails to decode.
+    let offsetMinutes: Int
+    /// e.g. `GMT+1`.
+    let offsetLabel: String
+    /// e.g. `BST`, falling back to the offset label in zones with no letter
+    /// abbreviation, so it is never empty.
+    let abbreviation: String
+
+    /// What the picker rows show on the trailing edge. The abbreviation alone
+    /// is ambiguous across regions and the offset alone is unreadable, so both.
+    var detail: String {
+        abbreviation == offsetLabel ? offsetLabel : "\(abbreviation) · \(offsetLabel)"
+    }
+
+    /// Matches a search box against the things a person would actually type:
+    /// the city, the region, the abbreviation, and the raw identifier. Splitting
+    /// the identifier on `/` and `_` is what makes "new york" find
+    /// `America/New_York`.
+    func matches(_ needle: String) -> Bool {
+        let query = needle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return true }
+        let haystack = [label, region, abbreviation, offsetLabel,
+                        id.replacingOccurrences(of: "_", with: " ")
+                          .replacingOccurrences(of: "/", with: " ")]
+            .joined(separator: " ")
+            .lowercased()
+        return haystack.contains(query)
+    }
+}
+
+/// Zones under one region heading.
+struct TimeZoneGroup: Codable, Identifiable, Hashable {
+    var id: String { region }
+    let region: String
+    let zones: [TimeZoneOption]
+}
+
+/// The whole picker document.
+struct TimeZoneCatalogue: Codable {
+    let generatedAt: String?
+    let count: Int
+    /// The server's own fallback zone. `default` is a Swift keyword, hence the
+    /// rename; the wire key stays `default`.
+    let serverDefault: String?
+    let groups: [TimeZoneGroup]
+
+    private enum CodingKeys: String, CodingKey {
+        case generatedAt
+        case count
+        case serverDefault = "default"
+        case groups
+    }
+
+    /// Flattened, for searching. Grouping is a display concern and a search
+    /// result list that reproduced the headings for one hit each would be
+    /// mostly headings.
+    var allZones: [TimeZoneOption] {
+        groups.flatMap(\.zones)
+    }
+}

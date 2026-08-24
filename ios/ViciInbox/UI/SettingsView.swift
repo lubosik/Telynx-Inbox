@@ -99,6 +99,22 @@ private struct SettingsLink<Destination: View>: View {
 
 private struct AccountSettingsView: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var appearance: AppearanceModel
+
+    /// Names where the time zone came from rather than only what it is. An
+    /// account silently running on the device's zone looks identical to one
+    /// that was deliberately set, and the difference decides whether a
+    /// timestamp means what the reader thinks it means.
+    private var timeZoneFooter: String {
+        switch appearance.timeZoneSource {
+        case .account:
+            return "Timestamps across the app are shown in this zone. It is saved to your account, so it follows you to a new iPhone."
+        case .workspaceDefault:
+            return "This is the workspace default. Choose your own zone to override it on this account."
+        case .device:
+            return "Taken from this iPhone because your account has no zone set. Choose one to make it stick across devices."
+        }
+    }
 
     var body: some View {
         List {
@@ -129,6 +145,22 @@ private struct AccountSettingsView: View {
                     NavigationLink("Change name or email") { ProfileEditorView() }
                 } footer: {
                     Text("Your name changes immediately. A new email address has to be confirmed from that address before it takes effect.")
+                }
+
+                // Gated on a named account because PATCH /api/users/me answers
+                // 409 LEGACY_USER_IMMUTABLE for the shared team login: two
+                // people share that identity and neither gets to set the
+                // other's clock.
+                Section {
+                    NavigationLink {
+                        TimeZonePickerView()
+                    } label: {
+                        LabeledContent("Time zone", value: appearance.effectiveTimeZone.identifier)
+                    }
+                } header: {
+                    Text("Time zone")
+                } footer: {
+                    Text(timeZoneFooter)
                 }
             }
 
@@ -666,5 +698,187 @@ private struct AboutSettingsView: View {
 
     private var build: String {
         Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Not available"
+    }
+}
+
+// MARK: - Time zone picker
+
+/// Choose the zone every timestamp in the app is rendered in.
+///
+/// The list comes from `GET /api/users/me/timezones` rather than from
+/// `TimeZone.knownTimeZoneIdentifiers`, so what can be picked is exactly what
+/// the server will accept. A device-built list would eventually offer a zone
+/// the PATCH refuses, and the error would arrive after the tap.
+///
+/// This sets a DISPLAY zone. It has no bearing on campaign quiet hours, which
+/// are enforced against the business time zone in SQL. The footer says so,
+/// because the two are easy to confuse and confusing them is how a partner in
+/// Miami would silently move the sending window five hours.
+private struct TimeZonePickerView: View {
+    @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var appearance: AppearanceModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var catalogue: TimeZoneCatalogue?
+    @State private var loadError: String?
+    @State private var search = ""
+    @State private var saving: String?
+    @State private var saveError: String?
+
+    /// The identifier currently stored on the account, or nil when the account
+    /// has none and the device's zone is standing in. Distinct from
+    /// `appearance.effectiveTimeZone`, which always resolves to something.
+    private var storedIdentifier: String? {
+        guard appearance.usesAccountTimeZone else { return nil }
+        return appearance.accountTimeZoneIdentifier
+    }
+
+    var body: some View {
+        List {
+            if let saveError {
+                Section {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(ViciTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // Offered first because it is the one choice that is not in the
+            // catalogue: clearing is not picking a zone, it is returning the
+            // account to the documented fallback.
+            if storedIdentifier != nil && search.isEmpty {
+                Section {
+                    Button {
+                        Task { await save(nil) }
+                    } label: {
+                        HStack {
+                            Text("Use this iPhone's time zone")
+                            Spacer()
+                            if saving == Self.clearSentinel {
+                                ProgressView()
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .foregroundStyle(.primary)
+                    .disabled(saving != nil)
+                } footer: {
+                    Text("Clears the zone saved on your account. Timestamps then follow whichever device you are on.")
+                }
+            }
+
+            if let catalogue {
+                if search.isEmpty {
+                    ForEach(catalogue.groups) { group in
+                        Section(group.region) {
+                            ForEach(group.zones) { zone in row(for: zone) }
+                        }
+                    }
+                } else {
+                    let hits = catalogue.allZones.filter { $0.matches(search) }
+                    if hits.isEmpty {
+                        Section {
+                            Text("No time zone matches \"\(search)\".")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        // Flat, not grouped: a filtered list rebuilding its
+                        // region headings for one hit each would be mostly
+                        // headings. The region is on each row instead.
+                        Section {
+                            ForEach(hits) { zone in row(for: zone, showingRegion: true) }
+                        }
+                    }
+                }
+            } else if let loadError {
+                Section {
+                    Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(ViciTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Try again") { Task { await load() } }
+                }
+            } else {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Loading time zones").foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .searchable(text: $search, prompt: "City, region or abbreviation")
+        .navigationTitle("Time zone")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    /// `saving` holds the identifier being written so only the tapped row shows
+    /// a spinner. Clearing has no identifier, so it gets a sentinel that cannot
+    /// collide with an IANA name.
+    private static let clearSentinel = "\u{0}clear"
+
+    @ViewBuilder
+    private func row(for zone: TimeZoneOption, showingRegion: Bool = false) -> some View {
+        Button {
+            Task { await save(zone.id) }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(zone.label)
+                    Text(showingRegion ? "\(zone.region) · \(zone.detail)" : zone.detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if saving == zone.id {
+                    ProgressView()
+                } else if zone.id == storedIdentifier {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(ViciTheme.tint)
+                        .accessibilityLabel("Selected")
+                }
+            }
+            // Without this the row is only hittable across the text, and a tap
+            // in the gap before the checkmark does nothing.
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+        .disabled(saving != nil)
+        .accessibilityAddTraits(zone.id == storedIdentifier ? .isSelected : [])
+    }
+
+    private func load() async {
+        loadError = nil
+        do {
+            catalogue = try await APIClient.shared.loadTimeZoneCatalogue()
+        } catch {
+            catalogue = nil
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func save(_ identifier: String?) async {
+        guard saving == nil else { return }
+        saving = identifier ?? Self.clearSentinel
+        saveError = nil
+        defer { saving = nil }
+        do {
+            _ = try await APIClient.shared.updateTimeZone(identifier)
+            // Re-read rather than assume. The server stores the canonical
+            // spelling, so what came back may differ in case from what was
+            // sent, and every timestamp in the app is about to be rendered
+            // from it.
+            await session.reloadCurrentUser()
+            appearance.applyAccountTimeZone(
+                session.currentUser?.timeZone,
+                isDefault: session.currentUser?.timeZoneIsDefault ?? false
+            )
+            dismiss()
+        } catch {
+            saveError = error.localizedDescription
+        }
     }
 }
