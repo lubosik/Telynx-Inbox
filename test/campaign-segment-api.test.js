@@ -233,6 +233,7 @@ test('listing tells the operator which catalogue segments are not saved yet', as
   assert.deepEqual(
     result.available.map(entry => entry.key).sort(),
     [
+      'back_in_stock_nearly_due', 'back_in_stock_other_buyers',
       'one_time_above_typical_spend', 'one_time_buyers', 'one_time_first_month',
       'one_time_lapsed', 'one_time_multi_product', 'one_time_slipping',
       'reorder_approaching', 'reorder_due', 'winback_qualified'
