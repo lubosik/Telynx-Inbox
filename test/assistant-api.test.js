@@ -151,10 +151,74 @@ test('RBAC grants assistant.use to Owner/Admin and excludes Agent and legacy', (
   assert.doesNotMatch(agentBlock, /assistant\.use/);
 });
 
-test('assistant backend surface is read-only and contains no model or mutation endpoint', () => {
+// Reasoning moved off the device on 24 Aug 2026, so "no model endpoint" stopped
+// being the invariant worth protecting. What replaced it is narrower and more
+// important: the assistant may reason and may prepare drafts, and it may not
+// send. These assert that, plus that reasoning goes through the ONE privacy
+// boundary rather than a second client someone added later.
+test('assistant reasoning goes through the private OpenRouter boundary, never a raw provider call', () => {
   const source = fs.readFileSync(path.join(ROOT, 'routes', 'assistant.js'), 'utf8');
+  const converse = fs.readFileSync(path.join(ROOT, 'lib', 'assistant', 'converse.js'), 'utf8');
   assert.match(source, /router\.get\('\/status'/);
-  assert.doesNotMatch(source, /router\.(post|put|patch|delete)\s*\(/i);
-  assert.doesNotMatch(source, /require\(['"](?:openrouter|foundationmodels|languagemodel)/i);
-  assert.doesNotMatch(source, /\b(?:sendMessage|campaignMutation)\s*\(/i);
+  assert.match(converse, /require\('\.\.\/openrouter-private'\)/);
+  // A direct call to a provider would bypass tokenisation, the approved-model
+  // list, and the Zero Data Retention requirement all at once.
+  for (const raw of [/api\.openai\.com/, /api\.anthropic\.com/, /generativelanguage\.googleapis/]) {
+    assert.doesNotMatch(converse, raw, 'reasoning must not call a provider directly');
+    assert.doesNotMatch(source, raw);
+  }
+});
+
+test('THE SEND TOOL DOES NOT EXIST, which is stronger than it being denied', () => {
+  const tools = fs.readFileSync(path.join(ROOT, 'lib', 'assistant', 'tools.js'), 'utf8');
+  // A tool that is merely permission-gated can be reached by a mistaken grant.
+  // A tool that was never defined cannot be reached at all.
+  for (const forbidden of [
+    /name:\s*'send[_a-z]*'/i, /name:\s*'launch[_a-z]*'/i,
+    /name:\s*'approve[_a-z]*'/i, /name:\s*'schedule[_a-z]*'/i
+  ]) {
+    assert.doesNotMatch(tools, forbidden, 'the assistant must have no tool that reaches a customer');
+  }
+  // Nor may it reach the send path by another name.
+  for (const forbidden of [/sendSMS\s*\(/, /sendMMS\s*\(/, /telnyx/i, /\.launch\s*\(/, /finalizeApproval/]) {
+    assert.doesNotMatch(tools, forbidden);
+  }
+});
+
+test('every assistant tool names a permission, and prepare tools cost campaigns.manage', () => {
+  const { buildTools } = require('../lib/assistant/tools');
+  const stub = new Proxy({}, { get: () => async () => ({}) });
+  const tools = buildTools({
+    segments: stub, campaigns: stub, proposals: stub, referrals: stub, analytics: stub
+  });
+  assert.ok(tools.length > 0);
+  for (const tool of tools) {
+    assert.ok(typeof tool.permission === 'string' && tool.permission.includes('.'),
+      `${tool.name} must name the permission its equivalent route requires`);
+    assert.ok(['read', 'prepare'].includes(tool.kind), `${tool.name} has an unknown kind`);
+    // 'execute' is deliberately not a valid kind in this build.
+    if (tool.kind === 'prepare') {
+      assert.equal(tool.permission, 'campaigns.manage',
+        `${tool.name} writes, so it must cost the same permission the write route costs`);
+    }
+  }
+});
+
+test('a tool the actor cannot use is never shown to the model', () => {
+  const { buildTools, permittedTools } = require('../lib/assistant/tools');
+  const stub = new Proxy({}, { get: () => async () => ({}) });
+  const tools = buildTools({ segments: stub, campaigns: stub, proposals: stub, referrals: stub, analytics: stub });
+
+  // A Support Agent holds campaigns.read but not campaigns.manage.
+  const agent = { id: 8, permissions: new Set(['campaigns.read', 'referral.read']) };
+  const visible = permittedTools(tools, agent).map(tool => tool.name);
+  const writeTools = tools.filter(tool => tool.kind === 'prepare').map(tool => tool.name);
+  for (const name of writeTools) {
+    assert.ok(!visible.includes(name),
+      `${name} must not be offered to an actor who cannot perform it`);
+  }
+  assert.ok(visible.length > 0, 'a read-only actor still gets the read tools');
+
+  // And an actor with nothing gets nothing, rather than a default set.
+  assert.deepEqual(permittedTools(tools, { id: 9, permissions: new Set() }), []);
 });
