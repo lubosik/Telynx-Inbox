@@ -394,6 +394,44 @@ function startOpportunityRefresh() {
   }
 }
 
+// THE CLOCK THAT MAKES SEGMENTATION AUTOMATIC.
+//
+// Recomputes every automatic segment once a day, runs the opportunity
+// detector, decides what is significant, and delivers one summary push per
+// person at a local hour in that person's own time zone.
+//
+// NOT A DAILY `setInterval`. It ticks every five minutes and decides from the
+// wall clock plus a persisted claim whose UNIQUE constraint is the actual
+// guard, so a Railway redeploy cannot move the fire time. See the header of
+// lib/notifications/daily-schedule.js.
+//
+// Registered unconditionally, like the opportunity refresh. With every flag off
+// it recomputes, decides materiality and records the whole pass, and nothing
+// reaches a phone. The recompute is a real production write and is the correct
+// behaviour of this product; the flags gate delivery, not arithmetic.
+function startDailySegmentationCycle() {
+  try {
+    const { startDailyCycle } = require('./lib/daily-scheduler');
+    startDailyCycle({ client: supabase, env: process.env });
+  } catch (err) {
+    console.error('[DAILY] Segmentation cycle not started:', err.message);
+  }
+}
+
+// A rejected promise nobody handled is the most common way a scheduled job goes
+// quiet: the work stops, no error surfaces, and the only symptom is a digest
+// that never arrives. Node's default for an unhandled rejection is to CRASH the
+// process, which on a service that also carries the inbox, the dialler and
+// order SMS is the wrong trade. Log it loudly with the stack and keep serving.
+//
+// This is a backstop, not a strategy. Every background job in this file already
+// catches its own errors; this exists so that the one that forgets is visible
+// rather than fatal.
+process.on('unhandledRejection', reason => {
+  console.error('[FATAL-GUARD] Unhandled promise rejection:',
+    reason?.stack || reason?.message || reason);
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   await verifyConnection();
@@ -417,6 +455,7 @@ app.listen(PORT, async () => {
   startDeliveryCheck();
   startCampaignDelivery();
   startOpportunityRefresh();
+  startDailySegmentationCycle();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);

@@ -21,7 +21,7 @@ struct SettingsView: View {
                     AppearanceSettingsView()
                 }
                 SettingsLink(title: "Notifications",
-                             detail: "Messages, calls and business alerts",
+                             detail: "Choose which alerts reach this phone",
                              symbol: "bell.badge.fill") {
                     NotificationSettingsView()
                 }
@@ -277,33 +277,251 @@ private struct AppearanceSettingsView: View {
     }
 }
 
+/// The notification screen.
+///
+/// ═══════════════════════════════════════════════════════════════════════════
+/// THREE RULES, AND EACH EXISTS BECAUSE THE OBVIOUS ALTERNATIVE IS WORSE.
+///
+///   1. PER CATEGORY, AND NO APP LEVEL MASTER SWITCH. iOS already owns the
+///      master switch. A second one creates three states to reconcile and one
+///      genuinely bad failure mode: this screen reading On while iOS silently
+///      drops everything. Somebody who wants all of it off has a place to do
+///      that and it is not here.
+///
+///   2. THE OS STATE IS SHOWN HONESTLY AND THE TOGGLES ARE NOT GREYED OUT. When
+///      authorization is missing, a banner says so plainly and offers a route
+///      straight to this app's Notifications pane in iOS Settings. Disabling
+///      the switches would be the intuitive move and it is wrong: the
+///      preference is stored on the ACCOUNT, it still matters, and it takes
+///      effect the moment permission comes back. Greying it out throws away a
+///      real answer because of a temporary condition.
+///
+///   3. THE OS STATE IS RE-READ ON EVERY `scenePhase == .active`, not only at
+///      launch. Permission can be revoked in iOS Settings while this app is
+///      backgrounded and there is NO callback for it. Caching the answer as a
+///      proxy would guarantee the screen is wrong exactly when it matters.
+/// ═══════════════════════════════════════════════════════════════════════════
+///
+/// SUPPRESSION IS SERVER SIDE. There is no client-side filter for an alert
+/// push: if the backend sends one, iOS shows it whatever this screen says. A
+/// toggle here is a request to the server, and `lib/apns-notify.js` is what
+/// actually stops the push. Nothing in this file hides a delivered
+/// notification and calls that "off".
+///
+/// COPY RULE: no em dashes. Two short sentences instead.
 private struct NotificationSettingsView: View {
     @ObservedObject private var notifications = MessageNotificationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var settings: NotificationSettings = .unavailable
+    @State private var isLoading = true
+    @State private var savingCategory: NotificationCategory?
+    @State private var saveError: String?
 
     var body: some View {
         List {
-            Section("Messages") {
-                LabeledContent("Status", value: notifications.statusText)
-                if notifications.authorizationStatus == .denied {
-                    Button("Open iPhone Settings") { notifications.openSystemSettings() }
-                } else if !notifications.isRegisteredWithBackend {
-                    Button("Enable notifications") {
-                        Task { await notifications.enableAndSync() }
-                    }
-                }
-                if let error = notifications.lastError {
-                    Text(error).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Section("Calls") {
-                LabeledContent("Incoming calls", value: "Enabled while signed in")
-                Text("Incoming calls use the iPhone calling system and follow Focus and notification settings.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            authorizationSection
+            categoriesSection
+            digestSection
+            callsSection
         }
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+        // Rule 3. There is no callback when permission changes, so the only
+        // reliable moment to ask is when the screen comes back to the front.
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await notifications.refreshAuthorizationStatus() }
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var authorizationSection: some View {
+        if let banner = authorization.banner {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(banner.title, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    Text(banner.detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(banner.action) {
+                        if authorization == .notDetermined {
+                            Task { await notifications.enableAndSync() }
+                        } else {
+                            notifications.openSystemSettings()
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                }
+                .padding(.vertical, 4)
+            } footer: {
+                // Said explicitly, because the intuitive reading of a warning
+                // banner is "these switches are broken", and they are not.
+                Text("Your choices below are saved to your account either way. They take effect as soon as iOS allows notifications again.")
+            }
+        }
+    }
+
+    private var categoriesSection: some View {
+        Section {
+            if isLoading && settings.categories.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading your settings").foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(settings.rows) { row in
+                    if let category = row.category {
+                        toggle(for: category, row: row)
+                    }
+                }
+            }
+        } header: {
+            Text("What to tell me about")
+        } footer: {
+            Text(categoriesFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var digestSection: some View {
+        if let digest = settings.digest {
+            Section {
+                Text(digest.summary(timeZone: settings.resolvedTimeZone))
+                    .font(.footnote)
+                if let explanation = digest.silenceExplanation {
+                    Text(explanation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let zone = settings.timeZone {
+                    LabeledContent("Your timezone", value: zone)
+                        .font(.footnote)
+                }
+            } header: {
+                Text("Daily summary")
+            } footer: {
+                // The read-only timezone pre-empts the one support question
+                // this feature is guaranteed to generate, and makes the London
+                // and Miami difference visible rather than magical.
+                Text("The summary arrives in the morning, in your account's timezone, and only on a day when something moved enough to matter. Change your timezone on your Account.")
+            }
+        }
+    }
+
+    private var callsSection: some View {
+        Section {
+            LabeledContent("Incoming calls", value: "Enabled while signed in")
+        } header: {
+            Text("Calls")
+        } footer: {
+            Text("Incoming calls use the iPhone calling system and follow your Focus and Do Not Disturb settings. This app cannot silence them and does not try to.")
+        }
+    }
+
+    // MARK: - One row
+
+    private func toggle(for category: NotificationCategory,
+                        row: NotificationCategoryDescriptor) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Toggle(isOn: binding(for: category)) {
+                HStack(spacing: 11) {
+                    Image(systemName: category.symbol)
+                        .foregroundStyle(ViciTheme.tint)
+                        .frame(width: 24)
+                        .accessibilityHidden(true)
+                    Text(row.label).font(.body)
+                }
+            }
+            // Rule 2: never disabled because of the OS state. Only while its
+            // own write is in flight, and only that one row.
+            .disabled(savingCategory == category || !settings.available)
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 35)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Optimistic, and it puts the switch back if the write fails.
+    ///
+    /// A toggle that animates to the new position and then silently does not
+    /// save is the exact failure this feature exists to avoid, so the setter
+    /// moves it, awaits the server, and moves it back with a visible reason if
+    /// the server refused.
+    private func binding(for category: NotificationCategory) -> Binding<Bool> {
+        Binding(
+            get: { settings.preferences[category] },
+            set: { newValue in
+                let previous = settings.preferences[category]
+                var optimistic = settings.preferences
+                optimistic[category] = newValue
+                settings = NotificationSettings(preferences: optimistic,
+                                                categories: settings.categories,
+                                                available: settings.available,
+                                                digest: settings.digest,
+                                                timeZone: settings.timeZone)
+                Task { await save(category, enabled: newValue, revertTo: previous) }
+            }
+        )
+    }
+
+    // MARK: - Loading and saving
+
+    private var authorization: NotificationAuthorizationState {
+        switch notifications.authorizationStatus {
+        case .authorized: return .authorized
+        case .denied: return .denied
+        case .notDetermined: return .notDetermined
+        case .provisional: return .provisional
+        case .ephemeral: return .ephemeral
+        @unknown default: return .unknown
+        }
+    }
+
+    private var categoriesFooter: String {
+        if let saveError { return saveError }
+        if !settings.available {
+            return "These settings cannot be saved on this server yet. Ask an admin to finish the update."
+        }
+        return "Your choices are saved to your account, so they follow you to a new iPhone."
+    }
+
+    private func load() async {
+        isLoading = true
+        await notifications.refreshAuthorizationStatus()
+        settings = await APIClient.shared.loadNotificationSettings()
+        isLoading = false
+    }
+
+    private func save(_ category: NotificationCategory,
+                      enabled: Bool,
+                      revertTo previous: Bool) async {
+        savingCategory = category
+        saveError = nil
+        do {
+            settings = try await APIClient.shared.updateNotificationSetting(category, enabled: enabled)
+        } catch {
+            var reverted = settings.preferences
+            reverted[category] = previous
+            settings = NotificationSettings(preferences: reverted,
+                                            categories: settings.categories,
+                                            available: settings.available,
+                                            digest: settings.digest,
+                                            timeZone: settings.timeZone)
+            saveError = "That change was not saved. \(error.localizedDescription)"
+        }
+        savingCategory = nil
     }
 }
 

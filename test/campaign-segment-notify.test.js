@@ -41,6 +41,48 @@ function apns() {
   return require('../lib/apns-notify');
 }
 
+/**
+ * A Supabase stand-in that answers exactly one question: this account's
+ * notification preferences.
+ *
+ * Injected explicitly rather than left to fall through to the real client. A
+ * segment change push is governed by the `daily_digest` preference, which FAILS
+ * CLOSED when it cannot be read, so a test that supplied no client would be
+ * measuring "the offline database refused" rather than the targeting rule it
+ * claims to be about. It would also spend seven seconds waiting for a DNS
+ * failure, which is how this fake came to be written.
+ *
+ * @param {object} [byUser] account id -> partial preference row
+ */
+function preferenceClient(byUser = {}) {
+  return {
+    from() {
+      const state = { ids: [] };
+      const builder = {
+        select() { return builder; },
+        in(_column, values) { state.ids = values; return builder; },
+        then(onFulfilled, onRejected) {
+          return Promise.resolve()
+            .then(() => ({
+              data: state.ids.map(id => ({
+                user_id: id,
+                new_customer_messages: true,
+                missed_calls: true,
+                daily_digest: true,
+                campaign_proposals: true,
+                new_releases: true,
+                ...(byUser[String(id)] || {})
+              })),
+              error: null
+            }))
+            .then(onFulfilled, onRejected);
+        }
+      };
+      return builder;
+    }
+  };
+}
+
 // ── Targeting ───────────────────────────────────────────────────────────────
 
 test('only active Owners and Admins who can manage campaigns are notified', () => {
@@ -180,11 +222,12 @@ test('delivery is off unless the exact lowercase flag is set', async () => {
     users: USERS, segment: SEGMENT, change: { reason: 'created', memberCount: 3 }
   });
   const loadDevices = async () => ({ devices: [{ id: 1, user_id: 1, device_token: 't', environment: 'production' }], error: null });
+  const client = preferenceClient();
 
   for (const value of [undefined, '', 'false', 'TRUE', 'True', '1', 'yes']) {
     const result = await sendSegmentChangeNotifications(
       prepared, { dryRun: false },
-      { env: { SEGMENT_CHANGE_NOTIFICATIONS_ENABLED: value }, loadDevices }
+      { env: { SEGMENT_CHANGE_NOTIFICATIONS_ENABLED: value }, loadDevices, client }
     );
     assert.equal(result.disabled, true, `flag value ${JSON.stringify(value)} must not enable delivery`);
     assert.equal(result.sent, 0);
@@ -199,6 +242,7 @@ test('a dry run resolves targets without sending and without credentials', async
   });
   const result = await sendSegmentChangeNotifications(prepared, { dryRun: true }, {
     env: {},
+    client: preferenceClient(),
     loadDevices: async () => ({
       devices: [
         { id: 1, user_id: 1, device_token: 'a', environment: 'production', bundle_id: 'x' },

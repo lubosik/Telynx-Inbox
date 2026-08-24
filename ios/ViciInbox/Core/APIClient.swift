@@ -258,6 +258,54 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    // MARK: - Notification preferences
+    //
+    // THE SERVER IS WHERE SUPPRESSION HAPPENS. There is no client-side filter
+    // for an alert push: if the backend sends one, iOS displays it whatever a
+    // switch in this app says. These two calls record the person's answer on
+    // their ACCOUNT, so it follows them to a new device, and
+    // `lib/apns-notify.js` consults it immediately before handing a device list
+    // to Apple. Nothing in this client may hide a delivered notification and
+    // call that "off".
+
+    /// `GET /api/users/me/notifications`.
+    ///
+    /// Degrades rather than throwing on an older backend. A 404 means the
+    /// endpoint is not deployed yet, which is indistinguishable from an
+    /// unapplied migration as far as this screen is concerned: both mean "show
+    /// the defaults and say they cannot be saved". Throwing would put an error
+    /// page in front of a settings screen that has useful information on it.
+    func loadNotificationSettings() async -> NotificationSettings {
+        guard let (data, response) = try? await get("/api/users/me/notifications"),
+              (200..<300).contains(response.statusCode),
+              let settings = try? decoder.decode(NotificationSettings.self, from: data) else {
+            return .unavailable
+        }
+        return settings
+    }
+
+    /// `PATCH /api/users/me/notifications` with `{ "preferences": { key: Bool } }`.
+    ///
+    /// Partial by design: only the switch that moved is sent, so two devices
+    /// changing different categories cannot overwrite each other's answer with
+    /// a stale full snapshot.
+    ///
+    /// This one DOES throw. A read may degrade quietly; a write may not,
+    /// because a toggle that appears to save and does not is the exact failure
+    /// this whole feature exists to avoid. The caller puts the switch back and
+    /// says so.
+    @discardableResult
+    func updateNotificationSetting(_ category: NotificationCategory,
+                                   enabled: Bool) async throws -> NotificationSettings {
+        let (data, response) = try await patch("/api/users/me/notifications",
+                                               body: ["preferences": [category.rawValue: enabled]])
+        try validate(data: data, response: response)
+        guard let settings = try? decoder.decode(NotificationSettings.self, from: data) else {
+            throw APIError.server("That setting could not be saved. Try again.")
+        }
+        return settings
+    }
+
     func logout() async {
         _ = try? await post("/auth/logout", body: [:], retryOn401: false)
         lastKnownUser = nil

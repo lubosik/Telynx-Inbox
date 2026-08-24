@@ -29,6 +29,9 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     @Published private(set) var pendingSegmentID: String?
     @Published private(set) var campaignRefreshSequence = 0
     @Published private(set) var inboxRefreshSequence = 0
+    /// Set when iOS itself asks the app to show its own notification settings,
+    /// through `.providesAppNotificationSettings`. Consumed by RootView.
+    @Published private(set) var wantsNotificationSettings = false
 
     private let installationDefaultsKey = "vici.apns.installation-id"
     private var deviceToken: String?
@@ -77,6 +80,7 @@ final class MessageNotificationManager: NSObject, ObservableObject {
 
     func configure() {
         UNUserNotificationCenter.current().delegate = self
+        registerNotificationCategories()
         Task {
             await refreshAuthorizationStatus()
             if authorizationAllowsNotifications {
@@ -85,13 +89,72 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         }
     }
 
+    /// The daily digest category, its two actions, and its hidden-previews
+    /// placeholder.
+    ///
+    /// `hiddenPreviewsBodyPlaceholder` has NO payload equivalent: it is a
+    /// property of a UNNotificationCategory and can only be set here. It is
+    /// what a Lock Screen with previews turned off shows instead of the body,
+    /// and "Daily summary" is a great deal more useful than "Notification".
+    ///
+    /// TWO ACTIONS, AND DELIBERATELY NOT FOUR.
+    ///   REVIEW opens the app to the audiences screen.
+    ///   SNOOZE re-delivers this evening, locally.
+    ///
+    ///   There is no Approve and no Reject, and that is not an omission. A
+    ///   digest covers several proposals, so "approve" has no single referent.
+    ///   These are model-written messages aimed at real paying customers, and
+    ///   approving one from a Lock Screen without having read the copy is a
+    ///   defect dressed up as a convenience. And a background action has a few
+    ///   seconds of execution time, so on a bad connection the call fails after
+    ///   the notification has already been dismissed and the person believes
+    ///   they approved something they did not.
+    private func registerNotificationCategories() {
+        let review = UNNotificationAction(
+            identifier: Self.digestReviewAction,
+            title: "Review",
+            options: [.foreground]
+        )
+        let snooze = UNNotificationAction(
+            identifier: Self.digestSnoozeAction,
+            title: "Later today",
+            options: []
+        )
+        let digest = UNNotificationCategory(
+            identifier: Self.digestCategory,
+            actions: [review, snooze],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: "Daily summary",
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([digest])
+    }
+
+    static let digestCategory = "SEGMENT_DIGEST"
+    static let digestReviewAction = "SEGMENT_DIGEST_REVIEW"
+    static let digestSnoozeAction = "SEGMENT_DIGEST_SNOOZE"
+
+    /// Hours from now that a snoozed digest reappears.
+    ///
+    /// Local, not a server round trip. A background action has seconds of
+    /// execution time and no guarantee of a network, so asking the server to
+    /// re-send would fail silently on exactly the connection where somebody is
+    /// most likely to snooze. A local notification cannot fail that way, and a
+    /// summary of this morning is still true this evening.
+    private static let snoozeHours: Double = 8
+
     /// Called after authentication. The system prompt is shown only once; on
     /// later launches this simply refreshes the APNs token and backend row.
     func enableAndSync() async {
         backendRegistrationEnabled = true
         do {
+            // `.providesAppNotificationSettings` puts a button INSIDE iOS
+            // Settings that links back into this app's own notification
+            // screen. Most apps ship the app-to-Settings direction and miss
+            // this one; it is free once the option is in the set, and it is
+            // implemented by `openSettingsFor` at the bottom of this file.
             let granted = try await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .badge, .sound])
+                .requestAuthorization(options: [.alert, .badge, .sound, .providesAppNotificationSettings])
             await refreshAuthorizationStatus()
             guard granted || authorizationAllowsNotifications else { return }
             UIApplication.shared.registerForRemoteNotifications()
@@ -102,9 +165,49 @@ final class MessageNotificationManager: NSObject, ObservableObject {
         }
     }
 
+    /// The app's own pane in iOS Settings.
+    ///
+    /// `openNotificationSettingsURLString` (iOS 16+) lands directly on the
+    /// Notifications pane rather than on the app's root pane, which is one
+    /// fewer tap at exactly the moment somebody is already annoyed. It falls
+    /// back to the root pane if the constant is ever unavailable.
     func openSystemSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url)
+        let target = URL(string: UIApplication.openNotificationSettingsURLString)
+            ?? URL(string: UIApplication.openSettingsURLString)
+        guard let target else { return }
+        UIApplication.shared.open(target)
+    }
+
+    /// Re-deliver a digest later today, locally.
+    ///
+    /// The body is copied from the notification being snoozed rather than
+    /// refetched: the person has already been told what it says and a second
+    /// server read could return something different, which would make "later
+    /// today" quietly mean "a different message".
+    func snoozeDigest(title: String, body: String, digestDay: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.threadIdentifier = "segment-digest"
+        content.categoryIdentifier = Self.digestCategory
+        content.userInfo = ["screen": "segments", "digestDay": digestDay]
+        if #available(iOS 15.0, *) {
+            // Same level as the original. Snoozing does not make it urgent.
+            content.interruptionLevel = .active
+            content.relevanceScore = 0.9
+        }
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: Self.snoozeHours * 60 * 60, repeats: false)
+        let request = UNNotificationRequest(
+            // Keyed on the day, so snoozing twice replaces rather than stacks.
+            identifier: "segment-digest-snooze-\(digestDay)",
+            content: content,
+            trigger: trigger
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if error != nil { Log.push("digest snooze could not be scheduled") }
+        }
     }
 
     func queueConversation(phone: String) {
@@ -143,6 +246,14 @@ final class MessageNotificationManager: NSObject, ObservableObject {
     func consumePendingSegmentRoute() {
         pendingSegmentID = nil
         if pendingScreen?.lowercased() == "segments" { pendingScreen = nil }
+    }
+
+    func requestNotificationSettings() {
+        wantsNotificationSettings = true
+    }
+
+    func consumeNotificationSettingsRequest() {
+        wantsNotificationSettings = false
     }
 
     /// Reconciles the message half of the badge with the server-backed unread
@@ -284,10 +395,37 @@ extension MessageNotificationManager: UNUserNotificationCenterDelegate {
         completionHandler([.banner, .list, .sound, .badge])
     }
 
+    /// iOS Settings asking the app to show its own notification screen.
+    ///
+    /// The other half of `.providesAppNotificationSettings`. Without this the
+    /// option adds a button that does nothing. `notification` is nil when the
+    /// person arrived from the Settings app rather than from a delivered
+    /// notification, which is the case that matters here.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                            openSettingsFor notification: UNNotification?) {
+        Task { @MainActor in
+            MessageNotificationManager.shared.requestNotificationSettings()
+        }
+    }
+
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+
+        // "Later today" on a digest. Handled before the routing below because
+        // it must NOT open the app, must not queue a screen, and must not be
+        // treated as a tap on the notification itself.
+        if response.actionIdentifier == MessageNotificationManager.digestSnoozeAction {
+            let content = response.notification.request.content
+            let day = (userInfo["digestDay"] as? String) ?? ""
+            Task { @MainActor in
+                MessageNotificationManager.shared.snoozeDigest(
+                    title: content.title, body: content.body, digestDay: day)
+                completionHandler()
+            }
+            return
+        }
         let phone = userInfo["phone"] as? String
         // A top-level `screen` is a destination rather than a conversation, so
         // it is handled alongside `phone` rather than instead of it. The two are

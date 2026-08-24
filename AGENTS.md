@@ -310,6 +310,62 @@ client.
   Use `logAuditSafely()` at any call site where the audit follows the effect.
 - `docs/notifications/RELEASE-NOTIFICATIONS.md`, `lib/apns-notify.js`,
   `lib/release-targets.js`: APNs release announcements and their targeting.
+- `docs/notifications/DAILY-CYCLE.md`, `docs/notifications/DIGEST-AND-SETTINGS-RESEARCH.md`,
+  `lib/daily-cycle.js`, `lib/daily-scheduler.js`, `lib/notifications/`: THE CLOCK
+  that recomputes every automatic segment once a day and the one summary push it
+  may send. Apply `scripts/daily-cycle-runs-migration.sql` and
+  `scripts/notification-preferences-migration.sql` before the matching deploy;
+  running the code first is safe and degrades to "not ready".
+  **IT IS NOT A DAILY `setInterval`.** A 24-hour timer fires 24 hours after BOOT
+  and `main` auto-deploys, so the fire time would wander around the clock at the
+  pace of the release cadence. A five-minute TICK asks `dueAt()` a question of
+  the wall clock and a persisted claim, and the timer therefore decides nothing.
+  Idempotency is the UNIQUE constraint on
+  `(workspace_id, scope, scope_key, local_day)`: `claim()` INSERTs and a 23505
+  IS the answer "already done", so there is no check-then-act window during a
+  rolling deploy. `minutesLate >= 0` rather than `=== 0` is load-bearing; a
+  missed tick self-heals on the next one.
+  THREE ZONES AND THEY MUST NOT BE CROSSED: `DAILY_CYCLE_TIMEZONE` decides when
+  OUR recompute runs, `sms_users.timezone` decides when ONE PERSON'S digest is
+  delivered, and `sms_campaign_settings.business_timezone` decides when a
+  CUSTOMER may be texted. Only the third is compliance, it is enforced in SQL,
+  and nothing in this feature reads or writes it. Every module here lives
+  OUTSIDE `lib/campaigns/` precisely so the source-text guard in
+  `test/user-timezone.test.js` keeps holding, and `test/daily-cycle.test.js`
+  asserts the absence directly. Never cache a UTC offset: the UK and the US
+  change clocks on different dates, so the London-to-New-York gap is four hours
+  for several weeks a year and a cached offset looks like an intermittent bug.
+  MATERIALITY IS FOUR GATES AND SILENCE IS MANDATORY. `delta >= 3 AND delta >=
+  10% of prior size`, conjoined, because absolute-only lets 3-of-500 through and
+  relative-only lets 1-of-3 through; plus novelty, attributability, a cold-start
+  guard, a bulk-import guard and a circuit breaker. On live data a flat
+  threshold of 1 would fire every day forever, because six of the twelve
+  segments are tenure cohorts with frozen cuts and people cross a boundary daily
+  with no order placed. Nothing passing the gates means NOTHING IS SENT, never
+  an "all quiet" push.
+  The scheduler has NO FLAG of its own. `DAILY_DIGEST_NOTIFICATIONS_ENABLED`,
+  `SEGMENT_CHANGE_NOTIFICATIONS_ENABLED` and
+  `CAMPAIGN_OPPORTUNITY_PROPOSALS_ENABLED` gate DELIVERY, not arithmetic: with
+  all three off the pass still recomputes, still decides, and still records.
+- `lib/notifications/preferences.js`, `sms_user_notification_preferences`,
+  `GET`/`PATCH /api/users/me/notifications`: per-ACCOUNT notification opt-outs,
+  so the choice follows the person to a new device. Consulted at DELIVERY in
+  `splitByPreference()` in `lib/apns-notify.js`, immediately before the device
+  list goes to Apple, and never at the five call sites that decide to notify: a
+  toggle that does not actually stop the push is worse than no toggle, and a
+  future sender must not be able to forget. A stored `false` is always honoured.
+  An UNREADABLE preference is a different question and the failure mode splits
+  on whether the alert already existed: the four that predate the table fail
+  OPEN, so deploying before the migration cannot silently switch working
+  features off, and only `daily_digest` fails CLOSED. `missed_calls` controls
+  the missed-call half of the app BADGE and says so, because there is no
+  server-sent missed-call alert to suppress: CallKit presents the call.
+- `scripts/dry-run-daily-cycle.js`: read-only, aggregate-only rehearsal of the
+  whole daily cycle against live data. It computes membership IN MEMORY and
+  diffs it against the stored member list, so the movement numbers are real
+  while nothing is written: no recompute, no ledger claim, no proposal, no
+  notification. Prints counts, segment keys and the exact notification copy, and
+  no customer identity.
 - `scripts/ios-push-devices-migration.sql`: NOT applied in production. Device
   registration and delivery run through the `push_subscriptions` compatibility
   path; keep both storages in step or a change only works on the half that is
@@ -318,6 +374,23 @@ client.
   the live APNs device tokens, and now a `userId` inside its jsonb column — has
   no RLS. Fixing that needs its own deliberate migration reviewing every reader
   of that table; do not fold it into this file.
+- `ios/ViciInbox/UI/SettingsView.swift` `NotificationSettingsView`,
+  `ios/ViciInbox/Core/NotificationSettingsModels.swift`: the per-category
+  notification screen. THERE IS NO APP LEVEL MASTER SWITCH: iOS already owns
+  that, and a second one creates three states to reconcile plus the failure mode
+  where the app reads On while iOS drops everything. The OS state is re-read on
+  every `scenePhase == .active` because permission can change while the app is
+  backgrounded and there is NO callback for it; it is never cached as a proxy.
+  When authorization is missing a banner says so and links to
+  `UIApplication.openNotificationSettingsURLString`, and THE TOGGLES ARE NOT
+  GREYED OUT: the preference is stored on the account and takes effect the
+  moment permission returns. `.providesAppNotificationSettings` is requested AND
+  `openSettingsFor` is implemented; requesting it alone adds a button to iOS
+  Settings that does nothing. The digest category carries Review and Later and
+  deliberately NOT Approve or Reject. `hiddenPreviewsBodyPlaceholder` can only
+  be set on the client, so it lives in `MessageNotificationManager`.
+  `test/ios-notification-settings.test.js` asserts every one of those against
+  the Swift source, because nothing compiles the two halves together.
 - `ios/ViciInbox/`: Swift source, resources, plist, and entitlements.
 - `scripts/segment-lifecycle-migration.sql`: NOT applied yet. Adds
   `sms_campaign_segments.purpose`, backfills it, and creates
@@ -478,6 +551,7 @@ swiftc -typecheck \
   ios/ViciInbox/Core/AnalyticsModels.swift ios/ViciInbox/Core/CampaignModels.swift \
   ios/ViciInbox/Core/CampaignArchiveModels.swift ios/ViciInbox/Core/SegmentModels.swift \
   ios/ViciInbox/Core/SegmentRuleModels.swift \
+  ios/ViciInbox/Core/NotificationSettingsModels.swift \
   ios/ViciInbox/Core/ExperienceModels.swift ios/ViciInbox/Core/AppConfig.swift \
   ios/ViciInbox/Core/APIClient.swift ios/ViciInbox/Core/CredentialStore.swift \
   ios/ViciInbox/Core/Log.swift ios/ViciInbox/Voice/CallModels.swift

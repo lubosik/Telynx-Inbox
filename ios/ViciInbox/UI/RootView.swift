@@ -288,6 +288,22 @@ struct MainTabView: View {
             onboarding.consumeHandoff()
             showingAccountHandoff = true
         }
+        // iOS Settings asking for the app's own notification screen, through
+        // `.providesAppNotificationSettings`. Without a handler the option adds
+        // a button to iOS Settings that does nothing at all.
+        //
+        // It opens the account menu, which puts Settings one tap away and
+        // Notifications two. It deliberately does NOT push both levels
+        // automatically: this sheet's NavigationStack has no path binding, and
+        // adding one to drive a blind two-level push, in a layer that cannot be
+        // type-checked on this machine, is more risk than the tap is worth.
+        // Landing somewhere real and obvious beats landing somewhere clever and
+        // occasionally empty.
+        .onChange(of: notifications.wantsNotificationSettings) { wanted in
+            guard wanted else { return }
+            notifications.consumeNotificationSettingsRequest()
+            showingAccountHandoff = true
+        }
         // Replay is started from Settings, which is two pushes inside this very
         // sheet. `AccountToolbarModifier` closes its own presentation when a
         // tour starts; this one is separate and has to close itself, or the
