@@ -1,7 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// Private on-device assistant pilot with optional push-to-talk and local voice
+/// The assistant pilot, with push-to-talk capture and a spoken reply.
+///
+/// WHAT RUNS WHERE, BECAUSE THE LABELS ON THIS SCREEN MUST BE TRUE
+///   What you say is captured and recognised on this iPhone and the audio never
+///   leaves it. The question text goes to Vici, which reasons through the
+///   backend's existing privacy boundary and returns a sentence, and the spoken
+///   audio is synthesised in the cloud. Saying "on this iPhone" about either of
+///   those last two would be false, and a person deciding what to say out loud
+///   is relying on these words.
 /// output. Phase 7 adds only fixed, permission-checked read tools. Business
 /// figures are rendered from private verified evidence, never model prose.
 struct AssistantView: View {
@@ -459,7 +467,7 @@ private struct AssistantOrb: View {
         case .unavailable: return "Assistant unavailable"
         case .idle: return "On-device assistant ready"
         case .thinking: return "Preparing a response"
-        case .speaking: return "Speaking on this iPhone"
+        case .speaking: return "Speaking"
         case .interruptedByCall: return "Assistant interrupted by a call"
         case .failed: return "Assistant access check failed"
         }
@@ -491,8 +499,8 @@ private struct AssistantStatusCopy: View {
         case .disabled: return "Pilot not enabled"
         case .unavailable: return "Not available on this iPhone"
         case .idle: return "On-device assistant ready"
-        case .thinking: return "Thinking on this iPhone"
-        case .speaking: return "Speaking on this iPhone"
+        case .thinking: return "Working it out"
+        case .speaking: return "Speaking"
         case .interruptedByCall: return "Paused for your call"
         case .failed: return "Assistant needs another try"
         }
@@ -511,7 +519,7 @@ private struct AssistantStatusCopy: View {
             case .unsupportedMode:
                 return "The server reported an assistant mode this build does not support."
             case .appleIntelligenceNotEnabled:
-                return "Turn on Apple Intelligence in iOS Settings to use on-device reasoning."
+                return "Assistant reasoning is unavailable right now. Check your connection and try again."
             case .deviceNotEligible:
                 return "This iPhone does not support Apple's on-device language model. Typed app features still work."
             case .modelNotReady:
