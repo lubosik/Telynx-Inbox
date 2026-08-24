@@ -153,3 +153,88 @@ test('invalid cadence cannot qualify a win-back even after a long lapse', () => 
   assert.equal(result.qualifies, false);
   assert.ok(result.reasons.includes('reliable_cadence_required'));
 });
+
+// ── The floor under the consistency test ────────────────────────────────────
+//
+// These pin the reason the personal minimum is two intervals and not one. The
+// old default was three, which meant a customer needed four orders before
+// anything looked at their rhythm at all: on the live database that was 42 of
+// 788 buyers, with the other 746 never examined rather than examined and found
+// wanting.
+//
+// Lowering it to two is safe. Lowering it to one is not, and the difference is
+// arithmetic rather than taste, so it is enforced rather than documented.
+
+test('one interval cannot be a cadence, whatever the caller asks for', () => {
+  // The median of a single value is that value, so the deviation is 0, so the
+  // MAD is 0, so relativeMAD is 0 for EVERY input. Nothing can fail this test,
+  // which is exactly why it must not be allowed to run.
+  for (const gap of [3, 7, 30, 120, 364]) {
+    const cadence = cadenceFromIntervals([gap], { minimumIntervals: 1 });
+    assert.equal(cadence.reliable, false,
+      `a single ${gap} day gap is one observation, not a rhythm`);
+    assert.equal(cadence.reason, 'insufficient_intervals');
+    assert.equal(cadence.confidence, 'none');
+  }
+});
+
+test('the one-interval floor cannot be argued down by policy', () => {
+  // personalPolicy is spread over the defaults, so without a clamp any caller
+  // could reintroduce the vacuous case. 0 and negatives are covered because
+  // "fewer than one" is the same mistake with a worse number.
+  for (const minimumIntervals of [1, 0, -5, 0.5, NaN, null]) {
+    const cadence = cadenceFromIntervals([30], { minimumIntervals });
+    assert.equal(cadence.reliable, false,
+      `minimumIntervals=${minimumIntervals} must not admit a single interval`);
+  }
+});
+
+test('two intervals are enough to judge, and the judgement can still fail', () => {
+  // The whole justification for lowering the floor: at two intervals the test
+  // discriminates. If these three collapsed to the same verdict, two intervals
+  // would be as vacuous as one and the floor would belong at three.
+  assert.equal(cadenceFromIntervals([30, 32]).reliable, true, 'consistent gaps are a cadence');
+  assert.equal(cadenceFromIntervals([30, 60]).reliable, true, 'a wider but bounded spread survives');
+  assert.equal(cadenceFromIntervals([30, 120]).reliable, false, 'a fourfold disagreement is not a rhythm');
+  assert.equal(cadenceFromIntervals([30, 120]).reason, 'cadence_too_variable');
+});
+
+test('high confidence still needs three intervals, so its meaning has not moved', () => {
+  // Two tight gaps are worth acting on, but they are two observations. Anything
+  // downstream that treats `high` as a stronger claim keeps the bar it had
+  // before the floor was lowered.
+  const two = cadenceFromIntervals([30, 31]);
+  assert.equal(two.reliable, true);
+  assert.equal(two.confidence, 'moderate', 'two observations cannot be high confidence');
+
+  const three = cadenceFromIntervals([30, 31, 30]);
+  assert.equal(three.confidence, 'high', 'three tight intervals still reach high');
+});
+
+test('three orders now produce a personal cadence, where four were needed before', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  const purchases = [0, 30, 60].map(offset => ({
+    status: 'completed', total: 100, paidAt: new Date(start + offset * day).toISOString()
+  }));
+  const result = calculateReorderCadence({
+    purchases, now: new Date(start + 95 * day), productAvailable: true
+  });
+  assert.equal(result.state !== 'no_reliable_cadence', true,
+    'three orders with a steady gap must now be readable');
+  assert.equal(result.source, 'personal');
+});
+
+test('two orders still produce nothing, and say why', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  const purchases = [0, 30].map(offset => ({
+    status: 'completed', total: 100, paidAt: new Date(start + offset * day).toISOString()
+  }));
+  const result = calculateReorderCadence({
+    purchases, now: new Date(start + 65 * day), productAvailable: true
+  });
+  assert.equal(result.eligible, false);
+  assert.equal(result.state, 'no_reliable_cadence');
+  assert.equal(result.intervalCount, 1);
+});

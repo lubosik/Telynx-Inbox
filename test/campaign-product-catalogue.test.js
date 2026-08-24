@@ -193,3 +193,40 @@ test('GUARD: the catalogue module exposes no way to produce a product event', ()
     assert.ok(!/event/i.test(name), `${name} suggests this module can create restock events`);
   }
 });
+
+// A WooCommerce read that SUCCEEDS and returns nothing used to report
+// `available: true` with an empty entries list. Nothing threw, so the failure
+// path never ran, and every caller that resolves an order line against the
+// catalogue silently stopped resolving anything.
+//
+// Measured on live data at the time this was written: catalogue present, 2356
+// of 2360 order lines resolve and `one_time_multi_product` holds 328 people;
+// catalogue empty but reported available, 28 resolve and the same cohort holds
+// 11. A 97 per cent under-count presented as fact.
+//
+// The credential losing `read_products` scope produces exactly this: a 200
+// with an empty list, not an error.
+test('a fetch that succeeds with no products is unavailable, not an empty catalogue', async () => {
+  const woo = fakeWoo({ products: [], variations: {} });
+  const snapshot = await productCatalogue({ wooGet: woo, env: {}, now: new Date('2026-08-24T09:00:00Z') });
+
+  assert.equal(snapshot.available, false,
+    'an empty catalogue must not be reported as available: callers treat available as "identity can be resolved"');
+  assert.equal(snapshot.zeroEntries, true);
+  assert.deepEqual(snapshot.entries, []);
+  assert.match(String(snapshot.error), /no products/i,
+    'the reason has to survive to the caller, or this is just a silent zero again');
+  // Distinguishable from a provider that was never reachable, which has no
+  // fetchedAt at all.
+  assert.ok(snapshot.fetchedAt, 'the fetch did happen, and the timestamp is how a caller tells the two apart');
+});
+
+test('an unreachable provider and an empty answer are both unavailable, and both say why', async () => {
+  const unreachable = await productCatalogue({
+    wooGet: fakeWoo({ failAfter: 0 }), env: {}, now: new Date('2026-08-24T09:00:00Z')
+  });
+  assert.equal(unreachable.available, false);
+  assert.equal(unreachable.zeroEntries, true);
+  assert.equal(unreachable.fetchedAt, null, 'never fetched, so no timestamp');
+  assert.match(String(unreachable.error), /unavailable/i);
+});
