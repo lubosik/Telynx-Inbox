@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { hasXcodeSwiftCompiler } = require('./helpers/ios-toolchain');
 
 const ROOT = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -67,7 +68,11 @@ test('registry retains reusable owner tokens and requires explicit acknowledgeme
   assert.doesNotMatch(COORDINATOR, /clearAfterConfirmedDiscard/);
 });
 
-test('all changed Swift owners pass parser validation', () => {
+test('all changed Swift owners pass parser validation', (t) => {
+  if (!hasXcodeSwiftCompiler()) {
+    t.skip('Swift parser validation runs on the dedicated Xcode workflow');
+    return;
+  }
   const files = [
     'ios/ViciInbox/UI/AssistantDraftOwnerModifier.swift',
     'ios/ViciInbox/UI/InboxViews.swift', 'ios/ViciInbox/UI/CampaignsView.swift',

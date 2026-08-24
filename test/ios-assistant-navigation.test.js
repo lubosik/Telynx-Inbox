@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { hasXcodeSwiftCompiler } = require('./helpers/ios-toolchain');
 
 const ROOT = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(ROOT, file), 'utf8');
@@ -97,7 +98,11 @@ test('current screen is exact and navigation can be cancelled at lifecycle bound
   assert.match(COORDINATOR, /router\.dismissAccount\(\)/);
 });
 
-test('Foundation smoke compiles and executes independently', { timeout: 30000 }, () => {
+test('Foundation smoke compiles and executes independently', { timeout: 30000 }, (t) => {
+  if (!hasXcodeSwiftCompiler()) {
+    t.skip('Swift smoke validation runs on the dedicated Xcode workflow');
+    return;
+  }
   const output = path.join(process.env.TMPDIR || '/tmp', `vici-assistant-navigation-${process.pid}`);
   const result = spawnSync('xcrun', [
     'swiftc',

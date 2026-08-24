@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { hasXcodeSwiftCompiler } = require('./helpers/ios-toolchain');
 
 const ROOT = path.join(__dirname, '..');
 const FILE = 'ios/ViciInbox/App/ViciNavigationIntents.swift';
@@ -58,7 +59,11 @@ test('all returned dialogs are fixed and contain no outcome-associated content',
   }
 });
 
-test('intent source passes Swift parser validation without requiring an SDK module', () => {
+test('intent source passes Swift parser validation without requiring an SDK module', (t) => {
+  if (!hasXcodeSwiftCompiler()) {
+    t.skip('Swift parser validation runs on the dedicated Xcode workflow');
+    return;
+  }
   const result = spawnSync('xcrun', ['swiftc', '-parse', path.join(ROOT, FILE)], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
