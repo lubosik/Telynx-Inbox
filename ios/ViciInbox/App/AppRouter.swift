@@ -78,6 +78,7 @@ enum AppRoute: Codable, Hashable {
     case accountSettings
     case appearanceSettings
     case notificationSettings
+    case assistantSettings
     case team
     case password
     case securitySettings
@@ -103,7 +104,7 @@ enum AppRoute: Codable, Hashable {
         case .analytics, .analyticsAttributions, .attributionMethodology:
             return .analytics
         case .account, .assistant, .referrals, .settings, .accountSettings, .appearanceSettings,
-             .notificationSettings, .team, .password, .securitySettings,
+             .notificationSettings, .assistantSettings, .team, .password, .securitySettings,
              .messagingCallingSettings, .advancedSettings, .diagnostics,
              .help, .about:
             return nil
@@ -476,6 +477,8 @@ final class AppRouter: ObservableObject {
             path = []
         case .notificationSettings:
             path = [.settings, .notificationSettings]
+        case .assistantSettings:
+            path = [.settings, .assistantSettings]
         case .diagnostics:
             path = [.settings, .advancedSettings, .diagnostics]
         case .referrals:

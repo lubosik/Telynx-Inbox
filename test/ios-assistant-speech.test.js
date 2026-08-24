@@ -89,7 +89,18 @@ test('audio session setup is ordered and fails closed without interfering with t
 test('voice selector prefers installed locale quality and persists only its identifier', () => {
   assert.match(MODELS, /premium beats enhanced, which beats standard/);
   assert.match(COORDINATOR, /AVSpeechSynthesisVoice\.speechVoices\(\)/);
-  assert.match(COORDINATOR, /AssistantVoiceSelector\.select/);
+  // The coordinator now goes through `resolve`, not `select`. `select` treats a
+  // stored identifier as a tie-break at the best quality, which is right for a
+  // remembered automatic pick and wrong for a voice the operator chose in
+  // Settings: a newly installed Premium voice would silently replace it.
+  assert.match(COORDINATOR, /AssistantVoiceSelector\.resolve/);
+  assert.match(COORDINATOR, /preference: preferences\.voicePreference/);
+  // `resolve` still delegates to `select`, so the automatic path and the
+  // deleted-pinned-voice fallback keep the locale and quality ordering.
+  assert.match(MODELS, /static func resolve\(preference: AssistantVoicePreference/);
+  assert.match(MODELS, /return select\(from: candidates/);
+  // A pinned voice wins outright while it is installed.
+  assert.match(MODELS, /if let pinned = preference\.pinnedIdentifier,[\s\S]*?return match/);
   assert.match(COORDINATOR, /defaults\.set\(selected\.identifier/);
   assert.match(COORDINATOR, /usesApplicationAudioSession = false/);
   assert.match(COORDINATOR, /mixToTelephonyUplink = false/);

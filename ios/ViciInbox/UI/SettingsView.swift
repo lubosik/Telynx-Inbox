@@ -1,3 +1,4 @@
+import AVFAudio
 import SwiftUI
 
 /// Client-facing settings. Provider and transport diagnostics live one level
@@ -6,6 +7,12 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var appearance: AppearanceModel
+    @ObservedObject private var assistantPreferences = AssistantPreferences.shared
+
+    /// Says what the row will show rather than naming the feature twice.
+    private var assistantDetail: String {
+        assistantPreferences.isEnabled ? "Voice, speaking rate and appearance" : "Off on this iPhone"
+    }
 
     var body: some View {
         List {
@@ -22,6 +29,10 @@ struct SettingsView: View {
                              detail: "Choose which alerts reach this phone",
                              symbol: "bell.badge.fill",
                              route: .notificationSettings)
+                SettingsLink(title: "Assistant",
+                             detail: assistantDetail,
+                             symbol: "sparkles",
+                             route: .assistantSettings)
             }
 
             Section {
@@ -869,5 +880,205 @@ private struct TimeZonePickerView: View {
         } catch {
             saveError = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Assistant settings
+
+/// Everything the operator can decide about the assistant on this device.
+///
+/// The server's `ASSISTANT_ENABLED` is the pilot kill switch and is not shown
+/// here, because it is not this person's decision. The toggle below is one
+/// person opting out on one phone. Off in either place means off, and the
+/// footer says which is which rather than leaving somebody to wonder why a
+/// switch that reads On produced nothing.
+struct AssistantSettingsView: View {
+    @ObservedObject private var preferences = AssistantPreferences.shared
+    @StateObject private var preview = AssistantVoicePreview()
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("Assistant", isOn: $preferences.isEnabled)
+            } footer: {
+                Text(preferences.isEnabled
+                     ? "Ask about the business by voice and jump straight to what you asked for. It reads your data and drafts nothing, and it cannot send a message."
+                     : "The assistant is off on this iPhone. Nothing else changes.")
+            }
+
+            if preferences.isEnabled {
+                voiceSection
+                appearanceSection
+            }
+        }
+        .navigationTitle("Assistant")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { preview.reload() }
+        .onDisappear { preview.stop() }
+    }
+
+    private var voiceSection: some View {
+        Section {
+            Picker("Voice", selection: voiceBinding) {
+                Text("Automatic").tag(String?.none)
+                ForEach(preview.voices) { voice in
+                    Text(voice.title).tag(String?.some(voice.identifier))
+                }
+            }
+
+            Picker("Speaking rate", selection: $preferences.speakingRate) {
+                ForEach(AssistantSpeakingRate.allCases) { rate in
+                    Text(rate.label).tag(rate)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Button {
+                preview.play(identifier: preferences.pinnedVoiceIdentifier,
+                             rate: preferences.speakingRate)
+            } label: {
+                HStack {
+                    Label(preview.isSpeaking ? "Stop" : "Preview voice",
+                          systemImage: preview.isSpeaking ? "stop.fill" : "play.fill")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(preview.voices.isEmpty)
+        } header: {
+            Text("Voice")
+        } footer: {
+            // Naming the source of the list prevents the obvious support
+            // question: somebody who has heard a better voice on another phone
+            // needs to know it is a download, not a missing feature.
+            Text(preview.voices.isEmpty
+                 ? "No speech voices are installed on this iPhone yet."
+                 : "These are the voices installed on this iPhone. Automatic picks the best one for your language and improves on its own if you add a better one. iOS Settings, Accessibility, Spoken Content has more to download.")
+        }
+    }
+
+    private var appearanceSection: some View {
+        Section {
+            Picker("Colour", selection: $preferences.orbTint) {
+                ForEach(AssistantOrbTint.allCases) { tint in
+                    Text(tint.label).tag(tint)
+                }
+            }
+            Picker("Size", selection: $preferences.orbSize) {
+                ForEach(AssistantOrbSize.allCases) { size in
+                    Text(size.label).tag(size)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Appearance")
+        } footer: {
+            Text("Warning and error colours never change, so a problem always looks like a problem.")
+        }
+    }
+
+    /// The picker stores nil for automatic, which is why the tags are optional.
+    private var voiceBinding: Binding<String?> {
+        Binding(
+            get: { preferences.pinnedVoiceIdentifier },
+            set: { preferences.pinnedVoiceIdentifier = $0 }
+        )
+    }
+}
+
+/// Lists the installed voices and speaks a sample.
+///
+/// Deliberately its own synthesiser rather than the assistant's. The assistant
+/// owns an audio session shared with the dialler, and a Settings preview must
+/// not be able to interrupt a live call or leave that session in a state the
+/// call path did not expect.
+@MainActor
+private final class AssistantVoicePreview: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    struct Voice: Identifiable, Equatable {
+        let identifier: String
+        let title: String
+        var id: String { identifier }
+    }
+
+    @Published private(set) var voices: [Voice] = []
+    @Published private(set) var isSpeaking = false
+
+    private let synthesizer = AVSpeechSynthesizer()
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func reload() {
+        let installed = AVSpeechSynthesisVoice.speechVoices()
+        let preferred = Set(Locale.preferredLanguages.map { Self.language($0) })
+        voices = installed
+            // Only voices in a language this person actually reads. The full
+            // list is over a hundred entries and picking a Finnish voice to
+            // read English is not a choice anybody means to make.
+            .filter { preferred.contains(Self.language($0.language)) }
+            .sorted {
+                if $0.quality.rawValue != $1.quality.rawValue {
+                    return $0.quality.rawValue > $1.quality.rawValue
+                }
+                return $0.name < $1.name
+            }
+            .map { Voice(identifier: $0.identifier, title: Self.title(for: $0)) }
+    }
+
+    func play(identifier: String?, rate: AssistantSpeakingRate) {
+        if isSpeaking {
+            stop()
+            return
+        }
+        let voice = identifier.flatMap(AVSpeechSynthesisVoice.init(identifier:))
+            ?? voices.first.flatMap { AVSpeechSynthesisVoice(identifier: $0.identifier) }
+        guard let voice else { return }
+        // A real sentence this product actually says. "The quick brown fox"
+        // tells you nothing about how the assistant will sound reading numbers.
+        let utterance = AVSpeechUtterance(
+            string: "Three customers are due to reorder. Two campaign proposals are waiting for approval."
+        )
+        utterance.voice = voice
+        utterance.rate = min(
+            AVSpeechUtteranceMaximumSpeechRate,
+            max(AVSpeechUtteranceMinimumSpeechRate,
+                AVSpeechUtteranceDefaultSpeechRate * rate.multiplier)
+        )
+        isSpeaking = true
+        synthesizer.speak(utterance)
+    }
+
+    func stop() {
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        isSpeaking = false
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.isSpeaking = false }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.isSpeaking = false }
+    }
+
+    private static func language(_ identifier: String) -> String {
+        String(identifier.replacingOccurrences(of: "_", with: "-")
+            .split(separator: "-").first ?? Substring(identifier)).lowercased()
+    }
+
+    /// e.g. "Serena (Premium), English (United Kingdom)".
+    private static func title(for voice: AVSpeechSynthesisVoice) -> String {
+        let quality: String
+        switch voice.quality {
+        case .premium: quality = " (Premium)"
+        case .enhanced: quality = " (Enhanced)"
+        default: quality = ""
+        }
+        let locale = Locale.current.localizedString(forIdentifier: voice.language) ?? voice.language
+        return "\(voice.name)\(quality), \(locale)"
     }
 }

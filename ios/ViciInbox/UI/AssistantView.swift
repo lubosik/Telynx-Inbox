@@ -11,6 +11,7 @@ struct AssistantView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AssistantModel()
     @ObservedObject private var navigation = AssistantNavigationCoordinator.shared
+    @ObservedObject private var preferences = AssistantPreferences.shared
     @ObservedObject private var drafts = AssistantUnsavedDraftRegistry.shared
     @State private var draftToken: AssistantDraftToken?
     @FocusState private var inputIsFocused: Bool
@@ -51,7 +52,9 @@ struct AssistantView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 22) {
-                            AssistantOrb(phase: model.phase)
+                            AssistantOrb(phase: model.phase,
+                                         tint: preferences.orbTint,
+                                         size: preferences.orbSize)
                                 .padding(.top, 24)
 
                             AssistantStatusCopy(
@@ -323,28 +326,39 @@ private struct AssistantBackdrop: View {
 
 private struct AssistantOrb: View {
     let phase: AssistantPhase
+    /// The operator's chosen accent. Only ever applied to the RESTING colours;
+    /// see `orbColor`.
+    var tint: AssistantOrbTint = .brand
+    var size: AssistantOrbSize = .standard
+
+    /// Every circle and the glyph scale from one diameter, so the three sizes
+    /// stay in proportion rather than needing three sets of hand-picked numbers.
+    private var outer: CGFloat { size.diameter }
+    private var middle: CGFloat { outer * 0.81 }
+    private var core: CGFloat { outer * 0.61 }
+    private var glyph: CGFloat { outer * 0.195 }
 
     var body: some View {
         ZStack {
             Circle()
                 .fill(orbColor.opacity(0.12))
-                .frame(width: 144, height: 144)
+                .frame(width: outer, height: outer)
             Circle()
                 .stroke(orbColor.opacity(0.24), lineWidth: 1)
-                .frame(width: 116, height: 116)
+                .frame(width: middle, height: middle)
             Circle()
                 .fill(
                     RadialGradient(
                         colors: [Color.white.opacity(0.9), orbColor.opacity(0.85), orbColor],
                         center: .topLeading,
                         startRadius: 2,
-                        endRadius: 76
+                        endRadius: core * 0.86
                     )
                 )
-                .frame(width: 88, height: 88)
+                .frame(width: core, height: core)
                 .shadow(color: orbColor.opacity(0.32), radius: 24, y: 8)
             Image(systemName: symbol)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: glyph, weight: .semibold))
                 .foregroundStyle(.white)
                 .accessibilityHidden(true)
         }
@@ -352,12 +366,30 @@ private struct AssistantOrb: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    /// THE CHOSEN TINT NEVER OVERRIDES A STATE COLOUR.
+    ///
+    /// Warning and failure keep their own colours whatever the operator picked,
+    /// and disabled stays grey. A preference that could repaint the failure
+    /// state would let somebody choose a theme in which a broken assistant
+    /// looks exactly like a working one. The accent applies to the resting,
+    /// listening and speaking states, which is where it is actually seen.
     private var orbColor: Color {
         switch phase {
         case .disabled, .unavailable: return .secondary
         case .interruptedByCall: return ViciTheme.warning
         case .failed: return ViciTheme.destructive
-        default: return ViciTheme.tint
+        default: return Self.accent(for: tint)
+        }
+    }
+
+    static func accent(for tint: AssistantOrbTint) -> Color {
+        switch tint {
+        case .brand: return ViciTheme.tint
+        case .indigo: return Color.indigo
+        case .teal: return Color.teal
+        case .amber: return Color.orange
+        case .rose: return Color.pink
+        case .graphite: return Color.gray
         }
     }
 

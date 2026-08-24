@@ -701,8 +701,17 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate 
                 quality: Self.quality($0.quality)
             )
         }
-        guard let selected = AssistantVoiceSelector.select(
-            from: candidates,
+        // A voice the operator pinned in Settings wins outright while it is
+        // still installed. `select` treats a stored identifier as a tie-break
+        // at the best quality, which is correct for a remembered automatic
+        // pick and wrong for a deliberate choice: it would let a newly
+        // installed Premium voice silently override the one they picked.
+        // `resolve` falls back to `select` for the automatic case and for a
+        // pinned voice that has since been deleted from the device.
+        let preferences = AssistantPreferences.shared
+        guard let selected = AssistantVoiceSelector.resolve(
+            preference: preferences.voicePreference,
+            candidates: candidates,
             localeIdentifier: localeIdentifier,
             storedIdentifier: defaults.string(forKey: Self.selectedIdentifierKey)
         ), let voice = AVSpeechSynthesisVoice(identifier: selected.identifier) else {
@@ -713,6 +722,13 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate 
         self.completion = completion
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = voice
+        // Clamped to the range AVSpeechUtterance accepts. A rate outside it is
+        // ignored silently, which would make the setting look broken.
+        utterance.rate = min(
+            AVSpeechUtteranceMaximumSpeechRate,
+            max(AVSpeechUtteranceMinimumSpeechRate,
+                AVSpeechUtteranceDefaultSpeechRate * preferences.speakingRate.multiplier)
+        )
         activeUtterance = utterance
         queuedUptime = AssistantMonotonicClock.now
         didRecordStart = false

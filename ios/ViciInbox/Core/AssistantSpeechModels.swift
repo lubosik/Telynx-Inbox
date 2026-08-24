@@ -142,3 +142,118 @@ enum AssistantVoiceSelector {
         String(identifier.split(separator: "-").first ?? Substring(identifier))
     }
 }
+
+// MARK: - What the operator chose
+
+/// Which voice to speak with.
+///
+/// `automatic` is the existing behaviour: the best installed voice for this
+/// device's locale, re-evaluated each time, so installing a Premium voice
+/// improves it without anybody touching a setting.
+///
+/// `pinned` is a deliberate choice and is honoured ABSOLUTELY while that voice
+/// is still installed. `AssistantVoiceSelector.select` treats a stored
+/// identifier only as a tie-break at the best quality, which is right for a
+/// remembered automatic pick and wrong for a person who listened to four voices
+/// and chose one. A setting that silently loses to a quality score is a setting
+/// that lies.
+enum AssistantVoicePreference: Equatable {
+    case automatic
+    case pinned(identifier: String)
+
+    var pinnedIdentifier: String? {
+        if case .pinned(let identifier) = self { return identifier }
+        return nil
+    }
+}
+
+extension AssistantVoiceSelector {
+    /// Resolves a preference against what is actually installed right now.
+    ///
+    /// A pinned voice that has been deleted from the device falls back to
+    /// automatic rather than going silent. Losing a voice must not lose the
+    /// assistant.
+    static func resolve(preference: AssistantVoicePreference,
+                        candidates: [AssistantVoiceCandidate],
+                        localeIdentifier: String,
+                        storedIdentifier: String?) -> AssistantVoiceCandidate? {
+        if let pinned = preference.pinnedIdentifier,
+           let match = candidates.first(where: { $0.identifier == pinned }) {
+            return match
+        }
+        return select(from: candidates,
+                      localeIdentifier: localeIdentifier,
+                      storedIdentifier: storedIdentifier)
+    }
+}
+
+/// How fast the assistant speaks. Three named steps rather than a raw slider,
+/// because `AVSpeechUtterance` rate is not a scale anybody can reason about and
+/// a mis-set slider makes the product feel broken.
+enum AssistantSpeakingRate: String, CaseIterable, Identifiable {
+    case slow, normal, fast
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .slow: return "Slower"
+        case .normal: return "Normal"
+        case .fast: return "Faster"
+        }
+    }
+
+    /// Multipliers of `AVSpeechUtteranceDefaultSpeechRate`, kept deliberately
+    /// gentle. Anything past about 1.2 stops sounding like a person.
+    var multiplier: Float {
+        switch self {
+        case .slow: return 0.85
+        case .normal: return 1.0
+        case .fast: return 1.15
+        }
+    }
+}
+
+/// The orb's accent. A closed set, not a colour wheel: every option has to stay
+/// legible on both light and dark backgrounds and has to keep the state colours
+/// distinguishable, and a free picker guarantees somebody eventually chooses a
+/// tint that hides the failure state.
+enum AssistantOrbTint: String, CaseIterable, Identifiable {
+    case brand, indigo, teal, amber, rose, graphite
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .brand: return "Vici"
+        case .indigo: return "Indigo"
+        case .teal: return "Teal"
+        case .amber: return "Amber"
+        case .rose: return "Rose"
+        case .graphite: return "Graphite"
+        }
+    }
+}
+
+/// How large the orb is drawn.
+enum AssistantOrbSize: String, CaseIterable, Identifiable {
+    case compact, standard, large
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .compact: return "Compact"
+        case .standard: return "Standard"
+        case .large: return "Large"
+        }
+    }
+
+    var diameter: CGFloat {
+        switch self {
+        case .compact: return 128
+        case .standard: return 168
+        case .large: return 208
+        }
+    }
+}

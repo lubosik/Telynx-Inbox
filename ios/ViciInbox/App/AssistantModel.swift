@@ -323,3 +323,69 @@ final class AssistantModel: ObservableObject {
         phase = machine.phase
     }
 }
+
+// MARK: - Assistant preferences
+
+/// What the operator chose about the assistant on THIS device.
+///
+/// Device-local on purpose, and not a server preference like notifications.
+/// Every value here is about this phone: which voices are installed differs per
+/// device, and the orb is presentation. A per-account row would promise these
+/// follow you to a new phone, and the voice half of that promise cannot be kept
+/// because the chosen voice may not exist there.
+///
+/// `isEnabled` layers UNDER the server flag, it does not override it. The
+/// server's `ASSISTANT_ENABLED` is the admin kill switch for the whole pilot;
+/// this is one person saying "not for me". Off in either place means off, which
+/// is why the view asks the server first and this second.
+@MainActor
+final class AssistantPreferences: ObservableObject {
+    static let shared = AssistantPreferences()
+
+    @Published var isEnabled: Bool { didSet { defaults.set(isEnabled, forKey: Keys.enabled) } }
+    @Published var speakingRate: AssistantSpeakingRate {
+        didSet { defaults.set(speakingRate.rawValue, forKey: Keys.rate) }
+    }
+    @Published var orbTint: AssistantOrbTint {
+        didSet { defaults.set(orbTint.rawValue, forKey: Keys.tint) }
+    }
+    @Published var orbSize: AssistantOrbSize {
+        didSet { defaults.set(orbSize.rawValue, forKey: Keys.size) }
+    }
+    /// nil means automatic. A stored identifier means the operator picked it.
+    @Published var pinnedVoiceIdentifier: String? {
+        didSet {
+            if let pinnedVoiceIdentifier {
+                defaults.set(pinnedVoiceIdentifier, forKey: Keys.pinnedVoice)
+            } else {
+                defaults.removeObject(forKey: Keys.pinnedVoice)
+            }
+        }
+    }
+
+    private enum Keys {
+        static let enabled = "assistant_preference_enabled"
+        static let rate = "assistant_preference_speaking_rate"
+        static let tint = "assistant_preference_orb_tint"
+        static let size = "assistant_preference_orb_size"
+        static let pinnedVoice = "assistant_preference_pinned_voice"
+    }
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        // Absent means on. Somebody who has never opened this screen should get
+        // the feature, not an empty page they have to go and switch on.
+        isEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
+        speakingRate = AssistantSpeakingRate(rawValue: defaults.string(forKey: Keys.rate) ?? "")
+            ?? .normal
+        orbTint = AssistantOrbTint(rawValue: defaults.string(forKey: Keys.tint) ?? "") ?? .brand
+        orbSize = AssistantOrbSize(rawValue: defaults.string(forKey: Keys.size) ?? "") ?? .standard
+        pinnedVoiceIdentifier = defaults.string(forKey: Keys.pinnedVoice)
+    }
+
+    var voicePreference: AssistantVoicePreference {
+        pinnedVoiceIdentifier.map { .pinned(identifier: $0) } ?? .automatic
+    }
+}

@@ -276,6 +276,8 @@ struct AccountMenuSheet: View {
             AppearanceSettingsView()
         case .notificationSettings:
             NotificationSettingsView()
+        case .assistantSettings:
+            AssistantSettingsView()
         case .securitySettings:
             SecuritySettingsView()
         case .messagingCallingSettings:
