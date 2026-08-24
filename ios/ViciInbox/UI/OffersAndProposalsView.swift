@@ -323,7 +323,11 @@ private struct CampaignProposalReviewRow: View {
                 Label(proposal.offer.isIntentionalNoOffer ? "No-offer control" : "Structured offer",
                       systemImage: proposal.offer.isIntentionalNoOffer ? "circle.slash" : "tag")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(proposal.offer.isIntentionalNoOffer ? .secondary : .blue)
+                    // Both branches spelled as Color on purpose. In a ternary
+                    // the two sides must be one type, and bare `.secondary`
+                    // infers HierarchicalShapeStyle while `.blue` is a Color,
+                    // so the shorthand does not compile.
+                    .foregroundStyle(proposal.offer.isIntentionalNoOffer ? Color.secondary : Color.blue)
                 Text("Unapproved")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.orange)

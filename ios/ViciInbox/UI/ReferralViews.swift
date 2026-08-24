@@ -122,7 +122,11 @@ struct ReferralComposerView: View {
                                 .lineLimit(3...7)
                             Text("\(model.draft.note.count)/1,000")
                                 .font(.caption)
-                                .foregroundStyle(model.draft.note.count > 1_000 ? .red : .secondary)
+                                // Spelled as Color on both sides. A ternary
+                                // needs one type across both branches, and
+                                // bare `.secondary` can infer
+                                // HierarchicalShapeStyle, which has no `.red`.
+                                .foregroundStyle(model.draft.note.count > 1_000 ? Color.red : Color.secondary)
                         } header: {
                             Text("Internal note (optional)")
                         } footer: {
