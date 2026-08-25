@@ -126,7 +126,16 @@ function createAssistantRouter({ env = process.env, services } = {}) {
         elapsedMs: result.elapsedMs
       });
     } catch (error) {
-      // Never the raw provider error. It can carry the prompt back out.
+      // LOGGED HERE, NEVER RETURNED.
+      //
+      // The client gets a message with no provider detail in it, because that
+      // detail can carry the prompt back out. But swallowing it entirely cost
+      // real time once already: a dead OPENROUTER_API_KEY on Railway made every
+      // question fail, the app showed a generic "could not finish that
+      // response", and there was nothing in the logs to point at the 401. The
+      // message and status are enough to tell a bad credential from a timeout
+      // without printing anything sensitive.
+      console.error('[ASSISTANT] converse failed:', error?.message || 'unknown');
       return res.status(502).json({ error: 'The assistant could not answer that right now.', code: 'ASSISTANT_UPSTREAM_FAILED' });
     }
   });
@@ -146,6 +155,7 @@ function createAssistantRouter({ env = process.env, services } = {}) {
       return res.send(audio);
     } catch (error) {
       const code = error?.code || 'VOICE_FAILED';
+      console.error('[ASSISTANT] speak failed:', code, error?.message || '');
       const status = code === 'VOICE_NOT_CONFIGURED' ? 503 : code === 'EMPTY_TEXT' ? 400 : 502;
       return res.status(status).json({ error: 'Speech could not be produced.', code });
     }
