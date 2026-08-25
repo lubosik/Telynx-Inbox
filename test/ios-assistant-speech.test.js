@@ -92,10 +92,22 @@ test('microphone disclosure covers calls and point-of-use Assistant dictation', 
 test('capture is tap to start, ends itself, and typed fallback remains', () => {
   // Hold to talk made a conversation a physical act: hold the phone, hold the
   // button, do not let go mid sentence. Tap starts it; silence ends it.
-  assert.match(VIEW, /\.onTapGesture \{/);
+  // The tap is now the ORB itself, in the chamber. A Button rather than an
+  // .onTapGesture, which is strictly better: a Button is reachable by
+  // VoiceOver, Switch Control and Full Keyboard Access without anybody having
+  // to remember to add traits for it.
+  const CHAMBER = fs.readFileSync(
+    path.join(ROOT, 'ios', 'ViciInbox', 'UI', 'AssistantVoiceChamberView.swift'), 'utf8');
+  assert.match(CHAMBER, /Button\(action: onOrbTap\)/);
+  assert.doesNotMatch(CHAMBER, /DragGesture\(minimumDistance: 0\)/,
+    'holding must not be required to speak');
   assert.doesNotMatch(VIEW, /DragGesture\(minimumDistance: 0\)/,
     'holding must not be required to speak');
-  assert.match(VIEW, /Tap to start speaking\. It stops on its own when you finish/);
+  // The affordance is spoken rather than printed under the orb. A line of
+  // instructions on a screen whose whole point is that it is not covered in
+  // text would be the first thing to put back by accident.
+  assert.match(CHAMBER, /Double tap to speak/);
+  assert.match(CHAMBER, /Double tap to interrupt and speak/);
 
   // Ending itself is the half that makes tapping safe: without it a tap would
   // leave the microphone open indefinitely.
@@ -106,24 +118,40 @@ test('capture is tap to start, ends itself, and typed fallback remains', () => {
   // not close before anybody has spoken.
   assert.match(COORDINATOR, /!liveTranscript\.trimmingCharacters\(in: \.whitespaces\)\.isEmpty else \{ return \}/);
   assert.doesNotMatch(VIEW, /\.onChange\(of: isEnabled\)/);
-  assert.match(VIEW, /TextField\("Ask for a verified Vici summary"/);
+  // Typing survived the move to the chamber. It is the fallback for a noisy
+  // room, a quiet room, and anybody who simply does not want to talk to their
+  // phone in an office, and removing it would have made the assistant
+  // unusable for all three.
+  assert.match(CHAMBER, /TextField\("Ask anything"/);
+  assert.match(CHAMBER, /Type instead/);
   assert.match(VIEW, /Open microphone settings/);
   assert.match(COORDINATOR, /30_000_000_000/);
   assert.doesNotMatch(VIEW, /\.task\s*\{[^}]*beginPushToTalk/);
-  // Anchored to the accessibility action itself rather than to whatever
-  // modifier happens to follow it. The orb gained its own `.onChange(of:
-  // phase)` for the listening animation, which sits earlier in the file, and
-  // slicing to the first match silently emptied this check.
-  const a11yStart = VIEW.indexOf('.accessibilityAction {');
-  assert.ok(a11yStart >= 0, 'the push to talk accessibility action must exist');
-  const a11yAction = VIEW.slice(a11yStart, VIEW.indexOf('.onChange(of: phase)', a11yStart));
-  assert.ok(a11yAction.length > 0, 'the accessibility action slice must not be empty');
-  // Toggling off is checked before the enabled guard, so VoiceOver can always
-  // stop a capture that is already running even if the control has since been
-  // disabled underneath it.
-  assert.ok(a11yAction.indexOf('if isPressed') >= 0 && a11yAction.indexOf('guard isEnabled') >= 0);
-  assert.ok(a11yAction.indexOf('if isPressed') < a11yAction.indexOf('guard isEnabled'));
+  // STOPPING IS CHECKED BEFORE THE CAN-BEGIN GUARD, and that ordering is the
+  // real guarantee. It used to live in a custom .accessibilityAction on the
+  // push-to-talk button, because a bare gesture is invisible to VoiceOver. The
+  // orb is a Button, so it is reachable without a custom action at all, and
+  // what has to be preserved is the order: a capture that is already running
+  // can always be stopped, even when nothing would let a new one start.
+  //
+  // Get this backwards and the microphone stays open with no way to close it
+  // from the screen, which is the worst failure this control has.
+  const tap = CHAMBER_TAP(VIEW);
+  const stopAt = tap.indexOf('speech.endPushToTalk()');
+  const guardAt = tap.indexOf('guard speech.canBeginPushToTalk');
+  assert.ok(stopAt >= 0, 'a running capture must be stoppable from the orb');
+  assert.ok(guardAt >= 0, 'starting must still be guarded');
+  assert.ok(stopAt < guardAt, 'stopping must be checked before the can-begin guard');
 });
+
+/** The orb tap handler, sliced out of the assistant screen. */
+function CHAMBER_TAP(view) {
+  const start = view.indexOf('private func handleChamberOrbTap');
+  assert.ok(start >= 0, 'handleChamberOrbTap must exist');
+  const body = view.slice(start);
+  const end = body.indexOf('\n    private ', 1);
+  return end > 0 ? body.slice(0, end) : body;
+}
 
 test('release during setup and every call stop capture and local voice output', () => {
   assert.match(COORDINATOR, /guard pressIsHeld else[\s\S]*?assetsReady\(pressIsHeld: false\)/);
@@ -183,7 +211,16 @@ test('voice completion and external interruption cannot wedge the shell', () => 
   assert.match(COORDINATOR, /didFinish[\s\S]*?finishOnce\(for: utterance\)/);
   assert.match(COORDINATOR, /didCancel[\s\S]*?finishOnce\(for: utterance\)/);
   assert.match(COORDINATOR, /45_000_000_000/);
-  assert.match(VIEW, /case \.readyToRequest, \.microphoneDenied, \.finalizing,[\s\S]*?isPressed = false/);
+  // The pressed-state reset this used to check belonged to the push-to-talk
+  // button, which no longer exists. Nothing in the chamber holds a duplicate
+  // of the capture state, so there is no second copy left to wedge: the orb
+  // reads `speechPhase` straight from the coordinator. That absence is the
+  // stronger property, so it is what gets asserted.
+  const CHAMBER = fs.readFileSync(
+    path.join(ROOT, 'ios', 'ViciInbox', 'UI', 'AssistantVoiceChamberView.swift'), 'utf8');
+  assert.doesNotMatch(CHAMBER, /@State private var isPressed/,
+    'the chamber must not keep its own copy of whether capture is running');
+  assert.match(CHAMBER, /let speechPhase: AssistantSpeechPhase/);
 });
 
 test('generated project includes every Phase 5 source', () => {
@@ -259,16 +296,28 @@ test('EVERY speech path ends in the turn being released, or the shell wedges', (
 test('the assistant can be interrupted while it is speaking', () => {
   // Requiring .idle meant the microphone was dead for the whole answer, so the
   // only way to redirect was to sit through it. People interrupt each other.
-  assert.match(VIEW, /model\.phase == \.idle \|\| model\.phase == \.speaking/);
+  // The orb has no phase gate at all now: the only thing that disables it is a
+  // live call holding the microphone. That is strictly stronger than the old
+  // "idle or speaking" allowance it replaces.
+  const chamber = fs.readFileSync(
+    path.join(ROOT, 'ios', 'ViciInbox', 'UI', 'AssistantVoiceChamberView.swift'), 'utf8');
+  assert.match(chamber, /\.disabled\(isBlockedByCall\)/);
+  assert.doesNotMatch(chamber, /\.disabled\(.*phase == \.speaking/);
 
   // And the answer is cut off BEFORE capture starts. Recording over the
   // assistant's own voice feeds it back through the microphone, and the
   // transcript then contains what the assistant said as though the person had
   // said it.
-  const begin = VIEW.slice(VIEW.indexOf('beginDictation: {'), VIEW.indexOf('endDictation: {'));
-  assert.ok(begin.length > 0, 'beginDictation must be findable');
-  const stopAt = begin.indexOf('speech.stopAll()');
-  const startAt = begin.indexOf('speech.beginPushToTalk');
+  //
+  // This used to read the composer's beginDictation closure. The composer is
+  // gone: interruption is now a tap on the orb itself, which is the thing the
+  // person is already looking at while it talks. Same guarantee, read at the
+  // one place that can still start capture.
+  const begin = VIEW.slice(VIEW.indexOf('private func handleChamberOrbTap'));
+  assert.ok(begin.length > 0, 'handleChamberOrbTap must be findable');
+  const speakingBranch = begin.slice(begin.indexOf('if model.phase == .speaking'));
+  const stopAt = speakingBranch.indexOf('speech.stopAll()');
+  const startAt = speakingBranch.indexOf('speech.beginPushToTalk');
   assert.ok(stopAt >= 0, 'speaking must be stopped when the person cuts in');
   assert.ok(startAt >= 0, 'capture must still start');
   assert.ok(stopAt < startAt, 'stop the answer before opening the microphone');

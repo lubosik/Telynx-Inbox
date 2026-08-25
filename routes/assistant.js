@@ -363,6 +363,17 @@ function createAssistantRouter({ env = process.env, services } = {}) {
 
       res.json({
         reply: result.reply,
+        // BOTH OF THESE WERE BEING DROPPED HERE.
+        // open_screen has always returned a navigation instruction and
+        // converse() has always carried it out of the loop, but this handler
+        // never put it in the response, so "take me to the inbox" produced a
+        // sentence about the inbox and no movement. The app has decoded the
+        // field the whole time. Nothing else needed changing.
+        ...(result.navigate ? { navigate: result.navigate } : {}),
+        // The send confirmation travels the same way, and its absence would be
+        // worse than a failed navigation: the model would say a send was
+        // waiting for a face and no prompt would ever appear.
+        ...(result.confirmSend ? { confirmSend: result.confirmSend } : {}),
         toolsUsed: result.toolsUsed,
         refused: result.refused,
         elapsedMs: result.elapsedMs,

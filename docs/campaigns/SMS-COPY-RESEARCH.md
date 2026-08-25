@@ -335,6 +335,31 @@ anywhere in the codebase.
         "sarms"
       ]
     },
+    "compound_names_and_brands": {
+      "source": "CAMPAIGN-COPY-PLAYBOOK.md \"Avoid ... treatment continuity\"; Telnyx forbidden messaging use cases in the US and Canada; copy-rules.js \"no generated copy may expand an abbreviation into the name it stands for\"",
+      "terms": [
+        "retatrutide",
+        "tirzepatide",
+        "semaglutide",
+        "liraglutide",
+        "dulaglutide",
+        "cagrilintide",
+        "survodutide",
+        "tesamorelin",
+        "ipamorelin",
+        "sermorelin",
+        "ozempic",
+        "wegovy",
+        "mounjaro",
+        "zepbound",
+        "saxenda",
+        "victoza",
+        "trulicity",
+        "glp-1",
+        "glp1",
+        "glp 1"
+      ]
+    },
     "privacy_and_surveillance": {
       "source": "CAMPAIGN-COPY-PLAYBOOK.md \"Do not mention how much the customer spent, expose private purchase history, imply surveillance\"",
       "terms": [

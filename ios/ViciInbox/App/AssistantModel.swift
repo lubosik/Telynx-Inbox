@@ -53,6 +53,9 @@ final class AssistantModel: ObservableObject {
     /// Set when the last answer asked the app to move somewhere. The view
     /// performs it and clears it, so a move happens once.
     @Published var pendingNavigation: AssistantNavigationInstruction?
+    /// A send the assistant has prepared and is asking to have authorised.
+    /// Nothing happens until the screen puts a face in front of it.
+    @Published var pendingSendConfirmation: AssistantSendConfirmation?
 
     @Published private(set) var openThreadSummary: String?
     @Published private(set) var openThreadSummarisedCount = 0
@@ -412,7 +415,11 @@ final class AssistantModel: ObservableObject {
             let generated = try await reasoning.respond(submittedText)
             try Task.checkCancellation()
             let move = reasoning.takeNavigation()
-            await MainActor.run { self.pendingNavigation = move }
+            let send = reasoning.takeSendConfirmation()
+            await MainActor.run {
+                self.pendingNavigation = move
+                self.pendingSendConfirmation = send
+            }
             return AssistantGroundedResponse(text: generated, citations: [])
         }
         responseTask = task
@@ -637,7 +644,18 @@ final class AssistantPreferences: ObservableObject {
         }
     }
 
+    /// Whether the operator has been through the voice and orb picker.
+    ///
+    /// It is shown once, on the way into the first conversation, and never
+    /// again: a chooser that reappears every time stops being a choice and
+    /// becomes a toll on the way to the thing you actually wanted. Changing it
+    /// afterwards lives in Settings, where a setting belongs.
+    @Published var hasChosenVoice: Bool {
+        didSet { defaults.set(hasChosenVoice, forKey: Keys.hasChosenVoice) }
+    }
+
     private enum Keys {
+        static let hasChosenVoice = "assistant_preference_has_chosen_voice"
         static let enabled = "assistant_preference_enabled"
         static let thorough = "assistant_preference_thorough"
         static let rate = "assistant_preference_speaking_rate"
@@ -664,6 +682,12 @@ final class AssistantPreferences: ObservableObject {
         orbSize = AssistantOrbSize(rawValue: defaults.string(forKey: Keys.size) ?? "") ?? .standard
         pinnedVoiceIdentifier = defaults.string(forKey: Keys.pinnedVoice)
         pinnedVoiceName = defaults.string(forKey: Keys.pinnedVoiceName)
+        // Absent means not yet chosen, so the picker appears. Somebody who had
+        // already pinned a voice before this screen existed has chosen one, and
+        // must not be sent back through a first-run flow they finished months
+        // ago by another route.
+        hasChosenVoice = defaults.object(forKey: Keys.hasChosenVoice) as? Bool
+            ?? (defaults.string(forKey: Keys.pinnedVoice) != nil)
     }
 
     var voicePreference: AssistantVoicePreference {

@@ -166,19 +166,46 @@ test('transcript is memory-only and purged on navigation, background, and calls'
   assert.match(MODEL_SMOKE, /delayedModel\.phase == \.interruptedByCall/);
 });
 
-test('assistant copy accurately limits grounded reasoning and business access', () => {
-  assert.match(VIEW, /Ask for a verified Vici summary/);
+test('assistant privacy copy describes what the code actually does', () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE OF THE TRUTH.
+  // It required the card to claim "No write actions" and "On-device
+  // reasoning". Both were true when written and neither survived contact with
+  // the product: the assistant drafts campaigns and audiences, and reasoning
+  // moved to a cloud model behind lib/openrouter-private.js. A test pinning
+  // stale privacy copy in place is worse than no test, because it makes the
+  // false claim look deliberate.
   assert.match(VIEW, /Permission-checked business reads/);
-  assert.match(VIEW, /No write actions/);
-  assert.match(VIEW, /On-device reasoning/);
+  assert.match(VIEW, /Writes create drafts for review, never a send/);
+  assert.match(VIEW, /Sending always asks for your face first/);
+  assert.match(VIEW, /Speech is recognised on this iPhone/);
+  assert.match(VIEW, /Replies are spoken by a cloud voice/);
+
+  // And the claims that are now false must not come back.
+  assert.doesNotMatch(VIEW, /No write actions/,
+    'the assistant drafts campaigns and audiences');
+  assert.doesNotMatch(VIEW, /On-device reasoning/,
+    'reasoning runs on a cloud model');
+  assert.doesNotMatch(VIEW, /On-device speech input and output/,
+    'replies are spoken by a cloud voice');
+
   assert.equal(VIEW.includes('\u2014'), false, 'no em dash in user-facing shell copy');
+  for (const file of ['AssistantVoiceChamberView.swift', 'AssistantVoicePickerView.swift',
+                      'AssistantSendConfirmationView.swift']) {
+    const source = read(`ios/ViciInbox/UI/${file}`);
+    assert.equal(source.includes('\u2014'), false, `no em dash in ${file}`);
+  }
 });
 
 test('generated project contains every Assistant reasoning source', () => {
   const project = read('ios/ViciInbox.xcodeproj/project.pbxproj');
   for (const file of [
     'AssistantModels.swift', 'AssistantPromptCatalog.swift',
-    'AssistantModel.swift', 'OnDeviceAssistantReasoner.swift', 'AssistantView.swift'
+    'AssistantModel.swift', 'OnDeviceAssistantReasoner.swift', 'AssistantView.swift',
+    // The chamber, the one-time chooser and the send prompt. A Swift file that
+    // is not in the project simply is not compiled, and the screen renders as
+    // whatever it replaced, with no error anywhere.
+    'AssistantVoiceChamberView.swift', 'AssistantVoicePickerView.swift',
+    'AssistantSendConfirmationView.swift'
   ]) {
     assert.ok(project.includes(file), `${file} is absent from the checked-in project`);
   }

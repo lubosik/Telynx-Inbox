@@ -30,6 +30,12 @@ struct AssistantView: View {
     /// a modal to change four words reads as heavier than the change is.
     @State private var renamingThreadID: String?
     @State private var renameDraft = ""
+    /// Chamber sheets. Held here rather than inside the chamber because the
+    /// chamber is presentational and owns no policy, including the policy of
+    /// what a first run is.
+    @State private var isShowingTranscript = false
+    @State private var isShowingVoiceSettings = false
+    @State private var isChoosingVoiceForFirstTime = false
     @FocusState private var inputIsFocused: Bool
 
     private var callIsActive: Bool {
@@ -80,6 +86,10 @@ struct AssistantView: View {
             }
         }
         .toolbar { assistantToolbar }
+        // Hidden over the chamber. The chamber is a full-bleed black screen and
+        // a navigation bar above it puts a grey strip and a title over an orb
+        // that is meant to be floating in nothing.
+        .toolbar(model.isConversationOpen ? .hidden : .visible, for: .navigationBar)
         // Performed here rather than in the model, because moving the app is
         // the view layer's job and the router is an environment object. Cleared
         // as it is consumed so one instruction produces one move.
@@ -248,22 +258,94 @@ struct AssistantView: View {
         }
     }
 
+    /// THE CHAMBER IS THE CONVERSATION NOW.
+    ///
+    /// What this replaced put an orb, a heading, an explanation, a permission
+    /// card, the whole transcript, a text field and a send button on one
+    /// screen, all at once, while the person was trying to talk. The transcript
+    /// is not gone: it is one tap away at the top left, in `transcriptBody`
+    /// below, unchanged. It is just no longer pushed at somebody mid-sentence.
     private var conversation: some View {
+        AssistantVoiceChamberView(
+            phase: model.phase,
+            speechPhase: speech.phase,
+            tint: preferences.orbTint,
+            isBlockedByCall: callIsActive,
+            failureMessage: model.failureMessage,
+            draft: $model.draft,
+            onOrbTap: handleChamberOrbTap,
+            onSubmit: { submitQuestion(source: .assistantTyped, speechCompletionUptime: nil) },
+            onShowTranscript: { isShowingTranscript = true },
+            onShowVoiceSettings: { isShowingVoiceSettings = true },
+            onEnd: {
+                speech.stopAll()
+                dismiss()
+            }
+        )
+        .sheet(isPresented: $isShowingTranscript) {
+            NavigationStack {
+                transcriptBody
+                    .navigationTitle(openThreadTitle)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { isShowingTranscript = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $isShowingVoiceSettings) {
+            AssistantVoicePickerView(isFirstRun: false)
+        }
+        // Shown once, on the way in. `hasChosenVoice` is what makes it once.
+        .sheet(isPresented: $isChoosingVoiceForFirstTime) {
+            AssistantVoicePickerView(isFirstRun: true)
+        }
+        // The send prompt the assistant asked for. Presented here because this
+        // is where the person is standing when they ask, and a prompt that
+        // opened behind a dismissed screen would be a send nobody ever saw.
+        .sheet(item: $model.pendingSendConfirmation) { confirmation in
+            AssistantSendConfirmationView(confirmation: confirmation)
+        }
+        .onAppear {
+            if !preferences.hasChosenVoice { isChoosingVoiceForFirstTime = true }
+        }
+    }
+
+    /// One gesture, three meanings, and interruption is the one that matters.
+    ///
+    /// Cutting the answer off before opening the microphone is not politeness:
+    /// capturing over the top of the assistant's own voice feeds it back in,
+    /// and the transcript then contains what the assistant said as though the
+    /// person had said it.
+    private func handleChamberOrbTap() {
+        guard !callIsActive else { return }
+        if model.phase == .speaking {
+            speech.stopAll()
+            model.noteSpeechFinished()
+            speech.beginPushToTalk(callIsActive: callIsActive)
+            return
+        }
+        if speech.phase == .listening || speech.phase == .finalizing {
+            speech.endPushToTalk()
+            return
+        }
+        guard speech.canBeginPushToTalk else { return }
+        speech.beginPushToTalk(callIsActive: callIsActive)
+    }
+
+    /// What was said, for reading. Reached from the chamber's top left.
+    ///
+    /// The orb, the status copy and the microphone button used to live at the
+    /// top of this and now live in the chamber. A second orb inside a sheet
+    /// presented over the first one would be two things claiming to be the same
+    /// assistant, and the one in the sheet would be the one that was wrong.
+    private var transcriptBody: some View {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 22) {
-                            AssistantOrb(phase: model.phase,
-                                         tint: preferences.orbTint,
-                                         size: preferences.orbSize,
-                                         isListening: speech.phase == .listening
-                                             || speech.phase == .finalizing)
-                                .padding(.top, 24)
-
-                            AssistantStatusCopy(
-                                phase: model.phase,
-                                failureMessage: model.failureMessage
-                            )
+                            Color.clear.frame(height: 4)
 
                             if model.phase == .idle || speech.phase == .interruptedByCall {
                                 AssistantSpeechStatusCard(
@@ -340,41 +422,13 @@ struct AssistantView: View {
                     }
                 }
 
-                AssistantComposer(
-                    draft: $model.draft,
-                    isFocused: $inputIsFocused,
-                    canSubmit: hasClientAccess && model.phase == .idle && !callIsActive,
-                    // SPEAKING IS NOT A REASON TO REFUSE THE MICROPHONE.
-                    //
-                    // Requiring .idle meant the mic went dead for the whole
-                    // answer, so cutting in was impossible and the only way to
-                    // redirect was to sit through it. People interrupt each
-                    // other; an assistant that cannot be interrupted is being
-                    // listened to, not talked with.
-                    canDictate: hasClientAccess
-                        && (model.phase == .idle || model.phase == .speaking)
-                        && !callIsActive
-                        && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        && speech.canBeginPushToTalk,
-                    speechPhase: speech.phase,
-                    beginDictation: {
-                        inputIsFocused = false
-                        // Cut the answer off first. Capturing over the top of
-                        // the assistant's own voice feeds it back into the
-                        // microphone, and the transcript then contains what the
-                        // assistant said as though the person had said it.
-                        if model.phase == .speaking {
-                            speech.stopAll()
-                            model.noteSpeechFinished()
-                        }
-                        speech.beginPushToTalk(callIsActive: callIsActive)
-                    },
-                    endDictation: {
-                        speech.endPushToTalk()
-                    }
-                ) {
-                    submitQuestion(source: .assistantTyped, speechCompletionUptime: nil)
-                }
+                // NO COMPOSER HERE ANY MORE.
+                //
+                // Asking and reading are separate acts now. The chamber owns
+                // the microphone and the text field; a second set inside a
+                // sheet presented over it would leave two microphone buttons on
+                // screen at once, both claiming to be the way to speak, with
+                // only one of them attached to the orb the person is watching.
             }
     }
 
@@ -534,7 +588,10 @@ private struct AssistantBackdrop: View {
     }
 }
 
-private struct AssistantOrb: View {
+/// Internal rather than file-private: the chamber in
+/// AssistantVoiceChamberView.swift draws the same orb, and two copies of this
+/// would drift into two different assistants.
+struct AssistantOrb: View {
     let phase: AssistantPhase
     /// The operator's chosen accent. Only ever applied to the RESTING colours;
     /// see `orbColor`.
@@ -674,89 +731,36 @@ private struct AssistantOrb: View {
     }
 }
 
-private struct AssistantStatusCopy: View {
-    let phase: AssistantPhase
-    let failureMessage: String?
-
-    var body: some View {
-        VStack(spacing: 7) {
-            Text(title)
-                .font(.title2.bold())
-                .multilineTextAlignment(.center)
-            Text(detail)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: 480)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var title: String {
-        switch phase {
-        case .checkingCapability: return "Checking access"
-        case .disabled: return "Pilot not enabled"
-        case .unavailable: return "Not available on this iPhone"
-        case .idle: return "On-device assistant ready"
-        case .thinking: return "Working it out"
-        case .speaking: return "Speaking"
-        case .interruptedByCall: return "Paused for your call"
-        case .failed: return "Assistant needs another try"
-        }
-    }
-
-    private var detail: String {
-        switch phase {
-        case .checkingCapability:
-            return "Confirming this named account and iPhone are eligible."
-        case .disabled:
-            return "The server-side assistant pilot is off. No question will be accepted or sent."
-        case .unavailable(let reason):
-            switch reason {
-            case .requiresNewerOS(let required, _):
-                return "This pilot requires iOS \(required) or later."
-            case .unsupportedMode:
-                return "The server reported an assistant mode this build does not support."
-            case .appleIntelligenceNotEnabled:
-                return "Assistant reasoning is unavailable right now. Check your connection and try again."
-            case .deviceNotEligible:
-                return "This iPhone does not support Apple's on-device language model. Typed app features still work."
-            case .modelNotReady:
-                return "Apple's on-device model is still preparing. Try again after it finishes downloading."
-            case .modelUnavailable:
-                return "Apple's on-device model is unavailable right now. Other app features still work."
-            }
-        case .idle:
-            return "Ask for a verified Vici summary, or ask about this assistant and its privacy. Read-only business facts use permission-checked Vici API calls."
-        case .thinking:
-            return "Apple's on-device model is preparing a private response."
-        case .speaking:
-            return "The response is playing through an installed Apple voice."
-        case .interruptedByCall:
-            return "Your draft and transcript were cleared. Calls always take priority."
-        case .failed:
-            return failureMessage ?? "Nothing was sent. Try the capability check again."
-        }
-    }
-}
-
+/// REWRITTEN BECAUSE EVERY LINE OF IT HAD BECOME FALSE.
+///
+/// It previously said: no write actions, on-device reasoning, on-device speech
+/// input and output, and that questions were cleared when you left the screen.
+/// By the time this was read, the assistant drafted campaigns and audiences,
+/// reasoning had moved to a cloud model, replies were spoken by a cloud voice,
+/// and conversations were being saved to the server and compacted.
+///
+/// Four false privacy claims on a card headed "Private by design" is worse
+/// than no card, because somebody decides what to say out loud on the strength
+/// of it. What follows is what the code actually does, checked against
+/// lib/openrouter-private.js, the thread store and the speech coordinator.
 private struct AssistantPrivacyCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Private by design", systemImage: "lock.shield.fill")
+            Label("How this handles your data", systemImage: "lock.shield.fill")
                 .font(.headline)
                 .foregroundStyle(ViciTheme.tint)
-            Text("Questions and on-device model responses stay in memory and are cleared when you leave this screen, switch apps, or receive a call.")
+            Text("Conversations are saved to your Vici workspace so you can come back to them. Reasoning runs on a cloud model under zero data retention, and customer names and numbers are replaced with placeholders before anything leaves.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Label("Permission-checked business reads", systemImage: "building.2.crop.circle")
                 .font(.footnote.weight(.semibold))
-            Label("No write actions", systemImage: "hand.raised.fill")
+            Label("Writes create drafts for review, never a send", systemImage: "hand.raised.fill")
                 .font(.footnote.weight(.semibold))
-            Label("On-device reasoning", systemImage: "brain.head.profile")
+            Label("Sending always asks for your face first", systemImage: "faceid")
                 .font(.footnote.weight(.semibold))
-            Label("On-device speech input and output", systemImage: "waveform")
+            Label("Speech is recognised on this iPhone", systemImage: "waveform")
+                .font(.footnote.weight(.semibold))
+            Label("Replies are spoken by a cloud voice", systemImage: "speaker.wave.2")
                 .font(.footnote.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -937,125 +941,6 @@ private struct AssistantTranscriptBubble: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityLabel(entry.role == .user ? "You: \(entry.text)" : "Assistant: \(entry.text)")
-    }
-}
-
-private struct AssistantComposer: View {
-    @Binding var draft: String
-    let isFocused: FocusState<Bool>.Binding
-    let canSubmit: Bool
-    let canDictate: Bool
-    let speechPhase: AssistantSpeechPhase
-    let beginDictation: () -> Void
-    let endDictation: () -> Void
-    let submit: () -> Void
-    @State private var microphoneIsPressed = false
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            HStack(alignment: .bottom, spacing: 10) {
-                AssistantPushToTalkButton(
-                    isPressed: $microphoneIsPressed,
-                    phase: speechPhase,
-                    isEnabled: canDictate,
-                    begin: beginDictation,
-                    end: endDictation
-                )
-
-                TextField("Ask for a verified Vici summary", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .focused(isFocused)
-                    .submitLabel(.send)
-                    .onSubmit {
-                        if sendIsEnabled { submit() }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
-
-                Button(action: submit) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .background(sendIsEnabled ? ViciTheme.tealFill : Color.secondary, in: Circle())
-                }
-                .disabled(!sendIsEnabled)
-                .accessibilityLabel("Send question")
-                .accessibilityHint("Rechecks access before accepting the question")
-            }
-
-            Text("\(draft.count)/\(AssistantInputPolicy.maximumCharacters)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("\(draft.count) of \(AssistantInputPolicy.maximumCharacters) characters")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-    }
-
-    private var sendIsEnabled: Bool {
-        canSubmit && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-}
-
-private struct AssistantPushToTalkButton: View {
-    @Binding var isPressed: Bool
-    let phase: AssistantSpeechPhase
-    let isEnabled: Bool
-    let begin: () -> Void
-    let end: () -> Void
-
-    var body: some View {
-        Image(systemName: phase == .listening ? "waveform" : "mic.fill")
-            .font(.system(size: 17, weight: .semibold))
-            .foregroundStyle(isEnabled || isPressed ? Color.white : Color.secondary)
-            .frame(width: 48, height: 48)
-            .background(phase == .listening ? ViciTheme.destructive : ViciTheme.tint, in: Circle())
-            .opacity(isEnabled || isPressed ? 1 : 0.45)
-            .contentShape(Circle())
-            // TAP TO START. Silence ends it.
-            //
-            // Press and hold made a conversation into a physical act: hold the
-            // phone, hold the button, do not let go mid sentence. You cannot
-            // put the phone down, and you certainly cannot have a back and
-            // forth. Tapping starts listening, the transcript standing still
-            // for a moment and a half ends it, and tapping again stops it early.
-            .onTapGesture {
-                if isPressed {
-                    isPressed = false
-                    end()
-                    return
-                }
-                guard isEnabled else { return }
-                isPressed = true
-                begin()
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(phase == .listening ? "Listening" : "Start speaking")
-            .accessibilityHint("Tap to start speaking. It stops on its own when you finish, or tap again to stop. Typed input is always available.")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                if isPressed {
-                    isPressed = false
-                    end()
-                } else {
-                    guard isEnabled else { return }
-                    isPressed = true
-                    begin()
-                }
-            }
-            .onChange(of: phase) { newPhase in
-                switch newPhase {
-                case .readyToRequest, .microphoneDenied, .finalizing,
-                     .interruptedByCall, .unavailable, .failed:
-                    isPressed = false
-                case .requestingMicrophonePermission, .checkingAssets,
-                     .downloadingAssets, .ready, .listening:
-                    break
-                }
-            }
     }
 }
 

@@ -231,6 +231,11 @@ struct AssistantReasoningOperations {
     /// Defaulted so existing constructions, including every test that builds
     /// its own operations, keep compiling and simply never navigate.
     var takeNavigation: () -> AssistantNavigationInstruction? = { nil }
+    /// The send the last answer asked to have authorised, read once and
+    /// cleared. Defaulted to nil for the same reason as `takeNavigation`: every
+    /// test that builds its own operations keeps compiling, and simply never
+    /// asks for a send.
+    var takeSendConfirmation: () -> AssistantSendConfirmation? = { nil }
 }
 
 /// The thread endpoints, as a seam.
@@ -524,9 +529,60 @@ struct AssistantNavigationInstruction: Codable, Hashable {
     let targetId: String?
 }
 
+/// A send the assistant has PREPARED and is asking the operator to authorise.
+///
+/// It arrives from `request_campaign_send`, which reads and writes nothing. The
+/// campaign only goes out if the person's face answers this, and then only
+/// because the app calls approve and schedule itself. The assistant cannot.
+///
+/// `suppressed` and `topReasons` are not decoration. A send to 41 of 900 people
+/// is usually a broken audience rather than a fact about the customers, and the
+/// person is entitled to see that before their face is scanned, not after.
+struct AssistantSendConfirmation: Codable, Hashable, Identifiable {
+    struct SuppressionReason: Codable, Hashable, Identifiable {
+        let reason: String
+        let count: Int
+        var id: String { reason }
+
+        /// The server's own vocabulary, made readable without being softened.
+        /// "No recorded consent" and "some were skipped" are different facts
+        /// and only the first one tells somebody what to go and fix.
+        var readable: String {
+            switch reason {
+            case "consent_not_recorded":  return "no recorded consent"
+            case "do_not_contact":        return "on the do-not-contact list"
+            case "opted_out":             return "opted out"
+            case "dnd_unknown":           return "contact status out of date"
+            case "cadence_too_soon":      return "messaged too recently"
+            case "invalid_phone":         return "no usable number"
+            default: return reason.replacingOccurrences(of: "_", with: " ")
+            }
+        }
+    }
+
+    let campaignId: String
+    /// The revision being authorised. Sent back on approve, which refuses a
+    /// stale one, so copy edited between the question and the face fails closed.
+    let revision: Int?
+    let name: String?
+    let message: String?
+    let audience: String?
+    let recipients: Int
+    let suppressed: Int
+    let topReasons: [SuppressionReason]?
+    /// Whether the master brake is off. Shown before the prompt rather than
+    /// discovered after it.
+    let liveSendEnabled: Bool?
+    let requiresBiometricConfirmation: Bool?
+
+    var id: String { campaignId }
+}
+
 struct AssistantConverseResponse: Codable, Hashable {
     let reply: String
     let navigate: AssistantNavigationInstruction?
+    /// Present only when the assistant asked for a send to be authorised.
+    let confirmSend: AssistantSendConfirmation?
     /// Echoed back when the question belonged to a thread.
     let threadId: String?
     /// False when the answer could not be filed. The operator still gets the

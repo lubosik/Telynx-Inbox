@@ -59,7 +59,10 @@
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
 		8B82D664FF8A8C34810BB1A3 /* AssistantDraftOwnerModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */; };
 		14FF204156C51B930FE9280D /* AssistantNavigationVisibilityModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */; };
+		7C2D03DD62E3E4654B70425C /* AssistantSendConfirmationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */; };
 		206240A7E68D01446366EF9F /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69481367D9D83CCEF455B930 /* AssistantView.swift */; };
+		A929CC26D71E54102679A50A /* AssistantVoiceChamberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 983951664FBD8A43E3C9A86D /* AssistantVoiceChamberView.swift */; };
+		812021ABEDB326F5F3D97429 /* AssistantVoicePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 763C18F51B8BD325E72998D3 /* AssistantVoicePickerView.swift */; };
 		7A5C3535A4F4507AC9EC531F /* CampaignsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */; };
 		BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */; };
 		BD15BE2659E20B641906312E /* DialerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */; };
@@ -144,7 +147,10 @@
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantDraftOwnerModifier.swift; sourceTree = "<group>"; };
 		AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantNavigationVisibilityModifier.swift; sourceTree = "<group>"; };
+		3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSendConfirmationView.swift; sourceTree = "<group>"; };
 		69481367D9D83CCEF455B930 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
+		983951664FBD8A43E3C9A86D /* AssistantVoiceChamberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantVoiceChamberView.swift; sourceTree = "<group>"; };
+		763C18F51B8BD325E72998D3 /* AssistantVoicePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantVoicePickerView.swift; sourceTree = "<group>"; };
 		A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignsView.swift; sourceTree = "<group>"; };
 		02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
 		F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialerView.swift; sourceTree = "<group>"; };
@@ -283,7 +289,10 @@
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
 				74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */,
 				AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */,
+				3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */,
 				69481367D9D83CCEF455B930 /* AssistantView.swift */,
+				983951664FBD8A43E3C9A86D /* AssistantVoiceChamberView.swift */,
+				763C18F51B8BD325E72998D3 /* AssistantVoicePickerView.swift */,
 				A7CA09EEA3487E7D4D0373BA /* CampaignsView.swift */,
 				02DB20A9E3363F476BFA4001 /* ChangePasswordView.swift */,
 				F84E1AA8D88F5CD09AF30F41 /* DialerView.swift */,
@@ -460,7 +469,10 @@
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
 				8B82D664FF8A8C34810BB1A3 /* AssistantDraftOwnerModifier.swift in Sources */,
 				14FF204156C51B930FE9280D /* AssistantNavigationVisibilityModifier.swift in Sources */,
+				7C2D03DD62E3E4654B70425C /* AssistantSendConfirmationView.swift in Sources */,
 				206240A7E68D01446366EF9F /* AssistantView.swift in Sources */,
+				A929CC26D71E54102679A50A /* AssistantVoiceChamberView.swift in Sources */,
+				812021ABEDB326F5F3D97429 /* AssistantVoicePickerView.swift in Sources */,
 				7A5C3535A4F4507AC9EC531F /* CampaignsView.swift in Sources */,
 				BDC9CE853C975D9CCDF874F9 /* ChangePasswordView.swift in Sources */,
 				BD15BE2659E20B641906312E /* DialerView.swift in Sources */,

@@ -169,20 +169,58 @@ test('assistant reasoning goes through the private OpenRouter boundary, never a 
   }
 });
 
-test('THE SEND TOOL DOES NOT EXIST, which is stronger than it being denied', () => {
-  const tools = fs.readFileSync(path.join(ROOT, 'lib', 'assistant', 'tools.js'), 'utf8');
-  // A tool that is merely permission-gated can be reached by a mistaken grant.
-  // A tool that was never defined cannot be reached at all.
+test('THE ASSISTANT STILL CANNOT SEND. It can only ask for a face.', () => {
+  // THIS TEST USED TO ASSERT ABSENCE. It asserted no tool was named send,
+  // launch, approve or schedule, on the reasoning that a tool which does not
+  // exist cannot be reached by a mistaken permission grant. That was the right
+  // shape while nothing had ever been sent.
+  //
+  // The reorder check-in is the revenue activity, so the capability now
+  // exists. Absence has been replaced with a weaker but still real property,
+  // and the point of this test is that the replacement is real:
+  //
+  //   the assistant may PREPARE a send and may not PERFORM one.
+  //
+  // What follows is the whole of that guarantee, checked mechanically.
+  // Comments are stripped before scanning. Both files EXPLAIN at length that
+  // they do not touch Telnyx or the approve route, and an unstripped scan
+  // fails on the explanation, which would teach the next person to describe
+  // the safety property less clearly in order to keep the test green.
+  const codeOnly = (file) => fs.readFileSync(path.join(ROOT, 'lib', 'assistant', file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+  const tools = codeOnly('tools.js');
+  const request = codeOnly('send-request.js');
+
+  // 1. Neither file may name a transport or a commit. This is the line that
+  //    matters: a send tool that called finalizeApproval would have all the
+  //    same names as the safe one and none of the safety.
   for (const forbidden of [
-    /name:\s*'send[_a-z]*'/i, /name:\s*'launch[_a-z]*'/i,
-    /name:\s*'approve[_a-z]*'/i, /name:\s*'schedule[_a-z]*'/i
+    /sendSMS\s*\(/, /sendMMS\s*\(/, /telnyx/i, /\.launch\s*\(/,
+    /finalizeApproval/, /deliverBatch/, /\.approve\s*\(/, /\.schedule\s*\(/
   ]) {
-    assert.doesNotMatch(tools, forbidden, 'the assistant must have no tool that reaches a customer');
+    assert.doesNotMatch(tools, forbidden, 'tools.js must not reach the delivery path');
+    assert.doesNotMatch(request, forbidden, 'send-request.js must not reach the delivery path');
   }
-  // Nor may it reach the send path by another name.
-  for (const forbidden of [/sendSMS\s*\(/, /sendMMS\s*\(/, /telnyx/i, /\.launch\s*\(/, /finalizeApproval/]) {
-    assert.doesNotMatch(tools, forbidden);
+
+  // 2. No tool may be kind 'execute'. Reads look, prepares write drafts,
+  //    requests ask a person. Nothing acts.
+  const { buildTools } = require('../lib/assistant/tools');
+  const stub = new Proxy({}, { get: () => async () => ({}) });
+  const built = buildTools({ segments: stub, campaigns: stub, proposals: stub, referrals: stub, analytics: stub });
+  for (const tool of built) {
+    assert.notEqual(tool.kind, 'execute', `${tool.name} must not be an executing tool`);
   }
+
+  // 3. Exactly one tool concerns sending, and it says so in its own
+  //    description, because the description is what the model reasons from. A
+  //    send tool that described itself as sending would be one confused turn
+  //    away from the model announcing that a campaign had gone out.
+  const senders = built.filter(tool => tool.kind === 'request');
+  assert.equal(senders.length, 1);
+  assert.equal(senders[0].name, 'request_campaign_send');
+  assert.match(senders[0].description, /does NOT send/);
+  assert.match(senders[0].description, /Face ID/);
 });
 
 test('every assistant tool names a permission, and prepare tools cost campaigns.manage', () => {
@@ -195,11 +233,18 @@ test('every assistant tool names a permission, and prepare tools cost campaigns.
   for (const tool of tools) {
     assert.ok(typeof tool.permission === 'string' && tool.permission.includes('.'),
       `${tool.name} must name the permission its equivalent route requires`);
-    assert.ok(['read', 'prepare'].includes(tool.kind), `${tool.name} has an unknown kind`);
+    assert.ok(['read', 'prepare', 'request'].includes(tool.kind), `${tool.name} has an unknown kind`);
     // 'execute' is deliberately not a valid kind in this build.
     if (tool.kind === 'prepare') {
       assert.equal(tool.permission, 'campaigns.manage',
         `${tool.name} writes, so it must cost the same permission the write route costs`);
+    }
+    // A request tool costs what the route it is asking somebody to perform
+    // costs. Pricing it lower would let a role that cannot launch a campaign
+    // put a launch prompt in front of somebody who can.
+    if (tool.kind === 'request') {
+      assert.equal(tool.permission, 'campaigns.launch',
+        `${tool.name} asks for a send, so it must cost what the send route costs`);
     }
   }
 });

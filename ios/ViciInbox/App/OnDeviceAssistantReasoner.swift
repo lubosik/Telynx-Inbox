@@ -207,6 +207,17 @@ final class ServerAssistantReasoner {
         return pendingNavigation
     }
 
+    /// The send waiting on the operator's face, read once and cleared. Cleared
+    /// on read for the same reason navigation is: a later answer that asks for
+    /// nothing must not replay the previous prompt, and a send prompt is the
+    /// worst possible thing to replay.
+    private(set) var pendingSendConfirmation: AssistantSendConfirmation?
+
+    func takePendingSendConfirmation() -> AssistantSendConfirmation? {
+        defer { pendingSendConfirmation = nil }
+        return pendingSendConfirmation
+    }
+
     func respond(to text: String) async throws -> String {
         let answer = try await APIClient.shared.assistantConverse(
             question: text,
@@ -222,6 +233,13 @@ final class ServerAssistantReasoner {
         // echoes back keeps the two from drifting if it ever answers about a
         // different one than was asked for.
         if let answered = answer.threadId { threadID = answered }
+        // THESE TWO LINES WERE MISSING, AND THAT WAS THE OTHER HALF OF IT.
+        // `pendingNavigation` was declared here and read by the screen, but
+        // nothing ever assigned it, so "take me to the inbox" was broken on the
+        // client as well as on the server. Both ends are fixed together; either
+        // one alone would have kept it broken and looked correct in review.
+        pendingNavigation = answer.navigate
+        pendingSendConfirmation = answer.confirmSend
         // Absent means there was no thread to save into, which is not a failure
         // to save. Only an explicit false is.
         lastAnswerWasSaved = answer.saved ?? true
@@ -255,7 +273,8 @@ extension AssistantReasoningOperations {
             prewarm: {},
             respond: { text in try await reasoner.respond(to: text) },
             reset: { reasoner.reset() },
-            takeNavigation: { reasoner.takePendingNavigation() }
+            takeNavigation: { reasoner.takePendingNavigation() },
+            takeSendConfirmation: { reasoner.takePendingSendConfirmation() }
         )
         // `lastAnswerWasSaved` is read through a closure, not captured as a
         // value. A stored Bool would be the value at the moment this pair was

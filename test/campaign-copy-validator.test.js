@@ -273,7 +273,9 @@ test('every banned-term category rejects a representative message', () => {
     manufactured_urgency_and_scarcity: 'last chance today',
     carrier_filter_high_risk: 'free shipping on this',
     shaft_and_forbidden_categories: 'pairs well with cannabis',
-    privacy_and_surveillance: 'we noticed you went quiet'
+    privacy_and_surveillance: 'we noticed you went quiet',
+    // The catalogue says RT. This is the message that says the quiet part.
+    compound_names_and_brands: 'retatrutide is back in stock'
   };
   assert.deepEqual(
     Object.keys(representative).sort(),
