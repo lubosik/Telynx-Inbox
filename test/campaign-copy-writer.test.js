@@ -171,13 +171,17 @@ test('no customer identity appears anywhere in the transmitted prompt', async ()
   );
   // The user prompt is everything campaign-specific, so it must be clean of
   // every identifier shape.
-  for (const forbidden of ['@', 'http', '{{', '+1', 'Sarah', 'order #', '$']) {
+  // '{{' is no longer forbidden and must not be: the prompt names the four
+  // variables so the model knows which exist. That is the OPPOSITE of leaking
+  // an identity, it is the mechanism for never sending one. What must stay
+  // absent is a real name, address, number or amount.
+  for (const forbidden of ['@', 'http', '+1', 'Sarah', 'order #', '$']) {
     assert.equal(record.user.includes(forbidden), false, `user prompt contained ${forbidden}`);
   }
   // The system prompt legitimately contains "S@ve" because rule 17 names it as
   // an example of a violation, so the sweep across both messages is narrower.
   const transmitted = JSON.stringify(record.messages);
-  for (const forbidden of ['http', '{{', 'Sarah', 'order #']) {
+  for (const forbidden of ['http', 'Sarah', 'order #']) {
     assert.equal(transmitted.includes(forbidden), false, `prompt contained ${forbidden}`);
   }
   // And nothing had to be tokenised, which is the point: the boundary in

@@ -32,7 +32,7 @@ const {
   proposalsEnabled,
   similarity
 } = require('../lib/campaigns/proposal-writer');
-const { MECHANISMS } = require('../lib/campaigns/proposal-mechanisms');
+const { MECHANISMS, selectMechanisms, DEFAULT_MECHANISM_LIMIT } = require('../lib/campaigns/proposal-mechanisms');
 const { normaliseOpportunity } = require('../lib/campaigns/opportunity-contract');
 
 // The sender's name is a BUSINESS DECISION and it has already changed once,
@@ -72,6 +72,16 @@ const DRAFTS = {
   bundle: {
     message: `${BRAND}: there is a pairing in the range worth a look, ask us for details. Reply STOP to opt out.`,
     rationale: 'Changing what is on the table is different from changing what it costs.'
+  },
+  // THE TWO PERSONALISED ARMS. Both carry variables and both state their
+  // offer, which is what the loosened copy rules exist to permit.
+  loyalty_thank_you: {
+    message: `${BRAND}: Hi {{first_name}}, {{order_count}} orders in and we appreciate you. Code {{code}} for 15% off. Reply STOP to opt out.`,
+    rationale: 'Somebody who has ordered several times has already decided about this business, and noticing costs nothing until it is redeemed.'
+  },
+  winback_personal: {
+    message: `${BRAND}: Hi {{first_name}}, it has been a while. Code {{code}} for 15% off your next one. Reply STOP to opt out.`,
+    rationale: 'The largest cohort in the list bought once and stopped, and this is the cheapest test of whether that was indifference or forgetting.'
   },
   first_reorder_incentive: {
     message: `${BRAND}: something is set aside for you, ask us and we will explain. Reply STOP to opt out.`,
@@ -180,7 +190,13 @@ test('one opportunity produces several proposals with different mechanisms', asy
 
 test('the set always contains a no-offer arm and at most one monetary arm', async () => {
   const all = Object.keys(MECHANISMS);
-  const { result } = await draft({ mechanisms: all, input: { mechanismLimit: 6 } });
+  // Ask selection what it will actually offer, rather than assuming the whole
+  // catalogue. It gates by cohort now, and this fixture is a one-time-buyer
+  // opportunity, so the loyalty arm is correctly absent and a stub naming it
+  // would be a reply to a question nobody asked.
+  const offered = selectMechanisms({ limit: 6, opportunity: opportunity() }).map(m => m.id);
+  const { result } = await draft({ mechanisms: offered, input: { mechanismLimit: 6 } });
+  assert.ok(all.length > offered.length, 'not every mechanism suits every cohort');
   const withoutOffer = result.proposals.filter(item => item.offer.kind === 'none');
   const monetary = result.proposals.filter(item => item.offer.kind === 'monetary_discount');
   assert.ok(withoutOffer.length >= 1);
@@ -188,7 +204,8 @@ test('the set always contains a no-offer arm and at most one monetary arm', asyn
 });
 
 test('the mechanisms differ in kind, not only in words: offers, costs and risks all differ', async () => {
-  const { result } = await draft({ mechanisms: Object.keys(MECHANISMS), input: { mechanismLimit: 6 } });
+  const offered = selectMechanisms({ limit: 6, opportunity: opportunity() }).map(m => m.id);
+  const { result } = await draft({ mechanisms: offered, input: { mechanismLimit: 6 } });
   const offerKinds = new Set(result.proposals.map(item => item.offer.kind));
   assert.ok(offerKinds.size >= 3, 'at least three different offer kinds, including none');
   const riskIDs = new Set(result.proposals.flatMap(item => item.risks.map(risk => risk.id)));
@@ -362,7 +379,10 @@ test('an unexpected input key is refused, because recipients are server-owned', 
 test('prose instead of JSON produces no proposals and a refusal for each mechanism', async () => {
   const { result } = await draft({ content: 'Here are some great ideas for you!' });
   assert.equal(result.returned, 0);
-  assert.equal(result.refused.length, 4);
+  // One refusal per mechanism the writer actually asked about, which is the
+  // default limit rather than a hardcoded four. That default moved from four
+  // to six so the personalised arms are always offered.
+  assert.equal(result.refused.length, DEFAULT_MECHANISM_LIMIT);
   assert.ok(result.refused.every(item => item.reasons.includes('model_wrote_nothing_for_this_mechanism')));
 });
 
@@ -439,16 +459,29 @@ test('a cohort with no saved segment is readable but marked as needing one', () 
 
 // ── Offers stay out of the copy ─────────────────────────────────────────────
 
-test('an offer is structured, and the copy never states its terms', async () => {
-  const { result } = await draft({ mechanisms: Object.keys(MECHANISMS), input: { mechanismLimit: 6 } });
+test('an offer is structured, and the copy states only what it is allowed to', async () => {
+  // This asserted statedInCopy === false everywhere and that no copy contained
+  // a percentage. Both were true and neither is now: two mechanisms exist
+  // specifically to say "15% off with this code". What did NOT change is that a
+  // human still decides the terms, and that a currency amount and the carrier
+  // trigger words are still refused.
+  const offered = selectMechanisms({ limit: 6, opportunity: opportunity() }).map(m => m.id);
+  const { result } = await draft({ mechanisms: offered, input: { mechanismLimit: 6 } });
   for (const proposal of result.proposals) {
-    assert.equal(proposal.offer.statedInCopy, false);
-    if (proposal.offer.kind === 'none') continue;
+    if (proposal.offer.kind === 'none') {
+      assert.equal(proposal.offer.statedInCopy, false);
+      continue;
+    }
     assert.equal(proposal.offer.appliedBy, 'human_at_review');
     assert.ok(proposal.offer.termsRequiredFromHuman.length >= 3);
-    // The validator would reject these anyway; asserted so a future prompt
-    // change that starts writing them fails here rather than in review.
-    assert.equal(/%|\$|£|€|\bfree\b|\bdiscount\b/i.test(proposal.copy.text), false);
+    // Still refused, in every arm, stated offer or not.
+    assert.equal(/\$|£|€|\bfree\b|\bdiscount\b/i.test(proposal.copy.text), false,
+      `${proposal.mechanism} used a currency amount or a carrier trigger word`);
+    // An arm that says it states its offer must actually hand over a code.
+    if (proposal.offer.statedInCopy) {
+      assert.match(proposal.copy.text, /\{\{code\}\}/,
+        `${proposal.mechanism} announces an offer with no code to use`);
+    }
   }
 });
 
@@ -459,10 +492,15 @@ test('a no-offer proposal says out loud that it is the arm without one', () => {
 });
 
 test('a monetary proposal carries the discount-training risk where a reviewer will read it', async () => {
-  const { result } = await draft({ mechanisms: Object.keys(MECHANISMS), input: { mechanismLimit: 6 } });
-  const incentive = result.proposals.find(item => item.mechanism === 'first_reorder_incentive');
-  assert.ok(incentive, 'the incentive arm must be present at limit six');
-  assert.ok(incentive.risks.some(risk => risk.id === 'discount_trains_waiting'));
+  // Which monetary arm is offered depends on the cohort now, so the test asks
+  // rather than naming one. What must hold for whichever arrives is that the
+  // cost it defers onto later orders is stated in the proposal a person reads.
+  const offered = selectMechanisms({ limit: 6, opportunity: opportunity() }).map(m => m.id);
+  const { result } = await draft({ mechanisms: offered, input: { mechanismLimit: 6 } });
+  const monetary = result.proposals.filter(item => item.offer.kind === 'monetary_discount');
+  assert.equal(monetary.length, 1, 'exactly one arm may cost margin');
+  assert.ok(monetary[0].risks.some(risk => risk.id === 'discount_trains_waiting'),
+    `${monetary[0].mechanism} hides the cost of training people to wait`);
 });
 
 // ── It is a proposal, and it says so ────────────────────────────────────────

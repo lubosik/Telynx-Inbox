@@ -64,7 +64,15 @@ test('the prompt states the rules the validator actually enforces', () => {
     'capital letters',
     'fr33',
     's@ve',
-    'merge field'
+    // The merge-field rule is now an allowlist rather than a ban, so the
+    // prompt names the four variables instead of the phrase "merge field".
+    // The coverage property is unchanged: the model must be told the thing the
+    // validator will reject on, which is now an unrecognised placeholder.
+    '{{first_name}}',
+    '{{code}}',
+    'literal text',
+    'currency amount',
+    'watching or tracking'
   ]) {
     assert.ok(prompt.includes(phrase), `the prompt rules never mention "${phrase}"`);
   }

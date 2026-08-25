@@ -29,7 +29,9 @@ const {
   OFFER_APPLIED_BY,
   assertCatalogueIntegrity,
   mechanismById,
-  selectMechanisms
+  selectMechanisms,
+  MIN_MECHANISM_LIMIT,
+  DEFAULT_MECHANISM_LIMIT
 } = require('../lib/campaigns/proposal-mechanisms');
 
 /** A deep, mutable copy, so a test can break one field and re-run integrity. */
@@ -81,9 +83,19 @@ test('selection is deterministic and honours exclusions', () => {
 });
 
 test('the limit is clamped rather than trusted', () => {
-  assert.equal(selectMechanisms({ limit: 0 }).length, 2);
-  assert.equal(selectMechanisms({ limit: 99 }).length, MECHANISM_IDS.length);
-  assert.equal(selectMechanisms({ limit: 'four' }).length, 4);
+  assert.equal(selectMechanisms({ limit: 0 }).length, MIN_MECHANISM_LIMIT,
+    'zero clamps up to the minimum');
+  // A non-numeric limit falls back to the default rather than throwing.
+  assert.equal(selectMechanisms({ limit: 'four' }).length, DEFAULT_MECHANISM_LIMIT);
+
+  // A huge limit no longer returns the whole catalogue, and should not: only
+  // one arm may cost margin, so the three monetary mechanisms cannot all be
+  // offered at once. What the clamp guarantees is that asking for 99 is not an
+  // error and never exceeds what exists.
+  const everything = selectMechanisms({ limit: 99 });
+  assert.ok(everything.length <= MECHANISM_IDS.length);
+  assert.ok(everything.length >= 2);
+  assert.equal(everything.filter(m => m.offer?.kind === 'monetary_discount').length, 1);
 });
 
 // ── The risk that pays for itself later ─────────────────────────────────────
@@ -133,13 +145,58 @@ test('MUTATION: an offer a model could apply makes the catalogue refuse to load'
   assert.throws(() => assertCatalogueIntegrity(broken), /may only be applied by/);
 });
 
-test('MUTATION: an offer marked as stated in copy makes the catalogue refuse to load', () => {
-  // The copy validator rejects a price, a percentage, a code and the word
-  // "free", so a mechanism claiming its terms are in the message is a
-  // mechanism whose every draft would be discarded.
+test('MUTATION: an offer stated in copy with no code to give makes the catalogue refuse to load', () => {
+  // THIS ASSERTION USED TO BE THE OPPOSITE. It required statedInCopy to be
+  // false everywhere, because "the copy validator rejects a price, a
+  // percentage, a code and the word free". A percentage and a code both pass
+  // now, so the blanket version had become a statement about a world that no
+  // longer exists.
+  //
+  // What replaces it is narrower and still real: a mechanism may state its
+  // offer, but a message that announces a discount and hands over no code is
+  // an advert for something the customer cannot use.
   const broken = mutableCatalogue();
   broken.bundle.offer.statedInCopy = true;
-  assert.throws(() => assertCatalogueIntegrity(broken), /never stated in drafted copy/);
+  assert.throws(() => assertCatalogueIntegrity(broken), /never asks for \{\{code\}\}/);
+
+  // And the two that DO state their offer both ask for one, so they load.
+  assert.doesNotThrow(() => assertCatalogueIntegrity());
+});
+
+test('a mechanism that names a cohort is only offered for that cohort', () => {
+  // A thank-you for four orders sent to somebody who ordered once renders as
+  // "1 order in and we appreciate you", which is faintly insulting. The
+  // mirror case reads as a business that has lost track of a regular.
+  const { selectMechanisms } = require('../lib/campaigns/proposal-mechanisms');
+  const single = selectMechanisms({ limit: 6, opportunity: { cohort: { key: 'one_time_buyers' } } })
+    .map(m => m.id);
+  assert.ok(single.includes('winback_personal'));
+  assert.ok(!single.includes('loyalty_thank_you'));
+
+  const repeat = selectMechanisms({ limit: 6, opportunity: { cohort: { key: 'repeat_buyers_slowing' } } })
+    .map(m => m.id);
+  assert.ok(repeat.includes('loyalty_thank_you'));
+  assert.ok(!repeat.includes('winback_personal'));
+});
+
+test('AT MOST ONE ARM COSTS MARGIN, however many monetary mechanisms exist', () => {
+  // This used to be true for free: the catalogue held exactly one monetary
+  // mechanism. It now holds three, and without the cap the reviewer is handed
+  // three flavours of discount and one control, which answers "which discount"
+  // and never "does this cohort need one at all".
+  const { selectMechanisms, MECHANISMS } = require('../lib/campaigns/proposal-mechanisms');
+  const monetaryInCatalogue = Object.values(MECHANISMS)
+    .filter(m => m.offer?.kind === 'monetary_discount');
+  assert.ok(monetaryInCatalogue.length >= 3, 'the cap is only meaningful with several to choose from');
+
+  for (const key of ['one_time_buyers', 'repeat_buyers_slowing']) {
+    for (const limit of [4, 6, 8]) {
+      const picked = selectMechanisms({ limit, opportunity: { cohort: { key } } });
+      const monetary = picked.filter(m => m.offer?.kind === 'monetary_discount');
+      assert.ok(monetary.length <= 1,
+        `${key} at limit ${limit} offered ${monetary.length} discounts`);
+    }
+  }
 });
 
 test('MUTATION: removing the control makes the catalogue refuse to load', () => {
@@ -150,13 +207,22 @@ test('MUTATION: removing the control makes the catalogue refuse to load', () => 
 
 // ── Offers, costs and evidence ──────────────────────────────────────────────
 
-test('every offer says what a human must still supply, and none of it is in the copy', () => {
+test('every offer says what a human must still supply, whether or not the copy states it', () => {
   for (const mechanism of Object.values(MECHANISMS)) {
     if (!mechanism.offer) continue;
     assert.equal(mechanism.offer.appliedBy, OFFER_APPLIED_BY);
-    assert.equal(mechanism.offer.statedInCopy, false);
+    // statedInCopy is a per-mechanism decision now rather than a constant
+    // false. What is NOT negotiable is that a human still decides the terms:
+    // a message may say "15% off with this code" and the percentage, the
+    // expiry and the margin behind it are still somebody's call, made before
+    // approval, in the store as well as in the message.
+    assert.equal(typeof mechanism.offer.statedInCopy, 'boolean');
     assert.ok(mechanism.offer.termsRequiredFromHuman.length >= 3,
       `${mechanism.id} must list what the reviewer has to decide`);
+    if (mechanism.offer.statedInCopy) {
+      assert.match(mechanism.copyDirective, /\{\{code\}\}/,
+        `${mechanism.id} states an offer, so it must hand over a code`);
+    }
   }
 });
 

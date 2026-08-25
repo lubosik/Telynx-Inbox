@@ -162,7 +162,10 @@ test('generateCode is deterministic: same seed, same code', () => {
 
 test('every generated code passes merge-fields sanitiseCode, 500 codes with and without prefixes', () => {
   for (let i = 0; i < 500; i += 1) {
-    const prefix = i % 3 === 0 ? '' : (i % 3 === 1 ? 'vp' : 'save5');
+    // Not "save5": "save" is a carrier-filter term, so every code built on it
+    // is refused by the copy rules. That is now a fast, named error rather
+    // than an exhausted retry loop, and it has its own test below.
+    const prefix = i % 3 === 0 ? '' : (i % 3 === 1 ? 'vp' : 'vin');
     const code = generateCode({ prefix, seed: `shape:${i}` });
     assert.match(code, /^[a-z0-9-]{4,16}$/);
     assert.equal(sanitiseCode(code), code, `sanitiseCode must accept ${code} unchanged or the recipient is dropped`);
@@ -255,4 +258,58 @@ test('deleteCoupon passes force through and validates the id', async () => {
 
 test('BATCH_LIMIT is the WooCommerce hard cap of 100', () => {
   assert.equal(BATCH_LIMIT, 100);
+});
+
+test('A GENERATED CODE IS SAFE TO PUT IN A MESSAGE', () => {
+  // FOUND AGAINST REAL DATA, not imagined. Rendering a win-back for 200 real
+  // customers produced "vin-6m10cc5sl3" for one of them. The substring "10cc"
+  // matches the dose-measurement pattern in the copy rules, the rendered
+  // message failed validation, and that customer was silently dropped.
+  //
+  // Ten random base36 characters produce "10cc", "5ml" and "20mg" at a low but
+  // entirely reachable rate. Measured before the fix: eight in three thousand.
+  // At five hundred recipients it happens, and it happens invisibly.
+  const { validateCopy } = require('../lib/campaigns/copy-validator');
+  const { RULES } = require('../lib/campaigns/copy-rules');
+  const brandName = RULES.brand.defaultName;
+
+  let unsafe = 0;
+  for (let index = 0; index < 3000; index += 1) {
+    const code = generateCode({ prefix: 'vin', seed: `winback-${index}` });
+    const message = `${brandName}. Hi Mark, it has been a while. Use ${code} for 15% off your next order. ${RULES.optOut.exactSuffix}`;
+    if (!validateCopy(message, { brandName, approvedProductCodes: [code] }).ok) unsafe += 1;
+  }
+  assert.equal(unsafe, 0, 'a generated code must never be the reason a message is refused');
+});
+
+test('the exact code that caused it is no longer produced for that customer', () => {
+  // Regression, pinned to the real seed. The dose-shaped code was the first
+  // hash for this input, so this only passes because the rehash happens.
+  const code = generateCode({ prefix: 'vin', seed: 'winback-+18563790172' });
+  assert.doesNotMatch(code, /\d+(?:mg|mcg|ug|iu|ml|cc)\b/i);
+});
+
+test('rehashing for safety does not cost determinism', () => {
+  // The attempt counter is part of the hash input, so a seed that needed three
+  // attempts needs three attempts every time. Re-running a campaign has to
+  // give somebody the code they already have, not a second one.
+  for (const seed of ['winback-1', 'winback-99', 'loyalty-4']) {
+    assert.equal(generateCode({ prefix: 'vin', seed }), generateCode({ prefix: 'vin', seed }));
+  }
+});
+
+
+test('a prefix carrying a banned word is refused immediately, with the real reason', () => {
+  // Found by this file's own fixture, which used "save5". Every code built on
+  // it is unusable because "save" is a carrier-filter term, and the honest
+  // failure is to say so rather than to hash twenty-four times and report that
+  // no code could be generated, which sends somebody looking at the generator.
+  for (const prefix of ['save5', 'free', 'cash']) {
+    assert.throws(
+      () => generateCode({ prefix, seed: 'anything' }),
+      (error) => error.code === 'COUPON_PREFIX_UNSAFE',
+      `"${prefix}" should be refused up front`
+    );
+  }
+  assert.doesNotThrow(() => generateCode({ prefix: 'vin', seed: 'anything' }));
 });
