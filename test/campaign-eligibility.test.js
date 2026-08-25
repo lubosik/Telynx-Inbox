@@ -153,3 +153,93 @@ test('single-row RPC responses normalize PostgREST object and one-item array sha
   assert.deepEqual(singleRPCRow([{ id: 'one' }]), { id: 'one' });
   assert.equal(singleRPCRow([]), null);
 });
+
+// GoHighLevel returns `dndSettings` as per-channel OVERRIDES, so an empty
+// object means "no override, the global flag applies". Requiring an explicit
+// SMS status as well meant every contact in this account read as unknown:
+// measured across the whole of GHL, 929 contacts, all `dnd: false`, none with
+// channel settings. A campaign targeting five hundred people would have sent to
+// nobody.
+//
+// These fix the boundary in both directions. The first is the change. The rest
+// are what must not move because of it.
+test('an explicit dnd false with no channel override is contactable', () => {
+  const result = evaluateRecipient({
+    phone: '+15551230000',
+    contactDnd: false,
+    smsDndStatus: null,          // GHL sent dndSettings: {}
+    dndSyncedAt: new Date().toISOString(),
+    now: new Date()
+  });
+  // Asserted as "cleared the DND gate", not as "eligible". Consent is a later
+  // and separate check, so demanding eligibility here would make this test fail
+  // for a reason that has nothing to do with what it is guarding.
+  assert.notEqual(result.reason, 'dnd_unknown',
+    'no override plus an explicit false is an answer, not a shrug');
+  assert.notEqual(result.reason, 'dnd');
+});
+
+test('DND TRUE IS STILL REFUSED, whatever the channel says', () => {
+  for (const smsDndStatus of [null, '', 'inactive', 'active', 'permanent']) {
+    const result = evaluateRecipient({
+      phone: '+15551230000',
+      contactDnd: true,
+      smsDndStatus,
+      dndSyncedAt: new Date().toISOString(),
+      now: new Date()
+    });
+    assert.equal(result.eligible, false, `dnd true with channel ${JSON.stringify(smsDndStatus)} must be refused`);
+    assert.equal(result.reason, 'dnd');
+  }
+});
+
+test('a channel that says do not contact is still refused even when the global flag is false', () => {
+  for (const smsDndStatus of ['active', 'permanent']) {
+    const result = evaluateRecipient({
+      phone: '+15551230000',
+      contactDnd: false,
+      smsDndStatus,
+      dndSyncedAt: new Date().toISOString(),
+      now: new Date()
+    });
+    assert.equal(result.eligible, false, `channel ${smsDndStatus} must be refused`);
+    assert.equal(result.reason, 'dnd');
+  }
+});
+
+test('no answer at all is still unknown, and so is a stale one', () => {
+  const now = new Date();
+  // No boolean: GHL was asked and gave nothing.
+  assert.equal(evaluateRecipient({
+    phone: '+15551230000', contactDnd: null, smsDndStatus: null,
+    dndSyncedAt: now.toISOString(), now
+  }).reason, 'dnd_unknown');
+
+  // Never synced.
+  assert.equal(evaluateRecipient({
+    phone: '+15551230000', contactDnd: false, smsDndStatus: null,
+    dndSyncedAt: null, now
+  }).reason, 'dnd_unknown');
+
+  // Synced two days ago against a 24 hour window.
+  assert.equal(evaluateRecipient({
+    phone: '+15551230000', contactDnd: false, smsDndStatus: null,
+    dndSyncedAt: new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString(),
+    dndMaxAgeHours: 24, now
+  }).reason, 'dnd_unknown');
+});
+
+test('the do-not-contact list still outranks a clean DND answer', () => {
+  // Suppression is checked before DND, so somebody blocked by hand is refused
+  // even when GHL says they are perfectly contactable.
+  const result = evaluateRecipient({
+    phone: '+15551230000',
+    contactDnd: false,
+    smsDndStatus: null,
+    dndSyncedAt: new Date().toISOString(),
+    authoritativeSuppressionReason: 'authoritative_suppression',
+    now: new Date()
+  });
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, 'authoritative_suppression');
+});

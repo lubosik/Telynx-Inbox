@@ -43,7 +43,10 @@ function dndState(contact, observedAt) {
   const smsStatus = ['active', 'inactive', 'permanent'].includes(String(rawSms || '').toLowerCase())
     ? String(rawSms).toLowerCase()
     : null;
-  const complete = globalDnd !== null && smsStatus !== null;
+  // Complete when GHL gave an explicit global flag. An absent per-channel
+  // status means no override, which is an answer. A PARTIAL answer, meaning no
+  // boolean at all, is still not freshness.
+  const complete = globalDnd !== null;
   return {
     ghl_dnd: globalDnd,
     ghl_sms_dnd_status: smsStatus,
