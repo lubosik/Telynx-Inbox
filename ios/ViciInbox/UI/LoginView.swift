@@ -240,3 +240,80 @@ struct MintDriftBackground: View {
         }
     }
 }
+
+// MARK: - Coming back in
+
+/// The moment between signing in and the app appearing.
+///
+/// WHY THIS EXISTS AT ALL
+///   That moment was a bare spinner, gone in whatever fraction of a second the
+///   session check took. The work of signing in landed on a blank screen, which
+///   is the one point in the app where a person is waiting and looking directly
+///   at it.
+///
+/// WHY IT DOES NOT TRAP ANYBODY
+///   It holds for a beat and then continues on its own. A screen that REQUIRES
+///   a tap every single launch is a toll, and it would be paid most often by the
+///   person opening the app to answer a customer. The button is there for
+///   anybody who would rather not wait, not as the only way through.
+struct WelcomeBackView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let name: String?
+    let onContinue: () -> Void
+
+    /// Long enough to register as a moment rather than a flash, short enough
+    /// that somebody opening the app in a hurry does not resent it.
+    private static let hold: Duration = .seconds(1.8)
+
+    @State private var hasAppeared = false
+
+    var body: some View {
+        ZStack {
+            MintDriftBackground(isStatic: reduceMotion)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 46, weight: .light))
+                    .foregroundStyle(ViciTheme.tint)
+                    .scaleEffect(hasAppeared ? 1 : 0.85)
+                    .opacity(hasAppeared ? 1 : 0)
+
+                VStack(spacing: 6) {
+                    Text(greeting)
+                        .font(.title2.weight(.semibold))
+                    Text("Getting your inbox ready")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .opacity(hasAppeared ? 1 : 0)
+                .offset(y: hasAppeared ? 0 : 8)
+
+                Button("Continue", action: onContinue)
+                    .buttonStyle(.borderedProminent)
+                    .tint(ViciTheme.tint)
+                    .padding(.top, 6)
+                    .opacity(hasAppeared ? 1 : 0)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 32)
+            .animation(.easeOut(duration: 0.45), value: hasAppeared)
+        }
+        .task {
+            hasAppeared = true
+            try? await Task.sleep(for: Self.hold)
+            onContinue()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(greeting)
+    }
+
+    /// First name only. "Welcome back, Lubosi Kongwa" reads like a bank.
+    private var greeting: String {
+        guard let first = name?.split(separator: " ").first, !first.isEmpty else {
+            return "Welcome back"
+        }
+        return "Welcome back, \(first)"
+    }
+}

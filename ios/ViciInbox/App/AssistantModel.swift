@@ -32,6 +32,25 @@ final class AssistantModel: ObservableObject {
 
     @Published private(set) var threads: [AssistantThreadSummary] = []
     @Published private(set) var openThreadID: String?
+
+    /// True when a conversation is on screen that is NOT being saved.
+    ///
+    /// WHY THIS EXISTS
+    ///   Threads shipped as a hard dependency: if the store could not be
+    ///   reached, New chat failed, `openThreadID` stayed nil, and the person was
+    ///   left on the list with no route to the assistant at all. An unapplied
+    ///   migration therefore bricked the whole feature, and so would a database
+    ///   blip.
+    ///
+    ///   Talking to the assistant does not require anywhere to put the
+    ///   transcript. When the store is unreachable the conversation opens
+    ///   anyway and history is kept in memory for the session, which is exactly
+    ///   how it worked before threads existed. The screen says it is not being
+    ///   saved rather than pretending otherwise.
+    @Published private(set) var isUnsavedConversationOpen = false
+
+    /// A conversation is on screen either way.
+    var isConversationOpen: Bool { openThreadID != nil || isUnsavedConversationOpen }
     @Published private(set) var isLoadingThreads = false
     /// Set when the last answer could not be filed. The operator still received
     /// it, so this is a note rather than an error.
@@ -116,6 +135,7 @@ final class AssistantModel: ObservableObject {
             let detail = try await threadAPI.detail(id)
             guard generation == threadGeneration, !callIsActive else { return }
             openThreadID = detail.thread.id
+            isUnsavedConversationOpen = false
             adoptThread(detail.thread.id)
             lastAnswerWasSaved = true
             failureMessage = nil
@@ -145,6 +165,7 @@ final class AssistantModel: ObservableObject {
             let created = try await threadAPI.create()
             guard generation == threadGeneration, !callIsActive else { return }
             openThreadID = created.id
+            isUnsavedConversationOpen = false
             adoptThread(created.id)
             transcript.removeAll(keepingCapacity: false)
             draft = ""
@@ -153,8 +174,21 @@ final class AssistantModel: ObservableObject {
             threads.insert(created, at: 0)
         } catch {
             guard generation == threadGeneration, !callIsActive else { return }
-            failureMessage = "A new conversation could not be started."
+            // Open it anyway, unsaved. Being unable to store a conversation is
+            // not a reason to refuse to have one.
+            openUnsavedConversation()
         }
+    }
+
+    /// Opens a conversation with nowhere to persist it.
+    func openUnsavedConversation() {
+        openThreadID = nil
+        isUnsavedConversationOpen = true
+        adoptThread(nil)
+        transcript.removeAll(keepingCapacity: false)
+        draft = ""
+        lastAnswerWasSaved = false
+        failureMessage = nil
     }
 
     func renameThread(id: String, title: String) async {
@@ -204,6 +238,7 @@ final class AssistantModel: ObservableObject {
     /// changes: closing a screen is not an instruction to destroy anything.
     func closeThread() {
         openThreadID = nil
+        isUnsavedConversationOpen = false
         adoptThread(nil)
         cancelResponse(resetSession: false)
         transcript.removeAll(keepingCapacity: false)

@@ -66,7 +66,7 @@ struct AssistantView: View {
             // composer and the orb belong to one conversation and putting them
             // over a list of all of them makes it ambiguous which one a
             // question is about.
-            if model.openThreadID == nil {
+            if !model.isConversationOpen {
                 threadList
             } else {
                 conversation
@@ -77,7 +77,7 @@ struct AssistantView: View {
             }
         }
         .toolbar { assistantToolbar }
-        .navigationTitle(model.openThreadID == nil ? "Assistant" : openThreadTitle)
+        .navigationTitle(model.isConversationOpen ? openThreadTitle : "Assistant")
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
         .task {
@@ -203,13 +203,16 @@ struct AssistantView: View {
 
     private var openThreadTitle: String {
         guard let openThreadID = model.openThreadID,
-              let thread = model.threads.first(where: { $0.id == openThreadID }) else { return "Chat" }
+              let thread = model.threads.first(where: { $0.id == openThreadID }) else {
+            // An unsaved conversation has no stored title to show.
+            return model.isUnsavedConversationOpen ? "Chat (not saved)" : "Chat"
+        }
         return thread.displayTitle
     }
 
     @ToolbarContentBuilder
     private var assistantToolbar: some ToolbarContent {
-        if model.openThreadID == nil {
+        if !model.isConversationOpen {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     guard hasClientAccess, !callIsActive else { return }

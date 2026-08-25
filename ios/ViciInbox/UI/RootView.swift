@@ -29,6 +29,11 @@ struct RootView: View {
     /// point of not signing them in automatically.
     @State private var signInPrefillEmail = ""
 
+    /// Shown for a beat after a sign-in lands, never on a session that was
+    /// already open. Opening the app to answer a customer must not cost a
+    /// welcome screen every time.
+    @State private var showingWelcomeBack = false
+
     /// An invitation must never sit in front of a ringing or connected call.
     /// Nothing else on this screen outranks the phone.
     private var isCallOnScreen: Bool {
@@ -77,6 +82,11 @@ struct RootView: View {
                 }
             } else if session.isCheckingSession {
                 ProgressView().controlSize(.large)
+            } else if showingWelcomeBack, session.isSignedIn {
+                WelcomeBackView(name: session.currentUser?.name) {
+                    showingWelcomeBack = false
+                }
+                .transition(.opacity)
             } else if !session.isSignedIn {
                 // `id` forces a fresh LoginView when an invitation has just
                 // supplied an address. Without it SwiftUI can reuse the view
@@ -170,10 +180,14 @@ struct RootView: View {
         .onChange(of: session.isSignedIn) { signedIn in
             if signedIn {
                 signInPrefillEmail = ""
+                // Only on the transition into signed in. A relaunch that
+                // restores an existing session goes straight to the app.
+                showingWelcomeBack = true
                 synchronizeAssistantNavigationSession()
                 presentNextExperienceIfReady()
             } else {
                 showingPremiumWelcome = false
+                showingWelcomeBack = false
                 assistantSpeech.stopAll()
                 assistantNavigation.updateAuthenticatedSession(userID: nil, access: nil)
                 router.resetForSignOut()

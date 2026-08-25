@@ -1220,3 +1220,35 @@ test('the migration is transaction wrapped, re-runnable, and reloads the schema 
   assert.match(sql, /REVOKE ALL ON TABLE public\.sms_assistant_threads\s+FROM PUBLIC, anon, authenticated/);
   assert.match(sql, /REVOKE ALL ON TABLE public\.sms_assistant_messages FROM PUBLIC, anon, authenticated/);
 });
+
+test('AN UNREACHABLE THREAD STORE MUST NOT COST YOU THE ASSISTANT', () => {
+  // Shipped and hit within hours: threads were a hard dependency, so with the
+  // migration unapplied New chat failed, openThreadID stayed nil, and the
+  // person was left on the list with no route to the assistant at all. An
+  // unapplied migration bricked the feature, and a database blip would have
+  // done the same.
+  //
+  // Talking to the assistant does not require anywhere to put the transcript.
+  const model = fs.readFileSync(path.join(ROOT, 'ios/ViciInbox/App/AssistantModel.swift'), 'utf8');
+  const view = fs.readFileSync(path.join(ROOT, 'ios/ViciInbox/UI/AssistantView.swift'), 'utf8');
+
+  // A failed create opens the conversation anyway rather than only reporting.
+  const startNew = model.slice(
+    model.indexOf('func startNewThread()'),
+    model.indexOf('func openUnsavedConversation()')
+  );
+  assert.ok(startNew.length > 0, 'startNewThread must be findable');
+  const catchAt = startNew.indexOf('} catch {');
+  const fallbackAt = startNew.indexOf('openUnsavedConversation()', catchAt);
+  assert.ok(catchAt >= 0, 'the create must be guarded');
+  assert.ok(fallbackAt > catchAt, 'a failed create must open an unsaved conversation, not just report');
+
+  // And the screen must show the conversation, which it cannot do while it
+  // decides what to render from the thread id alone.
+  assert.match(view, /if !model\.isConversationOpen \{/);
+  assert.match(model, /var isConversationOpen: Bool \{ openThreadID != nil \|\| isUnsavedConversationOpen \}/);
+
+  // The person is told, rather than left believing it is saved.
+  assert.match(model, /lastAnswerWasSaved = false/);
+  assert.match(view, /Chat \(not saved\)/);
+});
