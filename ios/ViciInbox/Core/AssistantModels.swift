@@ -229,6 +229,31 @@ struct AssistantReasoningOperations {
     let reset: () -> Void
 }
 
+/// The thread endpoints, as a seam.
+///
+/// Same shape and same reason as `AssistantReasoningOperations`: a screen test
+/// should be able to open, rename and delete conversations without a network
+/// stack, and `AssistantModel` should not hold a reference to `APIClient` that
+/// a test has to work around.
+@MainActor
+struct AssistantThreadOperations {
+    let list: () async throws -> [AssistantThreadSummary]
+    let detail: (String) async throws -> AssistantThreadDetail
+    let create: () async throws -> AssistantThreadSummary
+    let rename: (String, String) async throws -> AssistantThreadSummary
+    let remove: (String) async throws -> Void
+
+    static func live() -> AssistantThreadOperations {
+        AssistantThreadOperations(
+            list: { try await APIClient.shared.assistantThreads() },
+            detail: { id in try await APIClient.shared.assistantThread(id: id) },
+            create: { try await APIClient.shared.createAssistantThread() },
+            rename: { id, title in try await APIClient.shared.renameAssistantThread(id: id, title: title) },
+            remove: { id in try await APIClient.shared.deleteAssistantThread(id: id) }
+        )
+    }
+}
+
 enum AssistantUnavailableReason: Equatable {
     case requiresNewerOS(required: Int, current: Int)
     case unsupportedMode
@@ -380,6 +405,86 @@ struct AssistantTranscriptEntry: Identifiable, Equatable {
     }
 }
 
+// MARK: - Threads
+
+/// One saved conversation in the list.
+///
+/// The dates arrive as ISO 8601 strings and are decoded here rather than by a
+/// date strategy on the shared decoder, because that decoder is shared with
+/// every other endpoint in the app and changing its strategy to suit this
+/// screen would quietly re-interpret dates everywhere else.
+struct AssistantThreadSummary: Codable, Hashable, Identifiable {
+    let id: String
+    let title: String?
+    let preview: String?
+    let lastMessageAt: String?
+    let createdAt: String?
+
+    /// What the row says when the thread has no name yet. A thread is named by
+    /// its first question, so this is only ever seen on one that was opened and
+    /// not yet used.
+    var displayTitle: String {
+        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
+        if let preview, !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return preview }
+        return "New chat"
+    }
+
+    var sortDate: Date {
+        AssistantThreadSummary.parse(lastMessageAt) ?? AssistantThreadSummary.parse(createdAt) ?? .distantPast
+    }
+
+    static func parse(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        // Two formatters, because Postgres emits fractional seconds only when
+        // they are non zero. A single formatter returns nil for half the rows,
+        // and a nil date sorts to distantPast, which puts the thread the
+        // operator just used at the bottom of their own list.
+        if let withFraction = ISO8601DateFormatter.assistantFractional.date(from: value) { return withFraction }
+        return ISO8601DateFormatter.assistantPlain.date(from: value)
+    }
+}
+
+extension ISO8601DateFormatter {
+    static let assistantFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static let assistantPlain: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+}
+
+/// One stored turn inside an open thread.
+struct AssistantThreadMessage: Codable, Hashable, Identifiable {
+    let id: String
+    let role: String
+    let content: String
+    let toolsUsed: [String]?
+    let createdAt: String?
+
+    var isAssistant: Bool { role == "assistant" }
+}
+
+/// `GET /api/assistant/threads/:id`.
+struct AssistantThreadDetail: Codable, Hashable {
+    let thread: AssistantThreadSummary
+    let messages: [AssistantThreadMessage]
+}
+
+/// `GET /api/assistant/threads`.
+struct AssistantThreadListResponse: Codable, Hashable {
+    let threads: [AssistantThreadSummary]
+}
+
+/// `POST /api/assistant/threads` and `PATCH /api/assistant/threads/:id`.
+struct AssistantThreadResponse: Codable, Hashable {
+    let thread: AssistantThreadSummary
+}
+
 // MARK: - Server reasoning wire types
 
 /// One remembered turn, sent back so a follow-up resolves against what was
@@ -393,6 +498,12 @@ struct AssistantConversationTurn: Codable, Hashable {
 /// `POST /api/assistant/converse`.
 struct AssistantConverseResponse: Codable, Hashable {
     let reply: String
+    /// Echoed back when the question belonged to a thread.
+    let threadId: String?
+    /// False when the answer could not be filed. The operator still gets the
+    /// answer, so this exists to stop the app claiming it was kept when it was
+    /// not. Absent on the unsaved path, where there was nothing to keep.
+    let saved: Bool?
     /// Which verified lookups produced the answer. Empty means the model
     /// answered from the conversation itself, which is legitimate for a
     /// follow-up and is also the fastest path.

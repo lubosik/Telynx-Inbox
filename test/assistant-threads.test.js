@@ -1047,6 +1047,154 @@ test('no em dash anywhere in the thread feature, code or copy', () => {
   assert.equal(threadBlock.includes(EM_DASH), false, 'no em dash in the thread routes');
 });
 
+// ── iOS ─────────────────────────────────────────────────────────────────────
+//
+// Text assertions, like the other ios-*.test.js files here, and for the same
+// reason: this machine runs macOS 13 and the app needs Xcode 26, so `swiftc
+// -parse` is the only local check and it sees syntax and nothing else. These
+// cannot prove the app compiles. CI does that. What they can do is stop a
+// property this feature depends on being quietly removed.
+
+const swift = file => fs.readFileSync(path.join(ROOT, 'ios', file), 'utf8');
+
+test('the reasoner carries a thread id and no longer holds a transcript', () => {
+  const source = swift('ViciInbox/App/OnDeviceAssistantReasoner.swift');
+  const reasoner = source.slice(source.indexOf('final class ServerAssistantReasoner'));
+  assert.ok(reasoner.length > 400, 'ServerAssistantReasoner must be found');
+
+  assert.match(reasoner, /private\(set\) var threadID: String\?/);
+  // The array is gone, not merely unused. While it exists, somebody will send it.
+  assert.equal(/var history: \[AssistantConversationTurn\]/.test(reasoner), false,
+    'the client must not keep its own copy of the transcript');
+  assert.equal(/history\.append/.test(reasoner), false);
+  assert.equal(/maxRememberedTurns/.test(reasoner), false);
+
+  // And the parameter that used to smuggle it is sent empty.
+  assert.match(reasoner, /history: \[\],/);
+  assert.match(reasoner, /threadID: threadID,/);
+});
+
+test('the app never claims an unsaved answer was kept', () => {
+  const reasoner = swift('ViciInbox/App/OnDeviceAssistantReasoner.swift');
+  // Absent means there was no thread, which is not a failed save. Only an
+  // explicit false is. `?? false` here would put a warning on every answer in
+  // the unsaved path.
+  assert.match(reasoner, /lastAnswerWasSaved = answer\.saved \?\? true/);
+
+  const model = swift('ViciInbox/App/AssistantModel.swift');
+  assert.match(model, /lastAnswerWasSaved = openThreadID == nil \? true : readAnswerWasSaved\(\)/);
+
+  const view = swift('ViciInbox/UI/AssistantView.swift');
+  assert.match(view, /if !model\.lastAnswerWasSaved \{\s*\n\s*AssistantUnsavedNotice\(\)/);
+  assert.match(view, /This answer could not be saved to the chat\./);
+});
+
+test('the thread list is purged with everything else that is private', () => {
+  const model = swift('ViciInbox/App/AssistantModel.swift');
+  const purge = model.slice(
+    model.indexOf('private func clearPrivateText()'),
+    model.indexOf('private func makeRoomForNextExchange')
+  );
+  assert.ok(purge.length > 200, 'clearPrivateText must be found');
+  // A thread title is the operator's first question in full. A list of them
+  // behind the app switcher is a summary of what the business is worried about.
+  assert.match(purge, /threads\.removeAll\(keepingCapacity: false\)/);
+  assert.match(purge, /openThreadID = nil/);
+  assert.match(purge, /transcript\.removeAll\(keepingCapacity: false\)/);
+});
+
+test('the assistant tab shows a list of chats, and the open one shows its messages', () => {
+  const view = swift('ViciInbox/UI/AssistantView.swift');
+
+  // A list, and a way to start one.
+  assert.match(view, /private var threadList: some View/);
+  assert.match(view, /Label\("New chat", systemImage: "square\.and\.pencil"\)/);
+  assert.match(view, /await model\.startNewThread\(\)/);
+
+  // Tap to resume.
+  assert.match(view, /await model\.openThread\(id: thread\.id\)/);
+
+  // Title, when, and first line.
+  assert.match(view, /Text\(thread\.displayTitle\)/);
+  assert.match(view, /if let preview = thread\.preview/);
+  assert.match(view, /if let when \{/);
+
+  // Rename in the row, not in a sheet.
+  assert.match(view, /TextField\("Name this chat", text: \$renameDraft\)/);
+  assert.match(view, /\.onSubmit\(commitRename\)/);
+  assert.match(view, /await model\.renameThread\(id: id, title: name\)/);
+  assert.match(view, /await model\.deleteThread\(id: thread\.id\)/);
+
+  // The whole conversation is rendered, which is what the operator asked for.
+  // The old build showed only the newest answer.
+  assert.match(view, /ForEach\(model\.transcript\) \{ entry in/);
+  assert.equal(/model\.transcript\.last\(where: \{ \$0\.role == \.assistant \}\)/.test(view), false,
+    'the screen must no longer show only the last answer');
+});
+
+test('the row that is tapped carries no animation modifier', () => {
+  // The two tap bug. SwiftUI hit tests at an animation's FINAL geometry, so a
+  // tap target that animates swallows the first tap. A list row exists to be
+  // tapped, so it is the worst possible place to reintroduce it.
+  const view = swift('ViciInbox/UI/AssistantView.swift');
+  const row = view.slice(
+    view.indexOf('private struct AssistantThreadRow'),
+    view.indexOf('private struct AssistantEmptyThreadList')
+  );
+  assert.ok(row.length > 500, 'AssistantThreadRow must be found, or this checks nothing');
+  assert.equal(/\.animation\(/.test(row), false, 'no animation on a tap target');
+  // And the trap the codebase has already paid for twice.
+  assert.equal(/Section\([^)]*\) \{[\s\S]*?\} footer:/.test(row), false);
+});
+
+test('the API client speaks to the five thread routes and no others', () => {
+  const api = swift('ViciInbox/Core/APIClient.swift');
+  assert.match(api, /decodedGET\("\/api\/assistant\/threads"\)/);
+  assert.match(api, /post\("\/api\/assistant\/threads", body: body\)/);
+  assert.match(api, /decodedGET\("\/api\/assistant\/threads\/\\\(pathEscaped\(id\)\)"\)/);
+  assert.match(api, /patch\("\/api\/assistant\/threads\/\\\(pathEscaped\(id\)\)"/);
+  assert.match(api, /delete\("\/api\/assistant\/threads\/\\\(pathEscaped\(id\)\)"\)/);
+  // threadId only travels when there is one, so the unsaved path posts exactly
+  // the body it always did.
+  assert.match(api, /if let threadID, !threadID\.isEmpty \{ body\["threadId"\] = threadID \}/);
+});
+
+test('thread dates decode whether or not Postgres emitted fractional seconds', () => {
+  // Postgres omits them when they are zero. One formatter returns nil for those
+  // rows, a nil date sorts to distantPast, and the thread the operator used a
+  // minute ago goes to the bottom of their own list.
+  const models = swift('ViciInbox/Core/AssistantModels.swift');
+  assert.match(models, /withFractionalSeconds/);
+  assert.match(models, /static let assistantPlain/);
+  assert.match(models, /if let withFraction = ISO8601DateFormatter\.assistantFractional/);
+});
+
+test('no em dash in any assistant iOS copy this change touched', () => {
+  for (const file of [
+    'ViciInbox/UI/AssistantView.swift',
+    'ViciInbox/App/AssistantModel.swift',
+    'ViciInbox/App/OnDeviceAssistantReasoner.swift'
+  ]) {
+    const lines = swift(file).split('\n');
+    const index = lines.findIndex(text => text.includes(EM_DASH));
+    assert.equal(index, -1, `ios/${file}:${index + 1} contains an em dash`);
+  }
+});
+
+test('no new Swift file was added, so the generated project is still current', () => {
+  // xcodegen is not installed and ios/ViciInbox.xcodeproj is committed. CI runs
+  // ios/scripts/generate-xcodeproj.py and fails on any diff, so a new file that
+  // was not regenerated in is a red build. Everything this change needed went
+  // into a file the project already knows about.
+  const project = fs.readFileSync(path.join(ROOT, 'ios', 'ViciInbox.xcodeproj', 'project.pbxproj'), 'utf8');
+  for (const file of [
+    'AssistantModels.swift', 'AssistantModel.swift',
+    'OnDeviceAssistantReasoner.swift', 'AssistantView.swift', 'APIClient.swift'
+  ]) {
+    assert.ok(project.includes(file), `${file} is absent from the checked-in project`);
+  }
+});
+
 test('the migration is transaction wrapped, re-runnable, and reloads the schema cache', () => {
   const sql = fs.readFileSync(path.join(ROOT, 'scripts', 'assistant-threads-migration.sql'), 'utf8');
   assert.match(sql, /^BEGIN;$/m);

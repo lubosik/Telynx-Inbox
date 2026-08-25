@@ -22,6 +22,11 @@ struct AssistantView: View {
     @ObservedObject private var preferences = AssistantPreferences.shared
     @ObservedObject private var drafts = AssistantUnsavedDraftRegistry.shared
     @State private var draftToken: AssistantDraftToken?
+    /// Which row is being renamed, if any. Renaming happens in the row itself
+    /// rather than in a sheet, because the thing being named is right there and
+    /// a modal to change four words reads as heavier than the change is.
+    @State private var renamingThreadID: String?
+    @State private var renameDraft = ""
     @FocusState private var inputIsFocused: Bool
 
     private var callIsActive: Bool {
@@ -56,119 +61,23 @@ struct AssistantView: View {
         ZStack {
             AssistantBackdrop()
 
-            VStack(spacing: 0) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 22) {
-                            AssistantOrb(phase: model.phase,
-                                         tint: preferences.orbTint,
-                                         size: preferences.orbSize,
-                                         isListening: speech.phase == .listening
-                                             || speech.phase == .finalizing)
-                                .padding(.top, 24)
-
-                            AssistantStatusCopy(
-                                phase: model.phase,
-                                failureMessage: model.failureMessage
-                            )
-
-                            if model.phase == .idle || speech.phase == .interruptedByCall {
-                                AssistantSpeechStatusCard(
-                                    phase: speech.phase,
-                                    liveTranscript: speech.liveTranscript,
-                                    voiceDisclosure: speech.voiceDisclosure
-                                )
-                            }
-
-                            if model.phase == .failed {
-                                Button {
-                                    guard hasClientAccess else { return }
-                                    Task { await model.refreshCapability(callIsActive: callIsActive) }
-                                } label: {
-                                    Label("Retry access check", systemImage: "arrow.clockwise")
-                                        .font(.subheadline.weight(.semibold))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 10)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(ViciTheme.tint)
-                                .disabled(callIsActive)
-                            }
-
-                            // ONLY THE LAST EXCHANGE, NOT THE WHOLE LOG.
-                            //
-                            // This is a voice interface. Reading back what you
-                            // just said is not something a person does in a
-                            // conversation, and a growing wall of bubbles is
-                            // what made this feel like a chat app bolted to a
-                            // microphone rather than something you talk to.
-                            //
-                            // The latest answer stays on screen because a
-                            // spoken figure is worth being able to check, and
-                            // it keeps its evidence tap.
-                            if model.transcript.isEmpty {
-                                AssistantPrivacyCard()
-                            } else if let latest = model.transcript.last(where: { $0.role == .assistant }) {
-                                AssistantTranscriptBubble(entry: latest) { token in
-                                    openEvidence(token)
-                                }
-                                .id(latest.id)
-                                .transition(.opacity)
-                            }
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 18)
-                    }
-                    .onChange(of: model.transcript.count) { _ in
-                        guard let last = model.transcript.last else { return }
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-
-                AssistantComposer(
-                    draft: $model.draft,
-                    isFocused: $inputIsFocused,
-                    canSubmit: hasClientAccess && model.phase == .idle && !callIsActive,
-                    // SPEAKING IS NOT A REASON TO REFUSE THE MICROPHONE.
-                    //
-                    // Requiring .idle meant the mic went dead for the whole
-                    // answer, so cutting in was impossible and the only way to
-                    // redirect was to sit through it. People interrupt each
-                    // other; an assistant that cannot be interrupted is being
-                    // listened to, not talked with.
-                    canDictate: hasClientAccess
-                        && (model.phase == .idle || model.phase == .speaking)
-                        && !callIsActive
-                        && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        && speech.canBeginPushToTalk,
-                    speechPhase: speech.phase,
-                    beginDictation: {
-                        inputIsFocused = false
-                        // Cut the answer off first. Capturing over the top of
-                        // the assistant's own voice feeds it back into the
-                        // microphone, and the transcript then contains what the
-                        // assistant said as though the person had said it.
-                        if model.phase == .speaking {
-                            speech.stopAll()
-                            model.noteSpeechFinished()
-                        }
-                        speech.beginPushToTalk(callIsActive: callIsActive)
-                    },
-                    endDictation: {
-                        speech.endPushToTalk()
-                    }
-                ) {
-                    submitQuestion(source: .assistantTyped, speechCompletionUptime: nil)
-                }
+            // The list, or the conversation that was opened from it. Two
+            // screens rather than a list stacked above a chat, because the
+            // composer and the orb belong to one conversation and putting them
+            // over a list of all of them makes it ambiguous which one a
+            // question is about.
+            if model.openThreadID == nil {
+                threadList
+            } else {
+                conversation
             }
 
             if scenePhase != .active {
                 Color(.systemBackground).ignoresSafeArea()
             }
         }
-        .navigationTitle("Assistant")
+        .toolbar { assistantToolbar }
+        .navigationTitle(model.openThreadID == nil ? "Assistant" : openThreadTitle)
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
         .task {
@@ -178,7 +87,9 @@ struct AssistantView: View {
                 return
             }
             await model.refreshCapability(callIsActive: callIsActive)
+            await model.loadThreads()
         }
+
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 guard hasClientAccess else {
@@ -249,6 +160,197 @@ struct AssistantView: View {
             }
         }
     }
+
+    /// The saved conversations for this account.
+    private var threadList: some View {
+        Group {
+            if model.threads.isEmpty {
+                AssistantEmptyThreadList(isLoading: model.isLoadingThreads) {
+                    Task { await model.startNewThread() }
+                }
+            } else {
+                List {
+                    ForEach(model.threads) { thread in
+                        AssistantThreadRow(
+                            thread: thread,
+                            isRenaming: renamingThreadID == thread.id,
+                            renameDraft: $renameDraft,
+                            open: {
+                                guard hasClientAccess, !callIsActive else { return }
+                                Task { await model.openThread(id: thread.id) }
+                            },
+                            beginRename: {
+                                renameDraft = thread.title ?? thread.displayTitle
+                                renamingThreadID = thread.id
+                            },
+                            commitRename: {
+                                let name = renameDraft
+                                let id = thread.id
+                                renamingThreadID = nil
+                                Task { await model.renameThread(id: id, title: name) }
+                            },
+                            cancelRename: { renamingThreadID = nil },
+                            delete: { Task { await model.deleteThread(id: thread.id) } }
+                        )
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .refreshable { await model.loadThreads() }
+            }
+        }
+    }
+
+    private var openThreadTitle: String {
+        guard let openThreadID = model.openThreadID,
+              let thread = model.threads.first(where: { $0.id == openThreadID }) else { return "Chat" }
+        return thread.displayTitle
+    }
+
+    @ToolbarContentBuilder
+    private var assistantToolbar: some ToolbarContent {
+        if model.openThreadID == nil {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    guard hasClientAccess, !callIsActive else { return }
+                    Task { await model.startNewThread() }
+                } label: {
+                    Label("New chat", systemImage: "square.and.pencil")
+                }
+                .disabled(!hasClientAccess || callIsActive)
+            }
+        } else {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    inputIsFocused = false
+                    speech.stopAll()
+                    model.closeThread()
+                    Task { await model.loadThreads() }
+                } label: {
+                    Label("Chats", systemImage: "chevron.left")
+                }
+            }
+        }
+    }
+
+    private var conversation: some View {
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 22) {
+                            AssistantOrb(phase: model.phase,
+                                         tint: preferences.orbTint,
+                                         size: preferences.orbSize,
+                                         isListening: speech.phase == .listening
+                                             || speech.phase == .finalizing)
+                                .padding(.top, 24)
+
+                            AssistantStatusCopy(
+                                phase: model.phase,
+                                failureMessage: model.failureMessage
+                            )
+
+                            if model.phase == .idle || speech.phase == .interruptedByCall {
+                                AssistantSpeechStatusCard(
+                                    phase: speech.phase,
+                                    liveTranscript: speech.liveTranscript,
+                                    voiceDisclosure: speech.voiceDisclosure
+                                )
+                            }
+
+                            if model.phase == .failed {
+                                Button {
+                                    guard hasClientAccess else { return }
+                                    Task { await model.refreshCapability(callIsActive: callIsActive) }
+                                } label: {
+                                    Label("Retry access check", systemImage: "arrow.clockwise")
+                                        .font(.subheadline.weight(.semibold))
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ViciTheme.tint)
+                                .disabled(callIsActive)
+                            }
+
+                            // THE WHOLE CONVERSATION, BECAUSE IT IS A THREAD NOW.
+                            //
+                            // This used to show only the newest answer, on the
+                            // argument that a voice interface should not read
+                            // back what you just said. That argument holds for
+                            // a conversation that lasts one screen and then
+                            // ceases to exist. It does not hold for one you can
+                            // put down and come back to a week later: the
+                            // question the operator has then is "what had I
+                            // asked it?", and the answer used to be nowhere.
+                            //
+                            // It is also what the model is reasoning over, so
+                            // showing it is the only way the operator can tell
+                            // whether the context is what they think it is.
+                            if model.transcript.isEmpty {
+                                AssistantPrivacyCard()
+                            } else {
+                                ForEach(model.transcript) { entry in
+                                    AssistantTranscriptBubble(entry: entry) { token in
+                                        openEvidence(token)
+                                    }
+                                    .id(entry.id)
+                                }
+                            }
+
+                            if !model.lastAnswerWasSaved {
+                                AssistantUnsavedNotice()
+                            }
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 18)
+                    }
+                    .onChange(of: model.transcript.count) { _ in
+                        guard let last = model.transcript.last else { return }
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+
+                AssistantComposer(
+                    draft: $model.draft,
+                    isFocused: $inputIsFocused,
+                    canSubmit: hasClientAccess && model.phase == .idle && !callIsActive,
+                    // SPEAKING IS NOT A REASON TO REFUSE THE MICROPHONE.
+                    //
+                    // Requiring .idle meant the mic went dead for the whole
+                    // answer, so cutting in was impossible and the only way to
+                    // redirect was to sit through it. People interrupt each
+                    // other; an assistant that cannot be interrupted is being
+                    // listened to, not talked with.
+                    canDictate: hasClientAccess
+                        && (model.phase == .idle || model.phase == .speaking)
+                        && !callIsActive
+                        && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && speech.canBeginPushToTalk,
+                    speechPhase: speech.phase,
+                    beginDictation: {
+                        inputIsFocused = false
+                        // Cut the answer off first. Capturing over the top of
+                        // the assistant's own voice feeds it back into the
+                        // microphone, and the transcript then contains what the
+                        // assistant said as though the person had said it.
+                        if model.phase == .speaking {
+                            speech.stopAll()
+                            model.noteSpeechFinished()
+                        }
+                        speech.beginPushToTalk(callIsActive: callIsActive)
+                    },
+                    endDictation: {
+                        speech.endPushToTalk()
+                    }
+                ) {
+                    submitQuestion(source: .assistantTyped, speechCompletionUptime: nil)
+                }
+            }
+    }
+
 
     private func submitQuestion(source: AssistantNavigationSource,
                                 speechCompletionUptime: TimeInterval?) {
@@ -604,6 +706,138 @@ private struct AssistantPrivacyCard: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(ViciTheme.tint.opacity(0.16))
         )
+    }
+}
+
+/// One saved conversation in the list.
+///
+/// No `.animation(_:value:)` anywhere on this row, deliberately. Attaching one
+/// to a view that is also a tap target loses the first tap, because SwiftUI hit
+/// tests at the animation's final geometry. That was the two tap bug, and a row
+/// whose whole purpose is to be tapped is the worst place to reintroduce it.
+private struct AssistantThreadRow: View {
+    let thread: AssistantThreadSummary
+    let isRenaming: Bool
+    @Binding var renameDraft: String
+    let open: () -> Void
+    let beginRename: () -> Void
+    let commitRename: () -> Void
+    let cancelRename: () -> Void
+    let delete: () -> Void
+
+    @FocusState private var renameIsFocused: Bool
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter
+    }()
+
+    private var when: String? {
+        let date = thread.sortDate
+        guard date != .distantPast else { return nil }
+        return Self.relative.localizedString(for: date, relativeTo: Date())
+    }
+
+    var body: some View {
+        Group {
+            if isRenaming {
+                HStack(spacing: 10) {
+                    TextField("Name this chat", text: $renameDraft)
+                        .textFieldStyle(.plain)
+                        .font(.body.weight(.semibold))
+                        .submitLabel(.done)
+                        .focused($renameIsFocused)
+                        .onSubmit(commitRename)
+                    Button("Save", action: commitRename)
+                        .font(.subheadline.weight(.semibold))
+                        .buttonStyle(.borderless)
+                    Button("Cancel", action: cancelRename)
+                        .font(.subheadline)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Color.secondary)
+                }
+                .onAppear { renameIsFocused = true }
+            } else {
+                Button(action: open) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(thread.displayTitle)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                        if let preview = thread.preview, !preview.isEmpty {
+                            Text(preview)
+                                .font(.footnote)
+                                .foregroundStyle(Color.secondary)
+                                .lineLimit(1)
+                        }
+                        if let when {
+                            Text(when)
+                                .font(.caption)
+                                .foregroundStyle(Color.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive, action: delete) {
+                Label("Delete", systemImage: "trash")
+            }
+            Button(action: beginRename) {
+                Label("Rename", systemImage: "pencil")
+            }
+            .tint(ViciTheme.tint)
+        }
+    }
+}
+
+/// What the list says before there is anything in it.
+private struct AssistantEmptyThreadList: View {
+    let isLoading: Bool
+    let startNew: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            if isLoading {
+                ProgressView()
+            } else {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Color.secondary)
+                Text("No chats yet")
+                    .font(.headline)
+                Text("Start one and it will be saved here, so you can pick it up later.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary)
+                    .multilineTextAlignment(.center)
+                Button(action: startNew) {
+                    Label("New chat", systemImage: "square.and.pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ViciTheme.tint)
+            }
+        }
+        .padding(.horizontal, 32)
+    }
+}
+
+/// Shown when the last answer could not be filed.
+///
+/// The operator has the answer on screen and it is a real one. What they must
+/// not be allowed to assume is that it will still be there tomorrow.
+private struct AssistantUnsavedNotice: View {
+    var body: some View {
+        Label("This answer could not be saved to the chat.", systemImage: "exclamationmark.triangle")
+            .font(.footnote)
+            .foregroundStyle(Color.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

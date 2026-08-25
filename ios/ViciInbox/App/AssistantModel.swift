@@ -22,25 +22,193 @@ final class AssistantModel: ObservableObject {
     }
     @Published private(set) var failureMessage: String?
 
+    // MARK: Threads
+    //
+    // The saved conversations for THIS account. Held here rather than in a
+    // separate store because they are purged on exactly the same events as the
+    // transcript: a title and a first line are private text about the business,
+    // and leaving them on screen behind the app switcher would undo what
+    // `obscureAndPurge` is for.
+
+    @Published private(set) var threads: [AssistantThreadSummary] = []
+    @Published private(set) var openThreadID: String?
+    @Published private(set) var isLoadingThreads = false
+    /// Set when the last answer could not be filed. The operator still received
+    /// it, so this is a note rather than an error.
+    @Published private(set) var lastAnswerWasSaved = true
+
     private var machine = AssistantStateMachine()
     private var capabilityGeneration = 0
     private var responseGeneration = 0
+    private var threadGeneration = 0
     private var callIsActive = false
     private let loadCapability: CapabilityLoader
     private let reasoning: AssistantReasoningOperations
+    /// Points the reasoner at the open thread. A no-op when a test injected its
+    /// own reasoning operations, because then there is no thread to point at.
+    private let adoptThread: @MainActor (String?) -> Void
+    /// Read after every answer. A closure, not a stored Bool: the value has to
+    /// be fetched at the moment it is needed, and a stored one would be
+    /// whatever it was when this model was constructed.
+    private let readAnswerWasSaved: @MainActor () -> Bool
+    private let threadAPI: AssistantThreadOperations
     private let businessReasoning: AssistantBusinessReasoningOperations
     private var responseTask: Task<AssistantGroundedResponse, Error>?
 
     init(loadCapability: @escaping CapabilityLoader = {
         try await APIClient.shared.fetchAssistantStatus()
     }, reasoning: AssistantReasoningOperations? = nil,
-       businessReasoning: AssistantBusinessReasoningOperations? = nil) {
+       businessReasoning: AssistantBusinessReasoningOperations? = nil,
+       threadAPI: AssistantThreadOperations? = nil) {
         self.loadCapability = loadCapability
         // Server backed, not on device. See ServerAssistantReasoner for what
         // that changes about privacy and what it buys back. Tests still inject
         // their own operations, so nothing here reaches the network in a test.
-        self.reasoning = reasoning ?? .serverBacked()
+        //
+        // Written as an if/else over two stored properties rather than a
+        // one-line `??`, because `serverBacked()` now returns a pair and both
+        // halves must be assigned before anything on `self` is read.
+        if let reasoning {
+            self.reasoning = reasoning
+            self.adoptThread = { _ in }
+            self.readAnswerWasSaved = { true }
+        } else {
+            let backed = AssistantReasoningOperations.serverBacked()
+            self.reasoning = backed.operations
+            self.adoptThread = backed.adopt
+            self.readAnswerWasSaved = backed.lastAnswerWasSaved
+        }
+        self.threadAPI = threadAPI ?? .live()
         self.businessReasoning = businessReasoning ?? .systemDefault()
+    }
+
+    // MARK: Thread list
+
+    /// Loads the account's conversations. Failure is quiet on purpose: the
+    /// assistant still works without the list, and a red banner over a feature
+    /// that is merely unavailable would read as the assistant being broken.
+    func loadThreads() async {
+        guard !callIsActive else { return }
+        threadGeneration += 1
+        let generation = threadGeneration
+        isLoadingThreads = true
+        defer { if generation == threadGeneration { isLoadingThreads = false } }
+        do {
+            let loaded = try await threadAPI.list()
+            guard generation == threadGeneration, !callIsActive else { return }
+            threads = loaded.sorted { $0.sortDate > $1.sortDate }
+        } catch {
+            guard generation == threadGeneration else { return }
+            threads = []
+        }
+    }
+
+    /// Opens a saved conversation and shows what is in it.
+    ///
+    /// The messages are rendered from what the SERVER stored, not from anything
+    /// this device remembered, so what the operator reads is what the assistant
+    /// will actually be reasoning over.
+    func openThread(id: String) async {
+        guard !callIsActive else { return }
+        threadGeneration += 1
+        let generation = threadGeneration
+        do {
+            let detail = try await threadAPI.detail(id)
+            guard generation == threadGeneration, !callIsActive else { return }
+            openThreadID = detail.thread.id
+            adoptThread(detail.thread.id)
+            lastAnswerWasSaved = true
+            failureMessage = nil
+            // Only the most recent exchanges are rendered. The registry that
+            // backs citations is bounded by AssistantTranscriptPolicy, and a
+            // thread of four hundred turns would blow through it. The rest are
+            // still on the server and still reasoned over through the summary.
+            let visible = AssistantTranscriptPolicy.maximumVisibleExchanges * 2
+            transcript = detail.messages
+                .suffix(visible)
+                .map { message in
+                    AssistantTranscriptEntry(role: message.isAssistant ? .assistant : .user,
+                                             text: message.content)
+                }
+        } catch {
+            guard generation == threadGeneration, !callIsActive else { return }
+            failureMessage = "That conversation could not be opened."
+        }
+    }
+
+    /// Starts a new conversation and switches to it.
+    func startNewThread() async {
+        guard !callIsActive else { return }
+        threadGeneration += 1
+        let generation = threadGeneration
+        do {
+            let created = try await threadAPI.create()
+            guard generation == threadGeneration, !callIsActive else { return }
+            openThreadID = created.id
+            adoptThread(created.id)
+            transcript.removeAll(keepingCapacity: false)
+            draft = ""
+            failureMessage = nil
+            lastAnswerWasSaved = true
+            threads.insert(created, at: 0)
+        } catch {
+            guard generation == threadGeneration, !callIsActive else { return }
+            failureMessage = "A new conversation could not be started."
+        }
+    }
+
+    func renameThread(id: String, title: String) async {
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, !callIsActive else { return }
+        do {
+            let updated = try await threadAPI.rename(id, cleaned)
+            guard !callIsActive else { return }
+            if let index = threads.firstIndex(where: { $0.id == id }) { threads[index] = updated }
+        } catch {
+            failureMessage = "That conversation could not be renamed."
+        }
+    }
+
+    /// Deletes a conversation. Removed from the list first, so the row does not
+    /// sit there looking alive while the request is in flight, and put back if
+    /// the server refuses.
+    func deleteThread(id: String) async {
+        guard !callIsActive else { return }
+        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
+        let removed = threads[index]
+        threads.remove(at: index)
+        if openThreadID == id { closeThread() }
+        do {
+            try await threadAPI.remove(id)
+        } catch {
+            guard !callIsActive else { return }
+            threads.insert(removed, at: min(index, threads.count))
+            failureMessage = "That conversation could not be deleted."
+        }
+    }
+
+    /// Picks up the name the server gave a thread from its first question.
+    ///
+    /// Reloading the whole list after every answer would be a request per
+    /// question to catch a change that happens exactly once in a thread's life.
+    /// A thread is named by its first question, so a row with no title is the
+    /// only stale one, and the check is a local comparison.
+    private func refreshOpenThreadRow() async {
+        guard let openThreadID else { return }
+        guard let index = threads.firstIndex(where: { $0.id == openThreadID }) else { return }
+        guard threads[index].title == nil else { return }
+        await loadThreads()
+    }
+
+    /// Back to the list. The thread is not deleted and nothing on the server
+    /// changes: closing a screen is not an instruction to destroy anything.
+    func closeThread() {
+        openThreadID = nil
+        adoptThread(nil)
+        cancelResponse(resetSession: false)
+        transcript.removeAll(keepingCapacity: false)
+        draft = ""
+        lastAnswerWasSaved = true
     }
 
     func refreshCapability(
@@ -212,6 +380,11 @@ final class AssistantModel: ObservableObject {
             transcript.append(AssistantTranscriptEntry(role: .assistant,
                                                         text: response.text,
                                                         citations: response.citations))
+            // Read after the answer, never assumed. The server returns a reply
+            // it could not file rather than losing it, and the screen has to be
+            // able to say so.
+            lastAnswerWasSaved = openThreadID == nil ? true : readAnswerWasSaved()
+            if openThreadID != nil { await refreshOpenThreadRow() }
             return response.text
         } catch is CancellationError {
             guard generation == responseGeneration else { return nil }
@@ -312,6 +485,15 @@ final class AssistantModel: ObservableObject {
     private func clearPrivateText() {
         draft = ""
         transcript.removeAll(keepingCapacity: false)
+        // The list goes too. A thread title is the operator's first question
+        // and the preview is that question in full, so a list of them is a
+        // summary of what this business has been worrying about. Leaving it on
+        // screen behind the app switcher would undo the reason this method
+        // exists. It is a read away when the screen comes back.
+        threads.removeAll(keepingCapacity: false)
+        openThreadID = nil
+        threadGeneration += 1
+        lastAnswerWasSaved = true
     }
 
     private func makeRoomForNextExchange() async {

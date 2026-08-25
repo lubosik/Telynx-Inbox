@@ -1761,16 +1761,70 @@ actor APIClient {
     /// state for a conversation. Keeping it client side means a dropped
     /// connection or a restarted backend loses nothing, and there is no
     /// per-user transcript sitting on a server waiting to be a liability.
+    /// With a `threadID` the server reads the transcript it recorded and
+    /// ignores `history` entirely, so a saved conversation cannot be reasoned
+    /// over from a version of events the client made up. `history` is still
+    /// sent for the unsaved path, which has nothing on the server to read.
     func assistantConverse(question: String,
                            history: [AssistantConversationTurn],
+                           threadID: String? = nil,
                            thorough: Bool = true) async throws -> AssistantConverseResponse {
-        let (data, response) = try await post("/api/assistant/converse", body: [
+        var body: [String: Any] = [
             "question": question,
             "thorough": thorough,
             "history": history.map { ["role": $0.role, "content": $0.content] }
-        ], timeout: 30)
+        ]
+        if let threadID, !threadID.isEmpty { body["threadId"] = threadID }
+        let (data, response) = try await post("/api/assistant/converse", body: body, timeout: 30)
         try validate(data: data, response: response)
         return try decoder.decode(AssistantConverseResponse.self, from: data)
+    }
+
+    // MARK: - Assistant threads
+
+    /// `GET /api/assistant/threads`, `assistant.use`. One account's own
+    /// conversations. The server never returns anybody else's.
+    func assistantThreads() async throws -> [AssistantThreadSummary] {
+        let response: AssistantThreadListResponse = try await decodedGET("/api/assistant/threads")
+        return response.threads
+    }
+
+    /// `POST /api/assistant/threads`, `assistant.use`.
+    func createAssistantThread(title: String? = nil) async throws -> AssistantThreadSummary {
+        var body: [String: Any] = [:]
+        if let title, !title.isEmpty { body["title"] = title }
+        let (data, response) = try await post("/api/assistant/threads", body: body)
+        try validate(data: data, response: response)
+        return try decoder.decode(AssistantThreadResponse.self, from: data).thread
+    }
+
+    /// `GET /api/assistant/threads/:id`, `assistant.use`. The thread and every
+    /// message in it, so the operator can see the context the assistant has.
+    func assistantThread(id: String) async throws -> AssistantThreadDetail {
+        try await decodedGET("/api/assistant/threads/\(pathEscaped(id))")
+    }
+
+    /// `PATCH /api/assistant/threads/:id`, `assistant.use`.
+    func renameAssistantThread(id: String, title: String) async throws -> AssistantThreadSummary {
+        let (data, response) = try await patch("/api/assistant/threads/\(pathEscaped(id))",
+                                               body: ["title": title])
+        try validate(data: data, response: response)
+        return try decoder.decode(AssistantThreadResponse.self, from: data).thread
+    }
+
+    /// `DELETE /api/assistant/threads/:id`, `assistant.use`. A real delete. The
+    /// messages go with it.
+    func deleteAssistantThread(id: String) async throws {
+        let (data, response) = try await delete("/api/assistant/threads/\(pathEscaped(id))")
+        try validate(data: data, response: response)
+    }
+
+    /// A thread id is a server generated uuid, so this should never change it.
+    /// It is here because the id is still interpolated into a path, and an id
+    /// that is one day not a uuid should produce a 404 rather than a request to
+    /// a path nobody meant to build.
+    private func pathEscaped(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
     }
 
     /// `POST /api/assistant/speak`, `assistant.use`. Returns MP3 bytes.
