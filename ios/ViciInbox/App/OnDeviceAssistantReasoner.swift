@@ -197,6 +197,16 @@ final class ServerAssistantReasoner {
         lastAnswerWasSaved = true
     }
 
+    /// Where the last answer asked the app to go, if anywhere. Read once and
+    /// cleared, so a move is performed exactly once and a later answer that
+    /// asks for nothing cannot replay the previous destination.
+    private(set) var pendingNavigation: AssistantNavigationInstruction?
+
+    func takePendingNavigation() -> AssistantNavigationInstruction? {
+        defer { pendingNavigation = nil }
+        return pendingNavigation
+    }
+
     func respond(to text: String) async throws -> String {
         let answer = try await APIClient.shared.assistantConverse(
             question: text,
@@ -244,7 +254,8 @@ extension AssistantReasoningOperations {
             availability: { .available },
             prewarm: {},
             respond: { text in try await reasoner.respond(to: text) },
-            reset: { reasoner.reset() }
+            reset: { reasoner.reset() },
+            takeNavigation: { reasoner.takePendingNavigation() }
         )
         // `lastAnswerWasSaved` is read through a closure, not captured as a
         // value. A stored Bool would be the value at the moment this pair was

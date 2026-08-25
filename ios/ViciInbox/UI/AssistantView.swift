@@ -15,6 +15,9 @@ import UIKit
 struct AssistantView: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var router: AppRouter
+    // The assistant is presented as a sheet, so a move has to close it or the
+    // destination opens underneath and nobody sees it.
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var speech: AssistantSpeechCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AssistantModel()
@@ -77,6 +80,15 @@ struct AssistantView: View {
             }
         }
         .toolbar { assistantToolbar }
+        // Performed here rather than in the model, because moving the app is
+        // the view layer's job and the router is an environment object. Cleared
+        // as it is consumed so one instruction produces one move.
+        .onChange(of: model.pendingNavigation) { move in
+            guard let move else { return }
+            model.pendingNavigation = nil
+            guard performAssistantNavigation(move) else { return }
+            dismiss()
+        }
         .navigationTitle(model.isConversationOpen ? openThreadTitle : "Assistant")
         .navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
@@ -423,6 +435,39 @@ struct AssistantView: View {
             if started { model.noteSpeechStarted() }
             else { model.noteSpeechFinished() }
         }
+    }
+
+    /// Maps what the assistant asked for onto a real route.
+    ///
+    /// Returns false for anything unrecognised rather than guessing a nearby
+    /// screen. Being taken somewhere you did not ask for is worse than not
+    /// being taken anywhere, and the spoken answer already said where it
+    /// intended to go, so a silent non-move is visible rather than confusing.
+    private func performAssistantNavigation(_ move: AssistantNavigationInstruction) -> Bool {
+        let target = move.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasTarget = !(target ?? "").isEmpty
+
+        switch move.screen {
+        case "inbox":
+            if hasTarget, let target { router.open(.conversation(phone: target)) } else { router.open(.inbox) }
+        case "contacts":
+            if hasTarget, let target { router.open(.contact(phone: target)) } else { router.open(.contacts) }
+        case "calls": router.open(.calls)
+        case "analytics": router.open(.analytics)
+        case "growth", "automations": router.open(.growth(.automations))
+        case "campaigns":
+            if hasTarget, let target { router.open(.campaign(id: target)) } else { router.open(.growth(.campaigns)) }
+        case "campaignProposals": router.open(.campaignProposals)
+        case "audiences":
+            if hasTarget, let target { router.open(.segment(id: target, name: nil)) } else { router.open(.growth(.audiences)) }
+        case "opportunities": router.open(.opportunities)
+        case "referrals": router.open(.referrals)
+        // `activity` carries a required category; automations is the one the
+        // assistant can speak about, so an unqualified request lands there.
+        case "activity": router.open(.activity(category: "automations"))
+        default: return false
+        }
+        return true
     }
 
     private func registerDraftOwnerIfNeeded() {

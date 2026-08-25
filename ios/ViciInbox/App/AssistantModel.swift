@@ -50,6 +50,10 @@ final class AssistantModel: ObservableObject {
     @Published private(set) var isUnsavedConversationOpen = false
 
     /// The compacted-away part of the open thread, when there is one.
+    /// Set when the last answer asked the app to move somewhere. The view
+    /// performs it and clears it, so a move happens once.
+    @Published var pendingNavigation: AssistantNavigationInstruction?
+
     @Published private(set) var openThreadSummary: String?
     @Published private(set) var openThreadSummarisedCount = 0
 
@@ -407,6 +411,8 @@ final class AssistantModel: ObservableObject {
             try Task.checkCancellation()
             let generated = try await reasoning.respond(submittedText)
             try Task.checkCancellation()
+            let move = reasoning.takeNavigation()
+            await MainActor.run { self.pendingNavigation = move }
             return AssistantGroundedResponse(text: generated, citations: [])
         }
         responseTask = task

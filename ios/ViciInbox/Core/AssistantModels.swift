@@ -227,6 +227,10 @@ struct AssistantReasoningOperations {
     let prewarm: () -> Void
     let respond: (String) async throws -> String
     let reset: () -> Void
+    /// Where the last answer asked the app to go, read once and cleared.
+    /// Defaulted so existing constructions, including every test that builds
+    /// its own operations, keep compiling and simply never navigate.
+    var takeNavigation: () -> AssistantNavigationInstruction? = { nil }
 }
 
 /// The thread endpoints, as a seam.
@@ -509,8 +513,20 @@ struct AssistantConversationTurn: Codable, Hashable {
 }
 
 /// `POST /api/assistant/converse`.
+/// Where the assistant asked the app to go.
+///
+/// The server cannot move a phone, so it names a destination and the app
+/// decides whether to honour it. That keeps navigation something the client can
+/// refuse, and it means a move that fails is reported by the side that tried
+/// rather than silently described as done by the side that did not.
+struct AssistantNavigationInstruction: Codable, Hashable {
+    let screen: String
+    let targetId: String?
+}
+
 struct AssistantConverseResponse: Codable, Hashable {
     let reply: String
+    let navigate: AssistantNavigationInstruction?
     /// Echoed back when the question belonged to a thread.
     let threadId: String?
     /// False when the answer could not be filed. The operator still gets the
