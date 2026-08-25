@@ -1,0 +1,132 @@
+================================================================================
+THE PREVIEW SAYS 924. THE SEND WOULD REACH 0.
+================================================================================
+
+Run this before the first campaign. Without it every recipient is suppressed
+with reason `dnd_unknown` even with all three send locks open and consent
+recorded for 942 people.
+
+WHAT IS WRONG
+
+Eligibility is checked twice on purpose: once in JavaScript for the preview and
+the dry run, and once in SQL inside the claim function, because a preview is
+never authority to send later. That is the right design. The two checks have
+drifted apart, and the SQL half is the stale one.
+
+GoHighLevel returns `dndSettings` as the set of per-channel OVERRIDES. An empty
+object means "no override, the global flag applies". Measured across this
+account: 944 contacts, every one `ghl_dnd = false`, and `ghl_sms_dnd_status`
+NULL for all 944. Not one has a channel override, because none has ever needed
+one.
+
+The JavaScript was corrected for that and now treats NULL or empty as "no
+override, use the global flag". lib/campaigns/eligibility.js says so at length.
+
+The SQL still demands the literal string 'inactive':
+
+    AND d.ghl_dnd = false AND d.ghl_sms_dnd_status = 'inactive'
+
+NULL is not 'inactive', so the condition is false for every contact in the
+account. Verified just now: the JS preview passes 924, the SQL claim passes 0.
+
+WHY THAT IS WORSE THAN A CAMPAIGN THAT SENDS NOTHING
+
+The number in the preview is the number on the Face ID prompt. Approving a send
+to 924 people that reaches nobody is a silent failure with your face attached
+to it, and the first thing anybody would suspect is the consent backfill, which
+is fine.
+
+WHAT THIS CHANGES, AND WHAT IT DOES NOT
+
+It widens what counts as a COMPLETE ANSWER about a contact's DND state, to
+match the JavaScript exactly. It does not weaken any refusal:
+
+  dnd = true                        still refused
+  channel status 'active'           still refused
+  channel status 'permanent'        still refused
+  a missing or non-boolean dnd flag still unknown, still refused
+  a stale or future sync timestamp  still unknown, still refused
+
+Only NULL and empty string move, and only from "unknown" to "no override".
+
+--------------------------------------------------------------------------------
+RUN THIS IN THE SUPABASE SQL EDITOR
+--------------------------------------------------------------------------------
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.sms_dnd_says_contactable(
+  p_dnd boolean,
+  p_channel_status text,
+  p_synced_at timestamptz,
+  p_max_age_hours integer
+) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT p_dnd = false
+     -- The one line that changed. NULL and '' mean "no per-channel override",
+     -- which is what GoHighLevel returns for every contact in this account.
+     -- 'active' and 'permanent' are still refused by omission.
+     AND coalesce(nullif(trim(lower(p_channel_status)), ''), 'inactive') = 'inactive'
+     AND p_synced_at IS NOT NULL
+     AND p_synced_at >= now() - make_interval(hours => p_max_age_hours)
+     AND p_synced_at <= now();
+$$;
+
+COMMENT ON FUNCTION public.sms_dnd_says_contactable IS
+  'Send-time DND check. Must stay identical to the channelSaysContactable rule in lib/campaigns/eligibility.js. The two are checked against each other by test/campaign-dnd-parity.test.js.';
+
+COMMIT;
+
+-- ── Then replace the inline check inside claim_sms_campaign_recipients ──────
+-- The function is long, so rather than pasting it back in full, run this to
+-- print the current definition, replace the two-line condition, and run the
+-- result. The condition to find reads:
+--
+--     AND d.ghl_dnd = false AND d.ghl_sms_dnd_status = 'inactive'
+--     AND d.ghl_dnd_synced_at >= now() - make_interval(hours => s.dnd_status_max_age_hours)
+--     AND d.ghl_dnd_synced_at <= now()
+--
+-- and becomes:
+--
+--     AND public.sms_dnd_says_contactable(
+--           d.ghl_dnd, d.ghl_sms_dnd_status, d.ghl_dnd_synced_at, s.dnd_status_max_age_hours)
+
+SELECT pg_get_functiondef(oid)
+  FROM pg_proc
+ WHERE proname = 'claim_sms_campaign_recipients';
+
+--------------------------------------------------------------------------------
+CONFIRMING IT WORKED
+--------------------------------------------------------------------------------
+
+Expect 924 and 924. If the second number is 0, the claim function was not
+updated, only the helper.
+
+SELECT
+  count(*) FILTER (
+    WHERE ghl_dnd = false
+      AND coalesce(nullif(trim(lower(ghl_sms_dnd_status)), ''), 'inactive') = 'inactive'
+      AND ghl_dnd_synced_at >= now() - interval '24 hours'
+      AND ghl_dnd_synced_at <= now()
+  ) AS js_preview_says,
+  count(*) FILTER (
+    WHERE public.sms_dnd_says_contactable(ghl_dnd, ghl_sms_dnd_status, ghl_dnd_synced_at, 24)
+  ) AS sql_send_says
+FROM sms_contacts;
+
+--------------------------------------------------------------------------------
+THE ALTERNATIVE, IF YOU WOULD RATHER NOT TOUCH THE SEND FUNCTION
+--------------------------------------------------------------------------------
+
+Backfill the column instead, so the existing SQL is satisfied by the data:
+
+    UPDATE sms_contacts
+       SET ghl_sms_dnd_status = 'inactive'
+     WHERE ghl_dnd = false AND ghl_sms_dnd_status IS NULL;
+
+This works and is one line. It is the WORSE option, because it writes an
+assertion into 944 rows that GoHighLevel never made, and the next DND sync will
+overwrite some of them and quietly put those contacts back to zero. Fixing the
+check is the fix; filling the column to satisfy a wrong check is a workaround
+that expires.
+================================================================================
