@@ -5,6 +5,7 @@ const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
 const { sendNativeMessagePush } = require('../lib/apns-notify');
 const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
+const { suppressOptOut } = require('../lib/opt-out-suppression');
 const { rehostInboundMedia } = require('../lib/mms-media');
 const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
 const { normaliseTelnyxStatus, updateMessageStatus } = require('../lib/message-status');
@@ -131,6 +132,12 @@ module.exports = (broadcastSSE) => {
           console.error(`[OPT-OUT] Proceeding with suppression despite an unrecorded consent event for ...${fromPhone.slice(-4)}: ${optOutErr.message}`);
         }
         await cancelScheduledForCustomer(fromPhone).catch(() => {});
+        // Onto the visible do-not-contact list, and into the consent trail as
+        // a withdrawal. The sentinel above already blocks them; this makes the
+        // block VISIBLE, because a do-not-contact screen that does not list
+        // everybody who texted STOP gets somebody added back to a campaign by
+        // hand. Never throws: the STOP is already honoured by this point.
+        await suppressOptOut(fromPhone);
         // Log the inbound stop message but do not send any auto-reply.
         //
         // This used to end in `.catch(() => {})`. A Supabase query builder is a
