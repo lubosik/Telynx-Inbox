@@ -164,46 +164,79 @@ final class OnDeviceAssistantReasoner {
 ///   on, or the device being eligible. Any phone that can reach the server can
 ///   use the assistant.
 ///
-/// CONVERSATION MEMORY LIVES HERE
-///   `respond` is `(String) async throws -> String` and that signature is not
-///   worth changing. The history is held in this object instead, which is the
-///   right home for it anyway: `reset()` already exists and is already called
-///   when the conversation should be forgotten, so clearing memory and clearing
-///   the transcript stay one action rather than two that can disagree.
+/// CONVERSATION MEMORY IS A THREAD ID, NOT A TRANSCRIPT
+///   This object used to hold the last six turns and post them back with every
+///   question. Two things were wrong with that. The conversation died with the
+///   screen, so there was nothing to come back to. And the transcript the model
+///   reasoned over was whatever this client said it was, which meant grounding
+///   rested on the client being honest about what the assistant had previously
+///   said.
+///
+///   Now it holds only the id of the open thread. The server reads the turns it
+///   recorded itself, and compacts them once they get long. The one piece of
+///   state here is which conversation is open, which is the only piece the
+///   client is actually entitled to decide.
+///
+///   `reset()` keeps its meaning: forget which conversation is open. The thread
+///   is not deleted, because closing a screen is not an instruction to destroy
+///   anything. Deleting is its own deliberate action with its own button.
 @MainActor
 final class ServerAssistantReasoner {
-    /// Six turns, three exchanges. Enough that "out of those, which is the
-    /// biggest?" resolves, short enough that the request does not grow with the
-    /// conversation. Latency is the thing people notice on a voice interface,
-    /// and an unbounded transcript makes every question slower than the last.
-    private static let maxRememberedTurns = 6
+    private(set) var threadID: String?
 
-    private var history: [AssistantConversationTurn] = []
+    /// Whether the last answer was filed into the thread.
+    ///
+    /// The server returns the answer even when it could not store it, because
+    /// the operator asked a question and is owed what came back. This carries
+    /// that fact up so the screen can say the conversation was not kept,
+    /// instead of showing a reply that will not be there tomorrow.
+    private(set) var lastAnswerWasSaved = true
+
+    func adopt(threadID: String?) {
+        self.threadID = threadID
+        lastAnswerWasSaved = true
+    }
 
     func respond(to text: String) async throws -> String {
         let answer = try await APIClient.shared.assistantConverse(
             question: text,
-            history: history,
+            // Empty, always. With a thread the server ignores it and reads its
+            // own record; without one there is no conversation to carry. This
+            // is the parameter that used to smuggle the client's version of
+            // events into the reasoning.
+            history: [],
+            threadID: threadID,
             thorough: AssistantPreferences.shared.thoroughAnswers
         )
-        history.append(AssistantConversationTurn(role: "user", content: text))
-        history.append(AssistantConversationTurn(role: "assistant", content: answer.reply))
-        if history.count > Self.maxRememberedTurns {
-            history.removeFirst(history.count - Self.maxRememberedTurns)
-        }
+        // The server decides which thread the turn landed in. Adopting what it
+        // echoes back keeps the two from drifting if it ever answers about a
+        // different one than was asked for.
+        if let answered = answer.threadId { threadID = answered }
+        // Absent means there was no thread to save into, which is not a failure
+        // to save. Only an explicit false is.
+        lastAnswerWasSaved = answer.saved ?? true
         return answer.reply
     }
 
     func reset() {
-        history.removeAll()
+        threadID = nil
+        lastAnswerWasSaved = true
     }
 }
 
 extension AssistantReasoningOperations {
     /// The server-backed reasoner, as the shell already expects to consume it.
-    static func serverBacked() -> AssistantReasoningOperations {
+    ///
+    /// `adopt` is handed back so the screen can point the reasoner at whichever
+    /// thread the operator opened. It is a closure rather than a reference to
+    /// the object because `AssistantReasoningOperations` is the seam the tests
+    /// inject through, and widening it to expose a concrete class would put the
+    /// real networking class back in the middle of every test.
+    static func serverBacked() -> (operations: AssistantReasoningOperations,
+                                   adopt: @MainActor (String?) -> Void,
+                                   lastAnswerWasSaved: @MainActor () -> Bool) {
         let reasoner = ServerAssistantReasoner()
-        return AssistantReasoningOperations(
+        let operations = AssistantReasoningOperations(
             // Reasoning is no longer on this device, so there is no model to be
             // ineligible for. Reachability is decided by the request itself,
             // and a failed request surfaces as an error the person can act on
@@ -213,5 +246,12 @@ extension AssistantReasoningOperations {
             respond: { text in try await reasoner.respond(to: text) },
             reset: { reasoner.reset() }
         )
+        // `lastAnswerWasSaved` is read through a closure, not captured as a
+        // value. A stored Bool would be the value at the moment this pair was
+        // built, which is always true, so the screen would never learn that a
+        // save had failed.
+        return (operations,
+                { threadID in reasoner.adopt(threadID: threadID) },
+                { reasoner.lastAnswerWasSaved })
     }
 }
