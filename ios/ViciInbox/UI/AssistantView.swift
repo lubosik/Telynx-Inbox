@@ -131,14 +131,29 @@ struct AssistantView: View {
                     draft: $model.draft,
                     isFocused: $inputIsFocused,
                     canSubmit: hasClientAccess && model.phase == .idle && !callIsActive,
+                    // SPEAKING IS NOT A REASON TO REFUSE THE MICROPHONE.
+                    //
+                    // Requiring .idle meant the mic went dead for the whole
+                    // answer, so cutting in was impossible and the only way to
+                    // redirect was to sit through it. People interrupt each
+                    // other; an assistant that cannot be interrupted is being
+                    // listened to, not talked with.
                     canDictate: hasClientAccess
-                        && model.phase == .idle
+                        && (model.phase == .idle || model.phase == .speaking)
                         && !callIsActive
                         && model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         && speech.canBeginPushToTalk,
                     speechPhase: speech.phase,
                     beginDictation: {
                         inputIsFocused = false
+                        // Cut the answer off first. Capturing over the top of
+                        // the assistant's own voice feeds it back into the
+                        // microphone, and the transcript then contains what the
+                        // assistant said as though the person had said it.
+                        if model.phase == .speaking {
+                            speech.stopAll()
+                            model.noteSpeechFinished()
+                        }
                         speech.beginPushToTalk(callIsActive: callIsActive)
                     },
                     endDictation: {
@@ -756,25 +771,42 @@ private struct AssistantSpeechStatusCard: View {
     let voiceDisclosure: String?
     @Environment(\.openURL) private var openURL
 
+    private var isListening: Bool {
+        phase == .listening || phase == .finalizing
+    }
+
     var body: some View {
+        // WHILE LISTENING, THE WORDS ARE THE WHOLE CARD.
+        //
+        // This used to stack a status label, an explanatory line, the
+        // transcript and a voice disclosure on top of each other, so the thing
+        // the person is actually watching, their own words appearing, was the
+        // third item down in small type. Everything else is either obvious from
+        // the orb or is a sentence nobody rereads.
+        //
+        // The supporting text still appears when there is no transcript yet, or
+        // when something needs explaining, such as the microphone being denied.
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
-            Text(detail)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            if !liveTranscript.isEmpty {
+            if isListening, !liveTranscript.isEmpty {
                 Text(liveTranscript)
-                    .font(.callout)
-                    .lineLimit(3)
+                    .font(.title3)
+                    .foregroundStyle(.primary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
                     .privacySensitive()
-                    .accessibilityLabel("Live transcription: \(liveTranscript)")
-            }
-            if let voiceDisclosure {
-                Text(voiceDisclosure)
-                    .font(.caption)
+                    .accessibilityLabel("Hearing: \(liveTranscript)")
+            } else {
+                Label(title, systemImage: symbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+                Text(detail)
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+                if let voiceDisclosure {
+                    Text(voiceDisclosure)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             if phase == .microphoneDenied {
                 Button {

@@ -255,3 +255,25 @@ test('EVERY speech path ends in the turn being released, or the shell wedges', (
   assert.match(COORDINATOR, /max\(duration, 1\) \+ 5/);
   assert.match(COORDINATOR, /cancelPlaybackWatchdog\(\)/);
 });
+
+test('the assistant can be interrupted while it is speaking', () => {
+  // Requiring .idle meant the microphone was dead for the whole answer, so the
+  // only way to redirect was to sit through it. People interrupt each other.
+  assert.match(VIEW, /model\.phase == \.idle \|\| model\.phase == \.speaking/);
+
+  // And the answer is cut off BEFORE capture starts. Recording over the
+  // assistant's own voice feeds it back through the microphone, and the
+  // transcript then contains what the assistant said as though the person had
+  // said it.
+  const begin = VIEW.slice(VIEW.indexOf('beginDictation: {'), VIEW.indexOf('endDictation: {'));
+  assert.ok(begin.length > 0, 'beginDictation must be findable');
+  const stopAt = begin.indexOf('speech.stopAll()');
+  const startAt = begin.indexOf('speech.beginPushToTalk');
+  assert.ok(stopAt >= 0, 'speaking must be stopped when the person cuts in');
+  assert.ok(startAt >= 0, 'capture must still start');
+  assert.ok(stopAt < startAt, 'stop the answer before opening the microphone');
+
+  // A capture already running is still refused, so a second tap cannot start a
+  // second one on top of the first.
+  assert.match(COORDINATOR, /case \.listening, \.finalizing, \.interruptedByCall: return false/);
+});

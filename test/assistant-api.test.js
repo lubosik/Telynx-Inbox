@@ -222,3 +222,98 @@ test('a tool the actor cannot use is never shown to the model', () => {
   // And an actor with nothing gets nothing, rather than a default set.
   assert.deepEqual(permittedTools(tools, { id: 9, permissions: new Set() }), []);
 });
+
+test('EVERY TOOL CALLS A METHOD THAT EXISTS ON THE SERVICE IT IS GIVEN', () => {
+  // The bug this exists to prevent, which shipped and the owner hit:
+  // draft_campaign called proposals.draft() and list_opportunities called
+  // proposals.opportunities(). Neither exists. The proposal service exposes
+  // accept, dismiss, get, list, saveBatch and resolveSegmentRecipients. Both
+  // tools threw at runtime, were caught by the loop's try/catch, and came back
+  // to the operator as "that lookup did not succeed" with no hint that the
+  // method was imaginary.
+  //
+  // A stub that answers to everything, like the Proxy used elsewhere in these
+  // tests, hides exactly this. So the stub here answers only to the methods the
+  // real services actually have, and any call outside that set throws.
+  const { buildTools } = require('../lib/assistant/tools');
+
+  const REAL = {
+    // Read STATICALLY from the service's own export block rather than by
+    // constructing one. Constructing needs a database client, and a stub that
+    // is close-but-not-identical makes this guard fail intermittently for
+    // reasons that have nothing to do with what it is guarding. Parsing the
+    // source keeps it tracking the real surface with no runtime dependency.
+    segments: exportedMethodNames('lib/campaigns/segment-service.js'),
+    proposals: ['accept', 'dismiss', 'get', 'list', 'saveBatch', 'resolveSegmentRecipients', 'draftProposals'],
+    opportunities: ['current', 'read'],
+    campaigns: ['list', 'detail', 'performance', 'reviewCount', 'create', 'edit', 'recipients'],
+    referrals: ['list'],
+    // Constructed rather than parsed. This factory needs no client until a
+    // method is called, so building one with a stub is cheap and exact, and the
+    // file's many data-shaping `return {` blocks defeat a text parser anyway.
+    //
+    // Hardcoding this list is what let get_revenue ship calling
+    // analytics.overview() on a module that has no overview: the guess in the
+    // test agreed with the guess in the tool, so both were wrong together.
+    analytics: Object.keys(
+      require('../lib/analytics/aggregate').createAnalyticsService({ client: { from: () => ({}) } })
+    )
+  };
+
+  function strict(name, allowed) {
+    return new Proxy({}, {
+      get(_target, prop) {
+        if (typeof prop !== 'string' || prop === 'then') return undefined;
+        assert.ok(allowed.includes(prop),
+          `a tool called ${name}.${prop}(), which does not exist. Available: ${allowed.join(', ')}`);
+        return async () => ({ items: [], findings: [], refusals: [], proposals: [], segments: { items: [] } });
+      }
+    });
+  }
+
+  const tools = buildTools({
+    segments: strict('segments', REAL.segments),
+    campaigns: strict('campaigns', REAL.campaigns),
+    proposals: strict('proposals', REAL.proposals),
+    referrals: strict('referrals', REAL.referrals),
+    analytics: strict('analytics', REAL.analytics),
+    opportunities: strict('opportunities', REAL.opportunities)
+  });
+  assert.ok(tools.length > 0);
+  return Promise.all(tools.map(async tool => {
+    // Arguments shaped so required fields are present; the point is which
+    // METHOD gets called, not what it returns.
+    const args = {
+      audienceId: '1', phone: '+10000000000', opportunityId: 'op_1',
+      period: 'week', description: 'people who bought once', name: 'test', box: 'inbox'
+    };
+    try {
+      await tool.run(args, { actor: { id: 1, permissions: new Set() } });
+    } catch (error) {
+      // A strict-stub violation is the failure this test is for. Anything else
+      // is the tool's own logic reacting to empty data, which is fine here.
+      if (/does not exist/.test(String(error?.message))) throw error;
+    }
+  }));
+});
+
+/**
+ * The names in a service's final `return { ... }` block.
+ *
+ * Static on purpose: see the comment at the call site. It reads the LAST return
+ * object in the file, which is the factory's public surface in every service
+ * here.
+ */
+function exportedMethodNames(relativePath) {
+  const source = fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
+  const start = source.lastIndexOf('\n  return {');
+  assert.ok(start > 0, `could not find the exported surface of ${relativePath}`);
+  const end = source.indexOf('\n  };', start);
+  assert.ok(end > start, `could not find the end of the surface of ${relativePath}`);
+  const names = source.slice(start, end)
+    .split('\n')
+    .map(line => line.trim().replace(/[,:].*$/, '').trim())
+    .filter(name => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name));
+  assert.ok(names.length > 3, `parsed too few methods from ${relativePath}, the parser has drifted`);
+  return names;
+}

@@ -57,11 +57,17 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         voiceOutput.callIsActive = { [weak self] in self?.callIsActive ?? false }
     }
 
+    /// `.listening` and `.finalizing` are excluded because a capture is already
+    /// running. Every other non-call state may start one, including while the
+    /// assistant is still speaking: the view stops the answer before it calls
+    /// this, so barge-in is a stop followed by a normal start rather than two
+    /// audio paths competing.
     var canBeginPushToTalk: Bool {
         guard !callIsActive else { return false }
         switch phase {
-        case .readyToRequest, .ready, .microphoneDenied, .failed: return true
-        default: return false
+        case .listening, .finalizing, .interruptedByCall: return false
+        case .unavailable: return false
+        default: return true
         }
     }
 

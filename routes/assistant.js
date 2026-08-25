@@ -29,7 +29,10 @@ const { converse } = require('../lib/assistant/converse');
 const { buildTools, permittedTools } = require('../lib/assistant/tools');
 const { searchVoices, speak } = require('../lib/assistant/voice');
 const { createCampaignService } = require('../lib/campaigns/service');
+const { createAnalyticsService } = require('../lib/analytics/aggregate');
+const { createOpportunityPortfolioService } = require('../lib/campaigns/opportunity-portfolio');
 const { createProposalService } = require('../lib/campaigns/proposal-service');
+const { draftProposals } = require('../lib/campaigns/proposal-writer');
 const { createReferralService } = require('../lib/referrals/service');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
 
@@ -51,12 +54,36 @@ function createAssistantRouter({ env = process.env, services } = {}) {
   let cachedTools = null;
   function tools() {
     if (cachedTools) return cachedTools;
+    const portfolio = services?.opportunities || createOpportunityPortfolioService();
+    const proposalService = services?.proposals || createProposalService();
     cachedTools = services?.tools || buildTools({
       segments: services?.segments || createSegmentService(),
       campaigns: services?.campaigns || createCampaignService(),
-      proposals: services?.proposals || createProposalService(),
+      // Composed here rather than assumed on the service. The proposal service
+      // exposes accept/dismiss/get/list/saveBatch and nothing that drafts; the
+      // writer is a separate module. An earlier version of the tools called
+      // proposals.draft(), which does not exist, so every attempt to draft a
+      // campaign failed at runtime and surfaced as "that lookup did not
+      // succeed".
+      proposals: Object.assign(Object.create(proposalService), {
+        draftProposals: services?.draftProposals || draftProposals
+      }),
       referrals: services?.referrals || createReferralService(),
-      analytics: services?.analytics || require('../lib/campaigns/analytics')
+      // The analytics SERVICE, not lib/campaigns/analytics. That module holds
+      // campaign attribution helpers and has no overview; the overview the app
+      // shows comes from lib/analytics/service via /api/analytics/overview.
+      analytics: services?.analytics
+        || createAnalyticsService({ client: require('../db').supabase }),
+      opportunities: {
+        current: async () => {
+          const payload = await portfolio.current();
+          return payload || { findings: [], refusals: [] };
+        },
+        read: async id => {
+          const payload = await portfolio.current();
+          return (payload?.findings || []).find(f => String(f.id) === String(id)) || null;
+        }
+      }
     });
     return cachedTools;
   }
