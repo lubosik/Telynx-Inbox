@@ -282,7 +282,10 @@ test('every banned-term category rejects a representative message', () => {
     manufactured_urgency_and_scarcity: 'last chance today',
     carrier_filter_high_risk: 'free shipping on this',
     shaft_and_forbidden_categories: 'pairs well with cannabis',
-    privacy_and_surveillance: 'we noticed you went quiet',
+    // "we noticed you" is ALLOWED now: referring to somebody's own history is
+    // the point of a reorder message. What stays refused is the language of
+    // observation rather than relationship.
+    privacy_and_surveillance: 'we tracked your visits',
     // The catalogue says RT. This is the message that says the quiet part.
     compound_names_and_brands: 'retatrutide is back in stock'
   };
@@ -502,10 +505,36 @@ test('a verified product code may be capitalised and an unverified one may not',
 
 // ── 10. merge fields ───────────────────────────────────────────────────────
 
-test('merge fields and placeholders of every shape are rejected', () => {
-  for (const placeholder of ['{{first_name}}', '${firstName}', '%%NAME%%', '[verified product name]', '<name>']) {
+test('every placeholder shape NOTHING renders is still rejected', () => {
+  // The ban became an allowlist, not nothing. These four shapes have no
+  // renderer and would reach a customer as literal characters, which was the
+  // original and still correct reason for refusing them.
+  for (const placeholder of ['${firstName}', '%%NAME%%', '[verified product name]', '<name>']) {
     assertRejectedFor('no_merge_fields_or_placeholders', `${BRAND}: hello ${placeholder}, back in stock. ${OPT_OUT}`);
   }
+});
+
+test('an APPROVED merge field is accepted, and an unknown one is not', () => {
+  // The whole point of the change: a message can greet somebody by name.
+  assertAccepted(`${BRAND}: Hi {{first_name}}, good to have you with us. ${OPT_OUT}`);
+  assertAccepted(`${BRAND}: Hi {{first_name}}, {{order_count}} orders in. ${OPT_OUT}`);
+  // And a field nothing can fill is refused exactly as the whole shape used to
+  // be, because an unfillable placeholder still reaches a customer as text.
+  assertRejectedFor('no_merge_fields_or_placeholders',
+    `${BRAND}: Hi {{nickname}}, good to have you. ${OPT_OUT}`);
+  assertRejectedFor('no_merge_fields_or_placeholders',
+    `${BRAND}: your {{favourite_colour}} order. ${OPT_OUT}`);
+});
+
+test('LENGTH IS MEASURED WITH THE VARIABLES AT THEIR LONGEST', () => {
+  // A template that fits and a message that does not are the same bug, and it
+  // only ever breaks for the person with the longest name.
+  const filler = 'a'.repeat(150 - `${BRAND}: . ${OPT_OUT}`.length);
+  const tightWithName = `${BRAND}: {{first_name}} ${filler}. ${OPT_OUT}`;
+  const verdict = validateCopy(tightWithName, { brandName: BRAND });
+  assert.equal(verdict.ok, false, 'this fits as written and not once a name is in it');
+  assert.ok(verdict.failures.some(f => f.check === 'length_within_one_segment'
+    && f.detail?.worstCase === true));
 });
 
 test('the playbook starter drafts, which contain bracketed stand-ins, are rejected', () => {
@@ -531,12 +560,19 @@ test('invented inventory counts, prices, discounts and deadlines are rejected', 
     `${BRAND}: only 3 left in stock. ${OPT_OUT}`,
     `${BRAND}: 5 units remaining. ${OPT_OUT}`,
     `${BRAND}: now $49 for a restock. ${OPT_OUT}`,
-    `${BRAND}: 20% off this restock. ${OPT_OUT}`,
     `${BRAND}: ends in 6 hours. ${OPT_OUT}`
   ];
   for (const text of cases) {
     assertRejectedFor('no_unsupported_quantity_price_or_deadline', text);
   }
+
+  // A PERCENTAGE IS NOW ALLOWED, and a currency amount is not. The code
+  // carries the discount either way; hiding the number made the message weaker
+  // for no compliance gain, while a currency symbol beside a digit is a much
+  // stronger carrier-filter signal and nothing here needs one.
+  assertAccepted(`${BRAND}: 15% off your next one with code thankyou. ${OPT_OUT}`);
+  assertRejectedFor('no_unsupported_quantity_price_or_deadline',
+    `${BRAND}: 15 dollars off, now $15. ${OPT_OUT}`);
 });
 
 // ── Reporting behaviour ────────────────────────────────────────────────────

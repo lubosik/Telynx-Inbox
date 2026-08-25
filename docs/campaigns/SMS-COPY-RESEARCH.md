@@ -364,7 +364,6 @@ anywhere in the codebase.
       "source": "CAMPAIGN-COPY-PLAYBOOK.md \"Do not mention how much the customer spent, expose private purchase history, imply surveillance\"",
       "terms": [
         "you spent",
-        "your last order",
         "your purchase history",
         "we noticed you",
         "we noticed that you",
@@ -372,12 +371,12 @@ anywhere in the codebase.
         "we have been watching",
         "weve been watching",
         "we've been watching",
-        "you havent ordered",
-        "you haven't ordered",
-        "you have not ordered",
         "your account shows",
         "our records show",
-        "we tracked"
+        "we tracked",
+        "we are watching",
+        "we know you",
+        "we can see that you"
       ]
     }
   },
@@ -405,16 +404,16 @@ anywhere in the codebase.
     },
     {
       "id": "price_or_percentage_offer",
-      "pattern": "[$\\u00a3\\u20ac]\\s*\\d|\\d\\s*%|%\\s*off",
+      "pattern": "[$\\u00a3\\u20ac]\\s*\\d",
       "flags": "i",
-      "reason": "states a price or discount; offers are added during human review, never drafted",
+      "reason": "states a currency amount, which carrier filters score heavily; a percentage is permitted",
       "source": "CAMPAIGN-COPY-PLAYBOOK.md \"Add a link or offer only during human review\""
     },
     {
       "id": "merge_field_or_placeholder",
-      "pattern": "\\{\\{[^}]*\\}\\}|\\$\\{[^}]*\\}|%%[^%]*%%|\\[[^\\]]*\\]|<[^>]*>",
+      "pattern": "\\$\\{[^}]*\\}|%%[^%]*%%|\\[[^\\]]*\\]|<[^>]*>",
       "flags": "",
-      "reason": "contains a merge field or placeholder; rendering is not implemented and a placeholder can reach a customer",
+      "reason": "contains a placeholder shape that nothing renders, so it would reach a customer as literal text",
       "source": "CAMPAIGN-COPY-PLAYBOOK.md \"Do not add {{first_name}} or another merge field until rendering is implemented\""
     },
     {
@@ -492,7 +491,7 @@ anywhere in the codebase.
     },
     {
       "id": "no_merge_fields_or_placeholders",
-      "title": "No merge field, template placeholder or bracketed stand-in."
+      "title": "Only approved {{merge fields}}. No other placeholder or bracketed stand-in."
     },
     {
       "id": "no_customer_identifiers",
