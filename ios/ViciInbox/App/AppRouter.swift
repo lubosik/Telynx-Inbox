@@ -56,6 +56,7 @@ enum AppRoute: Codable, Hashable {
     case automationHistory(id: String)
     case activity(category: String)
     case opportunities
+    case doNotContact
     case campaignProposals
     case campaign(id: String)
     case segment(id: String, name: String?)
@@ -95,7 +96,7 @@ enum AppRoute: Codable, Hashable {
             return .inbox
         case .contacts, .contact, .businessLine:
             return .contacts
-        case .growth, .automationHistory, .activity, .opportunities,
+        case .growth, .automationHistory, .activity, .opportunities, .doNotContact,
              .campaignProposals, .campaign, .segment, .segmentPeople,
              .campaignAttributions:
             return .growth
@@ -116,7 +117,7 @@ enum AppRoute: Codable, Hashable {
         switch self {
         case .growth(let section): return section
         case .automationHistory, .activity: return .automations
-        case .opportunities: return .audiences
+        case .opportunities, .doNotContact: return .audiences
         case .campaignProposals, .campaign, .campaignAttributions: return .campaigns
         case .segment, .segmentPeople: return .audiences
         default: return nil
@@ -205,8 +206,11 @@ struct AppNavigationAccess: Equatable {
         case .analytics, .analyticsAttributions, .attributionMethodology:
             return analytics
         case .growth(.campaigns), .growth(.audiences),
-             .opportunities, .campaign, .segment, .segmentPeople,
+             .opportunities, .doNotContact, .campaign, .segment, .segmentPeople,
              .campaignAttributions:
+            // Gated explicitly rather than left to the default. Who a business
+            // refuses to contact is campaign information, and the default here
+            // is permit.
             return campaigns
         case .campaignProposals:
             return campaignsManage

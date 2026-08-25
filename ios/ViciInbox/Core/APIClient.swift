@@ -1839,6 +1839,34 @@ actor APIClient {
         return data
     }
 
+    // MARK: - Do not contact
+
+    /// `GET /api/do-not-contact`, `campaigns.read`.
+    func fetchDoNotContact() async throws -> DoNotContactList {
+        try await decodedGET("/api/do-not-contact")
+    }
+
+    /// `POST /api/do-not-contact`, `campaigns.manage`.
+    ///
+    /// Adding somebody already on the list succeeds rather than erroring:
+    /// blocking a person twice means the same thing it meant the first time.
+    @discardableResult
+    func addToDoNotContact(phone: String, note: String?) async throws -> Bool {
+        var body: [String: Any] = ["phone": phone, "reasonCode": "manual_block"]
+        if let note, !note.isEmpty { body["note"] = note }
+        let (data, response) = try await post("/api/do-not-contact", body: body)
+        try validate(data: data, response: response)
+        return true
+    }
+
+    /// `DELETE /api/do-not-contact/:phone`, `campaigns.manage`.
+    @discardableResult
+    func removeFromDoNotContact(phone: String) async throws -> Bool {
+        let (data, response) = try await delete("/api/do-not-contact/\(encodedPathSegment(phone))")
+        try validate(data: data, response: response)
+        return true
+    }
+
     /// `GET /api/assistant/voices`, `assistant.use`.
     func assistantVoices(query: String?, gender: String?, accent: String?) async throws -> AssistantVoiceSearchResponse {
         var items: [URLQueryItem] = []

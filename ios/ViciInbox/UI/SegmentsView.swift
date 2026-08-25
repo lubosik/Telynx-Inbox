@@ -834,3 +834,123 @@ private struct SegmentPickerChosenSection: View {
         }
     }
 }
+
+// MARK: - Do not contact
+
+/// The people this business will not message again.
+///
+/// WHY IT LIVES IN GROWTH
+///   It is the last thing that decides who a campaign reaches, so it belongs
+///   beside audiences and campaigns rather than buried in Settings. Somebody
+///   about to send should be able to check it without leaving the part of the
+///   app they are already in.
+///
+/// WHAT IT IS NOT
+///   It is not where opt-outs are managed. A STOP is honoured the moment it
+///   arrives, by the webhook, without waiting for anybody to curate a list.
+///   This screen is for the judgement calls: the refund that went badly, the
+///   person who should be left alone even though they never said the word.
+struct DoNotContactView: View {
+    @EnvironmentObject private var session: SessionModel
+
+    @State private var entries: [DoNotContactEntry] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var pendingRemoval: DoNotContactEntry?
+
+    private var canManage: Bool { session.can(Permission.campaignsManage) }
+
+    var body: some View {
+        List {
+            Section {
+                Text("Nobody on this list is included in any campaign. It is checked again at the moment of sending, not only when an audience is built.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(ViciTheme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Try again") { Task { await load() } }
+                }
+            } else if isLoading && entries.isEmpty {
+                Section {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Reading the list").foregroundStyle(.secondary)
+                    }
+                }
+            } else if entries.isEmpty {
+                Section {
+                    Text("Nobody is blocked. People who reply STOP are handled automatically and do not appear here.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Section {
+                    ForEach(entries) { entry in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.displayName).font(.body)
+                            Text(entry.reasonText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                        .swipeActions(edge: .trailing) {
+                            if canManage {
+                                Button(role: .destructive) {
+                                    pendingRemoval = entry
+                                } label: {
+                                    Label("Unblock", systemImage: "arrow.uturn.backward")
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text(entries.count == 1 ? "1 person" : "\(entries.count) people")
+                }
+            }
+        }
+        .navigationTitle("Do not contact")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await load() }
+        .task { await load() }
+        // Confirmed, because unblocking is the direction that can cause harm:
+        // it puts somebody back into every future campaign, and the person who
+        // asked not to be contacted is not in the room.
+        .confirmationDialog(
+            pendingRemoval.map { "Allow campaigns to reach \($0.displayName) again?" } ?? "",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Unblock", role: .destructive) {
+                if let entry = pendingRemoval { Task { await remove(entry) } }
+                pendingRemoval = nil
+            }
+            Button("Keep blocked", role: .cancel) { pendingRemoval = nil }
+        }
+    }
+
+    private func load() async {
+        errorMessage = nil
+        do {
+            entries = try await APIClient.shared.fetchDoNotContact().entries
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func remove(_ entry: DoNotContactEntry) async {
+        do {
+            try await APIClient.shared.removeFromDoNotContact(phone: entry.phone)
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}

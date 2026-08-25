@@ -1112,3 +1112,39 @@ enum SegmentBlockerText {
 struct SegmentRestoreResponse: Codable, Hashable {
     let segment: SegmentRecord
 }
+
+// MARK: - Do not contact
+
+/// One person this business will not message again.
+struct DoNotContactEntry: Codable, Hashable, Identifiable {
+    let id: String
+    let phone: String
+    let name: String?
+    let reasonCode: String?
+    let source: String?
+    let addedAt: String?
+
+    var displayName: String {
+        guard let name, !name.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return PhoneFormatter.pretty(phone)
+        }
+        return name
+    }
+
+    /// Said in words rather than as a code, because the screen is read by
+    /// somebody deciding whether a block still makes sense, not by a machine.
+    var reasonText: String {
+        switch reasonCode {
+        case "manual_block": return "Blocked by the team"
+        case "compliance_hold": return "On hold for compliance"
+        case "internal_identity": return "An internal number"
+        case "test_identity": return "A test number"
+        default: return "Blocked"
+        }
+    }
+}
+
+struct DoNotContactList: Codable, Hashable {
+    let entries: [DoNotContactEntry]
+    let total: Int
+}

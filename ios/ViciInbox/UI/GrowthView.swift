@@ -79,6 +79,17 @@ struct GrowthView: View {
                         .accessibilityLabel("Automation activity")
                     }
                 }
+                // Beside the audiences, because it is the last thing that
+                // decides who a campaign reaches. Somebody about to send should
+                // be able to check it without leaving Growth.
+                if router.growthSection == .audiences && session.can(Permission.campaignsRead) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        NavigationLink(value: AppRoute.doNotContact) {
+                            Image(systemName: "nosign")
+                        }
+                        .accessibilityLabel("Do not contact list")
+                    }
+                }
             }
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {
@@ -105,6 +116,8 @@ struct GrowthView: View {
                     ActivityLogView(category: AuditCategory(rawValue: category) ?? .all)
                 case .opportunities:
                     AssistantOpportunityEvidenceView()
+                case .doNotContact:
+                    DoNotContactView()
                 case .campaignAttributions(let campaignID):
                     CampaignAttributionListView(campaignID: campaignID)
                 default:

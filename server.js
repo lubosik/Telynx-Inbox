@@ -153,6 +153,7 @@ app.use('/api/upload',        requireAuth, require('./routes/upload'));
 app.use('/api/react',         requireAuth, sendLimiter, require('./routes/react')(broadcastSSE));
 app.use('/api/conversations', requireAuth, require('./routes/conversations'));
 app.use('/api/referrals',     requireAuth, require('./routes/referrals')());
+app.use('/api/do-not-contact', requireAuth, require('./routes/do-not-contact')());
 app.use('/api/intelligence',  requireAuth, require('./routes/intelligence'));
 app.use('/api/sync',          requireAuth, require('./routes/sync'));
 app.use('/api/contacts',      requireAuth, require('./routes/contacts'));
