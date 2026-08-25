@@ -380,7 +380,7 @@ struct CampaignDetailView: View {
         .sheet(isPresented: $showingSchedule) {
             CampaignScheduleSheet { date in
                 showingSchedule = false
-                await model.schedule(for: date)
+                await confirmThenSchedule(for: date)
             }
         }
         .sheet(isPresented: $showingCancellation) {
@@ -393,11 +393,25 @@ struct CampaignDetailView: View {
                 await model.cancel(reason: reason)
             }
         }
+        // MARK: Face ID on the two irreversible steps
+        //
+        // Approval is the moment a revision becomes the thing that may be sent,
+        // and scheduling is the moment it acquires a time to go out. Both reach
+        // real customers and neither can be taken back afterwards.
+        //
+        // Not authentication: the person is signed in and the server has
+        // already decided what they may do. This is a physical act between an
+        // intention and an outcome, in the two places where a mis-tap is
+        // expensive.
+        //
+        // `.unavailable` proceeds, because the dialog above was already
+        // answered and a phone with no passcode is not a reason somebody cannot
+        // run their business.
         .confirmationDialog("Approve this exact revision?",
                             isPresented: $confirmingApproval,
                             titleVisibility: .visible) {
             Button("Approve Revision \(model.campaign?.revision ?? 0)") {
-                Task { await model.approve() }
+                Task { await confirmThenApprove() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -415,6 +429,21 @@ struct CampaignDetailView: View {
         )) { Button("OK", role: .cancel) {} } message: {
             Text(model.confirmationMessage ?? "Done")
         }
+    }
+
+    private func confirmThenApprove() async {
+        let outcome = await BiometricConfirmation.confirm(
+            reason: "Confirm approval of this campaign message and audience"
+        )
+        guard outcome != .declined else { return }
+        await model.approve()
+    }
+    private func confirmThenSchedule(for date: Date) async {
+        let outcome = await BiometricConfirmation.confirm(
+            reason: "Confirm scheduling this campaign to go out to customers"
+        )
+        guard outcome != .declined else { return }
+        await model.schedule(for: date)
     }
 
     private func campaignList(_ campaign: CampaignRecord) -> some View {

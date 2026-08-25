@@ -33,6 +33,8 @@
 	</array>
 
 	<!-- Microphone is mandatory for a softphone. -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Vici Inbox asks for Face ID to confirm the few actions that cannot be undone, such as sending a campaign to customers or allowing campaigns to reach somebody who was blocked. Your face data never leaves your iPhone and Vici never sees it.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Vici Inbox uses the microphone for customer calls and, only while you are asking the Assistant a question, to turn what you say into text on this iPhone. It is never left listening: you start it, and it stops when you finish speaking.</string>
 	<!-- TelnyxRTC links WebRTC camera APIs even though the current app is audio-first.

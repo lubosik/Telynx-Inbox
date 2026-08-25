@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 
 enum AssistantSpeechUnavailableReason: Equatable {
     case requiresIOS26
@@ -254,6 +255,62 @@ enum AssistantOrbSize: String, CaseIterable, Identifiable {
         case .compact: return 128
         case .standard: return 168
         case .large: return 208
+        }
+    }
+}
+
+// MARK: - Confirming with Face ID
+
+/// A deliberate confirmation for the few actions that are hard to undo.
+///
+/// WHAT THIS IS, AND WHAT IT IS NOT
+///   It is not authentication. The person is already signed in and the server
+///   has already decided what they may do. This is a second, physical act
+///   between an intention and an irreversible outcome, for the two places where
+///   a mis-tap is expensive: putting somebody back into every future campaign,
+///   and sending real messages to real customers.
+///
+/// IT MUST NOT BECOME A LOCKED DOOR
+///   `deviceOwnerAuthentication` falls back to the passcode on its own when
+///   Face ID is unavailable, not enrolled, or locked out after failures. And if
+///   the device has no passcode at all, this returns `.unavailable` and the
+///   caller proceeds with its ordinary confirmation rather than refusing. A
+///   phone with no passcode is not a reason somebody cannot run their business,
+///   and it is the owner's device either way.
+enum BiometricConfirmation {
+    enum Outcome: Equatable {
+        /// The person confirmed with Face ID, Touch ID, or the device passcode.
+        case confirmed
+        /// They cancelled, or failed. The action must not proceed.
+        case declined
+        /// The device cannot ask. The caller falls back to a normal confirmation.
+        case unavailable
+    }
+
+    /// - Parameter reason: shown by the system inside the Face ID prompt. It is
+    ///   read at the moment of deciding, so it names the ACTION and its
+    ///   consequence, not the app.
+    static func confirm(reason: String) async -> Outcome {
+        let context = LAContext()
+        // Nothing else in the app should be able to reuse a recent unlock to
+        // satisfy this. Every high-impact action asks again.
+        context.touchIDAuthenticationAllowableReuseDuration = 0
+        context.localizedCancelTitle = "Cancel"
+
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
+            return .unavailable
+        }
+        do {
+            let approved = try await context.evaluatePolicy(.deviceOwnerAuthentication,
+                                                            localizedReason: reason)
+            return approved ? .confirmed : .declined
+        } catch {
+            // Cancellation and failure are the same outcome here: the action
+            // does not happen. They are deliberately not distinguished, because
+            // treating a failure as "try again quietly" is how a confirmation
+            // becomes a formality.
+            return .declined
         }
     }
 }

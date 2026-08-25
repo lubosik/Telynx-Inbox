@@ -928,7 +928,7 @@ struct DoNotContactView: View {
             titleVisibility: .visible
         ) {
             Button("Unblock", role: .destructive) {
-                if let entry = pendingRemoval { Task { await remove(entry) } }
+                if let entry = pendingRemoval { Task { await confirmThenRemove(entry) } }
                 pendingRemoval = nil
             }
             Button("Keep blocked", role: .cancel) { pendingRemoval = nil }
@@ -943,6 +943,26 @@ struct DoNotContactView: View {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Face ID between the tap and the outcome.
+    ///
+    /// Unblocking puts somebody back into every future campaign, and the person
+    /// who asked to be left alone is not in the room to object. A confirmation
+    /// dialog alone is one mis-tap; this is a deliberate second act.
+    ///
+    /// `.unavailable` proceeds. A device with no passcode is not a reason
+    /// somebody cannot run their business, and the dialog was already answered.
+    private func confirmThenRemove(_ entry: DoNotContactEntry) async {
+        let outcome = await BiometricConfirmation.confirm(
+            reason: "Confirm that campaigns may reach \(entry.displayName) again"
+        )
+        switch outcome {
+        case .declined:
+            errorMessage = "That was not confirmed, so \(entry.displayName) is still blocked."
+        case .confirmed, .unavailable:
+            await remove(entry)
+        }
     }
 
     private func remove(_ entry: DoNotContactEntry) async {
