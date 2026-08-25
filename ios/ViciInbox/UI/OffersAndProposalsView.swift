@@ -157,7 +157,16 @@ struct OffersAndProposalsView: View {
             if !model.structuredOffers.isEmpty {
                 Section("Structured offer proposals") {
                     ForEach(model.structuredOffers) { proposal in
-                        CampaignProposalReviewRow(proposal: proposal)
+                        CampaignProposalReviewRow(
+                            proposal: proposal,
+                            canManage: canManage,
+                            isBusy: busyProposalID == proposal.id,
+                            isAnyBusy: busyProposalID != nil,
+                            actionMessage: actionProposalID == proposal.id ? actionMessage : nil,
+                            actionFailed: actionFailed,
+                            onAccept: { Task { await accept(proposal) } },
+                            onDismiss: { Task { await dismissProposal(proposal) } }
+                        )
                     }
                 }
             }
@@ -165,7 +174,16 @@ struct OffersAndProposalsView: View {
             if !model.noOfferControls.isEmpty {
                 Section {
                     ForEach(model.noOfferControls) { proposal in
-                        CampaignProposalReviewRow(proposal: proposal)
+                        CampaignProposalReviewRow(
+                            proposal: proposal,
+                            canManage: canManage,
+                            isBusy: busyProposalID == proposal.id,
+                            isAnyBusy: busyProposalID != nil,
+                            actionMessage: actionProposalID == proposal.id ? actionMessage : nil,
+                            actionFailed: actionFailed,
+                            onAccept: { Task { await accept(proposal) } },
+                            onDismiss: { Task { await dismissProposal(proposal) } }
+                        )
                     }
                 } header: {
                     Text("Intentional no-offer controls")
@@ -324,6 +342,16 @@ final class OffersAndProposalsModel: ObservableObject {
 
 private struct CampaignProposalReviewRow: View {
     let proposal: CampaignProposal
+    /// Presentational. The row draws the buttons and owns none of the work, so
+    /// there is one place that accepts a draft and one place that knows which
+    /// one is mid-flight.
+    var canManage: Bool = false
+    var isBusy: Bool = false
+    var isAnyBusy: Bool = false
+    var actionMessage: String?
+    var actionFailed: Bool = false
+    var onAccept: () -> Void = {}
+    var onDismiss: () -> Void = {}
 
     var body: some View {
         DisclosureGroup {
@@ -373,10 +401,8 @@ private struct CampaignProposalReviewRow: View {
                 // campaign, behind Face ID.
                 if canManage {
                     HStack(spacing: 12) {
-                        Button {
-                            Task { await accept(proposal) }
-                        } label: {
-                            if busyProposalID == proposal.id {
+                        Button(action: onAccept) {
+                            if isBusy {
                                 ProgressView()
                             } else {
                                 Text("Turn into a campaign")
@@ -384,16 +410,14 @@ private struct CampaignProposalReviewRow: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(ViciTheme.tint)
-                        .disabled(busyProposalID != nil)
+                        .disabled(isAnyBusy)
 
-                        Button("Dismiss", role: .destructive) {
-                            Task { await dismissProposal(proposal) }
-                        }
-                        .disabled(busyProposalID != nil)
+                        Button("Dismiss", role: .destructive, action: onDismiss)
+                            .disabled(isAnyBusy)
                     }
                     .padding(.top, 4)
 
-                    if let actionMessage, actionProposalID == proposal.id {
+                    if let actionMessage {
                         Text(actionMessage)
                             .font(.caption)
                             .foregroundStyle(actionFailed ? ViciTheme.destructive : ViciTheme.success)
