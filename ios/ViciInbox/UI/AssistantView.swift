@@ -95,17 +95,25 @@ struct AssistantView: View {
                                 .disabled(callIsActive)
                             }
 
+                            // ONLY THE LAST EXCHANGE, NOT THE WHOLE LOG.
+                            //
+                            // This is a voice interface. Reading back what you
+                            // just said is not something a person does in a
+                            // conversation, and a growing wall of bubbles is
+                            // what made this feel like a chat app bolted to a
+                            // microphone rather than something you talk to.
+                            //
+                            // The latest answer stays on screen because a
+                            // spoken figure is worth being able to check, and
+                            // it keeps its evidence tap.
                             if model.transcript.isEmpty {
                                 AssistantPrivacyCard()
-                            } else {
-                                LazyVStack(spacing: 12) {
-                                    ForEach(model.transcript) { entry in
-                                        AssistantTranscriptBubble(entry: entry) { token in
-                                            openEvidence(token)
-                                        }
-                                            .id(entry.id)
-                                    }
+                            } else if let latest = model.transcript.last(where: { $0.role == .assistant }) {
+                                AssistantTranscriptBubble(entry: latest) { token in
+                                    openEvidence(token)
                                 }
+                                .id(latest.id)
+                                .transition(.opacity)
                             }
                         }
                         .padding(.horizontal, 18)
@@ -113,7 +121,7 @@ struct AssistantView: View {
                     }
                     .onChange(of: model.transcript.count) { _ in
                         guard let last = model.transcript.last else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        withAnimation(.easeOut(duration: 0.25)) {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
@@ -698,22 +706,26 @@ private struct AssistantPushToTalkButton: View {
             .background(phase == .listening ? ViciTheme.destructive : ViciTheme.tint, in: Circle())
             .opacity(isEnabled || isPressed ? 1 : 0.45)
             .contentShape(Circle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard isEnabled, !isPressed else { return }
-                        isPressed = true
-                        begin()
-                    }
-                    .onEnded { _ in
-                        guard isPressed else { return }
-                        isPressed = false
-                        end()
-                    }
-            )
+            // TAP TO START. Silence ends it.
+            //
+            // Press and hold made a conversation into a physical act: hold the
+            // phone, hold the button, do not let go mid sentence. You cannot
+            // put the phone down, and you certainly cannot have a back and
+            // forth. Tapping starts listening, the transcript standing still
+            // for a moment and a half ends it, and tapping again stops it early.
+            .onTapGesture {
+                if isPressed {
+                    isPressed = false
+                    end()
+                    return
+                }
+                guard isEnabled else { return }
+                isPressed = true
+                begin()
+            }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(phase == .listening ? "Recording question" : "Push to talk")
-            .accessibilityHint("Press and hold, or double tap to start and double tap again to stop. Typed input is always available.")
+            .accessibilityLabel(phase == .listening ? "Listening" : "Start speaking")
+            .accessibilityHint("Tap to start speaking. It stops on its own when you finish, or tap again to stop. Typed input is always available.")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction {
                 if isPressed {

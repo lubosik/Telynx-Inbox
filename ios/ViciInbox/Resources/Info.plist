@@ -34,7 +34,7 @@
 
 	<!-- Microphone is mandatory for a softphone. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Vici Inbox uses the microphone for customer calls and, only while you press and hold, to turn Assistant questions into text on this iPhone.</string>
+	<string>Vici Inbox uses the microphone for customer calls and, only while you are asking the Assistant a question, to turn what you say into text on this iPhone. It is never left listening: you start it, and it stops when you finish speaking.</string>
 	<!-- TelnyxRTC links WebRTC camera APIs even though the current app is audio-first.
 	     App Store validation therefore requires a camera purpose string. -->
 	<key>NSCameraUsageDescription</key>

@@ -80,6 +80,7 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     /// Called on touch-up. Preparation and system asset installation may finish
     /// safely, but capture never starts after the finger has been released.
     func endPushToTalk() {
+        cancelSilenceTimer()
         pressIsHeld = false
         captureTimeoutTask?.cancel()
         captureTimeoutTask = nil
@@ -270,6 +271,40 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     private func updateTranscript(_ text: String, generation expectedGeneration: Int) {
         guard expectedGeneration == generation, !callIsActive else { return }
         liveTranscript = String(text.prefix(AssistantInputPolicy.maximumCharacters))
+        armSilenceTimer()
+    }
+
+    // MARK: - Stopping when the person stops
+
+    /// How long the transcript must stand still before capture ends itself.
+    ///
+    /// Short enough that finishing a sentence and waiting does not feel like the
+    /// phone has forgotten you. Long enough to survive the natural pause in the
+    /// middle of "how are we doing... this week". Ordinary speech pauses run to
+    /// about a second; this sits beyond that without dragging.
+    private static let silenceBeforeStopping: Duration = .milliseconds(1_500)
+
+    private var silenceTimer: Task<Void, Never>?
+
+    /// Restarted on every transcript update, so the countdown measures silence
+    /// rather than elapsed time. It only ends capture once something has
+    /// actually been said: an empty transcript means the microphone opened and
+    /// nobody spoke, and cutting that off after a second and a half would make
+    /// the assistant impossible to use in a quiet room.
+    private func armSilenceTimer() {
+        silenceTimer?.cancel()
+        guard machine.phase == .listening,
+              !liveTranscript.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        silenceTimer = Task { [weak self] in
+            try? await Task.sleep(for: Self.silenceBeforeStopping)
+            guard !Task.isCancelled, let self, self.machine.phase == .listening else { return }
+            self.endPushToTalk()
+        }
+    }
+
+    private func cancelSilenceTimer() {
+        silenceTimer?.cancel()
+        silenceTimer = nil
     }
 
     private func prepareAndStart(generation expectedGeneration: Int) async {
@@ -812,8 +847,22 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
                     player.delegate = self
                     self.audioPlayer = player
                     player.volume = 1.0
+                    player.prepareToPlay()
+                    // play() RETURNING FALSE IS THE STUCK STATE.
+                    //
+                    // When it refuses, no delegate callback ever fires, so the
+                    // completion that releases the turn is never called and the
+                    // shell sits on "Speaking" forever. That is exactly what
+                    // shipped: silent audio and a phase that never ended.
+                    // Treated as a failure to speak, not as speech.
+                    guard player.play() else {
+                        self.audioPlayer = nil
+                        self.releaseSessionAfterPlayback()
+                        _ = self.speakLocally(text)
+                        return
+                    }
                     self.noteStartedIfNeeded()
-                    player.play()
+                    self.armPlaybackWatchdog(duration: player.duration)
                 }
             } catch {
                 // Fall back rather than fail. Recorded as a fallback so a
@@ -824,6 +873,34 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
             }
         }
         return true
+    }
+
+    /// Releases the turn if the delegate never reports finishing.
+    ///
+    /// Every path into speech has to end in the completion being called, or the
+    /// assistant cannot be spoken to again. The synthesiser path already had a
+    /// timeout for this. The server path did not, and a single silent failure
+    /// left the shell wedged with no way back except restarting the app.
+    ///
+    /// Sized from the clip itself plus a margin, so it never truncates real
+    /// audio and never waits a fixed long time for a short answer.
+    private var playbackWatchdog: Task<Void, Never>?
+
+    private func armPlaybackWatchdog(duration: TimeInterval) {
+        playbackWatchdog?.cancel()
+        let allowance = max(duration, 1) + 5
+        playbackWatchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(allowance))
+            guard !Task.isCancelled, let self, self.audioPlayer != nil else { return }
+            self.audioPlayer = nil
+            self.releaseSessionAfterPlayback()
+            self.finishOnce()
+        }
+    }
+
+    private func cancelPlaybackWatchdog() {
+        playbackWatchdog?.cancel()
+        playbackWatchdog = nil
     }
 
     private func noteStartedIfNeeded() {
@@ -898,6 +975,7 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            self.cancelPlaybackWatchdog()
             self.audioPlayer = nil
             self.releaseSessionAfterPlayback()
             self.finishOnce()
@@ -912,6 +990,7 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
     }
 
     func stop() {
+        cancelPlaybackWatchdog()
         if let audioPlayer {
             audioPlayer.stop()
             self.audioPlayer = nil

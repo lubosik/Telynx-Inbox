@@ -73,17 +73,38 @@ test('a failed server voice falls back to the local synthesiser rather than goin
 test('microphone disclosure covers calls and point-of-use Assistant dictation', () => {
   assert.match(PLIST, /NSMicrophoneUsageDescription/);
   assert.match(PLIST, /customer calls/);
-  assert.match(PLIST, /only while you press and hold/);
-  assert.match(PLIST, /Assistant questions/);
+  // Press and hold is gone, so the disclosure cannot still promise it. What it
+  // must still promise, and what is still true, is that the microphone is not
+  // left open: capture is started deliberately and ends itself when speech
+  // stops.
+  assert.match(PLIST, /only while you are asking the Assistant a question/);
+  assert.match(PLIST, /never left listening/);
+  assert.doesNotMatch(PLIST, /press and hold/,
+    'the disclosure must not describe a gesture the app no longer uses');
+  // Both uses must be named. Matched on the word rather than an exact phrase,
+  // so rewording the sentence does not fail a test whose point is that the
+  // Assistant use is disclosed at all.
+  assert.match(PLIST, /Assistant/);
   assert.equal(PLIST.includes('NSSpeechRecognitionUsageDescription'), false);
   assert.match(COORDINATOR, /AVAudioApplication\.requestRecordPermission\(\)/);
 });
 
-test('push to talk is bounded, explicit, accessible, and typed fallback remains', () => {
-  assert.match(VIEW, /DragGesture\(minimumDistance: 0\)/);
-  assert.match(VIEW, /\.onChanged[\s\S]*?begin\(\)/);
-  assert.match(VIEW, /\.onEnded[\s\S]*?end\(\)/);
-  assert.match(VIEW, /Press and hold, or double tap to start and double tap again to stop\. Typed input is always available\./);
+test('capture is tap to start, ends itself, and typed fallback remains', () => {
+  // Hold to talk made a conversation a physical act: hold the phone, hold the
+  // button, do not let go mid sentence. Tap starts it; silence ends it.
+  assert.match(VIEW, /\.onTapGesture \{/);
+  assert.doesNotMatch(VIEW, /DragGesture\(minimumDistance: 0\)/,
+    'holding must not be required to speak');
+  assert.match(VIEW, /Tap to start speaking\. It stops on its own when you finish/);
+
+  // Ending itself is the half that makes tapping safe: without it a tap would
+  // leave the microphone open indefinitely.
+  assert.match(COORDINATOR, /silenceBeforeStopping/);
+  assert.match(COORDINATOR, /armSilenceTimer\(\)/);
+  assert.match(COORDINATOR, /endPushToTalk\(\)/);
+  // Never on an empty transcript: the microphone opening in a quiet room must
+  // not close before anybody has spoken.
+  assert.match(COORDINATOR, /!liveTranscript\.trimmingCharacters\(in: \.whitespaces\)\.isEmpty else \{ return \}/);
   assert.doesNotMatch(VIEW, /\.onChange\(of: isEnabled\)/);
   assert.match(VIEW, /TextField\("Ask for a verified Vici summary"/);
   assert.match(VIEW, /Open microphone settings/);
@@ -203,4 +224,34 @@ test('SERVER AUDIO CONFIGURES A PLAYBACK SESSION, or it plays silently', () => {
 test('playback never takes the audio session from a live call', () => {
   assert.match(COORDINATOR, /guard !callIsActive\(\) else \{ return false \}/);
   assert.match(COORDINATOR, /guard !callIsActive\(\) else \{ return \}[\s\S]{0,200}?setActive\(false/);
+});
+
+test('EVERY speech path ends in the turn being released, or the shell wedges', () => {
+  // Shipped once: server audio played silently and the delegate never fired,
+  // so the completion that ends the turn was never called and the assistant sat
+  // on "Speaking" forever with no way back except restarting the app.
+  //
+  // Two independent ways out, because one of them failing is what caused it.
+  const speakBlock = COORDINATOR.slice(
+    COORDINATOR.indexOf('func speakWithServerVoice'),
+    COORDINATOR.indexOf('private var playbackWatchdog')
+  );
+  assert.ok(speakBlock.length > 0, 'the speak block must be findable');
+
+  // 1. play() refusing is treated as a failure to speak, not as speech.
+  const guardAt = speakBlock.indexOf('guard player.play() else');
+  assert.ok(guardAt >= 0, 'the result of play() must be checked');
+  const fallbackAt = speakBlock.indexOf('speakLocally(text)', guardAt);
+  assert.ok(fallbackAt > guardAt, 'a refused play must fall back rather than pretend it is speaking');
+
+  // 2. A watchdog for the case where play() succeeds and the delegate never
+  //    reports finishing anyway.
+  const armAt = speakBlock.indexOf('armPlaybackWatchdog');
+  assert.ok(armAt >= 0, 'playback must arm a watchdog');
+  assert.match(COORDINATOR, /playbackWatchdog[\s\S]{0,600}?finishOnce\(\)/,
+    'the watchdog must release the turn');
+
+  // And it must not fire over audio that is still playing.
+  assert.match(COORDINATOR, /max\(duration, 1\) \+ 5/);
+  assert.match(COORDINATOR, /cancelPlaybackWatchdog\(\)/);
 });
