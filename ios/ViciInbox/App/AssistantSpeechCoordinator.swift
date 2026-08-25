@@ -48,7 +48,10 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         latencyRecorder = recorder
         voiceOutput = AssistantVoiceOutput(latencyRecorder: recorder)
         // Playback must never wrestle the audio session away from CallKit.
-        voiceOutput.callIsActive = { [weak self] in self?.callIsActive() ?? false }
+        // The coordinator's callIsActive is a stored Bool, not a closure. The
+        // capture pipeline below has a closure of the same name, which is why
+        // this read as callable and compiled only in my head.
+        voiceOutput.callIsActive = { [weak self] in self?.callIsActive ?? false }
         super.init()
     }
 
