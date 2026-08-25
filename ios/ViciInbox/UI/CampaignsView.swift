@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CampaignsView: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var router: AppRouter
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
 
@@ -150,6 +151,24 @@ struct CampaignsView: View {
         List {
             Section { CampaignSafetyNotice() }
 
+            // Reachable whether or not there are campaigns yet. Drafts live on
+            // a different screen from campaigns, which is the distinction that
+            // caused all of this, so the way across is always visible.
+            if session.can(Permission.campaignsManage) {
+                Section {
+                    Button {
+                        router.open(.campaignProposals)
+                    } label: {
+                        Label("Campaign drafts", systemImage: "doc.text.magnifyingglass")
+                    }
+                    Button {
+                        router.open(.opportunities)
+                    } label: {
+                        Label("Where the revenue is", systemImage: "chart.line.uptrend.xyaxis")
+                    }
+                }
+            }
+
             if model.reviewCount > 0 {
                 Section {
                     HStack(spacing: 12) {
@@ -247,6 +266,32 @@ struct CampaignsView: View {
                     Button("Create Draft") { showingNewCampaign = true }
                         .buttonStyle(.borderedProminent)
                         .tint(ViciTheme.tint)
+
+                    // THE TWO SCREENS NOBODY COULD REACH.
+                    //
+                    // Campaign drafts and Opportunities had no tap path at all:
+                    // the only way in was to ask the assistant to take you.
+                    // So being told "I've drafted four campaigns" and then
+                    // finding this empty page was a dead end, and the drafts
+                    // looked like they did not exist.
+                    //
+                    // Here rather than in the section picker because this is
+                    // the screen somebody is standing on when they go looking.
+                    VStack(spacing: 10) {
+                        Button {
+                            router.open(.campaignProposals)
+                        } label: {
+                            Label("Campaign drafts", systemImage: "doc.text.magnifyingglass")
+                        }
+                        Button {
+                            router.open(.opportunities)
+                        } label: {
+                            Label("Where the revenue is", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .tint(ViciTheme.tint)
+                    .padding(.top, 4)
                 }
             }
             .padding(24)

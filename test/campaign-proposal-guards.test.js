@@ -28,6 +28,15 @@ const {
 } = require('../lib/campaigns/proposal-guards');
 const { createProposalService } = require('../lib/campaigns/proposal-service');
 
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
+
 const ACTOR = { id: 7, displayName: 'Owner' };
 
 function proposal(overrides = {}) {
@@ -45,7 +54,7 @@ function proposal(overrides = {}) {
     segmentKey: 'one_time_buyers',
     offer: { kind: 'none' },
     copy: {
-      text: 'Vici: we are here if you need anything from us. Reply STOP to opt out.',
+      text: `${BRAND}: we are here if you need anything from us. Reply STOP to opt out.`,
       septets: 70,
       validated: true,
       failedChecks: [],
@@ -250,7 +259,7 @@ function storedRow(overrides = {}) {
     audience: { kind: 'rules', segmentKey: 'one_time_buyers' },
     segment_key: 'one_time_buyers',
     offer: { kind: 'none' },
-    copy_text: 'Vici: we are here if you need anything from us. Reply STOP to opt out.',
+    copy_text: `${BRAND}: we are here if you need anything from us. Reply STOP to opt out.`,
     copy_septets: 70,
     copy_rules_version: '2026-08-23',
     reasoning: {},

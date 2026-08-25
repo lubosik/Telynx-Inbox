@@ -15,6 +15,15 @@ const assert = require('node:assert/strict');
 
 const { buildSendConfirmation } = require('../lib/assistant/send-request');
 
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
+
 const OWNER = { id: 1, permissions: new Set(['campaigns.approve', 'campaigns.launch', 'campaigns.manage']) };
 
 /** A campaign service that records every method anybody touched. */
@@ -31,7 +40,7 @@ function service({ campaign, dry }) {
   };
 }
 
-const READY = { id: 'c1', status: 'approved', revision: 7, name: 'Reorder check-in', message: 'Vici: ready for another? Reply STOP to opt out.', segment_name: 'Due a reorder' };
+const READY = { id: 'c1', status: 'approved', revision: 7, name: 'Reorder check-in', message: `${BRAND}: ready for another? Reply STOP to opt out.`, segment_name: 'Due a reorder' };
 const HEALTHY_DRY = { revision: 7, total: 900, eligible: 41, suppressed: 859, reasons: { eligible: 41, consent_not_recorded: 800, do_not_contact: 55, cadence_too_soon: 4 }, liveEligibility: { enabled: false } };
 
 test('a confirmation reads the campaign and the dry run, and writes nothing', async () => {

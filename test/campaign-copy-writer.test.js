@@ -19,6 +19,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { RULES, renderPromptRules } = require('../lib/campaigns/copy-rules');
+
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
 const {
   CopyDraftError,
   SUPPORTED_WORKFLOWS,
@@ -34,9 +43,9 @@ const OPT_OUT = RULES.optOut.exactSuffix;
 const ENABLED = { CAMPAIGN_AI_COPY_ENABLED: 'true' };
 
 const GOOD_DRAFTS = [
-  `Vici: your product is back in stock. Reply if you would like help. ${OPT_OUT}`,
-  `Vici: we have restocked your product. Reply here for a hand. ${OPT_OUT}`,
-  `Vici: your product is available again. Reply if you want a hand. ${OPT_OUT}`
+  `${BRAND}: your product is back in stock. Reply if you would like help. ${OPT_OUT}`,
+  `${BRAND}: we have restocked your product. Reply here for a hand. ${OPT_OUT}`,
+  `${BRAND}: your product is available again. Reply if you want a hand. ${OPT_OUT}`
 ];
 
 /** A model stub that records what it was asked and returns what it is told. */
@@ -247,7 +256,7 @@ test('duplicate drafts collapse rather than pretending to be a choice', async ()
 test('a draft that fails validation is never surfaced as a candidate', async () => {
   const model = [
     GOOD_DRAFTS[0],
-    `Vici: Fr33 shipping, guaranteed results! ${OPT_OUT}`,
+    `${BRAND}: Fr33 shipping, guaranteed results! ${OPT_OUT}`,
     `Vici — only 3 left, act now. ${OPT_OUT}`,
     'Hello, buy now at https://bit.ly/x'
   ];
@@ -259,7 +268,7 @@ test('a draft that fails validation is never surfaced as a candidate', async () 
 
 test('the text of a rejected draft never leaves the drafter', async () => {
   // A reviewer must not be able to lift a rejected draft out of a response.
-  const poison = `Vici: Fr33 guaranteed cure, act now! ${OPT_OUT}`;
+  const poison = `${BRAND}: Fr33 guaranteed cure, act now! ${OPT_OUT}`;
   const result = await draft({ workflowType: 'winback' }, [GOOD_DRAFTS[0], poison]);
   const serialised = JSON.stringify(result);
   assert.equal(serialised.includes('Fr33'), false);
@@ -285,7 +294,7 @@ test('the text of a rejected draft never leaves the drafter', async () => {
 
 test('when every draft fails, zero candidates are returned rather than the least bad one', async () => {
   const result = await draft({ workflowType: 'winback' }, [
-    `Vici: Fr33 stuff! ${OPT_OUT}`,
+    `${BRAND}: Fr33 stuff! ${OPT_OUT}`,
     'Buy now at https://bit.ly/x'
   ]);
   assert.deepEqual(result.candidates, []);

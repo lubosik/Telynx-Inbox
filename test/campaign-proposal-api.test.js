@@ -24,6 +24,15 @@ const path = require('node:path');
 
 const createCampaignProposalRouter = require('../routes/campaign-proposals');
 
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
+
 function handler(router, method, routePath) {
   const layer = router.stack.find(entry => entry.route?.path === routePath && entry.route.methods[method]);
   assert.ok(layer, `${method.toUpperCase()} ${routePath} exists`);
@@ -51,7 +60,7 @@ function proposal(overrides = {}) {
     segmentKey: 'one_time_buyers',
     offer: { kind: 'none' },
     copy: {
-      text: 'Vici: we are here if you need anything from us. Reply STOP to opt out.',
+      text: `${BRAND}: we are here if you need anything from us. Reply STOP to opt out.`,
       septets: 70, validated: true, failedChecks: [], copyRulesVersion: '2026-08-23'
     },
     status: 'proposed',

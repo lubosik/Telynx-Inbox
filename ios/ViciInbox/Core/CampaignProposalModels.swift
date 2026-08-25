@@ -153,8 +153,21 @@ struct CampaignProposalAudience: Codable, Hashable, Sendable {
             values.decode(String.self, forKey: .cohortLabel), maximum: 200, decoder: decoder
         )
         cohortSize = try values.decode(Int.self, forKey: .cohortSize)
-        cohortSizeBasis = try CampaignProposalDecoding.code(
-            values.decode(String.self, forKey: .cohortSizeBasis), decoder: decoder
+        // PROSE, NOT A CODE, AND THIS IS WHY THE SCREEN WAS EMPTY.
+        //
+        // Decoded as a slug, it rejected anything containing a space. The
+        // server has always sent a sentence here: "1305 paid orders across 792
+        // buyers, counted per person and never per product pair." So EVERY
+        // proposal failed to decode, the whole page threw APIError.decoding,
+        // and the screen said "Proposal data could not be verified" while four
+        // perfectly good drafts sat on the server.
+        //
+        // 400 is the server's own MAX_STATEMENT_LENGTH, from
+        // lib/campaigns/opportunity-contract.js. Nothing is loosened except the
+        // alphabet, which was never a code alphabet on the wire: `text` still
+        // refuses empty strings, control characters and anything over length.
+        cohortSizeBasis = try CampaignProposalDecoding.text(
+            values.decode(String.self, forKey: .cohortSizeBasis), maximum: 400, decoder: decoder
         )
         plainEnglish = try CampaignProposalDecoding.text(
             values.decode(String.self, forKey: .plainEnglish), maximum: 1_000, decoder: decoder
@@ -385,4 +398,44 @@ private struct CampaignProposalDynamicKey: CodingKey {
         stringValue = String(intValue)
         self.intValue = intValue
     }
+}
+
+/// What comes back when a draft is accepted and becomes a campaign.
+///
+/// ACCEPTING IS NOT SENDING. The campaign it creates is in `draft`: reviewable,
+/// editable, and still behind approval and scheduling, both of which ask for a
+/// face. `nextSteps` is the server's own list of what remains, carried through
+/// so the app states it rather than inventing a reassurance of its own.
+struct CampaignProposalAcceptance: Codable, Hashable {
+    struct AcceptedCampaign: Codable, Hashable {
+        let id: String
+        let status: String?
+    }
+    let campaign: AcceptedCampaign?
+    let recipientCount: Int?
+    let campaignStatus: String?
+    let nextSteps: [String]?
+}
+
+/// The compliance verdict on a message somebody typed or edited.
+///
+/// It reports, it does not refuse. Before this existed nothing checked an
+/// edited message at all: the 160-septet cap, the brand prefix, the exact
+/// opt-out suffix, the compound names and the surveillance terms were enforced
+/// only on machine-drafted copy, and a person could edit any of them away.
+struct CampaignCopyVerdict: Codable, Hashable {
+    struct Failure: Codable, Hashable, Identifiable {
+        let check: String
+        let reason: String
+        let term: String?
+        var id: String { check + (term ?? "") }
+    }
+    let ok: Bool
+    let septets: Int
+    let maxSeptets: Int
+    let failures: [Failure]
+
+    /// Over one segment. Two segments is two messages billed and a higher
+    /// chance of the second arriving out of order.
+    var isOverOneSegment: Bool { septets > maxSeptets }
 }

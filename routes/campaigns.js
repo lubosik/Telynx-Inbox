@@ -1,6 +1,8 @@
 'use strict';
 
 const express = require('express');
+const { validateCopy, septetLength } = require('../lib/campaigns/copy-validator');
+const { RULES } = require('../lib/campaigns/copy-rules');
 const { logAudit, logAuditSafely } = require('../lib/audit/log');
 const { messageFingerprint } = require('../lib/audit/redact');
 const {
@@ -256,6 +258,51 @@ function createCampaignRouter({
   // nothing, so there is no state change to record; the campaign that
   // eventually carries this wording is audited at creation, with its message
   // fingerprint.
+  /**
+   * POST /check-copy — run the compliance rules over a message and say what,
+   * if anything, is wrong with it.
+   *
+   * WHY THIS EXISTS. Every rule in copy-rules.js was enforced in exactly one
+   * place: the AI drafting path. A message a person typed or edited reached
+   * `rendered_message` with nothing checked but `char_length BETWEEN 1 AND
+   * 1600`. So the 160-septet cap, the brand prefix, the exact opt-out suffix,
+   * the compound names and the surveillance terms were all unenforced on the
+   * text that actually ships.
+   *
+   * IT REPORTS, IT DOES NOT REFUSE. Editing stays possible and the operator is
+   * told plainly what a change breaks. That is a deliberate choice: a hard
+   * block on the edit screen is how somebody ends up sending from somewhere
+   * else, and the drafting path still refuses outright.
+   */
+  router.post('/check-copy', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const text = typeof req.body?.message === 'string' ? req.body.message : '';
+      if (!text.trim()) {
+        return res.status(400).json({ error: 'A message is required.', code: 'MESSAGE_REQUIRED' });
+      }
+      if (text.length > 1600) {
+        return res.status(400).json({ error: 'That message is too long to check.', code: 'MESSAGE_TOO_LONG' });
+      }
+      const verdict = validateCopy(text, {
+        brandName: RULES.brand.defaultName,
+        approvedProductCodes: RULES.defaultApprovedProductCodes
+      });
+      return res.json({
+        ok: verdict.ok === true,
+        septets: septetLength(text),
+        maxSeptets: RULES.length.maxSeptets,
+        // The validator's own words, unparaphrased. A restatement here is how
+        // a rule quietly loosens.
+        failures: (verdict.failures || []).map(failure => ({
+          check: failure.check,
+          reason: failure.reason,
+          term: failure.detail?.term || null
+        }))
+      });
+    } catch (error) { return sendError(res, error); }
+  });
+
   router.post('/copy-suggestions', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');

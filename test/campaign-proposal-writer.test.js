@@ -35,6 +35,15 @@ const {
 const { MECHANISMS } = require('../lib/campaigns/proposal-mechanisms');
 const { normaliseOpportunity } = require('../lib/campaigns/opportunity-contract');
 
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
+
 const ON = { CAMPAIGN_OPPORTUNITY_PROPOSALS_ENABLED: 'true' };
 
 const PRODUCTS = [
@@ -45,27 +54,27 @@ const PRODUCTS = [
 /** Compliant drafts, one per mechanism. Each passes the real validator. */
 const DRAFTS = {
   plain_check_in: {
-    message: 'Vici: we are here if you need anything from us. Reply STOP to opt out.',
+    message: `${BRAND}: we are here if you need anything from us. Reply STOP to opt out.`,
     rationale: 'This group may simply never have heard from the business again after their first order.'
   },
   product_education: {
-    message: 'Vici: happy to answer any question about our range, just reply here. Reply STOP to opt out.',
+    message: `${BRAND}: happy to answer any question about our range, just reply here. Reply STOP to opt out.`,
     rationale: 'A buyer who is unsure what pairs with what tends to stop rather than ask.'
   },
   ask_what_stopped_them: {
-    message: 'Vici: how did things go with us, reply and let us know. Reply STOP to opt out.',
+    message: `${BRAND}: how did things go with us, reply and let us know. Reply STOP to opt out.`,
     rationale: 'A written answer from one person tells the business more than a rate on a group this size.'
   },
   free_shipping: {
-    message: 'Vici: there is something waiting on your next order, details on our site. Reply STOP to opt out.',
+    message: `${BRAND}: there is something waiting on your next order, details on our site. Reply STOP to opt out.`,
     rationale: 'Shipping is a cost the customer meets at checkout without having chosen it.'
   },
   bundle: {
-    message: 'Vici: there is a pairing in the range worth a look, ask us for details. Reply STOP to opt out.',
+    message: `${BRAND}: there is a pairing in the range worth a look, ask us for details. Reply STOP to opt out.`,
     rationale: 'Changing what is on the table is different from changing what it costs.'
   },
   first_reorder_incentive: {
-    message: 'Vici: something is set aside for you, ask us and we will explain. Reply STOP to opt out.',
+    message: `${BRAND}: something is set aside for you, ask us and we will explain. Reply STOP to opt out.`,
     rationale: 'The strongest short term lever, and the one that costs the most later.'
   }
 };
@@ -192,8 +201,8 @@ test('MUTATION: three rewordings of one message yield ONE proposal, not three', 
   // not distinct, naming what they duplicated.
   const { result } = await draft({
     overrides: {
-      product_education: { message: 'Vici: we are here if you need anything at all from us. Reply STOP to opt out.' },
-      ask_what_stopped_them: { message: 'Vici: if you need anything from us we are here. Reply STOP to opt out.' }
+      product_education: { message: `${BRAND}: we are here if you need anything at all from us. Reply STOP to opt out.` },
+      ask_what_stopped_them: { message: `${BRAND}: if you need anything from us we are here. Reply STOP to opt out.` }
     }
   });
   assert.equal(result.returned, 2, 'only the first of the three near-duplicates, plus the genuinely different one');
@@ -206,7 +215,7 @@ test('the similarity measure separates a reworded message from a different one',
   const brand = 'Vici';
   const a = contentTokens(DRAFTS.free_shipping.message, brand);
   const reworded = contentTokens(
-    'Vici: something is waiting on your next order, details are on our site. Reply STOP to opt out.', brand
+    `${BRAND}: something is waiting on your next order, details are on our site. Reply STOP to opt out.`, brand
   );
   const different = contentTokens(DRAFTS.plain_check_in.message, brand);
   assert.ok(similarity(a, reworded) >= MAX_COPY_SIMILARITY, 'a reword must read as a duplicate');
@@ -218,7 +227,7 @@ test('the similarity measure separates a reworded message from a different one',
 test('MUTATION: a draft that fails the copy validator is never surfaced', async () => {
   const { result } = await draft({
     overrides: {
-      free_shipping: { message: 'Vici: FREE shipping today only, save 20% now. Reply STOP to opt out.' }
+      free_shipping: { message: `${BRAND}: FREE shipping today only, save 20% now. Reply STOP to opt out.` }
     }
   });
   assert.equal(result.proposals.some(item => item.mechanism === 'free_shipping'), false);
@@ -228,7 +237,7 @@ test('MUTATION: a draft that fails the copy validator is never surfaced', async 
 });
 
 test('MUTATION: the text of a rejected draft never leaves the process', async () => {
-  const poison = 'Vici: this cures everything, guaranteed. Reply STOP to opt out.';
+  const poison = `${BRAND}: this cures everything, guaranteed. Reply STOP to opt out.`;
   const { result } = await draft({ overrides: { plain_check_in: { message: poison } } });
   const serialised = JSON.stringify(result);
   assert.equal(serialised.includes('cures everything'), false, 'a rejected draft must not appear anywhere in the payload');
@@ -241,7 +250,7 @@ test('MUTATION: the text of a rejected draft never leaves the process', async ()
 test('MUTATION: a health claim is refused even when every other rule passes', async () => {
   const { result } = await draft({
     overrides: {
-      product_education: { message: 'Vici: our range is clinically proven to help. Reply STOP to opt out.' }
+      product_education: { message: `${BRAND}: our range is clinically proven to help. Reply STOP to opt out.` }
     }
   });
   assert.equal(result.proposals.some(item => item.mechanism === 'product_education'), false);
@@ -249,7 +258,7 @@ test('MUTATION: a health claim is refused even when every other rule passes', as
 
 test('nothing is auto-repaired: a failing draft produces a refusal, never a fixed message', async () => {
   const { result } = await draft({
-    overrides: { plain_check_in: { message: 'Vici: hurry, last chance. Reply STOP to opt out.' } }
+    overrides: { plain_check_in: { message: `${BRAND}: hurry, last chance. Reply STOP to opt out.` } }
   });
   assert.equal(result.proposals.length, 3);
   assert.equal(result.proposals.some(item => /hurry/i.test(item.copy.text)), false);

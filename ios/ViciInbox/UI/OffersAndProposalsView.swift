@@ -14,7 +14,62 @@ struct OffersAndProposalsView: View {
         self.assistantNavigationRoute = assistantNavigationRoute
     }
 
+    @EnvironmentObject private var router: AppRouter
+    /// Which proposal is mid-action, so both buttons on every row disable
+    /// together and a double tap cannot accept the same draft twice.
+    @State private var busyProposalID: String?
+    @State private var actionProposalID: String?
+    @State private var actionMessage: String?
+    @State private var actionFailed = false
+
     private var canReview: Bool { session.can(Permission.campaignsManage) }
+    private var canManage: Bool { canReview }
+
+    /// Turn a draft into a campaign.
+    ///
+    /// The campaign lands in `draft`, which is editable, so the operator can
+    /// change the wording before anything is approved. Nothing here reaches a
+    /// customer: approval and scheduling live on the campaign and both ask for
+    /// a face.
+    private func accept(_ proposal: CampaignProposal) async {
+        guard busyProposalID == nil else { return }
+        busyProposalID = proposal.id
+        actionProposalID = proposal.id
+        actionMessage = nil
+        actionFailed = false
+        defer { busyProposalID = nil }
+        do {
+            let result = try await APIClient.shared.acceptCampaignProposal(id: proposal.id)
+            let count = result.recipientCount ?? 0
+            actionMessage = "Created a draft campaign for \(count) \(count == 1 ? "person" : "people"). Still needs approving."
+            await model.load(reset: true)
+            // Straight to it, because the next thing anybody wants is to read
+            // the message and change it.
+            if let id = result.campaign?.id { router.open(.campaign(id: id)) }
+        } catch {
+            actionFailed = true
+            // The server's own sentence. Its refusals here are real answers:
+            // the segment may be empty, or somebody else may have accepted it.
+            actionMessage = (error as? APIError)?.errorDescription
+                ?? "That could not be turned into a campaign."
+        }
+    }
+
+    private func dismissProposal(_ proposal: CampaignProposal) async {
+        guard busyProposalID == nil else { return }
+        busyProposalID = proposal.id
+        actionProposalID = proposal.id
+        actionMessage = nil
+        actionFailed = false
+        defer { busyProposalID = nil }
+        do {
+            try await APIClient.shared.dismissCampaignProposal(id: proposal.id, reason: nil)
+            await model.load(reset: true)
+        } catch {
+            actionFailed = true
+            actionMessage = (error as? APIError)?.errorDescription ?? "That could not be dismissed."
+        }
+    }
 
     var body: some View {
         Group {
@@ -92,9 +147,9 @@ struct OffersAndProposalsView: View {
     private var proposalList: some View {
         List {
             Section {
-                Label("Review only", systemImage: "hand.raised.fill")
+                Label("Nothing here has been sent", systemImage: "hand.raised.fill")
                     .font(.headline)
-                Text("Every item below is an unapproved idea. Nothing here has been approved, scheduled, or sent.")
+                Text("Every item below is an unapproved idea. Turning one into a campaign still leaves it in draft, and approving and scheduling both ask for your face.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -308,9 +363,46 @@ private struct CampaignProposalReviewRow: View {
                     }, icon: "exclamationmark.triangle")
                 }
 
-                Text("This screen is read-only. Reviewing this idea does not create, approve, schedule, or send a campaign.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // WAS A DEAD END. The assistant could write four drafts and
+                // nothing on the phone could act on any of them: the only way
+                // to accept one was a direct HTTP call. So "I've drafted four
+                // campaigns" led to a screen that could only be read.
+                //
+                // Accepting creates a campaign in DRAFT. It reaches nobody.
+                // Approving and scheduling stay where they were, on the
+                // campaign, behind Face ID.
+                if canManage {
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await accept(proposal) }
+                        } label: {
+                            if busyProposalID == proposal.id {
+                                ProgressView()
+                            } else {
+                                Text("Turn into a campaign")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ViciTheme.tint)
+                        .disabled(busyProposalID != nil)
+
+                        Button("Dismiss", role: .destructive) {
+                            Task { await dismissProposal(proposal) }
+                        }
+                        .disabled(busyProposalID != nil)
+                    }
+                    .padding(.top, 4)
+
+                    if let actionMessage, actionProposalID == proposal.id {
+                        Text(actionMessage)
+                            .font(.caption)
+                            .foregroundStyle(actionFailed ? ViciTheme.destructive : ViciTheme.success)
+                    }
+                } else {
+                    Text("Reviewing this idea does not create, approve, schedule, or send a campaign.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.vertical, 8)
         } label: {

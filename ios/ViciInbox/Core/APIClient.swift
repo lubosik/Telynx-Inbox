@@ -576,6 +576,52 @@ actor APIClient {
         ])
     }
 
+    /// `POST /api/campaign-proposals/:id/accept`, `campaigns.manage`.
+    ///
+    /// ACCEPTING IS NOT SENDING. It turns a draft into a campaign in `draft`
+    /// status, which is still reviewable, still editable, and still behind
+    /// approval and scheduling, both of which ask for a face. This client
+    /// deliberately still has no approve, schedule or send method for
+    /// proposals: those live on the campaign, where the Face ID prompt is.
+    ///
+    /// Without this the drafts were a dead end. The assistant could write four
+    /// of them and nothing on the phone could act on any of them.
+    func acceptCampaignProposal(id: String) async throws -> CampaignProposalAcceptance {
+        let (data, response) = try await post(
+            "/api/campaign-proposals/\(encodedPathSegment(id))/accept", body: [:]
+        )
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignProposalAcceptance.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    /// `POST /api/campaign-proposals/:id/dismiss`, `campaigns.manage`.
+    /// Rejects a draft. Reaches no customer either way.
+    func dismissCampaignProposal(id: String, reason: String?) async throws {
+        var body: [String: Any] = [:]
+        if let reason, !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["reason"] = String(reason.prefix(500))
+        }
+        let (data, response) = try await post(
+            "/api/campaign-proposals/\(encodedPathSegment(id))/dismiss", body: body
+        )
+        try validate(data: data, response: response)
+    }
+
+    /// `POST /api/campaigns/check-copy`, `campaigns.manage`.
+    ///
+    /// Runs the compliance rules over a message and says what is wrong with it.
+    /// It REPORTS, it does not refuse: the edit screen shows what a change
+    /// breaks and lets the operator decide. Before this existed nothing checked
+    /// an edited message at all.
+    func checkCampaignCopy(message: String) async throws -> CampaignCopyVerdict {
+        let (data, response) = try await post("/api/campaigns/check-copy",
+                                              body: ["message": message])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignCopyVerdict.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// The aggregate-only opportunity portfolio. `refresh=false` is explicit:
     /// an Assistant read may consume the server's labelled cached snapshot but
     /// must never force a WooCommerce and database recomputation.

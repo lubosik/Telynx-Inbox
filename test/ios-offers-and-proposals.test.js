@@ -27,17 +27,33 @@ test('proposal read is fixed to the proposed queue and never mutates', () => {
   assert.match(proposalRead, /decodedGET\("\/api\/campaign-proposals"/);
   assert.match(proposalRead, /URLQueryItem\(name: "status", value: "proposed"\)/);
   assert.match(proposalRead, /min\(50, max\(1, pageSize\)\)/);
+  // ACCEPT AND DISMISS ARE NOW ALLOWED. APPROVE, SCHEDULE AND SEND ARE NOT.
+  //
+  // The line has moved, and it has moved to the place that matters. Accepting
+  // turns a draft into a campaign in `draft` status: reviewable, editable, and
+  // reaching nobody. Approving and scheduling are what put a message in front
+  // of a customer, and they live on the campaign screen behind Face ID.
+  //
+  // Before this, the drafts were a dead end: the assistant could write four
+  // and the only way to act on one was a direct HTTP call.
   for (const forbidden of [
-    '/api/campaign-proposals/draft', '/accept', '/dismiss', '/approve', '/schedule', '/send'
-  ]) assert.equal(proposalRead.includes(forbidden), false, `iOS proposal client contains mutation ${forbidden}`);
+    '/api/campaign-proposals/draft', '/approve', '/schedule', '/send'
+  ]) assert.equal(proposalRead.includes(forbidden), false, `iOS proposal client must not contain ${forbidden}`);
+  assert.match(proposalRead, /func acceptCampaignProposal/);
+  assert.match(proposalRead, /func dismissCampaignProposal/);
 });
 
-test('the native screen is read-only, permission-gated and honest', () => {
+test('the native screen may create a draft, never send, and says so honestly', () => {
   assert.match(VIEW, /session\.can\(Permission\.campaignsManage\)/);
-  assert.match(VIEW, /Nothing here has been approved, scheduled, or sent\./);
+  // The header sentence changed with the screen. What has to survive is the
+  // claim that nothing on it has reached anybody, which is still true.
+  assert.match(VIEW, /Every item below is an unapproved idea/);
   assert.match(VIEW, /Intentional no-offer controls/);
   assert.match(VIEW, /Structured offer proposals/);
-  assert.match(VIEW, /This screen is read-only/);
+  // No longer read-only, and the copy no longer says it is. What it does say
+  // is the thing that is still true and still load-bearing.
+  assert.match(VIEW, /Nothing here has been sent/);
+  assert.match(VIEW, /approving and scheduling both ask for your face/);
   assert.match(VIEW, /func clear\(\)[\s\S]*?items = \[\]/);
   assert.match(VIEW, /requestLifecycle == lifecycle/);
   assert.match(VIEW, /CampaignProposalPagingPolicy\.nextPage/);
@@ -47,10 +63,17 @@ test('the native screen is read-only, permission-gated and honest', () => {
   assert.doesNotMatch(MODELS, /total \+ pageSize|page \* pageSize/);
   assert.doesNotMatch(VIEW, /page \* pageSize/);
   assert.doesNotMatch(VIEW, /ContentUnavailableView/);
+  // The screen may accept and dismiss a DRAFT. It may not approve, schedule or
+  // send anything, and there must be no button offering to.
   for (const forbiddenAction of [
-    /func\s+accept/, /func\s+dismiss/, /func\s+approve/, /func\s+schedule/, /func\s+send/,
-    /Button\("Accept/, /Button\("Dismiss/, /Button\("Approve/, /Button\("Schedule/, /Button\("Send/
+    /func\s+approve/, /func\s+schedule/, /func\s+send/,
+    /Button\("Approve/, /Button\("Schedule/, /Button\("Send/
   ]) assert.doesNotMatch(VIEW, forbiddenAction);
+  assert.match(VIEW, /Turn into a campaign/);
+  // Both buttons on every row disable together, so a double tap cannot accept
+  // the same draft twice and create two campaigns.
+  assert.match(VIEW, /busyProposalID/);
+  assert.match(VIEW, /guard busyProposalID == nil else \{ return \}/);
 });
 
 test('decoding fails closed on malformed copy, status, offer, bounds and sensitive keys', () => {

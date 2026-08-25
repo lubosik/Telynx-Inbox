@@ -58,8 +58,8 @@ anywhere in the codebase.
 {
   "version": "2026-08-23",
   "brand": {
-    "defaultName": "Vici",
-    "recommendedPrefix": "Vici: "
+    "defaultName": "Vin from Vici",
+    "recommendedPrefix": "Vin from Vici: "
   },
   "optOut": {
     "exactSuffix": "Reply STOP to opt out."

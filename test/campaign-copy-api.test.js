@@ -19,6 +19,15 @@ const { findPolicy } = require('../lib/enforce-policy');
 const { RULES } = require('../lib/campaigns/copy-rules');
 const { CopyDraftError } = require('../lib/campaigns/copy-writer');
 
+// The sender's name is a BUSINESS DECISION and it has already changed once,
+// from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
+// these tests into a test of the current name, so 30 of them failed on a
+// two-word copy change that broke nothing. Read it from the rules instead: the
+// name can change again and only the rule file needs editing.
+const { RULES: COPY_RULES } = require('../lib/campaigns/copy-rules');
+const BRAND = COPY_RULES.brand.defaultName;
+
+
 const OPT_OUT = RULES.optOut.exactSuffix;
 const PATH = '/copy-suggestions';
 
@@ -59,7 +68,7 @@ const DRAFT_RESULT = {
   brandName: 'Vici',
   requested: 3,
   returned: 1,
-  candidates: [{ text: `Vici: your product is back in stock. ${OPT_OUT}`, septets: 62 }],
+  candidates: [{ text: `${BRAND}: your product is back in stock. ${OPT_OUT}`, septets: 62 }],
   rejected: [{ failedChecks: ['no_exclamation_marks'], reasons: ['x'], bannedTerms: [] }],
   model: 'anthropic/claude-haiku-4.5',
   copyStatus: 'human_review_required',
