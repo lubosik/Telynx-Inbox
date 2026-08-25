@@ -47,12 +47,14 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         let recorder = AssistantLatencyRecorder.shared
         latencyRecorder = recorder
         voiceOutput = AssistantVoiceOutput(latencyRecorder: recorder)
-        // Playback must never wrestle the audio session away from CallKit.
-        // The coordinator's callIsActive is a stored Bool, not a closure. The
-        // capture pipeline below has a closure of the same name, which is why
-        // this read as callable and compiled only in my head.
-        voiceOutput.callIsActive = { [weak self] in self?.callIsActive ?? false }
         super.init()
+        // AFTER super.init, because the closure captures self and Swift will
+        // not allow that before the superclass is initialised.
+        //
+        // Playback must never wrestle the audio session away from CallKit. Note
+        // this coordinator's callIsActive is a stored Bool; the capture
+        // pipeline lower in this file has a closure of the same name.
+        voiceOutput.callIsActive = { [weak self] in self?.callIsActive ?? false }
     }
 
     var canBeginPushToTalk: Bool {
