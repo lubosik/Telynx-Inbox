@@ -171,3 +171,36 @@ test('generated project includes every Phase 5 source', () => {
     assert.ok(generated.includes(file), `${file} is absent from the checked-in project`);
   }
 });
+
+test('SERVER AUDIO CONFIGURES A PLAYBACK SESSION, or it plays silently', () => {
+  // Capture sets the category to .record and then deactivates, which leaves the
+  // CATEGORY on .record. An AVAudioPlayer on a .record session produces no
+  // sound at all: no error, no warning, nothing. This shipped once and the only
+  // symptom was "I can't hear anything".
+  //
+  // It was invisible because the previous voice was AVSpeechSynthesizer with
+  // usesApplicationAudioSession = false, which owns its own session and is
+  // therefore immune to the category the app left behind.
+  assert.match(COORDINATOR, /setCategory\(\.playback, mode: \.spokenAudio/);
+
+  const speakBlock = COORDINATOR.slice(
+    COORDINATOR.indexOf('func speakWithServerVoice'),
+    COORDINATOR.indexOf('private func noteStartedIfNeeded')
+  );
+  assert.ok(speakBlock.length > 0, 'the speak block must be findable');
+
+  const prepareAt = speakBlock.indexOf('prepareSessionForPlayback()');
+  const playAt = speakBlock.indexOf('player.play()');
+  // Both asserted PRESENT before they are compared. indexOf returns -1 when
+  // absent, and -1 is less than any real index, so an ordering check on its own
+  // passes when the call has been deleted entirely. That is how the first
+  // version of this test survived a mutation that removed the fix.
+  assert.ok(prepareAt >= 0, 'the playback session must be configured inside speakWithServerVoice');
+  assert.ok(playAt >= 0, 'the player must be played inside speakWithServerVoice');
+  assert.ok(prepareAt < playAt, 'the session must be right before anything is played into it');
+});
+
+test('playback never takes the audio session from a live call', () => {
+  assert.match(COORDINATOR, /guard !callIsActive\(\) else \{ return false \}/);
+  assert.match(COORDINATOR, /guard !callIsActive\(\) else \{ return \}[\s\S]{0,200}?setActive\(false/);
+});

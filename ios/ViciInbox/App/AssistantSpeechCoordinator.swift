@@ -47,6 +47,8 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         let recorder = AssistantLatencyRecorder.shared
         latencyRecorder = recorder
         voiceOutput = AssistantVoiceOutput(latencyRecorder: recorder)
+        // Playback must never wrestle the audio session away from CallKit.
+        voiceOutput.callIsActive = { [weak self] in self?.callIsActive() ?? false }
         super.init()
     }
 
@@ -752,6 +754,40 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
     ///   a crash. Apple's voice is worse and it is always there, so an answer
     ///   still gets spoken and the person still learns what the system said.
     private var audioPlayer: AVAudioPlayer?
+    /// Set by the coordinator. Playback must not touch the session while
+    /// CallKit owns it.
+    var callIsActive: () -> Bool = { false }
+
+    /// PUTS THE SESSION BACK INTO A STATE WHERE SOUND COMES OUT.
+    ///
+    /// Capture sets the category to `.record` with mode `.measurement` and then
+    /// deactivates, which leaves the CATEGORY on `.record`. An AVAudioPlayer on
+    /// a `.record` session plays silently: no error, no warning, no audio. That
+    /// is exactly what happened, and it was invisible because the previous
+    /// voice was AVSpeechSynthesizer with `usesApplicationAudioSession = false`,
+    /// which manages its own session and is therefore immune to this.
+    ///
+    /// `.spokenAudio` is the mode for speech playback, and `.duckOthers` lowers
+    /// music rather than stopping it, which is the polite behaviour for an
+    /// assistant that talks for three seconds.
+    private func prepareSessionForPlayback() -> Bool {
+        guard !callIsActive() else { return false }
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Hands the session back so other audio can resume. Never while a call is
+    /// up: the call path owns the session then and will configure it itself.
+    private func releaseSessionAfterPlayback() {
+        guard !callIsActive() else { return }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
 
     @discardableResult
     func speakWithServerVoice(_ text: String,
@@ -767,9 +803,15 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
                 let data = try await APIClient.shared.assistantSpeak(text: text, voiceID: voiceID)
                 guard let self else { return }
                 try await MainActor.run {
+                    // Without this the player runs happily and produces silence.
+                    guard self.prepareSessionForPlayback() else {
+                        _ = self.speakLocally(text)
+                        return
+                    }
                     let player = try AVAudioPlayer(data: data)
                     player.delegate = self
                     self.audioPlayer = player
+                    player.volume = 1.0
                     self.noteStartedIfNeeded()
                     player.play()
                 }
@@ -857,6 +899,7 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
             self.audioPlayer = nil
+            self.releaseSessionAfterPlayback()
             self.finishOnce()
         }
     }
@@ -872,6 +915,7 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
         if let audioPlayer {
             audioPlayer.stop()
             self.audioPlayer = nil
+            releaseSessionAfterPlayback()
         }
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
