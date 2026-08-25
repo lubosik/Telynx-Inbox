@@ -39,8 +39,10 @@
 		666A59C35366D740110BC985 /* AssistantLatencyRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE848754FE9D637CA2BA6F8C /* AssistantLatencyRecorder.swift */; };
 		F006EC33153AE42955B4BDA2 /* AssistantModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F40EA49A6D6A53BEE8455C7 /* AssistantModels.swift */; };
 		1925542E938CC35D354271B0 /* AssistantNavigationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D23EF55B8F0F22CA0D84C2 /* AssistantNavigationModels.swift */; };
+		A602FF16F8E7138EFB2659F3 /* AssistantPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 191E0A53544E27F8D3977B49 /* AssistantPresence.swift */; };
 		CA1C17DCAE15EFEFCE03668E /* AssistantPromptCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D0FA45BD844CB9F354A82D /* AssistantPromptCatalog.swift */; };
 		27DF145CCFA125050A8E70FC /* AssistantSpeechModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8176E359E37457245A7FD16 /* AssistantSpeechModels.swift */; };
+		744B4DA5BA3228811A973A05 /* AssistantVoiceActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F344B3F0EB48A0833C3C77 /* AssistantVoiceActivity.swift */; };
 		C87378233C9E67E33B80C510 /* CampaignArchiveModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */; };
 		04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */; };
 		6536CD4C55CBB6F88387A3A5 /* CampaignProposalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7593A0310E20A6EE52B37D6B /* CampaignProposalModels.swift */; };
@@ -58,6 +60,7 @@
 		CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */; };
 		BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */; };
 		8B82D664FF8A8C34810BB1A3 /* AssistantDraftOwnerModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */; };
+		8213BFB5399F36FFA5C56847 /* AssistantFloatingOrb.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA7FB0967E114F9083055F13 /* AssistantFloatingOrb.swift */; };
 		14FF204156C51B930FE9280D /* AssistantNavigationVisibilityModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */; };
 		7C2D03DD62E3E4654B70425C /* AssistantSendConfirmationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */; };
 		206240A7E68D01446366EF9F /* AssistantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69481367D9D83CCEF455B930 /* AssistantView.swift */; };
@@ -127,8 +130,10 @@
 		EE848754FE9D637CA2BA6F8C /* AssistantLatencyRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantLatencyRecorder.swift; sourceTree = "<group>"; };
 		4F40EA49A6D6A53BEE8455C7 /* AssistantModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantModels.swift; sourceTree = "<group>"; };
 		A6D23EF55B8F0F22CA0D84C2 /* AssistantNavigationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantNavigationModels.swift; sourceTree = "<group>"; };
+		191E0A53544E27F8D3977B49 /* AssistantPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPresence.swift; sourceTree = "<group>"; };
 		76D0FA45BD844CB9F354A82D /* AssistantPromptCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPromptCatalog.swift; sourceTree = "<group>"; };
 		A8176E359E37457245A7FD16 /* AssistantSpeechModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSpeechModels.swift; sourceTree = "<group>"; };
+		A3F344B3F0EB48A0833C3C77 /* AssistantVoiceActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantVoiceActivity.swift; sourceTree = "<group>"; };
 		E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignArchiveModels.swift; sourceTree = "<group>"; };
 		0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignModels.swift; sourceTree = "<group>"; };
 		7593A0310E20A6EE52B37D6B /* CampaignProposalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignProposalModels.swift; sourceTree = "<group>"; };
@@ -146,6 +151,7 @@
 		07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityLogView.swift; sourceTree = "<group>"; };
 		3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsView.swift; sourceTree = "<group>"; };
 		74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantDraftOwnerModifier.swift; sourceTree = "<group>"; };
+		DA7FB0967E114F9083055F13 /* AssistantFloatingOrb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantFloatingOrb.swift; sourceTree = "<group>"; };
 		AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantNavigationVisibilityModifier.swift; sourceTree = "<group>"; };
 		3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantSendConfirmationView.swift; sourceTree = "<group>"; };
 		69481367D9D83CCEF455B930 /* AssistantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantView.swift; sourceTree = "<group>"; };
@@ -262,8 +268,10 @@
 				EE848754FE9D637CA2BA6F8C /* AssistantLatencyRecorder.swift */,
 				4F40EA49A6D6A53BEE8455C7 /* AssistantModels.swift */,
 				A6D23EF55B8F0F22CA0D84C2 /* AssistantNavigationModels.swift */,
+				191E0A53544E27F8D3977B49 /* AssistantPresence.swift */,
 				76D0FA45BD844CB9F354A82D /* AssistantPromptCatalog.swift */,
 				A8176E359E37457245A7FD16 /* AssistantSpeechModels.swift */,
+				A3F344B3F0EB48A0833C3C77 /* AssistantVoiceActivity.swift */,
 				E228CED8A3A81444D3FBAE50 /* CampaignArchiveModels.swift */,
 				0E391E86FDD9F919DF0ECA0A /* CampaignModels.swift */,
 				7593A0310E20A6EE52B37D6B /* CampaignProposalModels.swift */,
@@ -288,6 +296,7 @@
 				07FA4875EDA8E5FB333E978A /* ActivityLogView.swift */,
 				3C4E5A7B24B8403BB814872A /* AnalyticsView.swift */,
 				74B34C5853344A02C7049E57 /* AssistantDraftOwnerModifier.swift */,
+				DA7FB0967E114F9083055F13 /* AssistantFloatingOrb.swift */,
 				AF818CC06DDD06B8A00F3422 /* AssistantNavigationVisibilityModifier.swift */,
 				3EEC7015E835186A0CC93B2B /* AssistantSendConfirmationView.swift */,
 				69481367D9D83CCEF455B930 /* AssistantView.swift */,
@@ -449,8 +458,10 @@
 				666A59C35366D740110BC985 /* AssistantLatencyRecorder.swift in Sources */,
 				F006EC33153AE42955B4BDA2 /* AssistantModels.swift in Sources */,
 				1925542E938CC35D354271B0 /* AssistantNavigationModels.swift in Sources */,
+				A602FF16F8E7138EFB2659F3 /* AssistantPresence.swift in Sources */,
 				CA1C17DCAE15EFEFCE03668E /* AssistantPromptCatalog.swift in Sources */,
 				27DF145CCFA125050A8E70FC /* AssistantSpeechModels.swift in Sources */,
+				744B4DA5BA3228811A973A05 /* AssistantVoiceActivity.swift in Sources */,
 				C87378233C9E67E33B80C510 /* CampaignArchiveModels.swift in Sources */,
 				04C4BC64378AAA930FEC3D3D /* CampaignModels.swift in Sources */,
 				6536CD4C55CBB6F88387A3A5 /* CampaignProposalModels.swift in Sources */,
@@ -468,6 +479,7 @@
 				CE1FBA7A170BF3C01F0834E1 /* ActivityLogView.swift in Sources */,
 				BB204649E2041AAE3E78CDA9 /* AnalyticsView.swift in Sources */,
 				8B82D664FF8A8C34810BB1A3 /* AssistantDraftOwnerModifier.swift in Sources */,
+				8213BFB5399F36FFA5C56847 /* AssistantFloatingOrb.swift in Sources */,
 				14FF204156C51B930FE9280D /* AssistantNavigationVisibilityModifier.swift in Sources */,
 				7C2D03DD62E3E4654B70425C /* AssistantSendConfirmationView.swift in Sources */,
 				206240A7E68D01446366EF9F /* AssistantView.swift in Sources */,

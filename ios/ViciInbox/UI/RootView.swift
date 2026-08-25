@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject private var onboarding: OnboardingCoordinator
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var assistantSpeech: AssistantSpeechCoordinator
+    @ObservedObject private var assistantPresence = AssistantPresence.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @ObservedObject private var inviteLinks = InviteLinkRouter.shared
@@ -107,6 +108,41 @@ struct RootView: View {
             } else {
                 ZStack {
                     MainTabView()
+                    // THE ASSISTANT DOES NOT END WHEN IT TAKES YOU SOMEWHERE.
+                    //
+                    // It lives inside the account sheet, so moving the app used
+                    // to close it and reveal Settings underneath. Drawn here,
+                    // at the root, it survives all of that and stays one tap
+                    // away from wherever the operator was taken.
+                    if assistantPresence.isLive {
+                        VStack {
+                            Spacer()
+                            HStack {
+                                Spacer()
+                                AssistantFloatingOrb(
+                                    phase: assistantPresence.phase,
+                                    isListening: assistantSpeech.phase == .listening
+                                        || assistantSpeech.phase == .finalizing,
+                                    tint: AssistantPreferences.shared.orbTint,
+                                    destination: assistantPresence.lastDestination,
+                                    onTap: {
+                                        assistantPresence.returnedToConversation()
+                                        router.presentAssistant()
+                                    },
+                                    onDismiss: {
+                                        assistantSpeech.stopAll()
+                                        assistantPresence.end()
+                                    }
+                                )
+                                .padding(.trailing, 18)
+                                // Clear of the tab bar, so it never sits over
+                                // a tab somebody is reaching for.
+                                .padding(.bottom, 68)
+                            }
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                        .zIndex(150)
+                    }
                     if showingPremiumWelcome, let request = session.welcomeRequest {
                         PremiumWelcomeView(firstName: request.firstName) {
                             finishPremiumWelcome()

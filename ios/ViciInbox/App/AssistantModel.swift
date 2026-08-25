@@ -11,7 +11,12 @@ import Combine
 final class AssistantModel: ObservableObject {
     typealias CapabilityLoader = () async throws -> AssistantCapabilityStatus
 
-    @Published private(set) var phase: AssistantPhase = .checkingCapability
+    @Published private(set) var phase: AssistantPhase = .checkingCapability {
+        // Mirrored to AssistantPresence so the floating orb, which is drawn at
+        // the app root and cannot see this object, shows what is actually
+        // happening rather than a frozen icon.
+        didSet { AssistantPresence.shared.note(phase: phase) }
+    }
     @Published private(set) var transcript: [AssistantTranscriptEntry] = []
     @Published var draft = "" {
         didSet {
@@ -610,6 +615,17 @@ final class AssistantPreferences: ObservableObject {
         didSet { defaults.set(thoroughAnswers, forKey: Keys.thorough) }
     }
 
+    /// Whether the microphone reopens by itself after each answer.
+    ///
+    /// On by default, because a conversation where you have to ask permission
+    /// to speak after every reply is not a conversation. It is a switch rather
+    /// than a fact of the product because a phone that opens its own microphone
+    /// is not something to impose on somebody who did not want it, and because
+    /// somebody in an open-plan office may genuinely not.
+    @Published var continuousConversation: Bool {
+        didSet { defaults.set(continuousConversation, forKey: Keys.continuous) }
+    }
+
     @Published var speakingRate: AssistantSpeakingRate {
         didSet { defaults.set(speakingRate.rawValue, forKey: Keys.rate) }
     }
@@ -658,6 +674,7 @@ final class AssistantPreferences: ObservableObject {
         static let hasChosenVoice = "assistant_preference_has_chosen_voice"
         static let enabled = "assistant_preference_enabled"
         static let thorough = "assistant_preference_thorough"
+        static let continuous = "assistant_preference_continuous_conversation"
         static let rate = "assistant_preference_speaking_rate"
         static let tint = "assistant_preference_orb_tint"
         static let size = "assistant_preference_orb_size"
@@ -676,6 +693,7 @@ final class AssistantPreferences: ObservableObject {
         // who has never opened this screen should get the more capable
         // behaviour.
         thoroughAnswers = defaults.object(forKey: Keys.thorough) as? Bool ?? true
+        continuousConversation = defaults.object(forKey: Keys.continuous) as? Bool ?? true
         speakingRate = AssistantSpeakingRate(rawValue: defaults.string(forKey: Keys.rate) ?? "")
             ?? .normal
         orbTint = AssistantOrbTint(rawValue: defaults.string(forKey: Keys.tint) ?? "") ?? .brand

@@ -97,7 +97,29 @@ struct AssistantView: View {
             guard let move else { return }
             model.pendingNavigation = nil
             guard performAssistantNavigation(move) else { return }
+            // BEING TAKEN SOMEWHERE MUST NOT END THE CONVERSATION.
+            //
+            // This used to be `dismiss()` alone, which closed the assistant and
+            // revealed the SETTINGS SCREEN it is a destination inside. So
+            // asking to be shown an opportunity meant: the app moves, the
+            // assistant vanishes, Settings appears over the top, and closing
+            // that finally shows the right screen with the conversation gone.
+            // Three surprises for one request.
+            //
+            // Now the whole account sheet goes, the destination is what is
+            // actually on screen, and the conversation continues as a floating
+            // orb at the root. Speech is deliberately NOT stopped: it is
+            // usually mid-sentence explaining where it has just taken you.
+            AssistantPresence.shared.continueElsewhere(
+                destination: destinationName(for: move)
+            )
+            router.dismissAccount()
             dismiss()
+        }
+        .onAppear {
+            // Back on the conversation screen, so the floating orb would be a
+            // second way into the thing already in front of them.
+            AssistantPresence.shared.returnedToConversation()
         }
         .navigationTitle(model.isConversationOpen ? openThreadTitle : "Assistant")
         .navigationBarTitleDisplayMode(.inline)
@@ -485,10 +507,60 @@ struct AssistantView: View {
             // navigation remains on this sheet and must still say why.
             if submissionWasNavigation,
                navigation.announcement?.id != priorAnnouncementID { return }
-            let started = speech.speak(response) { model.noteSpeechFinished() }
+            let started = speech.speak(response) {
+                model.noteSpeechFinished()
+                // THE CONVERSATION CONTINUES BY ITSELF.
+                //
+                // Without this, every single turn cost two taps: one to speak
+                // and one to be heard again after the answer. Nobody talks to a
+                // person that way. The microphone reopens the moment the answer
+                // stops, so the natural thing, which is to just reply, works.
+                resumeListeningIfStillHere()
+            }
             if started { model.noteSpeechStarted() }
-            else { model.noteSpeechFinished() }
+            else {
+                model.noteSpeechFinished()
+                resumeListeningIfStillHere()
+            }
         }
+    }
+
+    /// What to call the place the operator has just been taken, in the words
+    /// the app itself uses for it. "Opportunities" and "that screen" are not
+    /// equally useful to somebody who looked up mid-sentence.
+    private func destinationName(for move: AssistantNavigationInstruction) -> String {
+        switch move.screen {
+        case "inbox":             return "Inbox"
+        case "contacts":          return "Contacts"
+        case "calls":             return "Calls"
+        case "analytics":         return "Analytics"
+        case "growth",
+             "automations":       return "Automations"
+        case "campaigns":         return "Campaigns"
+        case "campaignProposals": return "Campaign drafts"
+        case "audiences":         return "Audiences"
+        case "opportunities":     return "Opportunities"
+        case "referrals":         return "Referrals"
+        case "activity":          return "Activity"
+        default:                  return "Vici"
+        }
+    }
+
+    /// Reopen the microphone after an answer, if the person is still here to
+    /// hear it.
+    ///
+    /// Every condition below is a reason NOT to reopen, and each one is a real
+    /// way this becomes obnoxious rather than helpful: a microphone that opens
+    /// itself behind a backgrounded app, during a phone call, on a screen the
+    /// operator has closed, or while they are part way through typing
+    /// something, is worse than one that waits to be asked.
+    private func resumeListeningIfStillHere() {
+        guard preferences.continuousConversation else { return }
+        guard hasClientAccess, !callIsActive, scenePhase == .active else { return }
+        guard model.isConversationOpen else { return }
+        guard model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard speech.canBeginPushToTalk else { return }
+        speech.beginPushToTalk(callIsActive: callIsActive)
     }
 
     /// Maps what the assistant asked for onto a real route.

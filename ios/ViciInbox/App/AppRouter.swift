@@ -414,6 +414,19 @@ final class AppRouter: ObservableObject {
         isAccountPresented = true
     }
 
+    /// Open the assistant directly, without the operator passing through the
+    /// account menu to get there.
+    ///
+    /// The assistant is a destination INSIDE the account sheet, which is why
+    /// closing it used to reveal Settings: the assistant was never the thing on
+    /// top, the account menu was, and dismissing one screen simply showed the
+    /// one underneath. Somebody who taps the floating orb wants the
+    /// conversation, not the settings screen it happens to live behind.
+    func presentAssistant() {
+        accountPath = [.assistant]
+        isAccountPresented = true
+    }
+
     func dismissAccount() {
         isAccountPresented = false
         accountPath = []

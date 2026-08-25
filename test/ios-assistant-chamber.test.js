@@ -15,6 +15,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -150,4 +151,118 @@ test('navigation and the send confirmation are actually ASSIGNED from the reply'
   // writes compiles, runs, and does nothing, forever.
   assert.match(REASONER, /pendingNavigation = answer\.navigate/);
   assert.match(REASONER, /pendingSendConfirmation = answer\.confirmSend/);
+});
+
+// ── End of speech, which is what made every turn cost two taps ──────────────
+
+test('END OF SPEECH IS HEARD, not inferred from the transcript standing still', () => {
+  const COORD = read('ios/ViciInbox/App/AssistantSpeechCoordinator.swift');
+  // The old detector restarted a countdown on every new piece of recognised
+  // text. That only detects end-of-speech if text arrives WHILE somebody is
+  // talking; when the recogniser reports once at the end, the countdown is
+  // never armed, capture runs to its thirty second timeout, and the only thing
+  // that ever ends a turn is the person tapping the orb.
+  assert.match(COORD, /AssistantVoiceActivityDetector\.level\(/,
+    'loudness must be measured from the audio buffers');
+  assert.match(COORD, /case \.speechEnded:[\s\S]{0,200}endPushToTalk\(\)/,
+    'hearing speech end must end capture');
+  // Both signals are kept. They fail in different directions: the detector
+  // cannot see a recogniser that stopped producing text, and the countdown
+  // cannot see a person who stopped making noise.
+  assert.match(COORD, /armSilenceTimer\(\)/, 'the transcript countdown stays as a second signal');
+});
+
+test('the room is measured once and kept between sentences', () => {
+  const COORD = read('ios/ViciInbox/App/AssistantSpeechCoordinator.swift');
+  // beginTurn forgets what was said and keeps the measured floor. Re-learning
+  // the room every sentence would make the first third of a second of every
+  // turn behave differently from the rest of it.
+  assert.match(COORD, /voiceActivity\.beginTurn\(\)/);
+  const VAD = read('ios/ViciInbox/Core/AssistantVoiceActivity.swift');
+  assert.match(VAD, /Calibration is NOT redone/);
+});
+
+test('THE CONVERSATION CONTINUES BY ITSELF once an answer finishes', () => {
+  // Without this every turn cost two taps: one to speak, one to be heard again
+  // after the reply. Nobody talks to a person that way.
+  assert.match(VIEW, /resumeListeningIfStillHere\(\)/);
+  const resume = VIEW.slice(VIEW.indexOf('private func resumeListeningIfStillHere'));
+  // Each guard is a real way this becomes obnoxious rather than helpful.
+  for (const guard of [
+    /preferences\.continuousConversation/,
+    /scenePhase == \.active/,
+    /!callIsActive/,
+    /model\.isConversationOpen/,
+    /model\.draft\.trimmingCharacters/
+  ]) {
+    assert.match(resume, guard, 'a microphone that reopens itself needs every one of these');
+  }
+});
+
+// ── Being taken somewhere must not end the conversation ────────────────────
+
+test('NAVIGATION NO LONGER DUMPS THE OPERATOR IN SETTINGS', () => {
+  // The assistant is a destination inside the account sheet. Dismissing it
+  // alone revealed the settings screen it had been sitting on top of, so one
+  // request produced three surprises: the app moved, the assistant vanished,
+  // and Settings appeared.
+  const move = VIEW.slice(VIEW.indexOf('.onChange(of: model.pendingNavigation)'));
+  const block = move.slice(0, move.indexOf('.onAppear'));
+  assert.match(block, /router\.dismissAccount\(\)/,
+    'the whole account sheet must go, not just the assistant on top of it');
+  assert.match(block, /AssistantPresence\.shared\.continueElsewhere/);
+  assert.doesNotMatch(block, /speech\.stopAll\(\)/,
+    'it is usually mid-sentence saying where it has taken you');
+});
+
+test('the conversation survives as a floating orb, and can be reached and ended', () => {
+  const ROOT = read('ios/ViciInbox/UI/RootView.swift');
+  assert.match(ROOT, /AssistantFloatingOrb\(/);
+  assert.match(ROOT, /assistantPresence\.isLive/);
+  // Read from the observed object, not a static. A static would never redraw,
+  // so the orb would show whatever phase it was born with, forever.
+  assert.match(ROOT, /phase: assistantPresence\.phase/);
+  assert.match(ROOT, /router\.presentAssistant\(\)/);
+
+  const ORB = read('ios/ViciInbox/UI/AssistantFloatingOrb.swift');
+  // A Button, so VoiceOver and Switch Control reach it like anything else, and
+  // an explicit way out that does not require going back in first.
+  assert.match(ORB, /Button\(action: onTap\)/);
+  assert.match(ORB, /End the conversation/);
+});
+
+test('presentAssistant opens the conversation, not the menu it lives behind', () => {
+  const ROUTER = read('ios/ViciInbox/App/AppRouter.swift');
+  const fn = ROUTER.slice(ROUTER.indexOf('func presentAssistant'));
+  assert.match(fn.slice(0, 200), /accountPath = \[\.assistant\]/,
+    'landing on an empty account path is landing in Settings');
+});
+
+
+test('the voice activity detector actually runs and gets the decisions right',
+  { timeout: 60000 }, (t) => {
+  // Not a source scan. This compiles the real detector and runs it against
+  // synthetic level streams: an ordinary turn, a 0.7s thinking pause that must
+  // NOT end it, ten seconds of silence with nothing said, a cough, a noisy
+  // room, noise that starts mid-turn, and RMS on real samples.
+  //
+  // Ending too late is a pause. Ending too early cuts somebody off, loses what
+  // they said, and answers half a question. The tests are weighted accordingly.
+  const probe = spawnSync('xcrun', ['--find', 'swiftc'], { encoding: 'utf8' });
+  if (probe.status !== 0) {
+    t.skip('Swift smoke validation runs on the dedicated Xcode workflow');
+    return;
+  }
+  const output = path.join(process.env.TMPDIR || '/tmp', `vici-vad-${process.pid}`);
+  const build = spawnSync('xcrun', [
+    'swiftc',
+    path.join(ROOT, 'ios/ViciInbox/Core/AssistantVoiceActivity.swift'),
+    path.join(ROOT, 'ios/Tests/AssistantVoiceActivitySmoke.swift'),
+    '-o', output
+  ], { encoding: 'utf8' });
+  assert.equal(build.status, 0, build.stderr || build.stdout);
+  const run = spawnSync(output, [], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.match(run.stdout, /Assistant voice activity smoke: OK/);
+  fs.rmSync(output, { force: true });
 });

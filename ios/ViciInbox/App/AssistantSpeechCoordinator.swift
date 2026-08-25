@@ -77,6 +77,11 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         guard !callIsActive, canBeginPushToTalk else { return }
         self.callIsActive = false
         pressIsHeld = true
+        // A fresh turn, but the same room. beginTurn keeps the measured floor
+        // and forgets only what was said, so the first third of a second of
+        // every sentence is not spent deaf while the level is re-learned.
+        voiceActivity.beginTurn()
+        isHearingSpeech = false
         generation += 1
         let requestedGeneration = generation
         guard machine.pressBegan() else { return }
@@ -92,6 +97,7 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     /// safely, but capture never starts after the finger has been released.
     func endPushToTalk() {
         cancelSilenceTimer()
+        isHearingSpeech = false
         pressIsHeld = false
         captureTimeoutTask?.cancel()
         captureTimeoutTask = nil
@@ -285,6 +291,43 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         armSilenceTimer()
     }
 
+    // MARK: - Hearing that somebody has stopped
+
+    /// THE REASON THE ORB HAD TO BE TAPPED AFTER EVERY SENTENCE.
+    ///
+    /// End-of-speech used to be inferred from the transcript standing still:
+    /// every new piece of recognised text restarted a countdown, and capture
+    /// ended when the countdown expired. That is only end-of-speech detection
+    /// if text arrives WHILE somebody is talking. When the recogniser reports
+    /// once, at the end, the countdown is never armed at all, capture runs to
+    /// its thirty second timeout, and the only thing that ever ends a turn is
+    /// the person tapping.
+    ///
+    /// Audio energy has no such dependency. It is there on every buffer,
+    /// twenty-odd times a second, whatever the recogniser is doing.
+    ///
+    /// The transcript countdown is DELIBERATELY LEFT IN PLACE underneath this.
+    /// The two fail in different directions: the detector cannot see a
+    /// recogniser that has stopped producing text, and the countdown cannot see
+    /// a person who has stopped making noise. `endPushToTalk` is idempotent
+    /// through the state machine, so whichever notices first is the one that
+    /// acts and the second is a no-op.
+    private func observeLevel(_ level: Float, generation expectedGeneration: Int) {
+        guard expectedGeneration == generation, !callIsActive,
+              machine.phase == .listening else { return }
+        switch voiceActivity.observe(level: level, at: AssistantMonotonicClock.now) {
+        case .speechStarted:
+            // Someone is definitely talking. Anything queued to be said is now
+            // an interruption, and the answer to an interruption is to stop.
+            isHearingSpeech = true
+        case .speechEnded:
+            isHearingSpeech = false
+            endPushToTalk()
+        case .none:
+            break
+        }
+    }
+
     // MARK: - Stopping when the person stops
 
     /// How long the transcript must stand still before capture ends itself.
@@ -296,6 +339,16 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     private static let silenceBeforeStopping: Duration = .milliseconds(1_500)
 
     private var silenceTimer: Task<Void, Never>?
+
+    /// Decides end-of-speech from the microphone. Kept across turns on purpose:
+    /// it holds the measured level of the room, and the room does not change
+    /// between one sentence and the next.
+    private var voiceActivity = AssistantVoiceActivityDetector()
+
+    /// True between the detector hearing speech begin and hearing it end.
+    /// Published so the orb can show that it is hearing something, which is
+    /// different from the microphone merely being open.
+    @Published private(set) var isHearingSpeech = false
 
     /// Restarted on every transcript update, so the countdown measures silence
     /// rather than elapsed time. It only ends capture once something has
@@ -403,6 +456,9 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
                 onText: { [weak self] text in
                     self?.updateTranscript(text, generation: expectedGeneration)
                 },
+                onLevel: { [weak self] level in
+                    self?.observeLevel(level, generation: expectedGeneration)
+                },
                 onFailure: { [weak self] in
                     self?.recognitionFailed(generation: expectedGeneration)
                 }
@@ -448,6 +504,9 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
     private var finalizedText = ""
     private var volatileText = ""
     private let onText: (String) -> Void
+    /// Buffer loudness in dBFS, delivered on the main actor. This is what
+    /// decides when somebody has stopped talking; the transcript is not.
+    private let onLevel: (Float) -> Void
     private let onFailure: () -> Void
     private let shouldContinue: () -> Bool
     private let callIsActive: () -> Bool
@@ -462,6 +521,7 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
                  shouldContinue: @escaping () -> Bool,
                  callIsActive: @escaping () -> Bool,
                  onText: @escaping (String) -> Void,
+                 onLevel: @escaping (Float) -> Void,
                  onFailure: @escaping () -> Void) {
         self.analyzer = analyzer
         self.transcriber = transcriber
@@ -470,6 +530,7 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
         self.shouldContinue = shouldContinue
         self.callIsActive = callIsActive
         self.onText = onText
+        self.onLevel = onLevel
         self.onFailure = onFailure
     }
 
@@ -478,6 +539,7 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
                       shouldContinue: @escaping () -> Bool,
                       callIsActive: @escaping () -> Bool,
                       onText: @escaping (String) -> Void,
+                      onLevel: @escaping (Float) -> Void,
                       onFailure: @escaping () -> Void) async throws -> IOS26AssistantSpeechCapture {
         let transcriber = SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -490,6 +552,7 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
             shouldContinue: shouldContinue,
             callIsActive: callIsActive,
             onText: onText,
+            onLevel: onLevel,
             onFailure: onFailure
         )
         try await capture.start(inputSequence: inputSequence)
@@ -567,6 +630,17 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
             inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) {
                 [weak self] buffer, _ in
                 guard let self else { return }
+                // Measured on the audio thread, where the samples already are.
+                // An RMS over 2048 floats is a few microseconds and this is the
+                // only place the raw signal exists; the recogniser downstream
+                // reports words, and words are not what tells you somebody has
+                // stopped talking.
+                if let channel = buffer.floatChannelData?[0] {
+                    let level = AssistantVoiceActivityDetector.level(
+                        samples: channel, count: Int(buffer.frameLength)
+                    )
+                    Task { @MainActor [weak self] in self?.onLevel(level) }
+                }
                 do {
                     let converted = try converter.convert(buffer)
                     self.inputContinuation.yield(AnalyzerInput(buffer: converted))

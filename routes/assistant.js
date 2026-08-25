@@ -31,6 +31,39 @@ const { searchVoices, speak } = require('../lib/assistant/voice');
 const { createCampaignService } = require('../lib/campaigns/service');
 const { createAnalyticsService } = require('../lib/analytics/aggregate');
 const { createOpportunityPortfolioService } = require('../lib/campaigns/opportunity-portfolio');
+const { opportunityFromFinding } = require('../lib/campaigns/opportunity-contract');
+
+/**
+ * Findings to opportunities, dropping any the contract will not accept.
+ *
+ * A finding it refuses is one that could never be drafted from, so listing it
+ * would offer the operator something that fails at the last step. Better to
+ * not offer it: the refusals list already exists for saying what the engine
+ * would not size, and this is the same kind of honesty one layer down.
+ */
+function convertFindings(findings) {
+  const out = [];
+  for (const finding of findings || []) {
+    let converted = null;
+    try {
+      converted = opportunityFromFinding(finding);
+    } catch {
+      continue;
+    }
+    if (!converted?.ok || !converted.opportunity) continue;
+    // Trimmed to exactly the eight fields normaliseOpportunity allows.
+    //
+    // opportunityFromFinding decorates its result with `contractVersion` and
+    // `kindLabel`, which are useful to a reader and are rejected outright by
+    // the very contract that produced them: "Unexpected opportunity field".
+    // Passing its output straight back in fails, which is a sharp edge worth
+    // absorbing here once rather than at each of the two call sites.
+    const { id, kind, title, cohort, facts, sizing, detectedAt, detectorVersion } =
+      converted.opportunity;
+    out.push({ id, kind, title, cohort, facts, sizing, detectedAt, detectorVersion });
+  }
+  return out;
+}
 const { createProposalService } = require('../lib/campaigns/proposal-service');
 const { draftProposals } = require('../lib/campaigns/proposal-writer');
 const { createReferralService } = require('../lib/referrals/service');
@@ -139,14 +172,41 @@ function createAssistantRouter({ env = process.env, services } = {}) {
       // shows comes from lib/analytics/service via /api/analytics/overview.
       analytics: services?.analytics
         || createAnalyticsService({ client: require('../db').supabase }),
+      // THE MISSING CONVERSION, WHICH IS WHY DRAFTING NEVER WORKED.
+      //
+      // The portfolio produces FINDINGS. Everything downstream of an
+      // opportunity id consumes OPPORTUNITIES. They are different shapes with
+      // different field names, and `opportunityFromFinding` is the sanctioned
+      // way across: a finding carries `key`, its size buried in
+      // `evidence.people.people`, and customer evidence that the opportunity
+      // contract explicitly refuses to let travel.
+      //
+      // This adapter handed findings straight through. So:
+      //   - list_opportunities read `finding.id`, which findings do not have,
+      //     and sent the model a list of nulls. It could not quote an id it had
+      //     never been shown.
+      //   - read() matched `String(f.id) === String(id)`, comparing undefined
+      //     to whatever was passed, and returned null for every id in
+      //     existence.
+      //   - and had either worked, draftProposals would have rejected the raw
+      //     finding anyway: "Unexpected opportunity field: key, segmentKey,
+      //     population, actionability, evidence, observed."
+      //
+      // Three separate failures in one path, which is why it looked like the
+      // assistant simply could not draft.
       opportunities: {
         current: async () => {
           const payload = await portfolio.current();
-          return payload || { findings: [], refusals: [] };
+          return {
+            findings: convertFindings(payload?.findings),
+            refusals: payload?.refusals || []
+          };
         },
         read: async id => {
           const payload = await portfolio.current();
-          return (payload?.findings || []).find(f => String(f.id) === String(id)) || null;
+          const wanted = String(id || '');
+          return convertFindings(payload?.findings)
+            .find(o => String(o.id) === wanted) || null;
         }
       }
     });
@@ -456,3 +516,7 @@ function createAssistantRouter({ env = process.env, services } = {}) {
 
 module.exports = createAssistantRouter;
 module.exports.isNamedAdmin = isNamedAdmin;
+// Exported so the conversion can be tested against a real finding rather than
+// by reading this file for the right words. A source scan passed happily while
+// the conversion was bypassed behind an `if (false)`.
+module.exports.convertFindings = convertFindings;
