@@ -1252,3 +1252,32 @@ test('AN UNREACHABLE THREAD STORE MUST NOT COST YOU THE ASSISTANT', () => {
   assert.match(model, /lastAnswerWasSaved = false/);
   assert.match(view, /Chat \(not saved\)/);
 });
+
+test('an empty exchange is refused by name, not by a database constraint', async () => {
+  // content carries CHECK (char_length BETWEEN 1 AND 8000). Without this guard
+  // an empty question or reply violates it, and the caller is told "your
+  // conversations could not be reached", which sends somebody hunting a
+  // database problem that does not exist.
+  const { recordExchange, ThreadError } = require('../lib/assistant/threads');
+  const client = {
+    from: () => ({
+      select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) })
+    })
+  };
+  for (const [question, reply] of [['', 'an answer'], ['a question', ''], ['   ', 'a'], ['a', '   ']]) {
+    await assert.rejects(
+      () => recordExchange({ client, userId: 1, threadId: 't', question, reply }),
+      error => {
+        assert.ok(error instanceof ThreadError);
+        assert.equal(error.code, 'THREAD_EXCHANGE_EMPTY');
+        return true;
+      },
+      `question=${JSON.stringify(question)} reply=${JSON.stringify(reply)} must be refused before any write`
+    );
+  }
+});
+
+test('THREAD_EXCHANGE_EMPTY answers 400, not the storage 502', () => {
+  const route = fs.readFileSync(path.join(ROOT, 'routes', 'assistant.js'), 'utf8');
+  assert.match(route, /\['THREAD_EXCHANGE_EMPTY', 400\]/);
+});

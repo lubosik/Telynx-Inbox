@@ -53,7 +53,11 @@ const THREAD_ERROR_STATUS = new Map([
   ['THREAD_NOT_FOUND', 404],
   ['THREAD_TITLE_REQUIRED', 400],
   ['THREAD_LIMIT_REACHED', 409],
-  ['THREAD_ACTOR_REQUIRED', 403]
+  ['THREAD_ACTOR_REQUIRED', 403],
+  // Nothing to save is a bad request, not a storage outage. Without this it
+  // falls through to the 502 that says conversations could not be reached,
+  // which sends somebody looking for a database problem that is not there.
+  ['THREAD_EXCHANGE_EMPTY', 400]
 ]);
 
 function isNamedAdmin(actor) {
