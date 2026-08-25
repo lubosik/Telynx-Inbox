@@ -360,6 +360,14 @@ final class AssistantPreferences: ObservableObject {
     static let shared = AssistantPreferences()
 
     @Published var isEnabled: Bool { didSet { defaults.set(isEnabled, forKey: Keys.enabled) } }
+    /// Thorough answers may chain several lookups before replying, which is
+    /// what a question like "anything I should know?" needs. Quick stops after
+    /// one lookup and is roughly twice as fast. Named for what the person gets,
+    /// not for the round trips underneath.
+    @Published var thoroughAnswers: Bool {
+        didSet { defaults.set(thoroughAnswers, forKey: Keys.thorough) }
+    }
+
     @Published var speakingRate: AssistantSpeakingRate {
         didSet { defaults.set(speakingRate.rawValue, forKey: Keys.rate) }
     }
@@ -396,6 +404,7 @@ final class AssistantPreferences: ObservableObject {
 
     private enum Keys {
         static let enabled = "assistant_preference_enabled"
+        static let thorough = "assistant_preference_thorough"
         static let rate = "assistant_preference_speaking_rate"
         static let tint = "assistant_preference_orb_tint"
         static let size = "assistant_preference_orb_size"
@@ -410,6 +419,10 @@ final class AssistantPreferences: ObservableObject {
         // Absent means on. Somebody who has never opened this screen should get
         // the feature, not an empty page they have to go and switch on.
         isEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
+        // Defaults on. A wrong answer is worse than a slow one, and somebody
+        // who has never opened this screen should get the more capable
+        // behaviour.
+        thoroughAnswers = defaults.object(forKey: Keys.thorough) as? Bool ?? true
         speakingRate = AssistantSpeakingRate(rawValue: defaults.string(forKey: Keys.rate) ?? "")
             ?? .normal
         orbTint = AssistantOrbTint(rawValue: defaults.string(forKey: Keys.tint) ?? "") ?? .brand

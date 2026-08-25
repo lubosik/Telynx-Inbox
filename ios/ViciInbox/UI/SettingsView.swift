@@ -906,6 +906,15 @@ struct AssistantSettingsView: View {
             }
 
             if preferences.isEnabled {
+                Section {
+                    Toggle("Thorough answers", isOn: $preferences.thoroughAnswers)
+                } header: {
+                    Text("Answers")
+                } footer: {
+                    Text(preferences.thoroughAnswers
+                         ? "Looks things up more than once when a question needs it, so answers about several things at once come back complete. Takes a few seconds longer."
+                         : "Answers after a single look up. Faster, and it will tell you when a question needed more than that rather than guessing.")
+                }
                 voiceSection
                 appearanceSection
             }

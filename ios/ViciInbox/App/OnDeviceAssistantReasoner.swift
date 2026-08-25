@@ -183,7 +183,8 @@ final class ServerAssistantReasoner {
     func respond(to text: String) async throws -> String {
         let answer = try await APIClient.shared.assistantConverse(
             question: text,
-            history: history
+            history: history,
+            thorough: AssistantPreferences.shared.thoroughAnswers
         )
         history.append(AssistantConversationTurn(role: "user", content: text))
         history.append(AssistantConversationTurn(role: "assistant", content: answer.reply))

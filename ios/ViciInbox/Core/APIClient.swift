@@ -1762,9 +1762,11 @@ actor APIClient {
     /// connection or a restarted backend loses nothing, and there is no
     /// per-user transcript sitting on a server waiting to be a liability.
     func assistantConverse(question: String,
-                           history: [AssistantConversationTurn]) async throws -> AssistantConverseResponse {
+                           history: [AssistantConversationTurn],
+                           thorough: Bool = true) async throws -> AssistantConverseResponse {
         let (data, response) = try await post("/api/assistant/converse", body: [
             "question": question,
+            "thorough": thorough,
             "history": history.map { ["role": $0.role, "content": $0.content] }
         ], timeout: 30)
         try validate(data: data, response: response)

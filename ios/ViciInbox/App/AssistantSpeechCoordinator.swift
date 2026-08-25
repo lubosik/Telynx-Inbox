@@ -127,6 +127,52 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
         takePendingDictation()
     }
 
+    // MARK: - Covering the wait
+
+    /// Says a short "let me check" ONLY if the answer is still not back.
+    ///
+    /// WHY IT IS DELAYED RATHER THAN IMMEDIATE
+    ///   A tool-backed answer takes four to five seconds, because the model
+    ///   makes one round trip to choose the tool and another to phrase the
+    ///   result. That silence is what reads as broken. But a refusal or a
+    ///   follow-up answered from memory comes back in about two, and putting
+    ///   "one moment" in front of those makes a fast answer feel slower and the
+    ///   assistant feel scripted.
+    ///
+    ///   So the filler is armed, not spoken. If the answer arrives first the
+    ///   timer is cancelled and nothing is said. Only real dead air gets
+    ///   covered.
+    ///
+    /// It is never spoken over. `cancelThinkingFiller` stops it before the real
+    /// answer begins, and the completion is deliberately empty so finishing the
+    /// filler does not release the turn.
+    private static let fillerDelay: Duration = .milliseconds(900)
+
+    private var fillerTask: Task<Void, Never>?
+
+    func armThinkingFiller() {
+        cancelThinkingFiller()
+        // Varied so a demo of several questions in a row does not sound like a
+        // recording. Deliberately all short: this must finish well before a
+        // four second answer arrives.
+        let lines = ["One moment.", "Let me check.", "One second.", "Give me a moment."]
+        let line = lines.randomElement() ?? "One moment."
+        fillerTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.fillerDelay)
+            guard !Task.isCancelled, let self, !self.callIsActive else { return }
+            _ = self.voiceOutput.speakWithServerVoice(
+                line,
+                voiceID: AssistantPreferences.shared.pinnedVoiceIdentifier,
+                completion: {}
+            )
+        }
+    }
+
+    func cancelThinkingFiller() {
+        fillerTask?.cancel()
+        fillerTask = nil
+    }
+
     private func takePendingDictation() -> AssistantFinalizedDictation? {
         pendingDictation.consume()
     }
@@ -145,8 +191,8 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
             completion: completion
         )
         voiceDisclosure = started
-            ? "An installed locale-matching Apple voice is selected. Listening quality still needs physical-iPhone review."
-            : "No installed locale-matching Apple voice is available. Typed input still works."
+            ? "Answers are spoken with the voice chosen in Settings, synthesised in the cloud."
+            : "No voice is available right now. Typed input still works."
         return started
     }
 

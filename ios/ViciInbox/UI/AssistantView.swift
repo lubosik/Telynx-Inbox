@@ -239,6 +239,18 @@ struct AssistantView: View {
         let priorAnnouncementID = navigation.announcement?.id
         inputIsFocused = false
         speech.stopAll()
+        // Armed, not spoken. It only says anything if the answer is still not
+        // back after a beat, so a fast reply never gets "one moment" bolted on
+        // the front. See armThinkingFiller.
+        //
+        // Not armed for navigation: those resolve locally in well under a
+        // second, and covering them would make the fastest thing the assistant
+        // does sound like the slowest.
+        if case .command = AssistantNavigationParser.parse(model.draft) {
+            // Navigation resolves locally, so there is no wait to cover.
+        } else {
+            speech.armThinkingFiller()
+        }
         Task {
             guard let response = await model.submit(
                 callIsActive: callIsActive,
@@ -254,6 +266,9 @@ struct AssistantView: View {
                     if let draftToken { drafts.setDirty(false, for: draftToken) }
                 }
             ) else { return }
+            // The answer is here, so nothing should still be queued to say
+            // "one moment" over the top of it.
+            speech.cancelThinkingFiller()
             guard hasClientAccess, !callIsActive, scenePhase == .active else {
                 speech.stopAll()
                 model.noteSpeechFinished()

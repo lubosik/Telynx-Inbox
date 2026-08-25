@@ -115,7 +115,10 @@ function createAssistantRouter({ env = process.env, services } = {}) {
             .slice(-6)
             .map(turn => ({ role: turn.role, content: String(turn.content || '').slice(0, 600) }))
         : [];
-      const result = await converse({ question, actor: req.actor, tools: tools(), history, env });
+      // Defaults to thorough. A client that does not know about the setting
+      // gets the more capable behaviour rather than the faster one.
+      const thorough = req.body?.thorough !== false;
+      const result = await converse({ question, actor: req.actor, tools: tools(), history, thorough, env });
       return res.json({
         reply: result.reply,
         toolsUsed: result.toolsUsed,

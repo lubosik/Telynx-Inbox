@@ -147,7 +147,13 @@ test('voice selector prefers installed locale quality and persists only its iden
   assert.match(COORDINATOR, /usesApplicationAudioSession = false/);
   assert.match(COORDINATOR, /mixToTelephonyUplink = false/);
   assert.doesNotMatch(COORDINATOR, /defaults\.set\((?:text|utterance|transcript|audio)/i);
-  assert.match(COORDINATOR, /Listening quality still needs physical-iPhone review/);
+  // The old disclosure said an installed Apple voice was selected. Answers are
+  // now synthesised in the cloud with the voice chosen in Settings, so the
+  // string had to change or it would be describing something that no longer
+  // happens.
+  assert.match(COORDINATOR, /synthesised in the cloud/);
+  assert.doesNotMatch(COORDINATOR, /installed locale-matching Apple voice is selected/,
+    'the disclosure must not claim a local Apple voice is producing the answer');
   assert.doesNotMatch(VIEW, /premium (?:quality|voice experience)/i);
 });
 
