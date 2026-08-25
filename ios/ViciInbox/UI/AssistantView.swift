@@ -290,6 +290,18 @@ struct AssistantView: View {
                             // It is also what the model is reasoning over, so
                             // showing it is the only way the operator can tell
                             // whether the context is what they think it is.
+                            // What the earlier half of a long conversation was
+                            // folded into. Shown above the turns it replaced,
+                            // where it sits in the same order the conversation
+                            // actually happened.
+                            if let summary = model.openThreadSummary,
+                               !summary.trimmingCharacters(in: .whitespaces).isEmpty {
+                                AssistantCompactedHistory(
+                                    summary: summary,
+                                    messageCount: model.openThreadSummarisedCount
+                                )
+                            }
+
                             if model.transcript.isEmpty {
                                 AssistantPrivacyCard()
                             } else {
@@ -1124,5 +1136,44 @@ private struct AssistantSpeechStatusCard: View {
         case .interruptedByCall: return ViciTheme.warning
         default: return ViciTheme.tint
         }
+    }
+}
+
+/// What the older half of a long conversation was folded into.
+///
+/// WHY IT IS ON SCREEN AT ALL
+///   Past a threshold, earlier turns stop being sent to the model and this
+///   paragraph is sent instead, so the request does not grow without limit as
+///   the conversation does. That is a real change to what the assistant knows,
+///   and hiding it means somebody is told nothing about what happened to half
+///   their conversation and has no way to check that what was kept is right.
+///
+/// WHY IT DOES NOT LOOK LIKE AN ANSWER
+///   It is written by the model about the conversation, not by the assistant to
+///   the person, and it is deliberately styled apart from the bubbles so it is
+///   never mistaken for something that was said.
+private struct AssistantCompactedHistory: View {
+    let summary: String
+    let messageCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(heading, systemImage: "arrow.down.right.and.arrow.up.left")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(summary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(heading). \(summary)")
+    }
+
+    private var heading: String {
+        messageCount > 0 ? "Earlier in this chat, \(messageCount) messages" : "Earlier in this chat"
     }
 }

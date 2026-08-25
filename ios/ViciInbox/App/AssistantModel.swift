@@ -49,6 +49,10 @@ final class AssistantModel: ObservableObject {
     ///   saved rather than pretending otherwise.
     @Published private(set) var isUnsavedConversationOpen = false
 
+    /// The compacted-away part of the open thread, when there is one.
+    @Published private(set) var openThreadSummary: String?
+    @Published private(set) var openThreadSummarisedCount = 0
+
     /// A conversation is on screen either way.
     var isConversationOpen: Bool { openThreadID != nil || isUnsavedConversationOpen }
     @Published private(set) var isLoadingThreads = false
@@ -136,6 +140,8 @@ final class AssistantModel: ObservableObject {
             guard generation == threadGeneration, !callIsActive else { return }
             openThreadID = detail.thread.id
             isUnsavedConversationOpen = false
+            openThreadSummary = detail.thread.summary
+            openThreadSummarisedCount = detail.thread.summarisedMessageCount ?? 0
             adoptThread(detail.thread.id)
             lastAnswerWasSaved = true
             failureMessage = nil
@@ -166,6 +172,8 @@ final class AssistantModel: ObservableObject {
             guard generation == threadGeneration, !callIsActive else { return }
             openThreadID = created.id
             isUnsavedConversationOpen = false
+            openThreadSummary = nil
+            openThreadSummarisedCount = 0
             adoptThread(created.id)
             transcript.removeAll(keepingCapacity: false)
             draft = ""
@@ -184,6 +192,8 @@ final class AssistantModel: ObservableObject {
     func openUnsavedConversation() {
         openThreadID = nil
         isUnsavedConversationOpen = true
+        openThreadSummary = nil
+        openThreadSummarisedCount = 0
         adoptThread(nil)
         transcript.removeAll(keepingCapacity: false)
         draft = ""
@@ -239,6 +249,8 @@ final class AssistantModel: ObservableObject {
     func closeThread() {
         openThreadID = nil
         isUnsavedConversationOpen = false
+        openThreadSummary = nil
+        openThreadSummarisedCount = 0
         adoptThread(nil)
         cancelResponse(resetSession: false)
         transcript.removeAll(keepingCapacity: false)

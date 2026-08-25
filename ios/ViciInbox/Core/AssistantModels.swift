@@ -420,6 +420,19 @@ struct AssistantThreadSummary: Codable, Hashable, Identifiable {
     let lastMessageAt: String?
     let createdAt: String?
 
+    /// Present only on the detail view. When a conversation grows past the
+    /// threshold its older half stops being sent as turns and is carried as
+    /// this paragraph instead, so the assistant still knows what was discussed
+    /// without the request growing without limit.
+    let summary: String?
+    /// How many messages that paragraph now stands in for.
+    let summarisedMessageCount: Int?
+
+    var hasCompactedHistory: Bool {
+        guard let summary, !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return true
+    }
+
     /// What the row says when the thread has no name yet. A thread is named by
     /// its first question, so this is only ever seen on one that was opened and
     /// not yet used.
