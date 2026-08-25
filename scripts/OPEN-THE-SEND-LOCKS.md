@@ -1,3 +1,7 @@
+# Opening the send locks
+
+This is a document to read. The SQL to paste is in `open-the-send-locks.sql`.
+
 ================================================================================
 OPENING THE SEND LOCKS
 ================================================================================

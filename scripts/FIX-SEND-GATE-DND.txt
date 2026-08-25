@@ -1,106 +1,319 @@
-================================================================================
-THE PREVIEW SAYS 924. THE SEND WOULD REACH 0.
-================================================================================
+-- ============================================================================
+-- FIX THE SEND-TIME DND CHECK
+--
+-- Paste this whole file into the Supabase SQL editor and run it. Every line is
+-- either SQL or a SQL comment, so there is nothing in here to trim first.
+--
+-- MY MISTAKE LAST TIME: the previous version had plain English section
+-- headings sitting between the statements. Postgres read "RUN THIS IN THE
+-- SUPABASE SQL EDITOR" as SQL and refused, correctly. This file has no such
+-- lines.
+--
+-- WHAT IT FIXES
+--   Eligibility is checked twice on purpose: once in JavaScript for the
+--   preview and the dry run, once in SQL at the moment of sending, because a
+--   preview is never authority to send later. The two have drifted.
+--
+--   GoHighLevel returns dndSettings as per-channel OVERRIDES, so an empty set
+--   means "no override, the global flag applies". Every one of the 944
+--   contacts in this account has ghl_dnd = false and ghl_sms_dnd_status NULL:
+--   not one has ever needed an override.
+--
+--   The JavaScript was corrected for that. The SQL still demands the literal
+--   string 'inactive', and NULL is not 'inactive'. Measured: the preview
+--   passes 924 and the claim function passes 0. So a campaign approved for 924
+--   people would reach nobody, with your face on the approval.
+--
+-- WHAT IT DOES NOT CHANGE
+--   Only what counts as a COMPLETE ANSWER about somebody's DND state. Every
+--   refusal is untouched:
+--     ghl_dnd = true                     still refused
+--     channel status 'active'            still refused
+--     channel status 'permanent'         still refused
+--     a missing or non-boolean flag      still unknown, still refused
+--     a stale or future sync timestamp   still unknown, still refused
+--   Only NULL and empty move, and only from "unknown" to "no override".
+--
+-- READ THIS BEFORE RUNNING
+--   The function below was rebuilt from scripts/campaigns-migration.sql, which
+--   is what this database was created from. If anybody has hand-edited
+--   claim_sms_campaign_recipients in the dashboard since, this replaces their
+--   edit. Step 1 shows you the current definition so you can look before you
+--   overwrite. If it matches the migration, carry on.
+-- ============================================================================
 
-Run this before the first campaign. Without it every recipient is suppressed
-with reason `dnd_unknown` even with all three send locks open and consent
-recorded for 942 people.
 
-WHAT IS WRONG
+-- ── STEP 1. Look at what is there now. Run this on its own first. ──────────
+-- Expect three occurrences of: ghl_sms_dnd_status = 'inactive'
+-- If you see anything else you do not recognise, stop and send it to me.
 
-Eligibility is checked twice on purpose: once in JavaScript for the preview and
-the dry run, and once in SQL inside the claim function, because a preview is
-never authority to send later. That is the right design. The two checks have
-drifted apart, and the SQL half is the stale one.
+SELECT pg_get_functiondef(oid) AS current_definition
+  FROM pg_proc
+ WHERE proname = 'claim_sms_campaign_recipients';
 
-GoHighLevel returns `dndSettings` as the set of per-channel OVERRIDES. An empty
-object means "no override, the global flag applies". Measured across this
-account: 944 contacts, every one `ghl_dnd = false`, and `ghl_sms_dnd_status`
-NULL for all 944. Not one has a channel override, because none has ever needed
-one.
 
-The JavaScript was corrected for that and now treats NULL or empty as "no
-override, use the global flag". lib/campaigns/eligibility.js says so at length.
-
-The SQL still demands the literal string 'inactive':
-
-    AND d.ghl_dnd = false AND d.ghl_sms_dnd_status = 'inactive'
-
-NULL is not 'inactive', so the condition is false for every contact in the
-account. Verified just now: the JS preview passes 924, the SQL claim passes 0.
-
-WHY THAT IS WORSE THAN A CAMPAIGN THAT SENDS NOTHING
-
-The number in the preview is the number on the Face ID prompt. Approving a send
-to 924 people that reaches nobody is a silent failure with your face attached
-to it, and the first thing anybody would suspect is the consent backfill, which
-is fine.
-
-WHAT THIS CHANGES, AND WHAT IT DOES NOT
-
-It widens what counts as a COMPLETE ANSWER about a contact's DND state, to
-match the JavaScript exactly. It does not weaken any refusal:
-
-  dnd = true                        still refused
-  channel status 'active'           still refused
-  channel status 'permanent'        still refused
-  a missing or non-boolean dnd flag still unknown, still refused
-  a stale or future sync timestamp  still unknown, still refused
-
-Only NULL and empty string move, and only from "unknown" to "no override".
-
---------------------------------------------------------------------------------
-RUN THIS IN THE SUPABASE SQL EDITOR
---------------------------------------------------------------------------------
+-- ── STEP 2. The helper, and the function that uses it. ─────────────────────
+-- Safe to run more than once.
 
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.sms_dnd_says_contactable(
-  p_dnd boolean,
+  p_dnd            boolean,
   p_channel_status text,
-  p_synced_at timestamptz,
-  p_max_age_hours integer
+  p_synced_at      timestamptz,
+  p_max_age_hours  integer
 ) RETURNS boolean
-LANGUAGE sql IMMUTABLE AS $$
+LANGUAGE sql IMMUTABLE AS $fn$
   SELECT p_dnd = false
-     -- The one line that changed. NULL and '' mean "no per-channel override",
-     -- which is what GoHighLevel returns for every contact in this account.
-     -- 'active' and 'permanent' are still refused by omission.
+     -- The one line that changed. NULL and '' both mean "no per-channel
+     -- override", which is what GoHighLevel returns for every contact here.
+     -- 'active' and 'permanent' are still refused, by not being 'inactive'.
      AND coalesce(nullif(trim(lower(p_channel_status)), ''), 'inactive') = 'inactive'
      AND p_synced_at IS NOT NULL
      AND p_synced_at >= now() - make_interval(hours => p_max_age_hours)
      AND p_synced_at <= now();
-$$;
+$fn$;
 
 COMMENT ON FUNCTION public.sms_dnd_says_contactable IS
-  'Send-time DND check. Must stay identical to the channelSaysContactable rule in lib/campaigns/eligibility.js. The two are checked against each other by test/campaign-dnd-parity.test.js.';
+  'Send-time DND check. Must stay identical to channelSaysContactable in lib/campaigns/eligibility.js; test/campaign-dnd-parity.test.js fails if they disagree.';
+
+
+-- The claim function, rebuilt from the migration with the three contactable
+-- checks routed through the helper. The two refusal checks, which look for
+-- dnd = true or a channel status of active or permanent, are untouched.
+
+CREATE OR REPLACE FUNCTION public.claim_sms_campaign_recipients(
+  p_workspace_id text,
+  p_limit integer DEFAULT 25,
+  p_lease_seconds integer DEFAULT 120
+) RETURNS SETOF public.sms_campaign_recipients
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_claim uuid := gen_random_uuid();
+  v_candidate public.sms_campaign_recipients%ROWTYPE;
+  v_claimed public.sms_campaign_recipients%ROWTYPE;
+  v_settings public.sms_campaign_settings%ROWTYPE;
+  v_reserved_id bigint;
+  v_claimed_count integer := 0;
+BEGIN
+  IF p_limit < 1 OR p_limit > 100 THEN RAISE EXCEPTION 'invalid_claim_limit'; END IF;
+  IF p_lease_seconds < 30 OR p_lease_seconds > 900 THEN RAISE EXCEPTION 'invalid_claim_lease'; END IF;
+
+  SELECT * INTO v_settings FROM public.sms_campaign_settings
+  WHERE workspace_id = p_workspace_id FOR SHARE;
+  IF NOT FOUND OR v_settings.provider_approved <> true OR v_settings.live_send_enabled <> true THEN
+    RETURN;
+  END IF;
+
+  -- Fail-closed suppression. Missing consent is suppressing evidence whenever
+  -- the workspace requires positive evidence. STOP sentinels always win.
+  UPDATE public.sms_campaign_recipients r
+  SET state = 'suppressed',
+      suppression_reason = CASE
+        WHEN EXISTS (
+          SELECT 1 FROM public.sms_campaign_suppressions x
+          WHERE x.workspace_id = c.workspace_id AND x.contact_phone = r.contact_phone
+            AND x.active = true AND x.effective_at <= now()
+            AND (x.expires_at IS NULL OR x.expires_at > now())
+        ) THEN 'internal_or_authoritative_suppression'
+        WHEN EXISTS (
+          SELECT 1 FROM public.sms_sent_log l
+          WHERE l.phone = r.contact_phone AND l.flow_type = 'opted-out'
+        ) THEN 'opted_out'
+        WHEN EXISTS (
+          SELECT 1 FROM public.sms_contacts c
+          WHERE c.phone = r.contact_phone AND coalesce(c.opted_out, false) = true
+        ) THEN 'opted_out'
+        WHEN EXISTS (
+          SELECT 1 FROM public.sms_contacts d
+          WHERE d.phone = r.contact_phone
+            AND (d.ghl_dnd = true OR d.ghl_sms_dnd_status IN ('active', 'permanent'))
+        ) THEN 'dnd'
+        WHEN NOT EXISTS (
+          SELECT 1 FROM public.sms_contacts d
+          WHERE d.phone = r.contact_phone
+            AND public.sms_dnd_says_contactable(
+                  d.ghl_dnd, d.ghl_sms_dnd_status, d.ghl_dnd_synced_at,
+                  s.dnd_status_max_age_hours)
+        ) THEN 'dnd_unknown'
+        ELSE 'consent_not_recorded'
+      END,
+      updated_at = now()
+  FROM public.sms_campaigns c, public.sms_campaign_settings s
+  WHERE r.campaign_id = c.id AND s.workspace_id = c.workspace_id
+    AND c.workspace_id = p_workspace_id AND c.status = 'scheduled'
+    AND r.state IN ('pending', 'deferred')
+    AND coalesce(r.next_attempt_at, r.planned_send_at, now()) <= now()
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.sms_campaign_suppressions x
+        WHERE x.workspace_id = c.workspace_id AND x.contact_phone = r.contact_phone
+          AND x.active = true AND x.effective_at <= now()
+          AND (x.expires_at IS NULL OR x.expires_at > now())
+      )
+      OR EXISTS (SELECT 1 FROM public.sms_sent_log l WHERE l.phone = r.contact_phone AND l.flow_type = 'opted-out')
+      OR EXISTS (SELECT 1 FROM public.sms_contacts sc WHERE sc.phone = r.contact_phone AND coalesce(sc.opted_out, false) = true)
+      OR EXISTS (
+        SELECT 1 FROM public.sms_contacts d WHERE d.phone = r.contact_phone
+          AND (d.ghl_dnd = true OR d.ghl_sms_dnd_status IN ('active', 'permanent'))
+      )
+      OR NOT EXISTS (
+        SELECT 1 FROM public.sms_contacts d WHERE d.phone = r.contact_phone
+          AND public.sms_dnd_says_contactable(
+                d.ghl_dnd, d.ghl_sms_dnd_status, d.ghl_dnd_synced_at,
+                s.dnd_status_max_age_hours)
+      )
+      OR (s.consent_evidence_required AND NOT EXISTS (
+        SELECT 1 FROM public.sms_consent_events ce
+        WHERE ce.workspace_id = c.workspace_id AND ce.contact_phone = r.contact_phone
+          AND ce.event_type = 'opt_in' AND ce.purpose = 'promotional_sms'
+          AND ce.brand_id = c.workspace_id
+          AND char_length(trim(ce.source)) > 0
+          AND char_length(trim(coalesce(ce.evidence_ref, ''))) > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM public.sms_consent_events later
+            WHERE later.workspace_id = ce.workspace_id AND later.contact_phone = ce.contact_phone
+              AND later.event_type = 'opt_out'
+              AND (later.occurred_at, later.id) > (ce.occurred_at, ce.id)
+          )
+      ))
+    );
+
+  -- One row is processed at a time so the advisory lock is acquired in a
+  -- separate SQL statement before cadence is re-read under READ COMMITTED.
+  -- The reservation insert then makes the frequency decision durable before a
+  -- worker can receive the claimed row. At most one campaign per phone can be
+  -- reserved by concurrent claimers.
+  FOR v_candidate IN
+    SELECT r.*
+    FROM public.sms_campaign_recipients r
+    JOIN public.sms_campaigns c ON c.id = r.campaign_id
+    WHERE c.workspace_id = p_workspace_id
+      AND c.status = 'scheduled'
+      AND r.workspace_id = p_workspace_id
+      AND r.state IN ('pending', 'deferred')
+      AND coalesce(r.next_attempt_at, r.planned_send_at, now()) <= now()
+      AND NOT (
+        (v_settings.quiet_hours_start > v_settings.quiet_hours_end AND
+          (now() AT TIME ZONE v_settings.business_timezone)::time >= v_settings.quiet_hours_start)
+        OR (v_settings.quiet_hours_start > v_settings.quiet_hours_end AND
+          (now() AT TIME ZONE v_settings.business_timezone)::time < v_settings.quiet_hours_end)
+        OR (v_settings.quiet_hours_start < v_settings.quiet_hours_end AND
+          (now() AT TIME ZONE v_settings.business_timezone)::time >= v_settings.quiet_hours_start AND
+          (now() AT TIME ZONE v_settings.business_timezone)::time < v_settings.quiet_hours_end)
+      )
+    ORDER BY coalesce(r.next_attempt_at, r.planned_send_at), r.created_at
+    FOR UPDATE OF r SKIP LOCKED
+  LOOP
+    EXIT WHEN v_claimed_count >= p_limit;
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_candidate.contact_phone, 0));
+
+    -- Repeat every mutable suppression after the per-phone lock. Unknown or
+    -- stale GHL DND state is ineligible; absence is never interpreted as false.
+    IF EXISTS (
+         SELECT 1 FROM public.sms_campaign_suppressions x
+         WHERE x.workspace_id = p_workspace_id AND x.contact_phone = v_candidate.contact_phone
+           AND x.active = true AND x.effective_at <= now()
+           AND (x.expires_at IS NULL OR x.expires_at > now())
+       )
+       OR EXISTS (SELECT 1 FROM public.sms_sent_log l WHERE l.phone = v_candidate.contact_phone AND l.flow_type = 'opted-out')
+       OR EXISTS (SELECT 1 FROM public.sms_contacts c WHERE c.phone = v_candidate.contact_phone AND coalesce(c.opted_out, false) = true)
+       OR NOT EXISTS (
+         SELECT 1 FROM public.sms_contacts c WHERE c.phone = v_candidate.contact_phone
+           AND public.sms_dnd_says_contactable(
+                 c.ghl_dnd, c.ghl_sms_dnd_status, c.ghl_dnd_synced_at,
+                 v_settings.dnd_status_max_age_hours)
+       )
+       OR (v_settings.consent_evidence_required AND NOT EXISTS (
+         SELECT 1 FROM public.sms_consent_events ce
+         WHERE ce.workspace_id = p_workspace_id AND ce.contact_phone = v_candidate.contact_phone
+           AND ce.event_type = 'opt_in' AND ce.purpose = 'promotional_sms'
+           AND ce.brand_id = p_workspace_id
+           AND char_length(trim(ce.source)) > 0
+           AND char_length(trim(coalesce(ce.evidence_ref, ''))) > 0
+           AND NOT EXISTS (
+             SELECT 1 FROM public.sms_consent_events later
+             WHERE later.workspace_id = ce.workspace_id AND later.contact_phone = ce.contact_phone
+               AND later.event_type = 'opt_out'
+               AND (later.occurred_at, later.id) > (ce.occurred_at, ce.id)
+           )
+       )) THEN
+      CONTINUE;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM public.sms_commercial_contact_ledger ledger
+      WHERE ledger.workspace_id = p_workspace_id
+        AND ledger.contact_phone = v_candidate.contact_phone
+        AND ledger.classification = 'promotional'
+        AND coalesce(ledger.accepted_at, ledger.reserved_at) >
+          now() - make_interval(hours => v_settings.minimum_promotional_spacing_hours)
+        AND (ledger.accepted_at IS NOT NULL OR ledger.reservation_expires_at > now())
+    ) OR (
+      SELECT count(*) FROM public.sms_commercial_contact_ledger ledger
+      WHERE ledger.workspace_id = p_workspace_id
+        AND ledger.contact_phone = v_candidate.contact_phone
+        AND ledger.classification = 'promotional'
+        AND coalesce(ledger.accepted_at, ledger.reserved_at) > now() - interval '7 days'
+        AND (ledger.accepted_at IS NOT NULL OR ledger.reservation_expires_at > now())
+    ) >= v_settings.max_promotional_per_7_days OR (
+      SELECT count(*) FROM public.sms_commercial_contact_ledger ledger
+      WHERE ledger.workspace_id = p_workspace_id
+        AND ledger.contact_phone = v_candidate.contact_phone
+        AND ledger.classification = 'promotional'
+        AND coalesce(ledger.accepted_at, ledger.reserved_at) > now() - interval '30 days'
+        AND (ledger.accepted_at IS NOT NULL OR ledger.reservation_expires_at > now())
+    ) >= v_settings.max_promotional_per_30_days THEN
+      CONTINUE;
+    END IF;
+
+    INSERT INTO public.sms_commercial_contact_ledger
+      (workspace_id, contact_phone, campaign_id, recipient_id, classification,
+       workflow_category, idempotency_key, reserved_at, reservation_expires_at)
+    SELECT p_workspace_id, v_candidate.contact_phone, c.id, v_candidate.id, 'promotional',
+      c.workflow_category, 'campaign-recipient:' || v_candidate.id::text,
+      now(), now() + make_interval(secs => p_lease_seconds)
+    FROM public.sms_campaigns c
+    WHERE c.id = v_candidate.campaign_id AND c.workspace_id = p_workspace_id AND c.status = 'scheduled'
+    ON CONFLICT (workspace_id, idempotency_key) DO UPDATE
+      SET reserved_at = EXCLUDED.reserved_at,
+          reservation_expires_at = EXCLUDED.reservation_expires_at,
+          updated_at = now()
+      WHERE public.sms_commercial_contact_ledger.accepted_at IS NULL
+        AND public.sms_commercial_contact_ledger.reservation_expires_at <= now()
+    RETURNING id INTO v_reserved_id;
+    IF NOT FOUND THEN CONTINUE; END IF;
+
+    UPDATE public.sms_campaign_recipients r
+    SET state = 'claimed', claim_token = v_claim, claimed_at = now(),
+        claim_expires_at = now() + make_interval(secs => p_lease_seconds),
+        attempt_count = r.attempt_count + 1, updated_at = now()
+    WHERE r.id = v_candidate.id AND r.workspace_id = p_workspace_id
+      AND r.state IN ('pending', 'deferred')
+    RETURNING r.* INTO v_claimed;
+    IF FOUND THEN
+      v_claimed_count := v_claimed_count + 1;
+      RETURN NEXT v_claimed;
+    ELSE
+      UPDATE public.sms_commercial_contact_ledger
+      SET reservation_expires_at = now(), updated_at = now()
+      WHERE id = v_reserved_id AND accepted_at IS NULL;
+    END IF;
+  END LOOP;
+  RETURN;
+END;
+$$;
 
 COMMIT;
 
--- ── Then replace the inline check inside claim_sms_campaign_recipients ──────
--- The function is long, so rather than pasting it back in full, run this to
--- print the current definition, replace the two-line condition, and run the
--- result. The condition to find reads:
---
---     AND d.ghl_dnd = false AND d.ghl_sms_dnd_status = 'inactive'
---     AND d.ghl_dnd_synced_at >= now() - make_interval(hours => s.dnd_status_max_age_hours)
---     AND d.ghl_dnd_synced_at <= now()
---
--- and becomes:
---
---     AND public.sms_dnd_says_contactable(
---           d.ghl_dnd, d.ghl_sms_dnd_status, d.ghl_dnd_synced_at, s.dnd_status_max_age_hours)
 
-SELECT pg_get_functiondef(oid)
-  FROM pg_proc
- WHERE proname = 'claim_sms_campaign_recipients';
-
---------------------------------------------------------------------------------
-CONFIRMING IT WORKED
---------------------------------------------------------------------------------
-
-Expect 924 and 924. If the second number is 0, the claim function was not
-updated, only the helper.
+-- ── STEP 3. Confirm it worked. ─────────────────────────────────────────────
+-- Expect both numbers to be 924. If sql_send_says is 0, only the helper was
+-- created and the claim function did not replace; run step 2 again and read
+-- any error rather than scrolling past it.
 
 SELECT
   count(*) FILTER (
@@ -112,21 +325,17 @@ SELECT
   count(*) FILTER (
     WHERE public.sms_dnd_says_contactable(ghl_dnd, ghl_sms_dnd_status, ghl_dnd_synced_at, 24)
   ) AS sql_send_says
-FROM sms_contacts;
+FROM public.sms_contacts;
 
---------------------------------------------------------------------------------
-THE ALTERNATIVE, IF YOU WOULD RATHER NOT TOUCH THE SEND FUNCTION
---------------------------------------------------------------------------------
 
-Backfill the column instead, so the existing SQL is satisfied by the data:
+-- And that the claim function now calls the helper three times and no longer
+-- demands the literal string anywhere. Expect 3 and 0.
 
-    UPDATE sms_contacts
-       SET ghl_sms_dnd_status = 'inactive'
-     WHERE ghl_dnd = false AND ghl_sms_dnd_status IS NULL;
-
-This works and is one line. It is the WORSE option, because it writes an
-assertion into 944 rows that GoHighLevel never made, and the next DND sync will
-overwrite some of them and quietly put those contacts back to zero. Fixing the
-check is the fix; filling the column to satisfy a wrong check is a workaround
-that expires.
-================================================================================
+SELECT
+  (length(def) - length(replace(def, 'sms_dnd_says_contactable', ''))) / length('sms_dnd_says_contactable') AS helper_calls,
+  (length(def) - length(replace(def, 'ghl_sms_dnd_status = ''inactive''', ''))) / length('ghl_sms_dnd_status = ''inactive''') AS stale_checks_left
+FROM (
+  SELECT pg_get_functiondef(oid) AS def
+    FROM pg_proc
+   WHERE proname = 'claim_sms_campaign_recipients'
+) AS f;
