@@ -73,7 +73,28 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
 
     /// Called on touch-down, never on page appearance. This is the only route
     /// to the microphone permission prompt or an Apple asset download.
+    /// True for the duration of `stopAll`, and the reason this exists is a
+    /// crash.
+    ///
+    /// `stopAll` calls `voiceOutput.stop()`, which calls `finishOnce()`, which
+    /// invokes the speech-completion closure SYNCHRONOUSLY. That closure now
+    /// reopens the microphone so a conversation can continue by itself. So
+    /// tearing the assistant down re-entered this object mid-teardown and
+    /// started a brand new AVAudioEngine while the previous session was still
+    /// being deactivated, in the exact window where `installTap` raises an
+    /// Objective-C exception about mismatched sample rates. An ObjC exception
+    /// is not a Swift error: nothing can catch it, and the process is killed.
+    /// That is the drop to the home screen.
+    ///
+    /// Guarding here rather than at the call site is deliberate. The call site
+    /// can be got right today and wrong again in six months, and there is more
+    /// than one path into it: the floating orb's "End the conversation" runs
+    /// the identical sequence. Capture must not be able to start from inside
+    /// its own shutdown, whoever asks.
+    private var isStopping = false
+
     func beginPushToTalk(callIsActive: Bool) {
+        guard !isStopping else { return }
         guard !callIsActive, canBeginPushToTalk else { return }
         self.callIsActive = false
         pressIsHeld = true
@@ -240,6 +261,10 @@ final class AssistantSpeechCoordinator: NSObject, ObservableObject {
     }
 
     private func stopAll(interruptedByCall: Bool, stopVoiceOutput: Bool) {
+        // Held for the whole teardown, including the synchronous completion
+        // callback that `voiceOutput.stop()` fires from inside it.
+        isStopping = true
+        defer { isStopping = false }
         generation += 1
         pressIsHeld = false
         preparationTask?.cancel()
@@ -627,7 +652,25 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
             try await analyzer.start(inputSequence: inputSequence)
             guard shouldContinue() else { throw CancellationError() }
 
-            inputNode.installTap(onBus: 0, bufferSize: 2048, format: inputFormat) {
+            // RE-READ, not the format captured before the two awaits above.
+            //
+            // prepareToAnalyze and analyzer.start both suspend, and the audio
+            // route can change underneath them: a call ending, headphones
+            // going in, or the playback session from the previous answer
+            // finishing its deactivation. installTap raises an ObjC exception
+            // when the format it is handed disagrees with the hardware, and
+            // that exception cannot be caught from Swift.
+            let liveFormat = inputNode.outputFormat(forBus: 0)
+            guard liveFormat.sampleRate > 0, liveFormat.channelCount > 0 else {
+                throw AssistantSpeechCaptureError.noCompatibleAudioFormat
+            }
+            let liveConverter = liveFormat.isEqual(inputFormat)
+                ? converter
+                : AssistantPCMBufferConverter(inputFormat: liveFormat, outputFormat: analyzerFormat)
+            guard let tapConverter = liveConverter else {
+                throw AssistantSpeechCaptureError.noCompatibleAudioFormat
+            }
+            inputNode.installTap(onBus: 0, bufferSize: 2048, format: liveFormat) {
                 [weak self] buffer, _ in
                 guard let self else { return }
                 // Measured on the audio thread, where the samples already are.
@@ -642,7 +685,7 @@ private final class IOS26AssistantSpeechCapture: AssistantSpeechCapturing {
                     Task { @MainActor [weak self] in self?.onLevel(level) }
                 }
                 do {
-                    let converted = try converter.convert(buffer)
+                    let converted = try tapConverter.convert(buffer)
                     self.inputContinuation.yield(AnalyzerInput(buffer: converted))
                 } catch {
                     self.inputContinuation.finish()
@@ -1089,8 +1132,30 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
         finishOnce()
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didStart utterance: AVSpeechUtterance) {
+    // NONISOLATED, AND HOPPING TO MAIN, like the AVAudioPlayer delegate above.
+    //
+    // AVSpeechSynthesizer delivers these on whatever thread it likes. They call
+    // finishOnce, which invokes the completion, which sets AssistantModel.phase,
+    // whose didSet now writes AssistantPresence.phase, which the APP ROOT
+    // observes. So a background thread was invalidating the root view. This
+    // build emits no actor assertions, so it did not trap; it corrupted
+    // SwiftUI's update state quietly instead, which is worse to diagnose.
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didStart utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.handleSpeechStarted(utterance) }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.finishOnce(for: utterance) }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                       didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.finishOnce(for: utterance) }
+    }
+
+    private func handleSpeechStarted(_ utterance: AVSpeechUtterance) {
         guard activeUtterance === utterance,
               !didRecordStart,
               let queuedUptime else { return }
@@ -1101,16 +1166,6 @@ private final class AssistantVoiceOutput: NSObject, AVSpeechSynthesizerDelegate,
             startUptime: queuedUptime,
             endUptime: delegateUptime
         )
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didFinish utterance: AVSpeechUtterance) {
-        finishOnce(for: utterance)
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didCancel utterance: AVSpeechUtterance) {
-        finishOnce(for: utterance)
     }
 
     private func finishOnce(for utterance: AVSpeechUtterance? = nil) {

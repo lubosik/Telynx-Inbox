@@ -1,0 +1,142 @@
+================================================================================
+OPENING THE SEND LOCKS
+================================================================================
+
+There are three, and all three must be open. They are checked in three
+different places, on purpose: the environment, the database row, and the SQL
+function that hands a message to Telnyx. No single mistake opens sending.
+
+  1. provider_approved              database    sms_campaign_settings
+  2. live_send_enabled              database    sms_campaign_settings
+  3. CAMPAIGNS_LIVE_SEND_ENABLED    Railway     environment variable
+
+Order matters. The database refuses lock 2 unless lock 1 is already true, and
+Railway needs a restart for lock 3, so do the database first.
+
+--------------------------------------------------------------------------------
+BEFORE YOU DO ANY OF IT: WHAT LOCK 1 ACTUALLY MEANS
+--------------------------------------------------------------------------------
+
+`provider_approved` is not a feature switch. It is a claim, recorded with your
+name against it, that Telnyx has approved this business to send this kind of
+message on a registered 10DLC campaign.
+
+The table enforces that you mean it. You cannot set it true without also
+supplying a reference, a timestamp and a user id, and the reference is meant to
+be the real Telnyx campaign ID, not a note to yourself.
+
+If you set it true without that approval, nothing technical stops you and
+nothing good happens either. Carriers filter unregistered traffic at the
+network, so the messages are dropped or silently binned rather than delivered,
+your number's reputation goes with them, and the database now holds a signed
+statement that is not true. Peptides sit in a category carriers look at
+closely, which is the whole reason this lock is separate from the other two.
+
+So: get the 10DLC campaign approved in the Telnyx portal first, then put its ID
+in the reference field below. That is the honest version and it is also the one
+where the messages actually arrive.
+
+--------------------------------------------------------------------------------
+STEP 1 AND 2. THE DATABASE. Supabase SQL editor.
+--------------------------------------------------------------------------------
+
+Replace the reference with your real Telnyx 10DLC campaign ID before running.
+Your user id is 4.
+
+BEGIN;
+
+UPDATE sms_campaign_settings
+   SET provider_approved           = true,
+       provider_approval_reference = 'PUT-YOUR-TELNYX-10DLC-CAMPAIGN-ID-HERE',
+       provider_approved_at        = now(),
+       provider_approved_by        = 4,
+       live_send_enabled           = true,
+       updated_at                  = now()
+ WHERE workspace_id = 'vici';
+
+-- Both true, and the reference is not a placeholder. If either is false, or
+-- the reference still says PUT-YOUR, ROLLBACK and fix it.
+SELECT provider_approved,
+       live_send_enabled,
+       provider_approval_reference,
+       provider_approved_at
+  FROM sms_campaign_settings
+ WHERE workspace_id = 'vici';
+
+COMMIT;
+
+--------------------------------------------------------------------------------
+STEP 3. RAILWAY.
+--------------------------------------------------------------------------------
+
+Add to the service's variables:
+
+    CAMPAIGNS_LIVE_SEND_ENABLED = true
+
+Exactly the string "true". Not 1, not TRUE, not yes. The check is a string
+comparison and everything else reads as off, which is deliberate: a typo should
+fail closed.
+
+THE RESTART IS NOT OPTIONAL. The delivery loop is only started at boot, and
+only if this variable is already true. Setting the variable on a running server
+changes nothing until it restarts. Railway restarts automatically when you save
+a variable, so this normally takes care of itself. Confirm it did.
+
+--------------------------------------------------------------------------------
+CONFIRMING IT WORKED
+--------------------------------------------------------------------------------
+
+In the Railway deploy logs, after the restart, you want this line:
+
+    [CAMPAIGN SEND] Live sending is ON. Delivery loop running every 2 minutes.
+
+If you see this instead, the environment variable did not take:
+
+    [CAMPAIGN SEND] Live sending is off; no delivery loop started.
+
+--------------------------------------------------------------------------------
+WHAT IS STILL BETWEEN YOU AND A CUSTOMER AFTER ALL THREE ARE OPEN
+--------------------------------------------------------------------------------
+
+Opening these does not send anything. A campaign still has to be drafted,
+approved, and scheduled, and approving and scheduling both ask for your face.
+
+And every recipient is re-checked at the moment of sending, not at the moment
+you approved: consent, opt-outs, the do-not-contact list, and DND freshness are
+all evaluated again inside the SQL function that hands the message to Telnyx.
+A campaign approved this morning cannot message somebody who texted STOP at
+lunchtime.
+
+These also apply, and are worth knowing before the first send:
+
+  quiet hours          20:00 to 09:00, America/New_York. Nothing sends inside.
+  spacing              at least 24 hours between promotional messages
+  frequency            at most 2 per 7 days, 4 per 30 days, per person
+  campaign cap         10,000 recipients
+
+--------------------------------------------------------------------------------
+TURNING IT BACK OFF
+--------------------------------------------------------------------------------
+
+Set CAMPAIGNS_LIVE_SEND_ENABLED to false in Railway. That is the fastest one,
+it needs no database access, and anything already claimed for sending stops at
+the next check rather than draining.
+
+    UPDATE sms_campaign_settings
+       SET live_send_enabled = false, updated_at = now()
+     WHERE workspace_id = 'vici';
+
+is the database half, and either one alone is enough to stop sending.
+
+--------------------------------------------------------------------------------
+SEPARATE, AND NOT A SEND LOCK
+--------------------------------------------------------------------------------
+
+CAMPAIGN_OPPORTUNITY_PROPOSALS_ENABLED = true
+
+This one lets the assistant DRAFT from an opportunity. It is not set on Railway
+at the moment, which is why asking the assistant to draft a campaign returns
+CAMPAIGN_PROPOSALS_DISABLED. It sends nothing. You want this on well before you
+open the three above, because drafting and reviewing copy is exactly what you
+should be doing while sending is still shut.
+================================================================================

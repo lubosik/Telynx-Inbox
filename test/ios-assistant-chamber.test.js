@@ -266,3 +266,90 @@ test('the voice activity detector actually runs and gets the decisions right',
   assert.match(run.stdout, /Assistant voice activity smoke: OK/);
   fs.rmSync(output, { force: true });
 });
+
+// ── The crash: capture restarting from inside its own teardown ─────────────
+
+test('CAPTURE CANNOT START FROM INSIDE ITS OWN SHUTDOWN', () => {
+  // THE CRASH, and it was mine.
+  //
+  // stopAll calls voiceOutput.stop(), which calls finishOnce(), which invokes
+  // the speech-completion closure SYNCHRONOUSLY. That closure now reopens the
+  // microphone so a conversation can continue by itself. So tearing the
+  // assistant down re-entered the coordinator mid-teardown and built a new
+  // AVAudioEngine while the previous session was still deactivating, in the
+  // window where installTap raises an Objective-C exception about mismatched
+  // sample rates. An ObjC exception is not a Swift error. Nothing catches it,
+  // the process is killed, and the operator is on the home screen.
+  const COORD = read('ios/ViciInbox/App/AssistantSpeechCoordinator.swift');
+
+  assert.match(COORD, /private var isStopping = false/);
+  // Held for the whole teardown, including the synchronous callback inside it.
+  const stopAll = COORD.slice(COORD.indexOf('private func stopAll(interruptedByCall: Bool, stopVoiceOutput: Bool)'));
+  assert.match(stopAll.slice(0, 400), /isStopping = true[\s\S]*defer \{ isStopping = false \}/);
+
+  // And the guard is the FIRST thing beginPushToTalk does, before the phase
+  // checks, because the phase during teardown is not reliably anything.
+  const begin = COORD.slice(COORD.indexOf('func beginPushToTalk(callIsActive: Bool)'));
+  const guardAt = begin.indexOf('guard !isStopping else { return }');
+  const otherAt = begin.indexOf('canBeginPushToTalk');
+  assert.ok(guardAt >= 0, 'starting capture while stopping must be refused');
+  assert.ok(guardAt < otherAt, 'the re-entrancy guard comes first');
+});
+
+test('the guard is in the COORDINATOR, so every caller inherits it', () => {
+  // There is more than one way in. The chamber's End button and the floating
+  // orb's End action both run the identical sequence, and a call site can be
+  // got right today and wrong again in six months.
+  const VIEW_SRC = read('ios/ViciInbox/UI/AssistantView.swift');
+  const ROOT = read('ios/ViciInbox/UI/RootView.swift');
+  // Belt and braces: the view also purges before stopping, so the resume
+  // guard on isConversationOpen blocks it too.
+  const disappear = VIEW_SRC.slice(VIEW_SRC.indexOf('.onDisappear {'));
+  const purgeAt = disappear.indexOf('model.obscureAndPurge()');
+  const stopAt = disappear.indexOf('speech.stopAll()');
+  assert.ok(purgeAt >= 0 && stopAt >= 0);
+  assert.ok(purgeAt < stopAt, 'purge before stopping, or the resume guard is still open');
+  // Same ordering on the floating orb's end action.
+  const orbEnd = ROOT.slice(ROOT.indexOf('onDismiss: {'));
+  assert.ok(orbEnd.indexOf('assistantPresence.end()') < orbEnd.indexOf('assistantSpeech.stopAll()'));
+});
+
+test('the speech synthesizer delegate hops to the main actor like the player does', () => {
+  // These arrive on whatever thread AVSpeechSynthesizer chooses, and they now
+  // reach AssistantPresence.phase, which the APP ROOT observes. A background
+  // thread invalidating the root view does not trap in this build; it corrupts
+  // SwiftUI's update state quietly, which is harder to find, not easier.
+  const COORD = read('ios/ViciInbox/App/AssistantSpeechCoordinator.swift');
+  for (const callback of ['didStart utterance', 'didFinish utterance', 'didCancel utterance']) {
+    const at = COORD.indexOf(callback);
+    assert.ok(at >= 0, `${callback} must exist`);
+    const declaration = COORD.slice(Math.max(0, at - 220), at);
+    assert.match(declaration, /nonisolated func speechSynthesizer/,
+      `${callback} must be nonisolated`);
+  }
+  assert.match(COORD, /Task \{ @MainActor in self\.finishOnce\(for: utterance\) \}/);
+});
+
+test('the tap uses the format the hardware has NOW, not one read before two awaits', () => {
+  // prepareToAnalyze and analyzer.start both suspend, and the route can change
+  // underneath them. installTap raises an uncatchable ObjC exception when the
+  // format disagrees with the hardware.
+  const COORD = read('ios/ViciInbox/App/AssistantSpeechCoordinator.swift');
+  const install = COORD.indexOf('inputNode.installTap');
+  const reread = COORD.lastIndexOf('inputNode.outputFormat(forBus: 0)', install);
+  const firstRead = COORD.indexOf('inputNode.outputFormat(forBus: 0)');
+  assert.ok(reread > firstRead, 'the format must be read again immediately before the tap');
+  assert.match(COORD, /installTap\(onBus: 0, bufferSize: 2048, format: liveFormat\)/);
+});
+
+test('navigating away pops the sheet ONCE, not twice', () => {
+  // dismissAccount empties accountPath and closes the sheet, and the assistant
+  // is a destination pushed inside that same NavigationStack. Calling dismiss()
+  // as well asks SwiftUI to pop from a stack whose binding was emptied in the
+  // same turn.
+  const VIEW_SRC = read('ios/ViciInbox/UI/AssistantView.swift');
+  const move = VIEW_SRC.slice(VIEW_SRC.indexOf('.onChange(of: model.pendingNavigation)'));
+  const block = move.slice(0, move.indexOf('.onAppear'));
+  assert.match(block, /router\.dismissAccount\(\)/);
+  assert.doesNotMatch(block, /^\s*dismiss\(\)\s*$/m, 'dismissAccount already closed it');
+});

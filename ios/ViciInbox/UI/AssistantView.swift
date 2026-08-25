@@ -113,8 +113,14 @@ struct AssistantView: View {
             AssistantPresence.shared.continueElsewhere(
                 destination: destinationName(for: move)
             )
+            // dismissAccount ALONE. It empties accountPath and closes the
+            // sheet, and this view is a destination pushed inside that very
+            // NavigationStack. Calling dismiss() as well asks SwiftUI to pop a
+            // view out of a stack whose path binding was emptied in the same
+            // turn, which is the shape that produces "Can't remove last element
+            // from an empty collection" inside the stack bridge. It was also
+            // redundant: the sheet is already gone.
             router.dismissAccount()
-            dismiss()
         }
         .onAppear {
             // Back on the conversation screen, so the floating orb would be a
@@ -192,12 +198,22 @@ struct AssistantView: View {
         }
         .onDisappear {
             inputIsFocused = false
+            // PURGED BEFORE THE AUDIO IS STOPPED, and the order is the point.
+            //
+            // stopAll fires the speech-completion closure synchronously, and
+            // that closure now reopens the microphone so a conversation can
+            // continue by itself. It is guarded on `model.isConversationOpen`,
+            // which was still true here because the purge ran afterwards. So
+            // leaving the screen restarted capture on the way out.
+            //
+            // The coordinator refuses this on its own now, so this is the
+            // second of two independent guards rather than the only one.
+            model.obscureAndPurge()
             if navigation.hasNavigationInFlight {
                 speech.stopCaptureKeepingVoiceOutput()
             } else {
                 speech.stopAll()
             }
-            model.obscureAndPurge()
             if let draftToken {
                 drafts.unregister(draftToken)
                 self.draftToken = nil
@@ -300,8 +316,13 @@ struct AssistantView: View {
             onShowTranscript: { isShowingTranscript = true },
             onShowVoiceSettings: { isShowingVoiceSettings = true },
             onEnd: {
+                // Ended for good: no floating orb afterwards, and out of the
+                // account sheet entirely rather than popped back to the
+                // settings menu the assistant happens to live behind.
+                AssistantPresence.shared.end()
+                model.obscureAndPurge()
                 speech.stopAll()
-                dismiss()
+                router.dismissAccount()
             }
         )
         .sheet(isPresented: $isShowingTranscript) {

@@ -130,8 +130,16 @@ struct RootView: View {
                                         router.presentAssistant()
                                     },
                                     onDismiss: {
-                                        assistantSpeech.stopAll()
+                                        // Presence first. stopAll fires the
+                                        // speech completion synchronously, and
+                                        // that closure reopens the microphone;
+                                        // clearing presence first means there
+                                        // is no live conversation for it to
+                                        // resume into. The coordinator refuses
+                                        // it anyway, so this is the second of
+                                        // two guards, not the only one.
                                         assistantPresence.end()
+                                        assistantSpeech.stopAll()
                                     }
                                 )
                                 .padding(.trailing, 18)
