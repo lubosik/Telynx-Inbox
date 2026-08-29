@@ -1,8 +1,8 @@
 # Before the win-back can be approved
 
-Three things. The first is required, the second is a correction to a record
-that is currently untrue, and the third is a decision only you and Vin can
-make.
+Four things. The first is required, the second is a correction to a record
+that is currently untrue, the third is a decision only you and Vin can make,
+and the fourth is a collision between this and a draft already sitting there.
 
 Nothing here sends a message. The campaigns are drafts and stay drafts until
 you approve them in the app.
@@ -116,6 +116,32 @@ registered.
 
 That is Vici's call to make, not the platform's, and the responsibility model
 in `docs/campaigns/SMS-COMPLIANCE-RESEARCH.md` says so. Make it knowingly.
+
+---
+
+## 4. There is a third draft, and it targets the same people
+
+A campaign staged on 25 Aug is still sitting in drafts:
+
+> **Shipping covered on the next order for Bought once and never came back** — 511 recipients
+
+Its audience is the whole `one_time_buyers` cohort, and it **contains all 376
+of the win-back people**. Every single one:
+
+| | Overlap with the 511 |
+|---|---|
+| Win-back: bought once, by product (221) | 221 |
+| Win-back: bought once (155) | 155 |
+
+Approve both and those 376 get two different offers within days of each other:
+free shipping from one, 15% off from the other. The frequency caps allow it,
+two promotional messages in seven days is inside the limit, so nothing will
+stop it. It just makes the business look like it does not know what it is
+offering, and it spends two of a customer's four monthly messages arguing with
+itself.
+
+Pick one. If it is the win-back, archive the shipping campaign in the app
+first, or at minimum do not schedule them in the same fortnight.
 
 ---
 
