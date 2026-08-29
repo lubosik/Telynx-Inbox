@@ -145,6 +145,25 @@ first, or at minimum do not schedule them in the same fortnight.
 
 ---
 
+## Doing this again, without a terminal
+
+**Campaigns → + → Build a campaign.** Three recipes:
+
+| Recipe | Who | Offer | Not again for |
+|---|---|---|---|
+| Win back the people who bought once | One order, 1–12 months ago | 15% personal code | 6 months |
+| Nudge the people who came back once | Exactly two orders, past their own gap | Nothing | 6 weeks |
+| Check in three weeks after an order | Order passed 21 days in the last week | Nothing; code only on reply | 3 weeks |
+
+Picking one checks the numbers before it offers a Build button, so you see
+"376 qualify, 376 already had this, 0 to send" before committing to anything.
+That duplicate count is the point: cohorts do not know who has been messaged,
+so without it a second run re-sends the same offer to the same people.
+
+Everything after that is the flow below.
+
+---
+
 ## Then, in the app
 
 Campaigns → the two drafts:
