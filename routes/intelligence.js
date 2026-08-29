@@ -1,6 +1,8 @@
 const router = require('express').Router();
 const { supabase, insertSmsMessage } = require('../db');
 const { analyseConversation, generateCampaignBrief } = require('../intelligence');
+const { validateCopy } = require('../lib/campaigns/copy-validator');
+const { RULES } = require('../lib/campaigns/copy-rules');
 const { sendSMS } = require('../telnyx');
 const { isOptedOut } = require('../flows/utils');
 const { broadcast } = require('../lib/broadcaster');
@@ -89,6 +91,30 @@ router.post('/campaigns/:id/send', async (req, res) => {
     if (await isOptedOut(suggestion.contact_phone)) {
       return res.status(403).json({ error: 'This contact opted out of messages' });
     }
+    // ── The copy rules apply to AI text too, and here they did not ──────
+    //
+    // `suggested_message` is written by the model in intelligence.js, whose
+    // system prompt lists the compounds by name: "Semaglutide, Tirzepatide",
+    // and asks it for a "ready to send SMS". Every other path that reaches a
+    // customer runs validateCopy first; this one checked live-send,
+    // eligibility and opt-out, and then sent whatever the model wrote.
+    //
+    // So the one place in the system where a compound name could reach a
+    // carrier was the only place the compound-name ban was not enforced. The
+    // approved product codes are passed the same way campaign copy passes
+    // them, so a legitimate "RT" is fine and "Retatrutide" is refused.
+    const verdict = validateCopy(suggestion.suggested_message, {
+      brandName: RULES.brand.defaultName,
+      approvedProductCodes: RULES.defaultApprovedProductCodes
+    });
+    if (!verdict.ok) {
+      return res.status(422).json({
+        error: 'This suggested message breaks the copy rules and was not sent.',
+        code: 'SUGGESTION_COPY_REJECTED',
+        failedChecks: (verdict.failures || []).map(failure => failure.check)
+      });
+    }
+
     const { messageId, status: providerStatus } = await sendSMS(suggestion.contact_phone, suggestion.suggested_message);
     const inserted = await insertSmsMessage({
       telnyx_message_id: messageId,

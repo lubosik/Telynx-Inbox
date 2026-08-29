@@ -279,3 +279,36 @@ test('both minting paths consult the gate', () => {
   assert.match(read('service.js'), /filterEligibleForCode\(/,
     'campaign approval must check the budget before minting');
 });
+
+test('AI-suggested copy is validated before it can be sent', () => {
+  // routes/intelligence.js sends `suggested_message`, which is written by the
+  // model in intelligence.js. That model's system prompt lists the compounds
+  // by name ("Semaglutide, Tirzepatide") and asks it for a "ready to send
+  // SMS". The route checked live-send, recipient eligibility and opt-out, and
+  // then sent whatever came back.
+  //
+  // So the single place a compound name could reach a carrier was the only
+  // place the compound-name ban was not enforced.
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'routes', 'intelligence.js'), 'utf8'
+  );
+  const sendBlock = source.slice(0, source.indexOf('await sendSMS(suggestion.contact_phone'));
+  assert.match(sendBlock, /validateCopy\(suggestion\.suggested_message/,
+    'the suggested message must be validated before sendSMS');
+
+  // And prove the rule actually bites on the text this model is primed to write.
+  const { validateCopy } = require('../lib/campaigns/copy-validator');
+  const { RULES } = require('../lib/campaigns/copy-rules');
+  const options = {
+    brandName: RULES.brand.defaultName,
+    approvedProductCodes: RULES.defaultApprovedProductCodes
+  };
+  assert.equal(
+    validateCopy('Vin from Vici. Your Tirzepatide is back in stock. Reply STOP to opt out.', options).ok,
+    false
+  );
+  assert.equal(
+    validateCopy('Vin from Vici. Your TZ is back in stock. Reply STOP to opt out.', options).ok,
+    true
+  );
+});
