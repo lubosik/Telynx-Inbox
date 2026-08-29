@@ -152,14 +152,99 @@ test('a missing coupon-attribution migration is not treated as an error', async 
   assert.equal(verdict.allowed, true);
 });
 
+/**
+ * The batched path reads whole tables by `.in()`, so it needs rows tagged with
+ * the phone they belong to rather than the single-person stub's shape.
+ */
+function batchClient({ orders = [], recipients = [], sentLog = [], fail = null } = {}) {
+  return {
+    from(table) {
+      const rows = table === 'sms_orders' ? orders
+        : table === 'sms_campaign_recipients' ? recipients
+        : sentLog;
+      const b = {
+        select: () => b,
+        in: () => fail
+          ? Promise.resolve({ data: null, error: { message: fail } })
+          : Promise.resolve({ data: rows, error: null })
+      };
+      return b;
+    }
+  };
+}
+
 test('filtering an audience reports who was refused and why', async () => {
-  const client = stubClient({ orders: paid(4) });
   const result = await filterEligibleForCode({
-    client, phones: ['+15550000001', '+15550000002'], now: NOW
+    client: batchClient({
+      orders: [
+        ...paid(4).map(o => ({ ...o, contact_phone: '+15550000001' })),
+        { status: 'delivered', contact_phone: '+15550000002' }
+      ]
+    }),
+    phones: ['+15550000001', '+15550000002'],
+    now: NOW
+  });
+  assert.deepEqual(result.allowed, ['+15550000002']);
+  assert.equal(result.refused.length, 1);
+  assert.equal(result.refused[0].reason, 'regular_customer');
+});
+
+test('the batched path gives the same answer as the per-person one', async () => {
+  // Two implementations of one rule is exactly how a rule quietly stops being
+  // one, so the batched path exists only because looping the single-person
+  // check took 283 SECONDS on the real 376-person audience. It has to agree.
+  const cases = [
+    { label: 'clean', orders: 1, campaignCode: false, replyCode: false, expect: true },
+    { label: 'regular', orders: 3, campaignCode: false, replyCode: false, expect: false },
+    { label: 'has campaign code', orders: 1, campaignCode: true, replyCode: false, expect: false },
+    { label: 'has reply code', orders: 1, campaignCode: false, replyCode: true, expect: false }
+  ];
+  for (const c of cases) {
+    const phone = '+15550000001';
+    const single = await mayIssueCode({
+      client: stubClient({
+        orders: paid(c.orders),
+        campaignCodes: c.campaignCode ? [{ issued_coupon_code: 'vin-x', sent_at: ago(30) }] : [],
+        replyCodes: c.replyCode ? [{ sent_at: ago(30) }] : []
+      }),
+      phone, now: NOW
+    });
+    const batched = await filterEligibleForCode({
+      client: batchClient({
+        orders: paid(c.orders).map(o => ({ ...o, contact_phone: phone })),
+        recipients: c.campaignCode ? [{ contact_phone: phone, issued_coupon_code: 'vin-x', sent_at: ago(30) }] : [],
+        sentLog: c.replyCode ? [{ phone, flow_type: 'checkin-reply-code', sent_at: ago(30) }] : []
+      }),
+      phones: [phone], now: NOW
+    });
+    assert.equal(single.allowed, c.expect, `${c.label}: single-person path`);
+    assert.equal(batched.allowed.length === 1, c.expect, `${c.label}: batched path`);
+    if (!c.expect) {
+      assert.equal(single.reason, batched.refused[0].reason, `${c.label}: reasons must match`);
+    }
+  }
+});
+
+test('the batched path also fails closed', async () => {
+  const result = await filterEligibleForCode({
+    client: batchClient({ fail: 'connection reset' }),
+    phones: ['+15550000001', '+15550000002'], now: NOW
   });
   assert.equal(result.allowed.length, 0);
   assert.equal(result.refused.length, 2);
-  assert.equal(result.refused[0].reason, 'regular_customer');
+  assert.ok(result.refused.every(r => r.reason === 'budget_check_failed'));
+});
+
+test('an unsent campaign code does not count in the batched path either', async () => {
+  const result = await filterEligibleForCode({
+    client: batchClient({
+      orders: [{ status: 'delivered', contact_phone: '+15550000001' }],
+      // Minted at approval, campaign then cancelled, so sent_at is null.
+      recipients: [{ contact_phone: '+15550000001', issued_coupon_code: 'vin-x', sent_at: null }]
+    }),
+    phones: ['+15550000001'], now: NOW
+  });
+  assert.deepEqual(result.allowed, ['+15550000001']);
 });
 
 test('an invalid phone is refused rather than allowed by default', async () => {

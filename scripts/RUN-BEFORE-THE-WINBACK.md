@@ -145,6 +145,29 @@ first, or at minimum do not schedule them in the same fortnight.
 
 ---
 
+## Who gets a code, and how often
+
+One rule, enforced before any coupon is minted, on both paths that mint them.
+
+- **One code per person per six months.** Counted as ISSUED, not redeemed:
+  somebody holding an unused code still holds one.
+- **No code at all past three paid orders.** A regular has the habit the
+  discount exists to create, so a code to them is margin given away.
+- Cancelled and refunded orders do not make somebody a regular, and a code
+  minted for a campaign that was then cancelled reached nobody, so it does not
+  block a real one.
+
+In practice that means the **win-back is the only campaign that carries a
+code**. The check-in and the second-order nudge carry none, and the code the
+check-in sends to somebody who replies is refused if they have already had one
+or if they are a regular.
+
+If a read fails, nobody gets a code rather than everybody. A missed discount
+costs one order's uplift; a duplicate costs margin and teaches the customer to
+wait for the next one.
+
+---
+
 ## Writing the message
 
 Open any draft → Edit → the Message step now has three things it did not:
