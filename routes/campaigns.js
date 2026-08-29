@@ -16,6 +16,7 @@ const {
   createOpportunityPortfolioService
 } = require('../lib/campaigns/opportunity-portfolio');
 const { recipeCatalogue } = require('../lib/campaigns/recipes');
+const { FIELDS: MERGE_FIELDS, FIELD_NAMES } = require('../lib/campaigns/merge-fields');
 const { buildFromRecipe } = require('../lib/campaigns/audience-builder');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
@@ -170,7 +171,18 @@ function createCampaignRouter({
   router.get('/recipes', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      return res.json({ recipes: recipeCatalogue() });
+      return res.json({
+        recipes: recipeCatalogue(),
+        // So the editor can offer AI drafting only when it will work, rather
+        // than presenting a button that always fails.
+        aiCopyEnabled: process.env.CAMPAIGN_AI_COPY_ENABLED === 'true',
+        // The variables copy may use, straight from the renderer's own table,
+        // so the app can never offer one the renderer would refuse.
+        mergeFields: FIELD_NAMES.map(name => ({
+          name,
+          description: MERGE_FIELDS[name].description
+        }))
+      });
     } catch (error) { return sendError(res, error); }
   });
 
@@ -533,7 +545,12 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 100);
-      return res.json(await campaigns.preview(req.params.id, { limit }));
+      // Optional unsaved copy. Capped at the same length the editor enforces,
+      // so a preview cannot be used to render arbitrarily large text.
+      const message = typeof req.body?.message === 'string'
+        ? req.body.message.slice(0, 1600)
+        : null;
+      return res.json(await campaigns.preview(req.params.id, { limit, message }));
     } catch (error) { return sendError(res, error); }
   });
 

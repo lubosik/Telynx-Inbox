@@ -419,7 +419,12 @@ final class CampaignEditorModel: ObservableObject {
 
     @Published var step: CampaignWizardStep = .type
     @Published var title: String
-    @Published var message: String
+    @Published var message: String {
+        // A rendered preview describes copy that no longer exists the moment
+        // the copy changes. Showing yesterday's message beside today's draft
+        // is the one thing a preview must never do.
+        didSet { if message != oldValue { livePreview = nil } }
+    }
     @Published var recipientsText: String
     @Published var audienceMode: CampaignAudienceMode
     @Published var contactSearch = ""
@@ -437,6 +442,18 @@ final class CampaignEditorModel: ObservableObject {
     @Published private(set) var savedCampaign: CampaignRecord?
     @Published private(set) var dryRun: CampaignDryRun?
     @Published private(set) var eligibilityErrorMessage: String?
+
+    // ── Writing the message ────────────────────────────────────────────────
+    /// What the owner wants the message to do, in their own words. Keyboard
+    /// dictation fills this by voice; nothing bespoke is needed for that.
+    @Published var brief = ""
+    @Published private(set) var suggestions: [CampaignCopyCandidate] = []
+    @Published private(set) var mergeFields: [CampaignMergeField] = []
+    @Published private(set) var aiCopyEnabled = false
+    @Published private(set) var isDrafting = false
+    @Published private(set) var isPreviewing = false
+    @Published private(set) var livePreview: CampaignPreview?
+    @Published private(set) var copyError: String?
     @Published var errorMessage: String?
 
     let existingID: String?
@@ -499,6 +516,71 @@ final class CampaignEditorModel: ObservableObject {
         return title != initialTitle || message != initialMessage ||
             recipientsText != initialRecipientsText || audienceMode != initialAudienceMode ||
             !selectedContacts.isEmpty
+    }
+
+    /// Load what the editor needs to write copy: the variables the renderer
+    /// will actually accept, and whether drafting is switched on server-side.
+    ///
+    /// Never fatal. The editor's job is editing; if this fails the writer
+    /// simply gets no chips and no AI button rather than an error over a
+    /// working screen.
+    func loadCopyTools() async {
+        guard mergeFields.isEmpty else { return }
+        guard let catalogue = try? await APIClient.shared.fetchCampaignRecipeCatalogue() else { return }
+        mergeFields = catalogue.mergeFields ?? []
+        aiCopyEnabled = catalogue.aiCopyEnabled ?? false
+    }
+
+    /// Append a variable to the message.
+    ///
+    /// At the END, not at the cursor: SwiftUI's TextEditor exposes no
+    /// selection range, so inserting "at the cursor" would mean guessing, and
+    /// a guess that lands mid-word produces copy that reads as broken. The end
+    /// is always visible and always movable.
+    func insertVariable(_ field: CampaignMergeField) {
+        let needsSpace = !message.isEmpty && !message.hasSuffix(" ") && !message.hasSuffix("\n")
+        message += (needsSpace ? " " : "") + field.token
+        // The preview describes copy that no longer exists the moment the copy
+        // changes, and a stale rendered message is worse than none.
+        livePreview = nil
+    }
+
+    func draftWithAI() async {
+        let text = brief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isDrafting = true
+        copyError = nil
+        defer { isDrafting = false }
+        do {
+            let result = try await APIClient.shared.suggestCampaignCopy(brief: text)
+            suggestions = result.candidates
+            if result.candidates.isEmpty {
+                // Every draft failed validation. Their text is deliberately
+                // never returned, so there is nothing to show and the only
+                // useful thing to say is to try different words.
+                copyError = "Every version broke a copy rule, so none can be shown. Try describing it differently."
+            }
+        } catch {
+            copyError = error.localizedDescription
+        }
+    }
+
+    /// Render the copy currently in the box against the real audience.
+    ///
+    /// Sends the unsaved text, so wording can be checked without bumping the
+    /// revision and dropping an approval that already exists.
+    func previewCurrentCopy(campaignID: String) async {
+        isPreviewing = true
+        copyError = nil
+        defer { isPreviewing = false }
+        do {
+            livePreview = try await APIClient.shared.previewCampaign(
+                id: campaignID, limit: 3, message: message
+            )
+        } catch {
+            livePreview = nil
+            copyError = error.localizedDescription
+        }
     }
 
     func discardLocalDraft() {

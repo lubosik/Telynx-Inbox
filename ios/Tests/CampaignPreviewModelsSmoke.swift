@@ -72,6 +72,33 @@ struct CampaignPreviewModelsSmoke {
         precondition(unavailable.coupons?.hasCodes == false,
                      "an unavailable revenue figure must never render as a real one")
 
+        // ── The editor's copy tools ──────────────────────────────────────
+        let catalogue = try JSONDecoder().decode(CampaignRecipeCatalogue.self, from: catalogueFixture)
+        precondition(catalogue.recipes.count == 1)
+        precondition(catalogue.aiCopyEnabled == true)
+        // The chips must come from the renderer's own field table. Offering a
+        // variable the renderer would refuse produces a message with visible
+        // braces in it.
+        precondition(catalogue.mergeFields?.count == 2)
+        precondition(catalogue.mergeFields?[0].token == "{{first_name}}")
+        precondition(catalogue.mergeFields?[0].label == "first name")
+
+        // An older backend sends neither key, and the editor must still work:
+        // no chips, no AI button, rather than a failure to decode.
+        let bare = try JSONDecoder().decode(CampaignRecipeCatalogue.self, from: bareCatalogueFixture)
+        precondition(bare.aiCopyEnabled == nil && bare.mergeFields == nil)
+
+        let drafts = try JSONDecoder().decode(CampaignCopySuggestions.self, from: suggestionsFixture)
+        precondition(drafts.returned == 2 && drafts.candidates.count == 2)
+        precondition(drafts.candidates[0].isSingleSegment)
+        precondition(!drafts.candidates[1].isSingleSegment,
+                     "a 161-septet draft bills as two segments and must say so")
+
+        // A preview of unsaved copy is flagged, so the screen can tell the
+        // difference between what is saved and what is being typed.
+        let unsavedPreview = try JSONDecoder().decode(CampaignPreview.self, from: unsavedPreviewFixture)
+        precondition(unsavedPreview.unsaved == true)
+
         print("CampaignPreviewModelsSmoke passed")
     }
 
@@ -80,6 +107,49 @@ struct CampaignPreviewModelsSmoke {
         guard let value else { fatalError(message) }
         return value
     }
+
+    static let catalogueFixture = Data("""
+    {
+      "recipes": [{
+        "key": "winback_one_time", "name": "Win back the people who bought once",
+        "description": "One order, one to twelve months ago.",
+        "workflowCategory": "winback_one_time_buyer", "discountPercent": 15,
+        "dedupeDays": 180, "segments": ["one_time_lapsed"], "audience": "segments"
+      }],
+      "aiCopyEnabled": true,
+      "mergeFields": [
+        { "name": "first_name", "description": "The customer's first name, capitalised." },
+        { "name": "code", "description": "A discount code issued to this one person." }
+      ]
+    }
+    """.utf8)
+
+    static let bareCatalogueFixture = Data("""
+    { "recipes": [] }
+    """.utf8)
+
+    static let suggestionsFixture = Data("""
+    {
+      "workflowType": "manual", "brandName": "Vici", "requested": 3, "returned": 2,
+      "candidates": [
+        { "text": "Vin from Vici. Hi {{first_name}}, been a while. Reply STOP to opt out.", "septets": 71 },
+        { "text": "A much longer draft that runs past the single segment boundary.", "septets": 161 }
+      ],
+      "model": "anthropic/claude-haiku-4.5", "copyStatus": "human_review_required"
+    }
+    """.utf8)
+
+    static let unsavedPreviewFixture = Data("""
+    {
+      "personalised": true, "unsaved": true,
+      "template": "Vin from Vici. Hi {{first_name}}. Reply STOP to opt out.",
+      "fields": ["first_name"], "discountPercent": 15,
+      "audienceCount": 221, "renderedCount": 221, "excludedCount": 0,
+      "reasons": {},
+      "samples": [{ "phone": "+15550000001", "message": "Vin from Vici. Hi Jessica. Reply STOP to opt out." }],
+      "excluded": []
+    }
+    """.utf8)
 
     static let performanceFixture = Data("""
     {

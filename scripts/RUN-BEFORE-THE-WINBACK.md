@@ -145,6 +145,28 @@ first, or at minimum do not schedule them in the same fortnight.
 
 ---
 
+## Writing the message
+
+Open any draft → Edit → the Message step now has three things it did not:
+
+- **Variables** — tap a chip to insert `{{first_name}}`, `{{last_product}}`,
+  `{{last_order_date}}`, `{{order_count}}` or `{{code}}`. The list comes from
+  the renderer's own table, so it can never offer one that would then be
+  refused.
+- **Draft it with AI** — say what the message should do in your own words and
+  it writes three versions, each already through the copy rules. **Tap the
+  microphone on the keyboard to speak it** rather than type. Rejected drafts
+  are never shown, deliberately: copy that failed validation must not be
+  available to paste.
+- **Preview what people receive** — renders the wording currently in the box
+  against the real audience, without saving. So you can check the words before
+  committing them, and editing does not bump the revision or drop an approval.
+
+**Requires one Railway variable:** `CAMPAIGN_AI_COPY_ENABLED=true`. Without it
+the AI button is hidden (not broken) and everything else still works.
+
+---
+
 ## Doing this again, without a terminal
 
 **Campaigns → + → Build a campaign.** Three recipes:

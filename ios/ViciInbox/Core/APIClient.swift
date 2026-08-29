@@ -717,10 +717,28 @@ actor APIClient {
     }
 
     /// `GET /api/campaigns/recipes`, `campaigns.read`.
+    func fetchCampaignRecipeCatalogue() async throws -> CampaignRecipeCatalogue {
+        try await decodedGET("/api/campaigns/recipes")
+    }
+
     func fetchCampaignRecipes() async throws -> [CampaignRecipeSummary] {
-        struct Response: Codable { let recipes: [CampaignRecipeSummary] }
-        let result: Response = try await decodedGET("/api/campaigns/recipes")
-        return result.recipes
+        try await fetchCampaignRecipeCatalogue().recipes
+    }
+
+    /// `POST /api/campaigns/copy-suggestions`, `campaigns.manage`.
+    ///
+    /// The brief is campaign shape only: no recipient, no phone, no contact,
+    /// no order. The server re-checks it for identifier shapes before anything
+    /// reaches a model, and refuses the whole request rather than stripping.
+    func suggestCampaignCopy(brief: String, count: Int = 3) async throws -> CampaignCopySuggestions {
+        let (data, response) = try await post("/api/campaigns/copy-suggestions", body: [
+            "workflowType": "manual",
+            "brief": brief,
+            "candidateCount": count
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignCopySuggestions.self, from: data) }
+        catch { throw APIError.decoding }
     }
 
     /// `POST /api/campaigns/build`, `campaigns.manage`.
@@ -742,9 +760,13 @@ actor APIClient {
     /// Mints nothing. The server substitutes a placeholder code of the same
     /// shape as a real one, so lengths and validation behave exactly as they
     /// will at approval and WooCommerce is never touched.
-    func previewCampaign(id: String, limit: Int = 20) async throws -> CampaignPreview {
+    /// `message` previews copy that has NOT been saved, so wording can be
+    /// checked without bumping the revision and dropping an approval.
+    func previewCampaign(id: String, limit: Int = 20, message: String? = nil) async throws -> CampaignPreview {
+        var body: [String: Any] = ["limit": limit]
+        if let message, !message.isEmpty { body["message"] = message }
         let (data, response) = try await post("/api/campaigns/\(encodedPathSegment(id))/preview",
-                                              body: ["limit": limit])
+                                              body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignPreview.self, from: data) }
         catch { throw APIError.decoding }

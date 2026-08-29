@@ -1093,6 +1093,7 @@ private enum CampaignWizardField: Hashable {
     case contactSearch
     case recipients
     case message
+    case brief
 }
 
 struct CampaignEditorView: View {
@@ -1138,6 +1139,7 @@ struct CampaignEditorView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { wizardControls }
             .navigationTitle(model.existingID == nil ? "New Campaign" : "Edit Campaign")
             .navigationBarTitleDisplayMode(.inline)
+            .task { await model.loadCopyTools() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(model.savedCampaign == nil ? "Cancel" : "Done") { dismiss() }
@@ -1481,18 +1483,144 @@ struct CampaignEditorView: View {
     }
 
     private var messageStep: some View {
-        Section("Message") {
-            TextEditor(text: $model.message)
-                .frame(minHeight: 220)
-                .focused($focusedField, equals: .message)
-                .accessibilityLabel("Campaign message")
-            HStack {
-                Text("SMS length and carrier segmentation may vary.")
-                Spacer()
-                Text("\(model.messageCount)/1600").monospacedDigit()
+        Group {
+            Section("Message") {
+                TextEditor(text: $model.message)
+                    .frame(minHeight: 180)
+                    .focused($focusedField, equals: .message)
+                    .accessibilityLabel("Campaign message")
+                HStack {
+                    Text("SMS length and carrier segmentation may vary.")
+                    Spacer()
+                    Text("\(model.messageCount)/1600").monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(model.messageCount > 1_600 ? ViciTheme.destructive : Color.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(model.messageCount > 1_600 ? ViciTheme.destructive : Color.secondary)
+
+            // Tapping inserts at the end rather than at the cursor. SwiftUI's
+            // TextEditor exposes no selection range, and guessing one would
+            // sometimes drop a variable into the middle of a word. The end is
+            // always somewhere the writer can see it and move it.
+            Section("Variables") {
+                if model.mergeFields.isEmpty {
+                    Text("Loading the variables this message may use.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(model.mergeFields) { field in
+                                Button {
+                                    model.insertVariable(field)
+                                } label: {
+                                    Text(field.label)
+                                        .font(.caption.weight(.medium))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(ViciTheme.tint.opacity(0.12), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Insert \(field.label)")
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    Text("These fill in per person when the campaign is approved. A variable this system cannot fill removes that one recipient rather than sending a gap.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if model.aiCopyEnabled {
+                Section("Draft it with AI") {
+                    TextEditor(text: $model.brief)
+                        .frame(minHeight: 70)
+                        .focused($focusedField, equals: .brief)
+                        .accessibilityLabel("What the message should say")
+                        .overlay(alignment: .topLeading) {
+                            if model.brief.isEmpty {
+                                Text("Say what the message should do, in your own words. Tap the microphone on the keyboard to speak it.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 8).padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    Button {
+                        Task { await model.draftWithAI() }
+                    } label: {
+                        if model.isDrafting {
+                            HStack { ProgressView(); Text("Writing") }
+                        } else {
+                            Label("Write three versions", systemImage: "sparkles")
+                        }
+                    }
+                    .disabled(model.brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isDrafting)
+
+                    ForEach(model.suggestions) { candidate in
+                        Button {
+                            model.message = candidate.text
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(candidate.text)
+                                    .font(.footnote)
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(spacing: 6) {
+                                    Text("\(candidate.septets) characters")
+                                    if !candidate.isSingleSegment {
+                                        Label("Two segments", systemImage: "exclamationmark.circle")
+                                            .foregroundStyle(ViciTheme.warning)
+                                    }
+                                }
+                                .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if !model.suggestions.isEmpty {
+                        Text("Every version above already passed the copy rules. Tap one to use it, then edit it however you like.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let campaignID = model.existingID {
+                Section("See a real message") {
+                    Button {
+                        Task { await model.previewCurrentCopy(campaignID: campaignID) }
+                    } label: {
+                        if model.isPreviewing {
+                            HStack { ProgressView(); Text("Rendering") }
+                        } else {
+                            Label("Preview what people receive", systemImage: "eye")
+                        }
+                    }
+                    .disabled(model.isPreviewing || model.message.isEmpty)
+
+                    if let preview = model.livePreview {
+                        LabeledContent("Renders for") {
+                            Text("\(preview.renderedCount) of \(preview.audienceCount)")
+                                .font(.headline.monospacedDigit())
+                                .foregroundStyle(preview.rendersForEveryone ? ViciTheme.success : ViciTheme.warning)
+                        }
+                        if !preview.rendersForEveryone {
+                            Text("\(preview.excludedCount) cannot be personalised with this wording and would have to come out of the audience before it can be approved.")
+                                .font(.footnote).foregroundStyle(ViciTheme.warning)
+                        }
+                        ForEach(preview.samples) { sample in
+                            Text(sample.message)
+                                .font(.footnote)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text("Nothing is saved by previewing, and the codes shown are placeholders. Real codes are created when you approve.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let error = model.copyError {
+                Section { Text(error).font(.footnote).foregroundStyle(ViciTheme.warning) }
+            }
         }
     }
 

@@ -210,6 +210,9 @@ struct CampaignDryRun: Codable, Hashable {
 /// is capped by the server and is there to be read, not counted.
 struct CampaignPreview: Codable, Hashable {
     let personalised: Bool
+    /// True when this rendered copy the writer has not saved. Optional so an
+    /// older backend that does not send it still decodes.
+    let unsaved: Bool?
     let template: String
     let fields: [String]?
     let discountPercent: Int?
@@ -317,6 +320,55 @@ struct CampaignBuildCreated: Codable, Hashable, Identifiable {
         case campaignID = "id"
         case title, variant, recipients
     }
+}
+
+/// A variable the message may use.
+///
+/// Served from the renderer's own field table, so the app can never offer one
+/// the renderer would then refuse. A template naming an unknown variable is
+/// rejected outright rather than sent with the braces showing.
+struct CampaignMergeField: Codable, Hashable, Identifiable {
+    let name: String
+    let description: String
+    var id: String { name }
+    var token: String { "{{\(name)}}" }
+
+    /// What to show on a chip: `first_name` reads better than `{{first_name}}`
+    /// at chip size, and the braces are what gets inserted anyway.
+    var label: String { name.replacingOccurrences(of: "_", with: " ") }
+}
+
+/// The recipe catalogue plus what the editor needs to know about drafting.
+struct CampaignRecipeCatalogue: Codable, Hashable {
+    let recipes: [CampaignRecipeSummary]
+    /// False when CAMPAIGN_AI_COPY_ENABLED is not set on the server. The
+    /// editor hides the drafting button rather than offering one that fails.
+    let aiCopyEnabled: Bool?
+    let mergeFields: [CampaignMergeField]?
+}
+
+/// Candidate copy from the drafting model.
+///
+/// Rejected drafts come back as rule ids with NO text, deliberately: a
+/// reviewer must not be able to lift a draft that failed validation out of a
+/// response and paste it into a campaign.
+struct CampaignCopySuggestions: Codable, Hashable {
+    let workflowType: String?
+    let brandName: String?
+    let requested: Int?
+    let returned: Int
+    let candidates: [CampaignCopyCandidate]
+    let model: String?
+    let copyStatus: String?
+}
+
+struct CampaignCopyCandidate: Codable, Hashable, Identifiable {
+    let text: String
+    let septets: Int
+    var id: String { text }
+
+    /// Over one segment the message bills twice and can arrive split.
+    var isSingleSegment: Bool { septets <= 160 }
 }
 
 struct CampaignActionResponse: Codable, Hashable {
