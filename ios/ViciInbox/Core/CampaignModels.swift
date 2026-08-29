@@ -253,6 +253,72 @@ struct CampaignPreviewExclusion: Codable, Hashable, Identifiable {
     }
 }
 
+/// A campaign this app can build by itself.
+///
+/// Each one already knows who is in the audience, what the message says, what
+/// it offers, and how long before the same person may receive it again. That
+/// last number is the one that matters: cohorts do not know who has been
+/// messaged, so without it a second run sends the same personal offer to the
+/// same person.
+struct CampaignRecipeSummary: Codable, Hashable, Identifiable {
+    let key: String
+    let name: String
+    let description: String
+    let workflowCategory: String
+    let discountPercent: Int?
+    let dedupeDays: Int
+    let segments: [String]?
+    let audience: String
+    var id: String { key }
+
+    var offerLabel: String {
+        guard let percent = discountPercent else { return "No offer" }
+        return "\(percent)% code"
+    }
+
+    var dedupeLabel: String {
+        dedupeDays % 30 == 0 && dedupeDays >= 30
+            ? "Not again for \(dedupeDays / 30) months"
+            : "Not again for \(dedupeDays) days"
+    }
+}
+
+/// What building this recipe would do, or did.
+///
+/// `suppressedAsDuplicate` is the number worth reading first. A build that
+/// comes back with a small audience has to explain itself, and "364 of them
+/// already had this one" is the explanation.
+struct CampaignBuildResult: Codable, Hashable {
+    let recipe: String
+    let name: String
+    let candidates: Int
+    let suppressedAsDuplicate: Int
+    let dedupeDays: Int
+    let priorCampaigns: Int
+    let audience: Int
+    let created: [CampaignBuildCreated]
+    let note: String?
+    let dryRun: Bool?
+
+    var builtAnything: Bool { !created.isEmpty && dryRun != true }
+}
+
+struct CampaignBuildCreated: Codable, Hashable, Identifiable {
+    /// Absent on a dry run, which reports what WOULD be built without
+    /// creating anything, so the variant name carries the identity instead.
+    let campaignID: String?
+    let title: String?
+    let variant: String
+    let recipients: Int
+
+    var id: String { campaignID ?? variant }
+
+    private enum CodingKeys: String, CodingKey {
+        case campaignID = "id"
+        case title, variant, recipients
+    }
+}
+
 struct CampaignActionResponse: Codable, Hashable {
     let campaign: CampaignRecord
     let recipientCount: Int?

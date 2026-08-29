@@ -716,6 +716,27 @@ actor APIClient {
         return try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/cancel", body: body)
     }
 
+    /// `GET /api/campaigns/recipes`, `campaigns.read`.
+    func fetchCampaignRecipes() async throws -> [CampaignRecipeSummary] {
+        struct Response: Codable { let recipes: [CampaignRecipeSummary] }
+        let result: Response = try await decodedGET("/api/campaigns/recipes")
+        return result.recipes
+    }
+
+    /// `POST /api/campaigns/build`, `campaigns.manage`.
+    ///
+    /// Creates draft campaigns and nothing else: it cannot approve, schedule,
+    /// mint a coupon or send. `dryRun` reports the numbers and writes nothing,
+    /// which is what the screen calls first so the owner sees how many people
+    /// are left after the duplicate check before committing to a build.
+    func buildCampaign(recipe: String, dryRun: Bool) async throws -> CampaignBuildResult {
+        let (data, response) = try await post("/api/campaigns/build",
+                                              body: ["recipe": recipe, "dryRun": dryRun])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignBuildResult.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// `POST /api/campaigns/:id/preview`, `campaigns.read`.
     ///
     /// Mints nothing. The server substitutes a placeholder code of the same

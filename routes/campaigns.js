@@ -15,6 +15,8 @@ const { CopyDraftError, draftCandidates } = require('../lib/campaigns/copy-write
 const {
   createOpportunityPortfolioService
 } = require('../lib/campaigns/opportunity-portfolio');
+const { recipeCatalogue } = require('../lib/campaigns/recipes');
+const { buildFromRecipe } = require('../lib/campaigns/audience-builder');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -122,7 +124,8 @@ function createCampaignRouter({
   generationAuditWriter,
   campaignDeletionAuditWriter,
   copyDrafter,
-  opportunityPortfolio
+  opportunityPortfolio,
+  campaignClient
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -142,6 +145,10 @@ function createCampaignRouter({
   // database or WooCommerce credentials, and the first read happens inside the
   // handler. The instance is per-router so its cache is shared across requests.
   const portfolio = opportunityPortfolio || createOpportunityPortfolioService();
+  // Lazy for the same reason as the portfolio above: constructing this router
+  // must not require database credentials, because the route tests build it
+  // without any. Resolved on first use, inside a handler.
+  const db = () => (campaignClient || require('../db').supabase);
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -152,6 +159,57 @@ function createCampaignRouter({
   });
 
   // Literal before /:id so Express never interprets "review-count" as an id.
+  /**
+   * The campaigns this app can build by itself.
+   *
+   * Static data, so it needs no database and answers instantly. It is what
+   * turns "create a campaign" from a terminal script into a screen: each entry
+   * already knows who is in the audience, what the message says, what it
+   * offers, and how long before the same person may receive it again.
+   */
+  router.get('/recipes', async (_req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      return res.json({ recipes: recipeCatalogue() });
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Build one recipe into reviewable drafts.
+   *
+   * Creates DRAFTS and nothing else: no submit, no approve, no schedule, no
+   * coupon. Minting happens at approval, by a person.
+   *
+   * `dryRun: true` reports the numbers without writing anything, which is what
+   * the app calls first so the owner sees "376 qualify, 364 already had this,
+   * 12 to send" before deciding whether a build is worth doing at all.
+   */
+  router.post('/build', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const result = await buildFromRecipe({
+        client: db(),
+        recipeKey: req.body?.recipe,
+        actorID: Number(req.actor?.id) || null,
+        dryRun: req.body?.dryRun === true
+      });
+      if (!result.created?.length || result.dryRun) return res.json(result);
+
+      await auditCampaign('campaign.created', req, { id: result.created[0].id }, {
+        summary: `Built ${result.created.length} draft(s) from the "${result.name}" recipe `
+          + `for ${result.audience} people; ${result.suppressedAsDuplicate} were left out as already contacted`,
+        newState: { status: 'draft' },
+        metadata: {
+          recipe: result.recipe,
+          audience: result.audience,
+          suppressed_as_duplicate: result.suppressedAsDuplicate,
+          campaigns: result.created.map(row => row.id)
+        }
+      });
+      return res.status(201).json(result);
+    } catch (error) { return sendError(res, error); }
+  });
+
   router.get('/review-count', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');

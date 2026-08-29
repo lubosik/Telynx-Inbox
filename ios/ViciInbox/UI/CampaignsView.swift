@@ -5,6 +5,7 @@ struct CampaignsView: View {
     @EnvironmentObject private var router: AppRouter
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
+    @State private var showingRecipes = false
 
     /// The campaign a confirmation is currently being asked about, and which
     /// question is being asked. One piece of state rather than two booleans and
@@ -55,7 +56,18 @@ struct CampaignsView: View {
             }
             if session.can(Permission.campaignsManage) {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showingNewCampaign = true } label: {
+                    Menu {
+                        Button {
+                            showingRecipes = true
+                        } label: {
+                            Label("Build a campaign", systemImage: "wand.and.stars")
+                        }
+                        Button {
+                            showingNewCampaign = true
+                        } label: {
+                            Label("Write one from scratch", systemImage: "square.and.pencil")
+                        }
+                    } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("New campaign")
@@ -64,6 +76,11 @@ struct CampaignsView: View {
         }
         .sheet(isPresented: $showingNewCampaign) {
             CampaignEditorView {
+                Task { await model.load(reset: true) }
+            }
+        }
+        .sheet(isPresented: $showingRecipes) {
+            CampaignRecipeSheet {
                 Task { await model.load(reset: true) }
             }
         }
@@ -1790,5 +1807,173 @@ private struct CampaignCouponRevenueSection: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Build a campaign from a recipe, without leaving the app.
+///
+/// WHAT THIS REPLACED
+///   Everything after "draft" already happened here: preview, edit, review,
+///   approve, schedule. Everything BEFORE it happened in a terminal, so
+///   creating a campaign meant running a script by hand on a laptop. This is
+///   that script, behind a screen.
+///
+/// THE DRY RUN IS NOT OPTIONAL, AND THAT IS DELIBERATE
+///   Picking a recipe checks the numbers first and writes nothing. A cohort
+///   does not know who has already been messaged, so the interesting number is
+///   rarely "how many qualify" and almost always "how many are left once the
+///   people who already had this one are taken out". Showing that BEFORE the
+///   Build button appears is what stops somebody building a duplicate campaign
+///   and only noticing at the review step.
+private struct CampaignRecipeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onBuilt: () -> Void
+
+    @State private var recipes: [CampaignRecipeSummary] = []
+    @State private var selected: CampaignRecipeSummary?
+    @State private var dryRun: CampaignBuildResult?
+    @State private var isLoading = true
+    @State private var isChecking = false
+    @State private var isBuilding = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading campaigns")
+                } else if recipes.isEmpty {
+                    EmptyState(icon: "wand.and.stars",
+                               title: "No campaigns to build",
+                               detail: errorMessage ?? "This workspace has no campaign recipes configured.")
+                        .padding(24)
+                } else {
+                    list
+                }
+            }
+            .navigationTitle("Build a campaign")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private var list: some View {
+        List {
+            ForEach(recipes) { recipe in
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(recipe.name)
+                            .font(.headline)
+                        Text(recipe.description)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Label(recipe.offerLabel, systemImage: "tag")
+                            Label(recipe.dedupeLabel, systemImage: "clock.arrow.circlepath")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+
+                    if selected?.key == recipe.key, let result = dryRun {
+                        resultRows(result)
+                    }
+
+                    if selected?.key == recipe.key && isChecking {
+                        HStack { ProgressView(); Text("Checking who qualifies").font(.footnote) }
+                    } else if selected?.key != recipe.key {
+                        Button("Check who qualifies") {
+                            Task { await check(recipe) }
+                        }
+                        .disabled(isChecking || isBuilding)
+                    }
+                }
+            }
+            if let errorMessage, !recipes.isEmpty {
+                Section { Text(errorMessage).font(.footnote).foregroundStyle(ViciTheme.warning) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func resultRows(_ result: CampaignBuildResult) -> some View {
+        LabeledContent("Qualify today", value: "\(result.candidates)")
+        // The number that explains a small campaign. Shown even when zero, so
+        // "nobody was excluded" is stated rather than inferred from absence.
+        LabeledContent("Already had this one", value: "\(result.suppressedAsDuplicate)")
+            .foregroundStyle(result.suppressedAsDuplicate > 0 ? ViciTheme.warning : .secondary)
+        LabeledContent("Would be messaged") {
+            Text("\(result.audience)")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(result.audience > 0 ? ViciTheme.success : .secondary)
+        }
+
+        if let note = result.note {
+            Text(note)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
+        if result.audience > 0 {
+            ForEach(result.created) { group in
+                LabeledContent(group.variant == "named" ? "Naming the product" : "Not naming it",
+                               value: "\(group.recipients)")
+                    .font(.caption)
+            }
+            Button {
+                Task { await build() }
+            } label: {
+                if isBuilding {
+                    HStack { ProgressView(); Text("Building") }
+                } else {
+                    Text("Create \(result.audience > 0 ? "the drafts" : "nothing")")
+                }
+            }
+            .disabled(isBuilding)
+            Text("Creates drafts only. Nothing is approved, scheduled or sent, and no code is created until you approve.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do { recipes = try await APIClient.shared.fetchCampaignRecipes() }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func check(_ recipe: CampaignRecipeSummary) async {
+        selected = recipe
+        dryRun = nil
+        isChecking = true
+        errorMessage = nil
+        defer { isChecking = false }
+        do { dryRun = try await APIClient.shared.buildCampaign(recipe: recipe.key, dryRun: true) }
+        catch {
+            errorMessage = error.localizedDescription
+            selected = nil
+        }
+    }
+
+    private func build() async {
+        guard let recipe = selected else { return }
+        isBuilding = true
+        errorMessage = nil
+        defer { isBuilding = false }
+        do {
+            _ = try await APIClient.shared.buildCampaign(recipe: recipe.key, dryRun: false)
+            onBuilt()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
