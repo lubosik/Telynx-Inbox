@@ -30,7 +30,9 @@ const modelJSON = (verdict) => model(JSON.stringify(verdict));
 
 test('a confident happy reply is the only thing that auto-sends', async () => {
   const result = await triageReply({
-    text: 'all good thanks',
+    // Unambiguous praise about delivery, not "all good thanks", which is now
+    // deliberately `acknowledged` and has its own test below.
+    text: 'arrived fast and packaging was perfect',
     completion: modelJSON({ intent: 'happy', confidence: 0.95, summary: 'happy', draft_reply: null })
   });
   assert.equal(result.autoSendCode, true);
@@ -78,7 +80,7 @@ test('the keyword list can veto a wrong happy but can never create one', async (
 
 test('an unreachable model sends nothing and says so', async () => {
   const result = await triageReply({
-    text: 'all good thanks',
+    text: 'arrived fast and packaging was perfect',
     completion: async () => { throw new Error('timeout'); }
   });
   assert.equal(result.autoSendCode, false);
@@ -193,4 +195,118 @@ test('the handler honours an opt-out the phrase list would miss', () => {
 test('looksObviouslyUnhappy is only ever used to withhold', () => {
   assert.equal(looksObviouslyUnhappy('it arrived broken'), true);
   assert.equal(looksObviouslyUnhappy('all good thanks'), false);
+});
+
+// ── The two ambiguities a keyword list could never see ─────────────────────
+
+test('"all good thanks" is acknowledged, not happy, and does not auto-send', async () => {
+  // The owner's point, and he is right: "all good thanks" is two readings at
+  // once. The order was fine and they would buy again, or they are politely
+  // declining. A model is confidently right about the words and possibly wrong
+  // about the person, and confidence cannot fix an ambiguity that is really in
+  // the message. So it gets a human.
+  const result = await triageReply({
+    text: 'all good thanks',
+    completion: modelJSON({ intent: 'acknowledged', confidence: 0.95, summary: 'non-committal', draft_reply: 'Thanks for letting me know.' })
+  });
+  assert.equal(result.intent, 'acknowledged');
+  assert.equal(result.autoSendCode, false);
+  assert.equal(result.needsHuman, true);
+  assert.ok(result.draftReply, 'a person needs something to send');
+});
+
+test('a reply describing a bodily effect never auto-sends, however positive', async () => {
+  const { mentionsBodilyEffect } = require('../lib/campaigns/reply-triage');
+  for (const text of [
+    'lost 10lbs already, amazing stuff',
+    'my joints feel so much better',
+    "it's really working for me",
+    'so much more energy now'
+  ]) {
+    assert.equal(mentionsBodilyEffect(text), true, text);
+    const result = await triageReply({
+      text,
+      completion: modelJSON({ intent: 'happy', confidence: 0.99, summary: 'positive', draft_reply: 'Thanks for getting back to me.' })
+    });
+    // A business that answers an efficacy testimonial with money is soliciting
+    // more of them, and for a research-compound seller a file of
+    // customer-reported effects reads as marketing for human use.
+    assert.equal(result.autoSendCode, false, text);
+    assert.equal(result.bodilyEffect, true, text);
+    assert.ok(result.draftReply, 'held back but still needs an answer to send');
+  }
+});
+
+test('praise about delivery or packaging still auto-sends', async () => {
+  const { mentionsBodilyEffect } = require('../lib/campaigns/reply-triage');
+  const text = 'arrived fast and packaging was perfect';
+  assert.equal(mentionsBodilyEffect(text), false);
+  const result = await triageReply({
+    text, completion: modelJSON({ intent: 'happy', confidence: 0.95, summary: 'praised delivery', draft_reply: null })
+  });
+  assert.equal(result.autoSendCode, true);
+});
+
+test('the acknowledgement writer refuses anything that reaches past a clause', async () => {
+  const { acknowledgementFor } = require('../lib/campaigns/reply-triage');
+  // Each of these is the model doing more than it was asked. Falling back to
+  // the fixed wording is worse copy and perfectly safe; splicing any of them
+  // into the message is not.
+  for (const bad of [
+    'Here is 15% off your next order.',
+    'Visit http://example.com for more.',
+    'Reply STOP to opt out.',
+    'Use {{code}} today.',
+    'Glad to hear it. '.repeat(6)
+  ]) {
+    assert.equal(await acknowledgementFor({ text: 'hi', completion: model(bad) }), null, bad);
+  }
+  // And a plain clause is kept, with a full stop added.
+  assert.equal(
+    await acknowledgementFor({ text: 'hi', completion: model('Glad it turned up quickly') }),
+    'Glad it turned up quickly.'
+  );
+});
+
+test('an unreachable clause writer falls back rather than failing the send', async () => {
+  const { acknowledgementFor } = require('../lib/campaigns/reply-triage');
+  const result = await acknowledgementFor({
+    text: 'great thanks', completion: async () => { throw new Error('down'); }
+  });
+  assert.equal(result, null, 'null means the caller uses the fixed wording');
+});
+
+test('the code message composes the clause in and validates the whole thing', () => {
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib', 'campaigns', 'check-in-reply.js'), 'utf8'
+  );
+  // The clause is spliced BEFORE validateCopy runs, so model-written text is
+  // checked exactly like the rest rather than trusted.
+  assert.ok(
+    source.indexOf('acknowledgementFor(') < source.indexOf('validateCopy(outcome.text'),
+    'the acknowledgement must be composed before the message is validated'
+  );
+  const { TEMPLATE, FALLBACK_ACKNOWLEDGEMENT, codeMessageTemplate } =
+    require('../lib/campaigns/check-in-reply');
+  const { validateCopy } = require('../lib/campaigns/copy-validator');
+  const { RULES } = require('../lib/campaigns/copy-rules');
+  const options = {
+    brandName: RULES.brand.defaultName,
+    approvedProductCodes: RULES.defaultApprovedProductCodes
+  };
+
+  // The clause is composed by a function, not a `{{acknowledgement}}`
+  // placeholder. That placeholder is not a merge field and validateCopy rightly
+  // refuses unknown ones, so the first version of this could never be validated
+  // as written and failed its own compliance test.
+  assert.equal(validateCopy(TEMPLATE, options).ok, true, 'the default message must be valid');
+  assert.equal(
+    validateCopy(codeMessageTemplate('Glad it turned up quickly.'), options).ok, true,
+    'a composed message must be valid too'
+  );
+  // The commercial half must be identical whatever the clause says.
+  for (const clause of [undefined, 'Glad it turned up quickly.', FALLBACK_ACKNOWLEDGEMENT]) {
+    assert.match(codeMessageTemplate(clause), /\{\{code\}\} is 15% off your next order\. Reply STOP to opt out\.$/);
+  }
+  assert.ok(FALLBACK_ACKNOWLEDGEMENT.length > 0);
 });
