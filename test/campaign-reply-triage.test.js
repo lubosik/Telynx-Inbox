@@ -310,3 +310,89 @@ test('the code message composes the clause in and validates the whole thing', ()
   }
   assert.ok(FALLBACK_ACKNOWLEDGEMENT.length > 0);
 });
+
+// ── Drafting for every inbound, not just check-in replies ──────────────────
+
+test('a general inbound draft has no way to send or mint anything', () => {
+  // Structural, not a promise. Widening triage to every message means a
+  // stranger texting "all good thanks" gets read by the model; if the code
+  // path were shared they would also get 15% off.
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib', 'campaigns', 'reply-triage.js'), 'utf8'
+  );
+  const fn = source.slice(source.indexOf('async function draftReplyForInbound'));
+  const body = fn.slice(0, fn.indexOf('\nmodule.exports'));
+  for (const forbidden of ['sendSMS', 'createCoupons', 'generateCode', 'mayIssueCode']) {
+    assert.doesNotMatch(body, new RegExp(forbidden), `${forbidden} must not appear in the drafting path`);
+  }
+});
+
+test('a bare thank you is recorded as needing nothing, with no draft', async () => {
+  const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
+  const writes = [];
+  const client = { from() { return { insert(row) { writes.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: 1 }, error: null }) }) }; } }; } };
+  const result = await draftReplyForInbound({
+    client, phone: '+15550000001', text: 'Thank you!',
+    triage: async () => ({ intent: 'acknowledged', confidence: 0.95, draftReply: null, needsHuman: true })
+  });
+  // "Thank you" is a quarter of this inbox by volume. Drafting an answer to
+  // every one buries the messages that need one.
+  assert.equal(result.drafted, false);
+  assert.equal(result.reason, 'no_reply_needed');
+  assert.equal(writes.length, 0);
+});
+
+test('a real question is drafted and recorded', async () => {
+  const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
+  const writes = [];
+  const client = { from() { return { insert(row) { writes.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: 1 }, error: null }) }) }; } }; } };
+  const result = await draftReplyForInbound({
+    client, phone: '+15550000001', text: 'should I put 2 mL of bac water in',
+    triage: async () => ({
+      intent: 'question', confidence: 0.95, summary: 'asks about mixing',
+      draftReply: "It's Vin from Vici. Someone will get back to you on that. Reply STOP to opt out."
+    })
+  });
+  assert.equal(result.drafted, true);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].suggestion_type, 'reply_draft');
+  assert.equal(writes[0].status, 'pending');
+});
+
+test('an opt-out is left to the caller rather than answered cheerfully', async () => {
+  const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
+  const writes = [];
+  const client = { from() { return { insert(row) { writes.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: 1 }, error: null }) }) }; } }; } };
+  const result = await draftReplyForInbound({
+    client, phone: '+15550000001', text: 'please stop sending me these',
+    triage: async () => ({ intent: 'opt_out_intent', confidence: 0.99, draftReply: 'Sure thing.' })
+  });
+  assert.equal(result.drafted, false);
+  assert.equal(result.reason, 'opt_out_handled_elsewhere');
+  assert.equal(writes.length, 0, 'nothing cheerful may be drafted for somebody asking to be left alone');
+});
+
+test('the drafting path never throws at the webhook', async () => {
+  const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
+  const result = await draftReplyForInbound({
+    client: { from() { throw new Error('down'); } },
+    phone: '+15550000001', text: 'hello',
+    triage: async () => ({ intent: 'question', draftReply: 'x' })
+  });
+  assert.equal(result.drafted, false);
+  assert.equal(result.reason, 'draft_failed');
+});
+
+test('the webhook only drafts generally when it was not a check-in reply', () => {
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'routes', 'webhook.js'), 'utf8'
+  );
+  assert.match(source, /draftReplyForInbound\(/);
+  // Guarded on no_recent_check_in, so a check-in reply is handled once by the
+  // path that can send the code, and never drafted for twice.
+  const block = source.slice(source.indexOf('handleCheckInReply({'));
+  assert.ok(
+    block.indexOf("outcome.reason !== 'no_recent_check_in'") < block.indexOf('draftReplyForInbound('),
+    'general drafting must be reached only after the check-in path declines'
+  );
+});

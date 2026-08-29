@@ -14,6 +14,7 @@ const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = re
 const { isOptOutRequest } = require('../lib/opt-out-language');
 const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-receipts');
 const { handleCheckInReply } = require('../lib/campaigns/check-in-reply');
+const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
 const { sendSMS } = require('../telnyx');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
@@ -313,13 +314,30 @@ module.exports = (broadcastSSE) => {
       // Deliberately not awaited into the response path for anything except
       // its log line: the customer's message is already saved by this point.
       handleCheckInReply({ client: supabase, phone: fromPhone, text, sendSMS })
-        .then(outcome => {
+        .then(async outcome => {
           if (outcome.sent) {
             console.log(`[CHECK-IN] Sent ${outcome.code} to ...${fromPhone.slice(-4)} after their reply`);
-          } else if (outcome.reason === 'reply_needs_a_human') {
-            console.log(`[CHECK-IN] Reply from ...${fromPhone.slice(-4)} reads as a complaint; no code sent`);
-          } else if (outcome.reason !== 'no_recent_check_in') {
-            console.log(`[CHECK-IN] No code for ...${fromPhone.slice(-4)}: ${outcome.reason}`);
+            return;
+          }
+          if (outcome.reason !== 'no_recent_check_in') {
+            console.log(`[CHECK-IN] No code for ...${fromPhone.slice(-4)}: ${outcome.reason}`
+              + (outcome.drafted ? ' (drafted a reply)' : ''));
+            return;
+          }
+
+          // ── Not a check-in reply, so draft an answer anyway ─────────────
+          //
+          // Every other inbound message gets read and, unless it needs no
+          // answer, a suggested reply waiting for a person. Nine a day, and
+          // the real ones are questions worth answering properly.
+          //
+          // This path has NO coupon client and NO sendSMS. The discount lives
+          // only in handleCheckInReply above, which requires a check-in the
+          // customer actually received, so a stranger texting "all good
+          // thanks" is read and drafted for but can never earn 15% off.
+          const drafted = await draftReplyForInbound({ client: supabase, phone: fromPhone, text });
+          if (drafted.drafted) {
+            console.log(`[INBOUND] Drafted a ${drafted.intent} reply for ...${fromPhone.slice(-4)}`);
           }
         })
         .catch(err => console.error('[CHECK-IN] Reply handler error:', err.message));
