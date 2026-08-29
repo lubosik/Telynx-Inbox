@@ -13,6 +13,8 @@ const { classifyAndStoreSentiment } = require('../lib/analytics/sentiment');
 const { reconcileAttributionForDeliveredMessage, recordTelnyxMessageEvent } = require('../lib/analytics/events');
 const { isOptOutRequest } = require('../lib/opt-out-language');
 const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-receipts');
+const { handleCheckInReply } = require('../lib/campaigns/check-in-reply');
+const { sendSMS } = require('../telnyx');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -297,6 +299,30 @@ module.exports = (broadcastSSE) => {
       if (cancelled > 0) {
         console.log(`[INBOUND] Cancelled ${cancelled} hold/failed messages for ...${fromPhone.slice(-4)} (customer replied)`);
       }
+
+      // ── Answering a 21-day check-in earns the code ──────────────────────
+      //
+      // Only reached when the message is NOT a STOP: opt-out is handled far
+      // above and returns before here. The handler applies its own refusals
+      // on top of that (no recent check-in, already sent, reply reads as a
+      // complaint, opted out since), and never throws, because this webhook's
+      // job is to record the customer's message and return 200. A discount
+      // that failed to send must not become a retried webhook or a lost
+      // inbound message.
+      //
+      // Deliberately not awaited into the response path for anything except
+      // its log line: the customer's message is already saved by this point.
+      handleCheckInReply({ client: supabase, phone: fromPhone, text, sendSMS })
+        .then(outcome => {
+          if (outcome.sent) {
+            console.log(`[CHECK-IN] Sent ${outcome.code} to ...${fromPhone.slice(-4)} after their reply`);
+          } else if (outcome.reason === 'reply_needs_a_human') {
+            console.log(`[CHECK-IN] Reply from ...${fromPhone.slice(-4)} reads as a complaint; no code sent`);
+          } else if (outcome.reason !== 'no_recent_check_in') {
+            console.log(`[CHECK-IN] No code for ...${fromPhone.slice(-4)}: ${outcome.reason}`);
+          }
+        })
+        .catch(err => console.error('[CHECK-IN] Reply handler error:', err.message));
 
       broadcastSSE({
         type: 'new_message',
