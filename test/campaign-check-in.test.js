@@ -219,7 +219,10 @@ test('somebody who opted out since the check-in gets nothing', async () => {
       contact: { opted_out: true }
     }),
     phone: '+15550000001', text: 'all good thanks', now: NOW,
-    sendSMS: async () => ({ messageId: 'm1' }), coupons
+    sendSMS: async () => ({ messageId: 'm1' }), coupons,
+    // Stubbed happy, so the test reaches the opt-out branch rather than
+    // stopping at triage.
+    triage: async () => ({ intent: 'happy', confidence: 1, autoSendCode: true, needsHuman: false })
   });
   assert.equal(result.sent, false);
   assert.equal(result.reason, 'opted_out');
@@ -234,7 +237,8 @@ test('a second reply does not earn a second code', async () => {
       sentLog: { id: 1 }
     }),
     phone: '+15550000001', text: 'thanks again', now: NOW,
-    sendSMS: async () => ({ messageId: 'm1' }), coupons
+    sendSMS: async () => ({ messageId: 'm1' }), coupons,
+    triage: async () => ({ intent: 'happy', confidence: 1, autoSendCode: true, needsHuman: false })
   });
   assert.equal(result.sent, false);
   assert.equal(result.reason, 'code_already_sent');
