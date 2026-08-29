@@ -98,11 +98,20 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     const historical = !fromWebhook;
     const hasTracking = !!tracking?.trackingNumber;
     writtenStatus = hasTracking ? 'shipped' : (order.status || 'pending');
+    // Coupon codes, lowercased to match how they are minted and stored.
+    // WooCommerce has always returned these on every order and nothing here
+    // read them, which is why a redeemed campaign code could never be joined
+    // back to the campaign that sent it. See scripts/coupon-attribution-migration.sql.
+    const couponCodes = Array.isArray(order.coupon_lines)
+      ? order.coupon_lines.map(line => String(line?.code || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
     await supabase.from('sms_orders').upsert({
       contact_phone: phone,
       woo_order_id: order.id,
       status: writtenStatus,
       items,
+      coupon_codes: couponCodes.length ? couponCodes : null,
       total: parseFloat(order.total) || 0,
       tracking_number: tracking?.trackingNumber || null,
       carrier: tracking?.carrier || null,
@@ -200,8 +209,19 @@ async function syncOrderStatuses() {
     // Use WC modification date as last_seen — not NOW() — so old orders don't float to top
     const lastSeen = wc.date_modified || wc.date_created || new Date().toISOString();
 
+    // Coupon codes ride along on the status refresh, which is the only path
+    // that revisits an order that already has a row. The create path uses
+    // ignoreDuplicates, so without this an order whose row predates
+    // scripts/coupon-attribution-migration.sql would never gain its codes.
+    const refreshedCoupons = Array.isArray(wc.coupon_lines)
+      ? wc.coupon_lines.map(line => String(line?.code || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
     await supabase.from('sms_orders')
-      .update({ status: newStatus })
+      .update({
+        status: newStatus,
+        ...(refreshedCoupons.length ? { coupon_codes: refreshedCoupons } : {})
+      })
       .eq('woo_order_id', wc.id);
 
     if (db.contact_phone) {

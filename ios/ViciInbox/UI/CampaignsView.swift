@@ -532,6 +532,9 @@ struct CampaignDetailView: View {
 
             if let performance = model.performance {
                 CampaignPerformanceSection(performance: performance)
+                if let coupons = performance.coupons, coupons.hasCodes {
+                    CampaignCouponRevenueSection(coupons: coupons)
+                }
             }
 
             if session.can(Permission.analyticsRead) {
@@ -1733,5 +1736,59 @@ private struct CampaignPreviewSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// What this campaign actually earned.
+///
+/// Measured, not modelled: every pound traces to a single-use code on a
+/// specific paid order. That is why `attribution-policy.js` scores this above
+/// a clicked link, and why the section says "measured" rather than
+/// "estimated". Refunded and cancelled orders are excluded upstream, so a
+/// campaign that attracted the wrong buyer does not get credit for it.
+private struct CampaignCouponRevenueSection: View {
+    let coupons: CampaignCouponRevenue
+
+    var body: some View {
+        Section("Revenue from the codes") {
+            HStack {
+                statTile("Issued", "\(coupons.issued ?? 0)")
+                Divider()
+                statTile("Redeemed", "\(coupons.redeemed ?? 0)")
+                Divider()
+                statTile("Rate", coupons.formattedRate)
+            }
+            LabeledContent("Revenue") {
+                Text(coupons.formattedRevenue)
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(ViciTheme.success)
+            }
+            Text("Each code works once and belongs to one person, so every order here is that customer acting on this message. Refunded and cancelled orders are not counted.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let anomalies = coupons.anomalies, !anomalies.isEmpty {
+                // Surfaced rather than summed. A single-use code appearing
+                // twice is a WooCommerce problem, not a second sale.
+                DisclosureGroup("\(anomalies.count) needing a look") {
+                    ForEach(anomalies) { row in
+                        LabeledContent(row.code, value: row.readableReason)
+                            .font(.caption)
+                    }
+                }
+                .font(.footnote)
+            }
+        }
+    }
+
+    private func statTile(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.headline.monospacedDigit())
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }

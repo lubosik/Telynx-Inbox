@@ -266,6 +266,55 @@ struct CampaignPerformance: Codable, Hashable {
     let operational: CampaignOperationalMetrics
     let availability: CampaignPerformanceAvailability
     let warnings: [CampaignPerformanceWarning]
+    /// Optional so a campaign screen still decodes against a backend that
+    /// predates coupon attribution. Absent means unavailable, never zero.
+    let coupons: CampaignCouponRevenue?
+}
+
+/// Money this campaign made, measured rather than modelled.
+///
+/// Every figure traces to a specific single-use code on a specific paid order,
+/// which is why `attribution-policy.js` ranks it above a clicked link. A
+/// campaign that offered nothing reports `issued == 0` rather than a revenue
+/// figure it has no basis for.
+struct CampaignCouponRevenue: Codable, Hashable {
+    let available: Bool
+    let reason: String?
+    let issued: Int?
+    let redeemed: Int?
+    let revenue: Double?
+    let redemptionRate: Double?
+    let anomalies: [CampaignCouponAnomaly]?
+
+    /// Worth showing at all. A campaign with no codes has nothing to say here.
+    var hasCodes: Bool { available && (issued ?? 0) > 0 }
+
+    var formattedRevenue: String {
+        let value = revenue ?? 0
+        return "$" + String(format: "%.2f", value)
+    }
+
+    var formattedRate: String {
+        let rate = redemptionRate ?? 0
+        return String(format: "%.1f%%", rate * 100)
+    }
+}
+
+struct CampaignCouponAnomaly: Codable, Hashable, Identifiable {
+    let code: String
+    let wooOrderID: Int?
+    let reason: String
+    var id: String { "\(code)-\(wooOrderID ?? 0)-\(reason)" }
+
+    var readableReason: String {
+        switch reason {
+        case "code_used_more_than_once": return "Used more than once"
+        case "order_refunded": return "Order refunded"
+        case "order_cancelled": return "Order cancelled"
+        case "order_failed": return "Payment failed"
+        default: return reason.replacingOccurrences(of: "order_", with: "Order ")
+        }
+    }
 }
 
 struct CampaignOperationalMetrics: Codable, Hashable {

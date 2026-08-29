@@ -51,8 +51,77 @@ struct CampaignPreviewModelsSmoke {
         precondition(plain.fields == nil && plain.discountPercent == nil)
         precondition(plain.rendersForEveryone)
 
+        // ── Coupon revenue, the other half of the wire contract ──────────
+        let perf = try JSONDecoder().decode(CampaignPerformance.self, from: performanceFixture)
+        let coupons = try XCTUnwrapLike(perf.coupons, "performance must carry coupons")
+        precondition(coupons.hasCodes)
+        precondition(coupons.issued == 221 && coupons.redeemed == 14)
+        precondition(coupons.formattedRevenue == "$2431.80", coupons.formattedRevenue)
+        precondition(coupons.formattedRate == "6.3%", coupons.formattedRate)
+        precondition(coupons.anomalies?.count == 1)
+        precondition(coupons.anomalies?[0].readableReason == "Order refunded")
+
+        // Absent coupons must decode, and must read as "nothing to show"
+        // rather than as zero revenue. A backend without the migration, or a
+        // campaign that offered nothing, both land here.
+        let plainPerf = try JSONDecoder().decode(CampaignPerformance.self, from: performanceNoCouponsFixture)
+        precondition(plainPerf.coupons == nil)
+
+        let unavailable = try JSONDecoder().decode(CampaignPerformance.self, from: performanceUnavailableFixture)
+        precondition(unavailable.coupons?.available == false)
+        precondition(unavailable.coupons?.hasCodes == false,
+                     "an unavailable revenue figure must never render as a real one")
+
         print("CampaignPreviewModelsSmoke passed")
     }
+
+    /// `precondition` cannot unwrap, and these run outside XCTest.
+    static func XCTUnwrapLike<T>(_ value: T?, _ message: String) throws -> T {
+        guard let value else { fatalError(message) }
+        return value
+    }
+
+    static let performanceFixture = Data("""
+    {
+      "operational": {
+        "recipients": 221, "providerAccepted": 221, "delivered": 216, "queued": 0,
+        "failed": 5, "skipped": 0, "cancelled": 0, "replies": 12, "optOuts": 3,
+        "deliveryDefinition": "trusted_provider_delivery", "providerAcceptanceIsDelivery": false
+      },
+      "coupons": {
+        "available": true, "issued": 221, "redeemed": 14,
+        "revenue": 2431.80, "redemptionRate": 0.0633,
+        "anomalies": [{ "code": "vin-abc1234567", "wooOrderID": 5199, "reason": "order_refunded" }]
+      },
+      "availability": { "operational": true, "financial": false, "couponRevenue": true },
+      "warnings": []
+    }
+    """.utf8)
+
+    static let performanceNoCouponsFixture = Data("""
+    {
+      "operational": {
+        "recipients": 40, "providerAccepted": 40, "delivered": 39, "queued": 0,
+        "failed": 1, "skipped": 0, "cancelled": 0, "replies": 6, "optOuts": 0,
+        "deliveryDefinition": "trusted_provider_delivery", "providerAcceptanceIsDelivery": false
+      },
+      "availability": { "operational": true, "financial": false },
+      "warnings": []
+    }
+    """.utf8)
+
+    static let performanceUnavailableFixture = Data("""
+    {
+      "operational": {
+        "recipients": 40, "providerAccepted": 40, "delivered": 39, "queued": 0,
+        "failed": 1, "skipped": 0, "cancelled": 0, "replies": 6, "optOuts": 0,
+        "deliveryDefinition": "trusted_provider_delivery", "providerAcceptanceIsDelivery": false
+      },
+      "coupons": { "available": false, "reason": "coupon_attribution_migration_missing" },
+      "availability": { "operational": true, "financial": false, "couponRevenue": false },
+      "warnings": []
+    }
+    """.utf8)
 
     static let fixture = Data("""
     {
