@@ -72,6 +72,9 @@ async function audienceFor(db, segmentKeys) {
   const { data: segments, error } = await db
     .from('sms_campaign_segments')
     .select('id, segment_key, member_count')
+    // bounded: SEGMENTS is a two-element module constant, not user input or a
+    // query result, so this list cannot grow at runtime and cannot overflow
+    // the request URL. Every list below that CAN grow is paged instead.
     .in('segment_key', segmentKeys)
     .is('archived_at', null);
   if (error) throw new Error(`Reading segments failed: ${error.message}`);
