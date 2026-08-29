@@ -455,6 +455,31 @@ function createCampaignRouter({
   });
 
   /**
+   * The actual messages, per person, before anything is approved or minted.
+   *
+   * WHY THIS EXISTS SEPARATELY FROM dry-run
+   *   dry-run answers "who would this reach", which is about consent, quiet
+   *   hours and suppression. This answers "what would they read", which until
+   *   now nothing answered at all. A reviewer approving copy containing
+   *   {{first_name}} was approving a template and had no way to see a single
+   *   rendered message, which is how a campaign that renders for 216 of 376
+   *   people looks identical on screen to one that renders for all of them.
+   *
+   * IT MINTS NOTHING. `dryRun: true` substitutes a placeholder code of the same
+   *   shape and length as a real one, so validation and segment counts behave
+   *   exactly as they will at approval, and WooCommerce is never touched. A
+   *   preview that passed and a send that then failed on one extra character
+   *   would be worse than having no preview.
+   */
+  router.post('/:id/preview', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 100);
+      return res.json(await campaigns.preview(req.params.id, { limit }));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
    * Remove a campaign from the list.
    *
    * DESTROY OR ARCHIVE IS NOT THE CALLER'S DECISION.
