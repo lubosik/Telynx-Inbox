@@ -54,11 +54,16 @@ const DISCOUNT_PERCENT = 15;
  * PERSONAL is the owner's own brief: name, what they took, when. NEUTRAL is the
  * same message for somebody whose purchase cannot be named safely.
  */
-const PERSONAL = 'Vin from Vici. Hi {{first_name}}, you took {{last_product}} back in '
-  + '{{last_order_date}}. Here is {{code}} for 15% off your next order. Reply STOP to opt out.';
+// Sized against the WORST case, a 12-character first name beside a
+// 12-character product code, a 9-character month and a 16-character code, so
+// the app's own copy check passes when the owner edits these rather than
+// flagging a template that happens to fit today's audience. An earlier draft
+// rendered fine for all 221 real recipients and still failed that check.
+const PERSONAL = 'Vin from Vici. Hi {{first_name}}, thanks for the {{last_product}} order back in '
+  + '{{last_order_date}}. {{code}} is 15% off. Reply STOP to opt out.';
 
-const NEUTRAL = 'Vin from Vici. Hi {{first_name}}, it has been since {{last_order_date}} '
-  + 'and I wanted to check in. Here is {{code}} for 15% off your next order. Reply STOP to opt out.';
+const NEUTRAL = 'Vin from Vici. Hi {{first_name}}, thanks for your order back in '
+  + '{{last_order_date}}. {{code}} is 15% off your next. Reply STOP to opt out.';
 
 function client() {
   const url = process.env.SUPABASE_URL;
