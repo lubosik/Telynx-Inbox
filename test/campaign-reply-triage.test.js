@@ -396,3 +396,50 @@ test('the webhook only drafts generally when it was not a check-in reply', () =>
     'general drafting must be reached only after the check-in path declines'
   );
 });
+
+test('an opt-out stops the order automations too, not just campaigns', () => {
+  // The gap this closes, in the owner's words: "even for the automations, they
+  // should be put on the do-not-contact list."
+  //
+  // suppressOptOut writes the campaign suppression and the consent withdrawal.
+  // It does NOT write the `opted-out` sentinel in sms_sent_log, and that
+  // sentinel is the ONLY thing isOptedOut() reads, and isOptedOut() is what
+  // gates sendAndLog, which carries shipping and payment messages.
+  //
+  // So the first version stopped campaigns and left the order automations
+  // running for somebody who had asked to be left alone.
+  const source = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib', 'campaigns', 'check-in-reply.js'), 'utf8'
+  );
+  const branch = source.slice(
+    source.indexOf("triage.intent === 'opt_out_intent'"),
+    source.indexOf("reason: 'opt_out_detected'")
+  );
+  // Called through a lazy accessor, because flows/utils.js constructs a
+  // Supabase client at import and requiring it at the top breaks every test
+  // that loads this module without credentials.
+  assert.match(branch, /markOptedOut\(phone\)/,
+    'the sentinel isOptedOut reads must be written, or order flows keep sending');
+  assert.match(branch, /cancelScheduledForCustomer\(phone\)/,
+    'queued messages must be cancelled');
+  assert.match(branch, /suppressOptOut\(phone/,
+    'and it must appear on the visible do-not-contact list');
+
+  // Same three, in the same order, as the STOP branch. Two ways to be opted
+  // out that suppress different things is how somebody ends up half-opted-out.
+  const webhook = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'routes', 'webhook.js'), 'utf8'
+  );
+  const stopBranch = webhook.slice(webhook.indexOf('isOptOutRequest(text'), webhook.indexOf('Log the inbound stop message'));
+  for (const call of ['markOptedOut(', 'cancelScheduledForCustomer(', 'suppressOptOut(']) {
+    assert.ok(stopBranch.includes(call), `the STOP branch should still call ${call}`);
+  }
+  // Matched on the CALL, not any mention. The first version of this assertion
+  // compared indexOf on bare names and was reading the explanatory comment
+  // above the code, which mentions them in the opposite order.
+  const sentinelAt = branch.indexOf('markOptedOut(phone)');
+  const visibleAt = branch.indexOf('suppressOptOut(phone');
+  assert.ok(sentinelAt > -1 && visibleAt > -1);
+  assert.ok(sentinelAt < visibleAt,
+    'the sentinel is written before the visible list, as in the STOP branch');
+});
