@@ -519,6 +519,10 @@ struct CampaignDetailView: View {
                 }
             }
 
+            if let preview = model.preview, preview.personalised {
+                CampaignPreviewSection(preview: preview)
+            }
+
             if let rejection = campaign.rejectionReason, !rejection.isEmpty {
                 Section("Reason for changes") { Text(rejection) }
             }
@@ -1032,7 +1036,7 @@ private struct CampaignSafetyNotice: View {
             Text("Campaigns begin as drafts. Approval never sends automatically, and current consent is checked again before any future send.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Text("The current backend does not include a campaign delivery worker. A recorded schedule cannot deliver messages until that separately reviewed service is installed.")
+            Text("A schedule delivers only while live sending is switched on for this workspace. With it off, an approved and scheduled campaign waits and sends nothing.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -1490,7 +1494,7 @@ struct CampaignEditorView: View {
             }
             Section("Timing") {
                 LabeledContent("Next step", value: "Save and review")
-                Text("There is no Send Now action. A schedule can be recorded only after review and approval. The current backend has no campaign delivery worker, so a schedule alone cannot deliver messages.")
+                Text("There is no Send Now action. A schedule can be recorded only after review and approval, and it delivers only while live sending is switched on for this workspace.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -1630,7 +1634,7 @@ private struct CampaignScheduleSheet: View {
                                displayedComponents: [.date, .hourAndMinute])
                 }
                 Section {
-                    Text("This records a schedule only. The current backend has no campaign delivery worker, so scheduling alone cannot send messages. Eligible recipients must still be checked again by a separately reviewed sender.")
+                    Text("The campaign sends at this time only while live sending is switched on for this workspace. Every recipient is checked again for consent, opt-outs and quiet hours at the moment of sending, not now.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1659,5 +1663,75 @@ private struct CampaignScheduleSheet: View {
                 dismiss()
             }
         )
+    }
+}
+
+/// The finished messages, as customers would read them.
+///
+/// WHY THIS SECTION EXISTS
+///   The Message section above shows the TEMPLATE. Until this was added, a
+///   reviewer approving copy containing {{first_name}} had no way to see a
+///   single real message, which meant a campaign that personalises for 221 of
+///   376 people looked exactly like one that personalises for all of them. It
+///   also meant nobody could tell, by looking, that the merge fields were not
+///   being substituted at all.
+///
+///   The counts come first and the samples second, deliberately. The number
+///   that decides whether to approve is how many people drop out, not how
+///   nicely the first message reads.
+private struct CampaignPreviewSection: View {
+    let preview: CampaignPreview
+
+    var body: some View {
+        Section("What each person receives") {
+            HStack {
+                Label("\(preview.renderedCount) of \(preview.audienceCount) render",
+                      systemImage: preview.rendersForEveryone ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(preview.rendersForEveryone ? ViciTheme.success : ViciTheme.warning)
+                Spacer()
+                if let percent = preview.discountPercent {
+                    Text("\(percent)% code")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !preview.rendersForEveryone {
+                // Not a warning to be dismissed. Approval is refused while any
+                // selected recipient cannot be rendered, so this is the list of
+                // people who have to come out of the audience first.
+                Text("\(preview.excludedCount) cannot be personalised and must be removed from the audience before this can be approved.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                ForEach(preview.excluded) { row in
+                    LabeledContent(row.phone.suffix(4).description, value: row.readableReason)
+                        .font(.caption)
+                }
+            }
+
+            ForEach(preview.samples) { sample in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(sample.message)
+                        .font(.footnote)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Text("\(sample.message.count) characters")
+                        if !sample.isSingleSegment {
+                            Label("Two segments", systemImage: "exclamationmark.circle")
+                                .foregroundStyle(ViciTheme.warning)
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 2)
+            }
+
+            Text("Codes shown here are placeholders. The real single-use codes are created when you approve, not now.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

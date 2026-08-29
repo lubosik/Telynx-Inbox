@@ -716,6 +716,19 @@ actor APIClient {
         return try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/cancel", body: body)
     }
 
+    /// `POST /api/campaigns/:id/preview`, `campaigns.read`.
+    ///
+    /// Mints nothing. The server substitutes a placeholder code of the same
+    /// shape as a real one, so lengths and validation behave exactly as they
+    /// will at approval and WooCommerce is never touched.
+    func previewCampaign(id: String, limit: Int = 20) async throws -> CampaignPreview {
+        let (data, response) = try await post("/api/campaigns/\(encodedPathSegment(id))/preview",
+                                              body: ["limit": limit])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignPreview.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     func dryRunCampaign(id: String) async throws -> CampaignDryRun {
         let (data, response) = try await post("/api/campaigns/\(encodedPathSegment(id))/dry-run", body: [:])
         try validate(data: data, response: response)

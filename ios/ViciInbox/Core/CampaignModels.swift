@@ -198,6 +198,61 @@ struct CampaignDryRun: Codable, Hashable {
     }
 }
 
+/// What each customer would actually read, before anything is approved.
+///
+/// Distinct from `CampaignDryRun`, which answers "who would this reach" from
+/// consent, quiet hours and suppression. This answers "what would they read",
+/// which nothing answered before: a campaign whose copy contains
+/// `{{first_name}}` looked identical on screen whether it rendered for
+/// everybody or for two thirds of the list.
+///
+/// `renderedCount` and `excludedCount` are the numbers that matter. `samples`
+/// is capped by the server and is there to be read, not counted.
+struct CampaignPreview: Codable, Hashable {
+    let personalised: Bool
+    let template: String
+    let fields: [String]?
+    let discountPercent: Int?
+    let audienceCount: Int
+    let renderedCount: Int
+    let excludedCount: Int
+    let reasons: [String: Int]
+    let samples: [CampaignPreviewSample]
+    let excluded: [CampaignPreviewExclusion]
+
+    /// Everyone in the audience can be sent something.
+    var rendersForEveryone: Bool { excludedCount == 0 }
+}
+
+struct CampaignPreviewSample: Codable, Hashable, Identifiable {
+    let phone: String
+    let message: String
+    var id: String { phone }
+
+    /// GSM-7 single segment. Over this the message bills as two and can arrive
+    /// split, so it is worth showing rather than discovering on the invoice.
+    var isSingleSegment: Bool { message.count <= 160 }
+}
+
+struct CampaignPreviewExclusion: Codable, Hashable, Identifiable {
+    let phone: String
+    let reason: String
+    let missing: [String]?
+    var id: String { phone }
+
+    var readableReason: String {
+        switch reason {
+        case "personalisation_unavailable":
+            let names = (missing ?? []).joined(separator: ", ")
+            return names.isEmpty ? "Nothing to fill the message with" : "No \(names)"
+        case "rendered_message_not_compliant":
+            return "The finished message breaks a copy rule"
+        default:
+            return reason.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+}
+
 struct CampaignActionResponse: Codable, Hashable {
     let campaign: CampaignRecord
     let recipientCount: Int?

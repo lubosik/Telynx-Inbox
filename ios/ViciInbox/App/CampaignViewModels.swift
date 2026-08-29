@@ -171,6 +171,7 @@ final class CampaignDetailModel: ObservableObject {
     @Published private(set) var recipients: [CampaignRecipient] = []
     @Published private(set) var recipientTotal = 0
     @Published private(set) var dryRun: CampaignDryRun?
+    @Published private(set) var preview: CampaignPreview?
     @Published private(set) var performance: CampaignPerformance?
     @Published private(set) var financial: CampaignFinancialOverview?
     @Published private(set) var financialUnavailableMessage: String?
@@ -215,6 +216,7 @@ final class CampaignDetailModel: ObservableObject {
             // have reached every environment yet.
             performance = try? await APIClient.shared.fetchCampaignPerformance(id: campaignID)
             if canDryRun { await refreshDryRun() }
+            await refreshPreview()
             if canFinancial {
                 do {
                     financial = try await APIClient.shared.fetchCampaignFinancialOverview(id: campaignID)
@@ -274,6 +276,17 @@ final class CampaignDetailModel: ObservableObject {
             errorMessage = error.localizedDescription
             return nil
         }
+    }
+
+    /// The finished messages, as customers would read them.
+    ///
+    /// Deliberately not fatal. Preview arrived after campaign detail, so on an
+    /// environment where the endpoint has not rolled out yet the campaign must
+    /// still be readable rather than showing an error over a working screen.
+    /// A nil preview renders as "not available", never as "renders for
+    /// everybody", because the second would be a reassuring lie.
+    func refreshPreview() async {
+        preview = try? await APIClient.shared.previewCampaign(id: campaignID)
     }
 
     func refreshDryRun() async {
