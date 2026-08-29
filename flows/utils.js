@@ -432,13 +432,36 @@ async function cancelScheduledForCustomer(phone, flowTypes = null) {
 // Queue processor — called every 5 minutes by server.js
 // ---------------------------------------------------------------------------
 
+/**
+ * Flows this queue must never send, because it has no promotional gate.
+ *
+ * See the note inside processScheduledQueue. A flow named here is queued for
+ * its timing only; something else decides whether it may actually go out.
+ */
+const PROMOTIONAL_FLOW_TYPES = new Set(['checkin-21d']);
+
 async function processScheduledQueue() {
   const now = new Date().toISOString();
 
+  // ── This queue is TRANSACTIONAL, and it sends what it is given ─────────
+  //
+  // sendAndLog checks two things: has this person sent STOP, and has this
+  // exact message already gone. Correct and complete for "your order has
+  // shipped", which a customer is owed whatever their marketing preferences.
+  // It does not check promotional consent, quiet hours, the frequency caps or
+  // the do-not-contact list, because a shipping update needs none of them.
+  //
+  // So a promotional flow must never appear here. `checkin-21d` rows are
+  // queued by lib/campaigns/check-in.js purely to record a DUE DATE, they
+  // carry a null message_body on purpose, and without this filter they would
+  // arrive at sendAndLog and be handed to sendSMS as a null body. Excluded by
+  // name rather than by "has a body", so that adding a promotional flow that
+  // does have a body cannot quietly opt itself back in.
   const { data: due } = await supabase
     .from('sms_scheduled')
     .select('*')
     .eq('status', 'pending')
+    .not('flow_type', 'in', `(${[...PROMOTIONAL_FLOW_TYPES].join(',')})`)
     .lte('send_at', now)
     .limit(50);
 
