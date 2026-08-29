@@ -190,6 +190,37 @@ the AI button is hidden (not broken) and everything else still works.
 
 ---
 
+## The weekly routine
+
+Everything that decides WHO is automatic. Everything that decides WHETHER is
+you.
+
+**Runs on its own, no action needed:**
+
+| When | What |
+|---|---|
+| Daily, 06:05 London | Every segment recomputes from live orders |
+| Continuously | Orders sync in, and their coupon codes are recorded |
+| Every 2 minutes | Approved and scheduled campaigns actually send |
+| On any reply | A check-in answer earns a code, if the budget allows |
+
+**Your part, once a week, all in the app:**
+
+1. **Campaigns → + → Build a campaign.** Run each of the three. Each one shows
+   how many qualify and how many already had it before you commit.
+2. **Open each draft.** Read "What each person receives" — the real messages,
+   and the count that cannot be personalised.
+3. **Edit if you want.** Variable chips, AI drafting, preview without saving.
+4. **Submit → Approve.** This is the step that mints the codes.
+5. **Schedule** for Tuesday or Wednesday, 5–7pm your time.
+6. **Come back later** and read "Revenue from the codes".
+
+**Approve or archive a draft before the next build.** An unapproved draft
+counts as having reached those people for the length of the recipe's dedupe
+window, so leaving one sitting there quietly shrinks next week's campaign.
+
+---
+
 ## Doing this again, without a terminal
 
 **Campaigns → + → Build a campaign.** Three recipes:
