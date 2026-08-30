@@ -6,6 +6,7 @@ struct CampaignsView: View {
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
     @State private var showingRecipes = false
+    @State private var showingPlanner = false
 
     /// The campaign a confirmation is currently being asked about, and which
     /// question is being asked. One piece of state rather than two booleans and
@@ -58,9 +59,14 @@ struct CampaignsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
+                            showingPlanner = true
+                        } label: {
+                            Label("Describe a campaign", systemImage: "text.bubble")
+                        }
+                        Button {
                             showingRecipes = true
                         } label: {
-                            Label("Build a campaign", systemImage: "wand.and.stars")
+                            Label("Build a standard one", systemImage: "wand.and.stars")
                         }
                         Button {
                             showingNewCampaign = true
@@ -81,6 +87,11 @@ struct CampaignsView: View {
         }
         .sheet(isPresented: $showingRecipes) {
             CampaignRecipeSheet {
+                Task { await model.load(reset: true) }
+            }
+        }
+        .sheet(isPresented: $showingPlanner) {
+            CampaignPlannerSheet {
                 Task { await model.load(reset: true) }
             }
         }
@@ -2146,6 +2157,197 @@ private struct CampaignRecipeSheet: View {
         do {
             _ = try await APIClient.shared.buildCampaign(recipe: recipe.key, dryRun: false)
             onBuilt()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// Describe a campaign in a sentence and get one back to review.
+///
+/// WHAT THIS REPLACED
+///   Every piece of an arbitrary campaign already existed on a different
+///   screen. Describing a segment in words lived under Segments; drafting copy
+///   lived in the campaign editor; building an audience from a segment did not
+///   exist at all until recently. Doing "a clearance on RT for people who
+///   bought it and went quiet" meant three screens, four steps, and knowing
+///   the order.
+///
+/// IT PROPOSES, THEN YOU DECIDE
+///   Nothing is written until Create. The plan shows who, how many, what it
+///   offers, what it says, and anything that would stop it, and each of those
+///   can be wrong in a way worth catching before a segment and a campaign
+///   exist.
+private struct CampaignPlannerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: () -> Void
+
+    @State private var brief = ""
+    @State private var plan: CampaignPlan?
+    @State private var chosenCopy: String?
+    @State private var title = ""
+    @State private var isPlanning = false
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+    @FocusState private var briefFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("What should this campaign do?") {
+                    TextEditor(text: $brief)
+                        .frame(minHeight: 90)
+                        .focused($briefFocused)
+                        .overlay(alignment: .topLeading) {
+                            if brief.isEmpty {
+                                Text("For example: a clearance on RT, 20% off, for anyone who has bought it. Tap the microphone on the keyboard to say it.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.top, 8).padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    Button {
+                        Task { await makePlan() }
+                    } label: {
+                        if isPlanning {
+                            HStack { ProgressView(); Text("Working it out") }
+                        } else {
+                            Label("Plan it", systemImage: "sparkles")
+                        }
+                    }
+                    .disabled(brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isPlanning)
+                }
+
+                if let plan {
+                    planSections(plan)
+                }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).font(.footnote).foregroundStyle(ViciTheme.warning) }
+                }
+            }
+            .navigationTitle("Describe a campaign")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func planSections(_ plan: CampaignPlan) -> some View {
+        Section("Who it reaches") {
+            if let audience = plan.audience {
+                LabeledContent("People") {
+                    Text("\(audience.matchedCount)")
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(audience.matchedCount > 0 ? ViciTheme.success : ViciTheme.warning)
+                }
+                Text(audience.description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let error = plan.audienceError {
+                Text(error.message).font(.footnote).foregroundStyle(ViciTheme.warning)
+            }
+            LabeledContent("Offer", value: plan.offerLabel)
+        }
+
+        // Shown above the copy, because a blocking warning makes the copy
+        // irrelevant and reading it first wastes the reviewer's attention.
+        if !plan.warnings.isEmpty {
+            Section("Worth knowing") {
+                ForEach(plan.warnings) { warning in
+                    Label(warning.message, systemImage: warning.isBlocking
+                          ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(warning.isBlocking ? ViciTheme.destructive : ViciTheme.warning)
+                }
+            }
+        }
+
+        Section("What it says") {
+            if plan.copy.isEmpty {
+                Text(plan.copyError?.message ?? "No copy could be written.")
+                    .font(.footnote).foregroundStyle(ViciTheme.warning)
+            }
+            ForEach(plan.copy) { candidate in
+                Button {
+                    chosenCopy = candidate.text
+                } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: chosenCopy == candidate.text
+                              ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(chosenCopy == candidate.text ? ViciTheme.tint : .secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(candidate.text)
+                                .font(.footnote)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("\(candidate.septets) characters")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+
+        if plan.ready {
+            Section("Create it") {
+                TextField("Name this campaign", text: $title)
+                Button {
+                    Task { await create(plan) }
+                } label: {
+                    if isCreating {
+                        HStack { ProgressView(); Text("Creating") }
+                    } else {
+                        Text("Create the draft")
+                    }
+                }
+                .disabled(isCreating || chosenCopy == nil
+                          || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Text("Creates a segment and a draft campaign. Nothing is approved, scheduled or sent, and no code exists until you approve.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func makePlan() async {
+        isPlanning = true
+        errorMessage = nil
+        chosenCopy = nil
+        briefFocused = false
+        defer { isPlanning = false }
+        do {
+            let result = try await APIClient.shared.planCampaign(brief: brief)
+            plan = result
+            // Preselect the first, since most of the time it is the one used
+            // and an unselected radio list reads as an unfinished screen.
+            chosenCopy = result.copy.first?.text
+            if title.isEmpty { title = String(brief.prefix(60)) }
+        } catch {
+            errorMessage = error.localizedDescription
+            plan = nil
+        }
+    }
+
+    private func create(_ plan: CampaignPlan) async {
+        guard let audience = plan.audience, let ruleSet = audience.ruleSet, let message = chosenCopy else { return }
+        isCreating = true
+        errorMessage = nil
+        defer { isCreating = false }
+        do {
+            _ = try await APIClient.shared.acceptCampaignPlan(
+                title: title,
+                audienceDescription: audience.description,
+                ruleSet: ruleSet,
+                message: message,
+                discountPercent: plan.discountPercent,
+                workflowCategory: plan.workflowCategory
+            )
+            onCreated()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

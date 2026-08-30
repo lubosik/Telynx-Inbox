@@ -716,6 +716,44 @@ actor APIClient {
         return try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/cancel", body: body)
     }
 
+    /// `POST /api/campaigns/plan`, `campaigns.read`.
+    ///
+    /// Writes nothing. Describe the campaign and it works out who, chooses the
+    /// offer, drafts the copy and says whether it may be sent.
+    func planCampaign(brief: String) async throws -> CampaignPlan {
+        let (data, response) = try await post("/api/campaigns/plan", body: ["brief": brief])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignPlan.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    /// `POST /api/campaigns/plan/accept`, `campaigns.manage`.
+    ///
+    /// Sends the reviewed rules and copy back rather than re-planning, so what
+    /// is created is what was read. Re-planning could return different copy and
+    /// the operator would have approved words they never saw.
+    func acceptCampaignPlan(
+        title: String,
+        audienceDescription: String,
+        ruleSet: JSONValue,
+        message: String,
+        discountPercent: Int?,
+        workflowCategory: String
+    ) async throws -> CampaignBuildResult {
+        var body: [String: Any] = [
+            "title": title,
+            "audienceDescription": audienceDescription,
+            "ruleSet": ruleSet.rawValue,
+            "message": message,
+            "workflowCategory": workflowCategory
+        ]
+        if let discountPercent { body["discountPercent"] = discountPercent }
+        let (data, response) = try await post("/api/campaigns/plan/accept", body: body)
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignBuildResult.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// `GET /api/campaigns/recipes`, `campaigns.read`.
     func fetchCampaignRecipeCatalogue() async throws -> CampaignRecipeCatalogue {
         try await decodedGET("/api/campaigns/recipes")

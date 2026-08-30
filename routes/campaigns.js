@@ -18,6 +18,8 @@ const {
 const { recipeCatalogue } = require('../lib/campaigns/recipes');
 const { FIELDS: MERGE_FIELDS, FIELD_NAMES } = require('../lib/campaigns/merge-fields');
 const { buildFromRecipe, buildFromSegment } = require('../lib/campaigns/audience-builder');
+const { planCampaign } = require('../lib/campaigns/planner');
+const { createSegmentService } = require('../lib/campaigns/segment-service');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -150,6 +152,9 @@ function createCampaignRouter({
   // must not require database credentials, because the route tests build it
   // without any. Resolved on first use, inside a handler.
   const db = () => (campaignClient || require('../db').supabase);
+  // Lazy for the same reason: constructing it must not require credentials.
+  let segments = null;
+  const segmentService = () => (segments ||= createSegmentService({ client: db() }));
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -168,6 +173,74 @@ function createCampaignRouter({
    * already knows who is in the audience, what the message says, what it
    * offers, and how long before the same person may receive it again.
    */
+  /**
+   * Say what the campaign should do; get a proposal back.
+   *
+   * One call replacing three screens: it works out who, chooses the offer,
+   * drafts the copy, counts the audience and says whether it may actually be
+   * sent. It PROPOSES only. No segment is saved, no campaign created, no
+   * coupon minted; accepting is a separate explicit call, because a plan a
+   * model wrote from one sentence is exactly what a person should read first.
+   */
+  router.post('/plan', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(await planCampaign({
+        client: db(),
+        brief: req.body?.brief,
+        segments: segmentService()
+      }));
+    } catch (error) { return sendError(res, error); }
+  });
+
+  /**
+   * Turn an accepted plan into a segment and a draft campaign.
+   *
+   * Takes the rules and the copy back rather than re-planning, so what is
+   * created is what was reviewed. A second call to /plan could return
+   * different copy, and the operator would have approved words they never saw.
+   */
+  router.post('/plan/accept', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const actorID = Number(req.actor?.id) || null;
+      const title = String(req.body?.title || '').trim() || 'Campaign';
+
+      // The segment is saved first: a campaign built from an unsaved rule set
+      // could never be rebuilt or audited later.
+      const segment = await segmentService().createFromRules({
+        name: title.slice(0, 120),
+        description: String(req.body?.audienceDescription || title).slice(0, 500),
+        rules: req.body?.ruleSet
+      }, req.actor);
+
+      const result = await buildFromSegment({
+        client: db(),
+        segmentKeys: [segment?.segment?.segment_key || segment?.segment_key],
+        title,
+        message: req.body?.message,
+        discountPercent: Number(req.body?.discountPercent) || null,
+        dedupeDays: Number(req.body?.dedupeDays) || 30,
+        workflowCategory: req.body?.workflowCategory || 'custom',
+        actorID
+      });
+
+      if (result.created?.length) {
+        await auditCampaign('campaign.created', req, { id: result.created[0].id }, {
+          summary: `Planned "${title}" from a brief for ${result.audience} people`,
+          newState: { status: 'draft' },
+          metadata: {
+            planned: true,
+            segment: segment?.segment?.segment_key || null,
+            audience: result.audience,
+            suppressed_as_duplicate: result.suppressedAsDuplicate
+          }
+        });
+      }
+      return res.status(201).json({ ...result, segment });
+    } catch (error) { return sendError(res, error); }
+  });
+
   router.get('/recipes', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');

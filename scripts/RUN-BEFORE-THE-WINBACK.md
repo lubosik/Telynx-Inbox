@@ -168,6 +168,32 @@ wait for the next one.
 
 ---
 
+## Describing a campaign instead of building one
+
+**Campaigns → + → Describe a campaign.** Say what you want in a sentence; it
+works out who, picks the offer, drafts three versions of the copy, counts the
+audience and tells you anything that would stop it. Nothing is written until
+you tap Create.
+
+    "clearance on RT, 20% off, for anyone who has ever bought it"
+      -> 44 people, 20% code, three drafts, ready
+
+Two rules it enforces that the recipes also follow:
+
+- **A promotional campaign needs at least 25 eligible people.** Below that it
+  is refused, not warned: a send to a handful cannot be measured and costs more
+  to review than it returns. Between 25 and 100 it sends but says the result
+  will not tell you much. Check-ins are exempt, because one person is a good
+  reason to ask one person how their order went.
+- **Nobody hears from you twice in quick succession**, across all campaigns
+  rather than just this one. The spacing and the rolling caps come from the
+  same settings the send gate uses, applied at build time so the number you
+  approve is the number that goes out.
+
+Needs `SEGMENT_AI_BUILDER_ENABLED=true` and `CAMPAIGN_AI_COPY_ENABLED=true`.
+
+---
+
 ## Writing the message
 
 Open any draft → Edit → the Message step now has three things it did not:

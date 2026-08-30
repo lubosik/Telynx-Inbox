@@ -371,6 +371,59 @@ struct CampaignCopyCandidate: Codable, Hashable, Identifiable {
     var isSingleSegment: Bool { septets <= 160 }
 }
 
+/// A campaign proposed from one sentence.
+///
+/// Everything needed for an arbitrary campaign already existed on three
+/// different screens. This is the single answer: who, what it offers, what it
+/// says, and whether it may actually be sent.
+///
+/// It proposes only. Nothing is saved until Create is tapped.
+struct CampaignPlan: Codable, Hashable {
+    let brief: String
+    let shape: String
+    let workflowCategory: String
+    let discountPercent: Int?
+    let audience: CampaignPlanAudience?
+    let audienceError: CampaignPlanError?
+    let copy: [CampaignCopyCandidate]
+    let copyError: CampaignPlanError?
+    let warnings: [CampaignPlanWarning]
+    let ready: Bool
+
+    var offerLabel: String {
+        guard let percent = discountPercent else { return "No offer" }
+        return "\(percent)% code"
+    }
+}
+
+struct CampaignPlanAudience: Codable, Hashable {
+    let description: String
+    let matchedCount: Int
+    let consideredCount: Int
+    let ruleSet: JSONValue?
+    let sample: [CampaignPlanSample]?
+}
+
+struct CampaignPlanSample: Codable, Hashable, Identifiable {
+    let contactPhone: String?
+    let contactName: String?
+    var id: String { contactPhone ?? UUID().uuidString }
+}
+
+struct CampaignPlanError: Codable, Hashable {
+    let code: String?
+    let message: String
+}
+
+struct CampaignPlanWarning: Codable, Hashable, Identifiable {
+    let code: String?
+    let message: String
+    var id: String { (code ?? "") + message }
+
+    /// A warning that stops the campaign rather than merely colouring it.
+    var isBlocking: Bool { code == "below_floor" }
+}
+
 struct CampaignActionResponse: Codable, Hashable {
     let campaign: CampaignRecord
     let recipientCount: Int?

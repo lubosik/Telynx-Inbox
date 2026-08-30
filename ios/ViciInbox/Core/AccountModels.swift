@@ -758,6 +758,23 @@ struct InvitationCreation: Decodable {
 /// which are free-form objects. Kept deliberately small: it exists to print a
 /// field's before/after value, not to model the server's schema.
 indirect enum JSONValue: Codable, Hashable {
+    /// The value as plain Foundation types, for putting back into a request
+    /// body built with JSONSerialization.
+    ///
+    /// Needed because a rule set comes back from the planner as JSONValue and
+    /// has to be sent again, verbatim, when the plan is accepted. Re-deriving
+    /// it would mean accepting a rule set nobody reviewed.
+    var rawValue: Any {
+        switch self {
+        case .string(let value): return value
+        case .number(let value): return value
+        case .bool(let value): return value
+        case .object(let value): return value.mapValues(\.rawValue)
+        case .array(let value): return value.map(\.rawValue)
+        case .null: return NSNull()
+        }
+    }
+
     case string(String)
     case number(Double)
     case bool(Bool)

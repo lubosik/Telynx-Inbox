@@ -80,7 +80,10 @@ function stubClient({
   };
 }
 
-const person = (n) => `+1555000000${n}`;
+const person = (n) => `+1555${String(n).padStart(7, '0')}`;
+
+/** Enough people to clear MINIMUM_MARKETING_AUDIENCE without listing 30 by hand. */
+const manyPeople = (count) => Array.from({ length: count }, (_, i) => i + 1);
 const contactRow = (n) => ({ phone: person(n), name: `Person ${n}` });
 const orderRow = (n) => ({
   contact_phone: person(n), items: [{ sku: 'RT20', total: '130' }],
@@ -264,11 +267,14 @@ test('a campaign can be built from any saved segment with the owner\'s own copy'
   // selected contacts, all contacts, or pasted numbers, so "clearance on RT
   // for people who bought it and went quiet" stopped at the last step.
   const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  // Thirty, because the floor refuses a promotional campaign below 25 and
+  // this test is about the segment path rather than about the floor.
+  const people = manyPeople(30);
   const client = stubClient({
-    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: 2 }],
-    segmentMembers: [1, 2].map(n => ({ contact_phone: person(n) })),
-    contacts: [1, 2].map(contactRow),
-    orders: [1, 2].map(orderRow)
+    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: people.length }],
+    segmentMembers: people.map(n => ({ contact_phone: person(n) })),
+    contacts: people.map(contactRow),
+    orders: people.map(orderRow)
   });
   const result = await buildFromSegment({
     client,
@@ -279,7 +285,7 @@ test('a campaign can be built from any saved segment with the owner\'s own copy'
     discountPercent: 25,
     now: NOW
   });
-  assert.equal(result.audience, 2);
+  assert.equal(result.audience, 30);
   assert.equal(result.created.length, 1, 'one message means one draft, not a named and a plain');
   const call = client.created[0];
   assert.equal(call.p_workflow_category, 'clearance');
@@ -292,13 +298,14 @@ test('a campaign can be built from any saved segment with the owner\'s own copy'
 
 test('a segment campaign dedupes against its own workflow category', async () => {
   const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const people = manyPeople(30);
   const client = stubClient({
-    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: 2 }],
-    segmentMembers: [1, 2].map(n => ({ contact_phone: person(n) })),
+    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: people.length }],
+    segmentMembers: people.map(n => ({ contact_phone: person(n) })),
     priorCampaigns: [{ id: 'old', status: 'completed', created_at: '2026-08-20T00:00:00Z' }],
     priorRecipients: [{ contact_phone: person(1) }],
-    contacts: [1, 2].map(contactRow),
-    orders: [1, 2].map(orderRow)
+    contacts: people.map(contactRow),
+    orders: people.map(orderRow)
   });
   const result = await buildFromSegment({
     client, segmentKeys: ['bought_rt_lapsed'], title: 'Clearance',
@@ -307,7 +314,7 @@ test('a segment campaign dedupes against its own workflow category', async () =>
   });
   // Two clearance campaigns a fortnight apart must not both reach one person.
   assert.equal(result.suppressedAsDuplicate, 1);
-  assert.equal(result.audience, 1);
+  assert.equal(result.audience, 29);
 });
 
 test('a segment build refuses without a segment or a message', async () => {
@@ -320,4 +327,67 @@ test('a segment build refuses without a segment or a message', async () => {
     () => buildFromSegment({ client: stubClient(), segmentKeys: ['x'], message: '   ' }),
     /A message is required/
   );
+});
+
+// ── The floor, and who is exempt from it ───────────────────────────────────
+
+test('a promotional campaign to a handful of people is refused', async () => {
+  // A send to four people is not a campaign, it is a mail merge with a coupon
+  // budget: nothing about it can be measured and reviewing it costs more than
+  // the outcome. Refused rather than warned, because a warning on a screen of
+  // green ticks is a warning nobody reads.
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const { MINIMUM_MARKETING_AUDIENCE } = require('../lib/campaigns/audience-health');
+  const few = [1, 2, 3].map(n => ({ contact_phone: person(n) }));
+  const client = stubClient({
+    segments: [{ id: 'seg-1', segment_key: 'tiny', member_count: 3 }],
+    segmentMembers: few,
+    contacts: [1, 2, 3].map(contactRow),
+    orders: [1, 2, 3].map(orderRow)
+  });
+  await assert.rejects(
+    () => buildFromSegment({
+      client, segmentKeys: ['tiny'], title: 'Tiny', workflowCategory: 'clearance',
+      message: "It's Vin from Vici. Hi {{first_name}}. Reply STOP to opt out.", now: NOW
+    }),
+    (error) => {
+      assert.equal(error.code, 'AUDIENCE_BELOW_MINIMUM');
+      assert.match(error.message, new RegExp(`at least ${MINIMUM_MARKETING_AUDIENCE}`));
+      return true;
+    }
+  );
+  assert.equal(client.created.length, 0, 'nothing may be written when the floor is not met');
+});
+
+test('a check-in is exempt, because one person is a good reason to ask one person', async () => {
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const client = stubClient({
+    segments: [{ id: 'seg-1', segment_key: 'tiny', member_count: 1 }],
+    segmentMembers: [{ contact_phone: person(1) }],
+    contacts: [contactRow(1)],
+    orders: [orderRow(1)]
+  });
+  const result = await buildFromSegment({
+    client, segmentKeys: ['tiny'], title: 'Check in', workflowCategory: 'checkin_21d',
+    message: "It's Vin from Vici. Hi {{first_name}}. Reply STOP to opt out.", now: NOW
+  });
+  assert.equal(result.audience, 1);
+  assert.equal(result.created.length, 1);
+});
+
+test('an empty audience is reported, not refused as below the floor', async () => {
+  // Zero and three are different problems and must not read the same. Zero
+  // means the rules match nobody; three means they match too few.
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const client = stubClient({
+    segments: [{ id: 'seg-1', segment_key: 'empty', member_count: 0 }],
+    segmentMembers: []
+  });
+  const result = await buildFromSegment({
+    client, segmentKeys: ['empty'], title: 'Empty', workflowCategory: 'clearance',
+    message: "It's Vin from Vici. Reply STOP to opt out.", now: NOW
+  });
+  assert.equal(result.audience, 0);
+  assert.equal(result.created.length, 0);
+  assert.match(result.note, /Nobody/);
 });
