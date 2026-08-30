@@ -45,20 +45,40 @@ function stubClient({ contacts = [], orders = [] } = {}) {
   };
 }
 
-/** Coupon minting, without WooCommerce. */
+/**
+ * Coupon minting, without WooCommerce.
+ *
+ * ── IT USES THE REAL couponSpec AND THE REAL CALL SHAPE ────────────────────
+ *
+ * The previous stub took `{ coupons }` and hand-built specs, which is exactly
+ * what personalise.js was passing and exactly what the module does NOT accept.
+ * Every test passed and approving a campaign failed on the phone with
+ * "createCoupons requires an array of coupon specs".
+ *
+ * A stub that answers whatever shape the caller invented tests nothing about
+ * the boundary it is standing in for. So this one takes a POSITIONAL ARRAY,
+ * like the real function, and throws the real error when it does not get one.
+ * couponSpec is the genuine article, so a wrong field name fails here too.
+ */
+const { couponSpec: realCouponSpec } = require('../lib/woocommerce-coupons');
+
 function stubCoupons({ failCodes = [], duplicateCodes = [] } = {}) {
   const created = [];
   return {
     calls: created,
+    couponSpec: realCouponSpec,
     generateCode: ({ prefix, seed }) =>
       `${prefix}-${require('node:crypto').createHash('sha1').update(seed).digest('hex').slice(0, 10)}`,
-    createCoupons: async ({ coupons }) => {
-      created.push(...coupons);
+    createCoupons: async (specs) => {
+      if (!Array.isArray(specs)) {
+        throw new Error('createCoupons requires an array of coupon specs.');
+      }
+      created.push(...specs);
       return {
-        created: coupons.filter(c => !failCodes.includes(c.code) && !duplicateCodes.includes(c.code)),
+        created: specs.filter(c => !failCodes.includes(c.code) && !duplicateCodes.includes(c.code)),
         failed: [
-          ...failCodes.map(code => ({ code, error: 'rejected', duplicate: false })),
-          ...duplicateCodes.map(code => ({ code, error: 'exists', duplicate: true }))
+          ...failCodes.map(code => ({ code, errorCode: 'rejected', duplicate: false })),
+          ...duplicateCodes.map(code => ({ code, errorCode: 'exists', duplicate: true }))
         ]
       };
     }
@@ -233,4 +253,37 @@ test('the rendered month is a name and never a calendar date', async () => {
   });
   assert.match(result.rendered[0].message, /since February\./);
   assert.doesNotMatch(result.rendered[0].message, /19|2026|-/);
+});
+
+test('the minted spec is what WooCommerce actually accepts', async () => {
+  // This is the test that would have caught the failure on the phone. It
+  // asserts the SHAPE at the boundary rather than trusting a stub to agree
+  // with the caller.
+  const coupons = stubCoupons();
+  await issueCodes({
+    campaignID: 'camp-1', phones: ['+15550000001'], percentOff: 15, coupons
+  });
+  assert.equal(coupons.calls.length, 1);
+  const spec = coupons.calls[0];
+  // Field names are the module's, not the caller's guess. `percentOff` was
+  // what personalise.js sent; the module wants `percent` and turns it into a
+  // string `amount`.
+  assert.equal(spec.discount_type, 'percent');
+  assert.equal(spec.amount, '15');
+  assert.equal(typeof spec.amount, 'string', 'WooCommerce rejects a numeric amount on some versions');
+  assert.equal(spec.individual_use, true);
+  assert.equal(spec.usage_limit, 1);
+  assert.equal(spec.usage_limit_per_user, 1);
+  // ISO8601 with NO timezone designator. A bare date fails the module's own
+  // check, and a trailing Z is read in the wrong timezone by the store.
+  assert.match(spec.date_expires, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
+});
+
+test('the real createCoupons refuses the object shape this once sent', async () => {
+  // Pinned against the actual export, so the two cannot drift again.
+  const { createCoupons } = require('../lib/woocommerce-coupons');
+  await assert.rejects(
+    () => createCoupons({ coupons: [] }),
+    /requires an array of coupon specs/
+  );
 });

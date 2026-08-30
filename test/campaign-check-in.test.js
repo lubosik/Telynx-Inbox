@@ -168,11 +168,27 @@ function replyClient({ campaigns = [{ id: 'camp-1', title: 'Check-in' }], recipi
   };
 }
 
+/**
+ * Uses the REAL couponSpec and the real positional-array call shape.
+ *
+ * The previous version took `{ coupons }`, which is what this file was
+ * passing and is not what the module accepts. Every test passed and the send
+ * failed with "createCoupons requires an array of coupon specs". A stub that
+ * agrees with the caller instead of the callee tests nothing about the
+ * boundary it stands in for.
+ */
+const { couponSpec: realCouponSpec } = require('../lib/woocommerce-coupons');
+
 const stubCoupons = () => ({
   minted: [],
+  couponSpec: realCouponSpec,
   generateCode: ({ prefix, seed }) =>
     `${prefix}-${require('node:crypto').createHash('sha1').update(seed).digest('hex').slice(0, 10)}`,
-  createCoupons: async function ({ coupons }) { this.minted.push(...coupons); return { created: coupons, failed: [] }; }
+  createCoupons: async function (specs) {
+    if (!Array.isArray(specs)) throw new Error('createCoupons requires an array of coupon specs.');
+    this.minted.push(...specs);
+    return { created: specs, failed: [] };
+  }
 });
 
 test('somebody who never received a check-in gets nothing, whatever they say', async () => {
