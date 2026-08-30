@@ -714,8 +714,33 @@ struct CampaignDetailView: View {
                         Button("Record Campaign Schedule") { showingSchedule = true }
                             .disabled(model.isActing || model.dryRun?.eligible == 0)
                     } else {
-                        Label("Scheduling is unavailable", systemImage: "lock.fill")
-                            .foregroundStyle(.secondary)
+                        // "Scheduling is unavailable" and a padlock, with no
+                        // reason. The campaign was approved, 221 messages were
+                        // frozen and 221 coupons were minted, and the only
+                        // thing standing between that and a send time was one
+                        // unset environment variable that the screen did not
+                        // name. A lock icon that will not say what it is
+                        // locking is worse than the error it replaced.
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Scheduling is unavailable", systemImage: "lock.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(ViciTheme.warning)
+                            ForEach(model.dryRun?.liveEligibility.reasons ?? [], id: \.self) { reason in
+                                Text(CampaignReasonCopy.label(reason))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if (model.dryRun?.liveEligibility.reasons ?? []).isEmpty {
+                                Text("Run the eligibility check to see what is blocking it.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Everything else is done: the messages are frozen and the codes exist. Once this is cleared you can set a send time.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
 

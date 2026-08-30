@@ -660,9 +660,14 @@ enum CampaignReasonCopy {
         case "dnd_unknown": return "Contact preference out of date"
         case "campaign_settings_missing": return "Campaign settings unavailable"
         case "eligibility_check_failed": return "Eligibility check unavailable"
-        case "environment_gate_disabled": return "Live sending is disabled on the server"
+        // Both of these name the exact switch, because "disabled on the
+        // server" sent somebody looking through the app for a toggle that
+        // lives in an environment variable.
+        case "environment_gate_disabled":
+            return "Live sending is off on the server. Set CAMPAIGNS_LIVE_SEND_ENABLED to true on Railway."
         case "provider_not_approved": return "Provider approval is not recorded"
-        case "workspace_live_send_disabled": return "Live sending is disabled for this workspace"
+        case "workspace_live_send_disabled":
+            return "Live sending is off for this workspace, in the campaign settings row"
         default:
             return reason.replacingOccurrences(of: "_", with: " ").capitalized
         }
