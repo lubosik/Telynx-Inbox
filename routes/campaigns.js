@@ -17,7 +17,7 @@ const {
 } = require('../lib/campaigns/opportunity-portfolio');
 const { recipeCatalogue } = require('../lib/campaigns/recipes');
 const { FIELDS: MERGE_FIELDS, FIELD_NAMES } = require('../lib/campaigns/merge-fields');
-const { buildFromRecipe } = require('../lib/campaigns/audience-builder');
+const { buildFromRecipe, buildFromSegment } = require('../lib/campaigns/audience-builder');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -199,20 +199,34 @@ function createCampaignRouter({
   router.post('/build', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      const result = await buildFromRecipe({
-        client: db(),
-        recipeKey: req.body?.recipe,
-        actorID: Number(req.actor?.id) || null,
-        dryRun: req.body?.dryRun === true
-      });
+      // Either a named recipe, or any saved segment with copy the owner wrote.
+      // The second is what makes an arbitrary campaign possible: a clearance
+      // on one product, a thank-you to the top spenders, anything a segment
+      // can describe.
+      const dryRun = req.body?.dryRun === true;
+      const actorID = Number(req.actor?.id) || null;
+      const result = req.body?.recipe
+        ? await buildFromRecipe({ client: db(), recipeKey: req.body.recipe, actorID, dryRun })
+        : await buildFromSegment({
+          client: db(),
+          segmentKeys: req.body?.segments,
+          title: req.body?.title,
+          message: req.body?.message,
+          discountPercent: Number(req.body?.discountPercent) || null,
+          dedupeDays: Number(req.body?.dedupeDays) || 30,
+          workflowCategory: req.body?.workflowCategory,
+          actorID,
+          dryRun
+        });
       if (!result.created?.length || result.dryRun) return res.json(result);
 
       await auditCampaign('campaign.created', req, { id: result.created[0].id }, {
-        summary: `Built ${result.created.length} draft(s) from the "${result.name}" recipe `
+        summary: `Built ${result.created.length} draft(s) from ${result.name ? `the "${result.name}" recipe` : 'a segment'} `
           + `for ${result.audience} people; ${result.suppressedAsDuplicate} were left out as already contacted`,
         newState: { status: 'draft' },
         metadata: {
-          recipe: result.recipe,
+          recipe: result.recipe || null,
+          segments: result.segments || null,
           audience: result.audience,
           suppressed_as_duplicate: result.suppressedAsDuplicate,
           campaigns: result.created.map(row => row.id)

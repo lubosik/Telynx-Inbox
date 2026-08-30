@@ -35,10 +35,12 @@ function stubClient({
   priorRecipients = [],
   contacts = [],
   orders = [],
-  created = []
+  created = [],
+  updates = []
 } = {}) {
   return {
     created,
+    updates,
     from(table) {
       if (table === 'sms_campaign_segments') {
         const b = { select: () => b, in: () => b, eq: () => b, is: () => Promise.resolve({ data: segments, error: null }) };
@@ -49,7 +51,14 @@ function stubClient({
         return b;
       }
       if (table === 'sms_campaigns') {
-        const b = { select: () => b, eq: () => b, gte: () => Promise.resolve({ data: priorCampaigns, error: null }) };
+        const b = {
+          select: () => b,
+          eq: () => b,
+          gte: () => Promise.resolve({ data: priorCampaigns, error: null }),
+          // buildFromSegment stamps discount_percent on the new draft, because
+          // approval mints at the application default otherwise.
+          update: (row) => { updates.push(row); return b; }
+        };
         return b;
       }
       if (table === 'sms_campaign_recipients') {
@@ -243,5 +252,72 @@ test('a segment that has never been computed says so instead of building nothing
   await assert.rejects(
     () => buildFromRecipe({ client: stubClient({ segments: [] }), recipeKey: 'winback_one_time' }),
     /None of these segments exist yet/
+  );
+});
+
+// ── Any segment, not just the three recipes ────────────────────────────────
+
+test('a campaign can be built from any saved segment with the owner\'s own copy', async () => {
+  // The link that was missing. A segment can be described in words, turned
+  // into rules by a model, previewed and saved; copy can be drafted by a
+  // model; codes mint at approval. But a campaign's audience could only be
+  // selected contacts, all contacts, or pasted numbers, so "clearance on RT
+  // for people who bought it and went quiet" stopped at the last step.
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const client = stubClient({
+    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: 2 }],
+    segmentMembers: [1, 2].map(n => ({ contact_phone: person(n) })),
+    contacts: [1, 2].map(contactRow),
+    orders: [1, 2].map(orderRow)
+  });
+  const result = await buildFromSegment({
+    client,
+    segmentKeys: ['bought_rt_lapsed'],
+    title: 'Clearance on RT',
+    workflowCategory: 'clearance',
+    message: "It's Vin from Vici. Hi {{first_name}}, {{code}} is 25% off. Reply STOP to opt out.",
+    discountPercent: 25,
+    now: NOW
+  });
+  assert.equal(result.audience, 2);
+  assert.equal(result.created.length, 1, 'one message means one draft, not a named and a plain');
+  const call = client.created[0];
+  assert.equal(call.p_workflow_category, 'clearance');
+  assert.equal(call.p_audience_definition.discount_percent, 25);
+  assert.equal(call.p_audience_definition.kind, 'segment');
+  // On the row too, not only in the audience definition: renderAndFreeze reads
+  // the column, so a discount recorded only as metadata mints at the default.
+  assert.deepEqual(client.updates, [{ discount_percent: 25 }]);
+});
+
+test('a segment campaign dedupes against its own workflow category', async () => {
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  const client = stubClient({
+    segments: [{ id: 'seg-1', segment_key: 'bought_rt_lapsed', member_count: 2 }],
+    segmentMembers: [1, 2].map(n => ({ contact_phone: person(n) })),
+    priorCampaigns: [{ id: 'old', status: 'completed', created_at: '2026-08-20T00:00:00Z' }],
+    priorRecipients: [{ contact_phone: person(1) }],
+    contacts: [1, 2].map(contactRow),
+    orders: [1, 2].map(orderRow)
+  });
+  const result = await buildFromSegment({
+    client, segmentKeys: ['bought_rt_lapsed'], title: 'Clearance',
+    workflowCategory: 'clearance', message: "It's Vin from Vici. Hi {{first_name}}. Reply STOP to opt out.",
+    now: NOW, dryRun: true
+  });
+  // Two clearance campaigns a fortnight apart must not both reach one person.
+  assert.equal(result.suppressedAsDuplicate, 1);
+  assert.equal(result.audience, 1);
+});
+
+test('a segment build refuses without a segment or a message', async () => {
+  const { buildFromSegment } = require('../lib/campaigns/audience-builder');
+  await assert.rejects(
+    () => buildFromSegment({ client: stubClient(), segmentKeys: [], message: 'hi' }),
+    /At least one segment is required/
+  );
+  await assert.rejects(
+    () => buildFromSegment({ client: stubClient(), segmentKeys: ['x'], message: '   ' }),
+    /A message is required/
   );
 });
