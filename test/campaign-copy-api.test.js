@@ -187,8 +187,16 @@ test('an unexpected failure does not leak internals to the caller', async () => 
   const res = response();
   await handler(router, 'post', PATH)({ body: { workflowType: 'winback' }, actor: { id: 9 } }, res);
   assert.equal(res.statusCode, 500);
-  assert.equal(res.payload.code, 'CAMPAIGN_REQUEST_FAILED');
+  // Renamed from CAMPAIGN_REQUEST_FAILED when lib/user-facing-errors.js took
+  // over: one code for every hidden fault, across campaigns and segments,
+  // rather than one per route family.
+  assert.equal(res.payload.code, 'INTERNAL_ERROR');
   assert.equal(res.payload.error.includes('10.0.0.4'), false);
+  // And the reference is what makes hiding it reportable rather than a dead
+  // end: the full message, including the address, is logged against it.
+  assert.match(res.payload.reference, /^VIC-[A-Z2-9]{6}$/);
+  assert.match(res.payload.error, /drafting the copy/);
+  assert.match(res.payload.error, /Lubosi/);
 });
 
 test('the existing campaign lifecycle routes are untouched', () => {

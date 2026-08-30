@@ -16,6 +16,7 @@
  *   is closed, and test/route-policy.test.js fails rather than shipping it.
  */
 
+const { presentError } = require('../lib/user-facing-errors');
 const express = require('express');
 const { logAudit, logAuditSafely } = require('../lib/audit/log');
 const { CampaignNotReadyError, CampaignRequestError } = require('../lib/campaigns/service');
@@ -40,23 +41,27 @@ function rejectUnknownKeys(body, allowed, message) {
   return input;
 }
 
-function sendError(res, error) {
-  if (error instanceof CampaignRequestError || error instanceof CampaignNotReadyError || error?.status) {
-    const body = {
-      error: error.message, code: error.code || 'INVALID_SEGMENT_REQUEST'
-    };
-    // A rule rejection is only useful if it says WHICH rule and why. These are
-    // the validator's own reasons, built from constants in
-    // lib/campaigns/segment-rule-schema.js: a dimension id, an operator name,
-    // a limit, or a product name the operator themselves typed. No customer
-    // value and no fragment of a model's reply travels in them.
-    if (Array.isArray(error.errors) && error.errors.length) body.errors = error.errors;
-    return res.status(error.status || 400).json(body);
+/**
+ * Answer a failed request without putting our internals on somebody's phone.
+ *
+ * Same rule as routes/campaigns.js: a code on the allowlist in
+ * lib/user-facing-errors.js keeps its message because that message tells the
+ * reader what to do; everything else becomes one sentence and a reference,
+ * with the full error logged against it.
+ *
+ * The `errors` array survives for the codes that keep their message, because a
+ * rule rejection is only useful if it says WHICH rule and why. Those are the
+ * validator's own reasons, built from constants in segment-rule-schema.js: a
+ * dimension id, an operator name, a limit, or a product name the operator
+ * typed themselves. No customer value and no fragment of a model's reply
+ * travels in them.
+ */
+function sendError(res, error, action = 'working on this segment') {
+  const { status, body } = presentError(error, { action });
+  if (body.code !== 'INTERNAL_ERROR' && Array.isArray(error?.errors) && error.errors.length) {
+    body.errors = error.errors;
   }
-  console.error('[SEGMENTS] Request failed:', error?.code || 'internal_error');
-  return res.status(500).json({
-    error: 'The segment request could not be completed.', code: 'SEGMENT_REQUEST_FAILED'
-  });
+  return res.status(status).json(body);
 }
 
 function segmentName(segment) {
@@ -123,7 +128,7 @@ function createSegmentRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await segments.list(req.query));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading your segments'); }
   });
 
   // Literal before /:id so Express never reads "catalogue" as an id.
@@ -131,7 +136,7 @@ function createSegmentRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(segments.catalogue());
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the segment catalogue'); }
   });
 
   // "Why is this person in all of these?" — every segment one person is in,
@@ -149,7 +154,7 @@ function createSegmentRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await segments.personMemberships(req.params.phone));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the segments for this person'); }
   });
 
   // ── Describing a segment in words ─────────────────────────────────────────
@@ -181,10 +186,9 @@ function createSegmentRouter({
       const result = await segments.draftRules({ description: input.description });
       return res.json(result);
     } catch (error) {
-      if (error instanceof SegmentRuleDraftError) {
-        return res.status(error.status || 400).json({ error: error.message, code: error.code });
-      }
-      return sendError(res, error);
+      // No special case. See the equivalent note in routes/campaigns.js: one
+      // place decides what is shown, or the exceptions become the rule.
+      return sendError(res, error, 'describing this segment');
     }
   });
 
@@ -196,7 +200,7 @@ function createSegmentRouter({
         'Only rules and selfSegmentKey may be provided.'
       );
       return res.json(await segments.previewRules(input));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'previewing this segment'); }
   });
 
   router.post('/rules', async (req, res) => {
@@ -223,7 +227,7 @@ function createSegmentRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'saving this segment'); }
   });
 
   router.post('/', async (req, res) => {
@@ -270,14 +274,14 @@ function createSegmentRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'creating this segment'); }
   });
 
   router.get('/:id', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await segments.detail(req.params.id, req.query));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading this segment'); }
   });
 
   // "Why is this person in this segment?" This is the endpoint that answers it.
@@ -285,7 +289,7 @@ function createSegmentRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await segments.member(req.params.id, req.params.phone));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'checking this person'); }
   });
 
   router.post('/:id/members', async (req, res) => {
@@ -302,7 +306,7 @@ function createSegmentRouter({
         metadata: { segment_id: String(req.params.id), membership_source: result.member.membershipSource }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'adding somebody to this segment'); }
   });
 
   router.delete('/:id/members/:phone', async (req, res) => {
@@ -314,7 +318,7 @@ function createSegmentRouter({
         metadata: { segment_id: String(req.params.id) }
       });
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'removing somebody from this segment'); }
   });
 
   // Force include or exclude on an AUTOMATIC segment. An exclusion outlives
@@ -340,7 +344,7 @@ function createSegmentRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'changing who is in this segment'); }
   });
 
   router.delete('/:id/overrides/:phone', async (req, res) => {
@@ -359,7 +363,7 @@ function createSegmentRouter({
         }
       });
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'changing who is in this segment'); }
   });
 
   /**
@@ -379,7 +383,7 @@ function createSegmentRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await segments.candidates(req.params.id, req.query));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading who could join this segment'); }
   });
 
   /**
@@ -473,7 +477,7 @@ function createSegmentRouter({
       }
 
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'removing this segment'); }
   });
 
   /**
@@ -497,7 +501,7 @@ function createSegmentRouter({
         }
       });
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'restoring this segment'); }
   });
 
   router.post('/:id/recompute', async (req, res) => {
@@ -537,7 +541,7 @@ function createSegmentRouter({
         })
         : { sent: 0, targeted: 0, reason: 'change_not_material' };
       return res.json({ ...result, notification });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'recomputing this segment'); }
   });
 
   return router;

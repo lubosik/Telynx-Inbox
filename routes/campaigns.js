@@ -5,6 +5,7 @@ const { validateCopy, septetLength } = require('../lib/campaigns/copy-validator'
 const { RULES } = require('../lib/campaigns/copy-rules');
 const { logAudit, logAuditSafely } = require('../lib/audit/log');
 const { messageFingerprint } = require('../lib/audit/redact');
+const { presentError } = require('../lib/user-facing-errors');
 const {
   CampaignNotReadyError,
   CampaignRequestError,
@@ -111,12 +112,25 @@ async function auditCampaignApproval(req, prepared, writer = logAudit) {
   return { ...result, fingerprint: input.fingerprint };
 }
 
-function sendError(res, error) {
-  if (error instanceof CampaignRequestError || error instanceof CampaignNotReadyError || error?.status) {
-    return res.status(error.status || 400).json({ error: error.message, code: error.code || 'INVALID_CAMPAIGN_REQUEST' });
-  }
-  console.error('[CAMPAIGNS] Request failed:', error?.code || 'internal_error');
-  return res.status(500).json({ error: 'The campaign request could not be completed.', code: 'CAMPAIGN_REQUEST_FAILED' });
+/**
+ * Answer a failed request without putting our internals on somebody's phone.
+ *
+ * This used to pass `error.message` through for anything carrying a `status`,
+ * and CouponRequestError carries 400, so approving a campaign showed the owner
+ * "createCoupons requires an array of coupon specs" — a sentence written for
+ * whoever edits that module.
+ *
+ * lib/user-facing-errors.js decides: a code on its allowlist keeps its
+ * message, because that message tells the reader what to do. Everything else
+ * becomes one sentence and a reference, with the full error and stack logged
+ * against that reference so it can still be found.
+ *
+ * `action` is what the person was trying to do, in their words, so the
+ * sentence describes their situation rather than the server's.
+ */
+function sendError(res, error, action = 'working on this campaign') {
+  const { status, body } = presentError(error, { action });
+  return res.status(status).json(body);
 }
 
 function createCampaignRouter({
@@ -161,7 +175,7 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.list(req.query));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading your campaigns'); }
   });
 
   // Literal before /:id so Express never interprets "review-count" as an id.
@@ -190,7 +204,7 @@ function createCampaignRouter({
         brief: req.body?.brief,
         segments: segmentService()
       }));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'planning this campaign'); }
   });
 
   /**
@@ -238,7 +252,7 @@ function createCampaignRouter({
         });
       }
       return res.status(201).json({ ...result, segment });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'creating this campaign'); }
   });
 
   router.get('/recipes', async (_req, res) => {
@@ -256,7 +270,7 @@ function createCampaignRouter({
           description: MERGE_FIELDS[name].description
         }))
       });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the campaigns you can build'); }
   });
 
   /**
@@ -306,14 +320,14 @@ function createCampaignRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'building this campaign'); }
   });
 
   router.get('/review-count', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.reviewCount());
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'counting what needs review'); }
   });
 
   /**
@@ -347,7 +361,7 @@ function createCampaignRouter({
       }
       const refresh = String(req.query?.refresh ?? '') === 'true';
       return res.json(await portfolio.current({ refresh }));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the opportunities'); }
   });
 
   // This endpoint accepts control inputs only. Orders, products, contacts,
@@ -397,7 +411,7 @@ function createCampaignRouter({
         ...(notification?.reason ? { reason: notification.reason } : {}),
         ...(notification?.error ? { error: notification.error } : {})
       } });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'generating campaigns'); }
   });
 
   // A DRAFTING AID. It returns candidate wording for a human to choose from
@@ -457,7 +471,7 @@ function createCampaignRouter({
           term: failure.detail?.term || null
         }))
       });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'checking the copy'); }
   });
 
   router.post('/copy-suggestions', async (req, res) => {
@@ -480,10 +494,12 @@ function createCampaignRouter({
         reviewRequirements: result.reviewRequirements
       });
     } catch (error) {
-      if (error instanceof CopyDraftError) {
-        return res.status(error.status || 400).json({ error: error.message, code: error.code });
-      }
-      return sendError(res, error);
+      // No special case for CopyDraftError. It used to return its message
+      // raw, which is right for the codes that tell a person to rephrase the
+      // brief and wrong for the ones that name a workflow id nobody outside
+      // this repo has heard of. sendError keeps the first and hides the
+      // second, which is the whole point of having one place decide.
+      return sendError(res, error, 'drafting the copy');
     }
   });
 
@@ -501,14 +517,14 @@ function createCampaignRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'creating this campaign'); }
   });
 
   router.get('/:id', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.detail(req.params.id));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading this campaign'); }
   });
 
   router.patch('/:id', async (req, res) => {
@@ -522,21 +538,21 @@ function createCampaignRouter({
         metadata: { revision: campaign.revision, ...messageFingerprint(campaign.proposed_message) }
       });
       return res.json({ campaign });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'saving your changes'); }
   });
 
   router.get('/:id/recipients', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.recipients(req.params.id, req.query));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the recipients'); }
   });
 
   router.get('/:id/performance', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.performance(req.params.id));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'loading the results'); }
   });
 
   router.post('/:id/submit-review', async (req, res) => {
@@ -549,7 +565,7 @@ function createCampaignRouter({
         metadata: { revision: result.campaign.revision, recipient_count: result.recipientCount }
       });
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'submitting this campaign for review'); }
   });
 
   router.post('/:id/reject', async (req, res) => {
@@ -562,7 +578,7 @@ function createCampaignRouter({
         metadata: { revision: campaign.revision, reason: campaign.rejection_reason }
       });
       return res.json({ campaign });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'rejecting this campaign'); }
   });
 
   router.post('/:id/approve', async (req, res) => {
@@ -575,7 +591,7 @@ function createCampaignRouter({
         req.params.id, prepared.campaign.revision, auditProof
       );
       return res.json({ campaign, recipientCount: prepared.recipientCount });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'approving this campaign'); }
   });
 
   router.post('/:id/schedule', async (req, res) => {
@@ -588,7 +604,7 @@ function createCampaignRouter({
         metadata: { revision: campaign.revision, scheduled_for: campaign.scheduled_for }
       });
       return res.json({ campaign });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'scheduling this campaign'); }
   });
 
   router.post('/:id/cancel', async (req, res) => {
@@ -601,14 +617,14 @@ function createCampaignRouter({
         metadata: { revision: campaign.revision, reason: campaign.cancellation_reason }
       });
       return res.json({ campaign });
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'cancelling this campaign'); }
   });
 
   router.post('/:id/dry-run', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       return res.json(await campaigns.dryRun(req.params.id));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'checking who this would reach'); }
   });
 
   /**
@@ -638,7 +654,7 @@ function createCampaignRouter({
         ? req.body.message.slice(0, 1600)
         : null;
       return res.json(await campaigns.preview(req.params.id, { limit, message }));
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'previewing the messages'); }
   });
 
   /**
@@ -722,7 +738,7 @@ function createCampaignRouter({
       }
 
       return res.json(result);
-    } catch (error) { return sendError(res, error); }
+    } catch (error) { return sendError(res, error, 'removing this campaign'); }
   });
 
   return router;
