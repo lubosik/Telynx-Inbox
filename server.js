@@ -412,6 +412,50 @@ function startOpportunityRefresh() {
 // it recomputes, decides materiality and records the whole pass, and nothing
 // reaches a phone. The recompute is a real production write and is the correct
 // behaviour of this product; the flags gate delivery, not arithmetic.
+/**
+ * Keep do-not-disturb status fresh enough to send.
+ *
+ * lib/campaigns/eligibility.js refuses any recipient whose DND status is older
+ * than 24 hours and fails CLOSED, which is right: not knowing whether somebody
+ * has asked not to be disturbed is not the same as knowing they have not.
+ *
+ * Nothing refreshed that timestamp except a human running
+ * scripts/sync-dnd-only.js. It was last run on 25 August; by the 30th all 221
+ * recipients of a ready campaign read `dnd_unknown`, the dry run said zero
+ * eligible, and the Submit button was greyed out with nothing on screen
+ * pointing at the cause.
+ *
+ * Every six hours, so a single failed run still leaves three chances inside
+ * the 24-hour window. Registered unconditionally and wrapped like every other
+ * background job here: it may never take down the process that also carries
+ * the inbox, the dialler and order SMS.
+ */
+function startDoNotDisturbSync() {
+  let syncDoNotDisturb;
+  try {
+    ({ syncDoNotDisturb } = require('./lib/ghl-dnd-sync'));
+  } catch (err) {
+    console.error('[DND] Sync not started:', err.message);
+    return;
+  }
+
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+  const run = async () => {
+    try {
+      const result = await syncDoNotDisturb({ client: supabase });
+      console.log(`[DND] Refreshed ${result.written} contacts`
+        + ` (${result.partial} incomplete, ${result.failed} failed)`);
+    } catch (err) {
+      console.error('[DND] Sync error:', err.message);
+    }
+  };
+
+  // Once at boot, because a deploy is exactly when the timestamp is most
+  // likely to be stale, then on the interval.
+  run();
+  setInterval(run, SIX_HOURS);
+}
+
 function startDailySegmentationCycle() {
   try {
     const { startDailyCycle } = require('./lib/daily-scheduler');
@@ -458,6 +502,7 @@ app.listen(PORT, async () => {
   startDeliveryCheck();
   startCampaignDelivery();
   startOpportunityRefresh();
+  startDoNotDisturbSync();
   startDailySegmentationCycle();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);

@@ -599,6 +599,12 @@ enum CampaignReasonCopy {
         case "internal_or_test_identity": return "Internal or test identity"
         case "opted_out": return "Opted out"
         case "consent_not_recorded": return "Consent not recorded"
+        case "dnd": return "Asked not to be contacted"
+        // Not "Dnd Unknown", which fell out of the default case and read like
+        // an accusation against the customer. It means OUR copy of their
+        // contact preference has gone stale, which is our problem and a
+        // temporary one: the six-hourly sync in lib/ghl-dnd-sync.js clears it.
+        case "dnd_unknown": return "Contact preference out of date"
         case "campaign_settings_missing": return "Campaign settings unavailable"
         case "eligibility_check_failed": return "Eligibility check unavailable"
         case "environment_gate_disabled": return "Live sending is disabled on the server"
@@ -606,6 +612,24 @@ enum CampaignReasonCopy {
         case "workspace_live_send_disabled": return "Live sending is disabled for this workspace"
         default:
             return reason.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    /// Whether this reason is about the CUSTOMER or about US.
+    ///
+    /// Red said the same thing for "opted out" and "contact preference out of
+    /// date", and they could not be less alike: one is a person declining, the
+    /// other is a timestamp we let expire. Colouring both as refusals made a
+    /// screen full of amber-worthy staleness look like an audience that had
+    /// rejected the business.
+    static func isCustomerRefusal(_ reason: String) -> Bool {
+        switch reason {
+        case "opted_out", "dnd", "consent_not_recorded",
+             "invalid_phone", "internal_or_test_identity":
+            return true
+        default:
+            // Everything else is something on our side, and fixable.
+            return false
         }
     }
 }

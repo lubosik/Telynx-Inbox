@@ -394,6 +394,10 @@ struct CampaignDetailView: View {
     @State private var showingRejection = false
     @State private var showingSchedule = false
     @State private var showingCancellation = false
+    @State private var showingAllRecipients = false
+
+    /// How many recipients to show before the reviewer asks for more.
+    private let recipientSampleSize = 3
 
     init(campaignID: String) {
         _model = StateObject(wrappedValue: CampaignDetailModel(campaignID: campaignID))
@@ -508,6 +512,24 @@ struct CampaignDetailView: View {
         await model.schedule(for: date)
     }
 
+    private var visibleRecipients: [CampaignRecipient] {
+        showingAllRecipients ? model.recipients : Array(model.recipients.prefix(recipientSampleSize))
+    }
+
+    /// What the reviewer actually needs from this section: how many will be
+    /// reached, and how many will not, rather than a list they will not read.
+    private var recipientFooter: String {
+        let total = model.recipientTotal
+        guard let dryRun = model.dryRun else {
+            return "\(total.formatted()) in this draft. Run the eligibility check to see how many can be reached."
+        }
+        let blocked = dryRun.suppressed
+        let base = "\(dryRun.eligible.formatted()) of \(total.formatted()) can be reached."
+        return blocked == 0
+            ? base + " Every recipient passed the current safety checks."
+            : base + " \(blocked.formatted()) cannot, and the reasons are listed against each one."
+    }
+
     private func campaignList(_ campaign: CampaignRecord) -> some View {
         List {
             Section {
@@ -581,23 +603,42 @@ struct CampaignDetailView: View {
 
             actionSection(campaign)
 
+            // ── Three, not two hundred ──────────────────────────────────
+            //
+            // This listed every recipient with infinite scroll, so reviewing a
+            // 221-person campaign meant scrolling past 221 rows to reach the
+            // approval controls below. Nobody reads 221 rows, and the ones
+            // worth reading are the exceptions, not the first three.
+            //
+            // So: a sample by default, and a toggle for the rest. The counts
+            // in the footer are what the reviewer actually needs.
             Section {
                 if model.recipients.isEmpty {
                     Text("No recipients")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(model.recipients) { recipient in
+                ForEach(visibleRecipients) { recipient in
                     CampaignRecipientRow(recipient: recipient,
                                          eligibility: eligibility(for: recipient))
                         .onAppear {
+                            guard showingAllRecipients else { return }
                             Task { await model.loadMoreRecipientsIfNeeded(after: recipient) }
                         }
                 }
-                if model.isLoadingMore { ProgressView().frame(maxWidth: .infinity) }
+                if model.recipientTotal > recipientSampleSize {
+                    Button(showingAllRecipients
+                           ? "Show fewer"
+                           : "Show all \(model.recipientTotal.formatted())") {
+                        showingAllRecipients.toggle()
+                    }
+                }
+                if showingAllRecipients && model.isLoadingMore {
+                    ProgressView().frame(maxWidth: .infinity)
+                }
             } header: {
                 Text("Recipients")
             } footer: {
-                Text("Showing \(model.recipients.count.formatted()) of \(model.recipientTotal.formatted()). Inclusion explains why the person entered the draft. Eligibility explains whether current safety checks allow a future send.")
+                Text(recipientFooter)
             }
 
             if let approval = model.detail?.latestApproval {
@@ -1015,7 +1056,11 @@ private struct CampaignRecipientRow: View {
                     Label(CampaignReasonCopy.label(eligibility.reason),
                           systemImage: eligibility.eligible ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .labelStyle(.iconOnly)
-                        .foregroundStyle(eligibility.eligible ? ViciTheme.success : ViciTheme.destructive)
+                        .foregroundStyle(eligibility.eligible
+                                         ? ViciTheme.success
+                                         : (CampaignReasonCopy.isCustomerRefusal(eligibility.reason)
+                                            ? ViciTheme.destructive
+                                            : ViciTheme.warning))
                         .accessibilityLabel(CampaignReasonCopy.label(eligibility.reason))
                 }
             }
@@ -1025,11 +1070,13 @@ private struct CampaignRecipientRow: View {
             if let reason = eligibility?.reason, reason != "eligible" {
                 Text(CampaignReasonCopy.label(reason))
                     .font(.caption)
-                    .foregroundStyle(ViciTheme.destructive)
+                    .foregroundStyle(CampaignReasonCopy.isCustomerRefusal(reason)
+                                     ? ViciTheme.destructive : ViciTheme.warning)
             } else if let reason = recipient.suppressionReason, !reason.isEmpty {
                 Text(CampaignReasonCopy.label(reason))
                     .font(.caption)
-                    .foregroundStyle(ViciTheme.destructive)
+                    .foregroundStyle(CampaignReasonCopy.isCustomerRefusal(reason)
+                                     ? ViciTheme.destructive : ViciTheme.warning)
             } else if recipient.state != "draft" {
                 Text(recipient.state.replacingOccurrences(of: "_", with: " ").capitalized)
                     .font(.caption)
