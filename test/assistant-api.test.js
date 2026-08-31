@@ -51,7 +51,15 @@ function request({ requestActor = actor(), env = {} } = {}) {
 test('assistant status is covered by assistant.use and mounted in server.js', () => {
   assert.equal(findPolicy('GET', '/api/assistant/status').permission, 'assistant.use');
   const server = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
-  assert.match(server, /app\.use\('\/api\/assistant',\s+requireAuth,\s+require\('\.\/routes\/assistant'\)\(\)\)/);
+  // The two things that matter are the path and requireAuth. The router's
+  // ARGUMENTS are deliberately not pinned: it takes an optional `services`
+  // seam, and the assistant is now passed the shared opportunity portfolio so
+  // it reads the cache the six-hourly refresh warms instead of building a
+  // private one and paying for a full cold rebuild of every paid order.
+  // The old regex demanded literally `require('./routes/assistant')()` and
+  // failed on that, which is a test pinning an implementation detail rather
+  // than the behaviour it is named for.
+  assert.match(server, /app\.use\('\/api\/assistant',\s+requireAuth,\s+require\('\.\/routes\/assistant'\)\(/);
 });
 
 test('the exact lowercase string true is the only value that enables the pilot', () => {

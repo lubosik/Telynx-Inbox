@@ -70,6 +70,30 @@ app.use('/webhooks/voice',              express.raw({ type: 'application/json' }
 app.use('/webhook/ghl',        express.json());
 app.use('/webhook/shipstation', express.json());
 // Image uploads arrive as base64 JSON — needs a higher limit than the default 100kb
+// ── ONE OPPORTUNITY PORTFOLIO, NOT THREE ──────────────────────────────────
+//
+// The detector reads every paid order, every contact and the live WooCommerce
+// catalogue, so a rebuild is expensive and the service caches it for six
+// hours. There were three separate instances: the scheduled refresh below made
+// its own, the campaigns router made its own, and the proposals router would
+// have made a third.
+//
+// So the scheduled rebuild every six hours warmed a cache that no HTTP request
+// ever read, and the first person to open the opportunities screen after a TTL
+// expiry paid for a full cold rebuild anyway. The background job was pure
+// waste and the screen was slow for no reason.
+//
+// Lazy, because constructing it must not require database or WooCommerce
+// credentials at module load: the route tests build these routers without any.
+let sharedOpportunityPortfolio = null;
+function opportunityPortfolio() {
+  if (!sharedOpportunityPortfolio) {
+    const { createOpportunityPortfolioService } = require('./lib/campaigns/opportunity-portfolio');
+    sharedOpportunityPortfolio = createOpportunityPortfolioService({ env: process.env });
+  }
+  return sharedOpportunityPortfolio;
+}
+
 app.use('/api/upload', express.json({ limit: '8mb' }));
 app.use(express.json());
 
@@ -163,34 +187,10 @@ app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
-app.use('/api/assistant',     requireAuth, require('./routes/assistant')());
+app.use('/api/assistant',     requireAuth, require('./routes/assistant')({ services: { opportunities: opportunityPortfolio() } }));
 app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')({
   opportunityPortfolio: opportunityPortfolio()
 }));
-// ── ONE OPPORTUNITY PORTFOLIO, NOT THREE ──────────────────────────────────
-//
-// The detector reads every paid order, every contact and the live WooCommerce
-// catalogue, so a rebuild is expensive and the service caches it for six
-// hours. There were three separate instances: the scheduled refresh below made
-// its own, the campaigns router made its own, and the proposals router would
-// have made a third.
-//
-// So the scheduled rebuild every six hours warmed a cache that no HTTP request
-// ever read, and the first person to open the opportunities screen after a TTL
-// expiry paid for a full cold rebuild anyway. The background job was pure
-// waste and the screen was slow for no reason.
-//
-// Lazy, because constructing it must not require database or WooCommerce
-// credentials at module load: the route tests build these routers without any.
-let sharedOpportunityPortfolio = null;
-function opportunityPortfolio() {
-  if (!sharedOpportunityPortfolio) {
-    const { createOpportunityPortfolioService } = require('./lib/campaigns/opportunity-portfolio');
-    sharedOpportunityPortfolio = createOpportunityPortfolioService({ env: process.env });
-  }
-  return sharedOpportunityPortfolio;
-}
-
 // Its own mount rather than a path under /api/campaigns: a proposal is not a
 // campaign, and keeping the two apart means no literal proposal path can ever
 // be shadowed by GET /api/campaigns/:id.

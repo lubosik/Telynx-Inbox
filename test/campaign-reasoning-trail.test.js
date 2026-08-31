@@ -178,3 +178,42 @@ test('money formats as money, and refuses what is not', () => {
   assert.equal(money(null), null);
   assert.equal(money('abc'), null);
 });
+
+// ── Malformed input, found by a reviewing subagent ─────────────────────────
+//
+// The live detector always emits complete sub-objects, so none of these shapes
+// occurs today. They are guarded anyway: a file whose whole premise is "never
+// show a figure that was not measured" should not be one missing field away
+// from printing "ranging from NaN to NaN".
+
+test('a partial range prints what it knows and drops what it does not', () => {
+  const trail = cohortTrail({ evidence: { timeSinceOrder: { middleDays: 5 } } });
+  assert.match(trail.join(' '), /typically 5 days\./);
+  assert.doesNotMatch(trail.join(' '), /NaN|ranging/);
+});
+
+test('partial stock counts are omitted rather than half-printed', () => {
+  const trail = cohortTrail({ evidence: { canStillBuyIt: { everyProductStillOnSale: 3 } } });
+  assert.doesNotMatch(trail.join(' '), /undefined|3 yes/);
+});
+
+test('malformed blockers cost their own line, not the whole trail', () => {
+  // `blockers: {}` threw "object is not iterable"; `[null]` threw on .detail.
+  assert.doesNotThrow(() => cohortTrail({ blockers: {} }));
+  assert.doesNotThrow(() => cohortTrail({ blockers: [null, undefined, {}] }));
+  assert.match(cohortTrail({ blockers: ['consent is missing'] }).join(' '),
+    /In the way: consent is missing/);
+});
+
+test('neither trail throws or leaks a placeholder on any junk input', () => {
+  for (const junk of [null, undefined, [], 'text', 42, true,
+    { evidence: null }, { sizing: null }, { evidence: { people: { people: 'NaN' } } },
+    { onlyOrderAt: {} }, { orderCount: 'many' }]) {
+    for (const render of [cohortTrail, personTrail]) {
+      let text;
+      assert.doesNotThrow(() => { text = render(junk).join(' '); }, `${render.name} threw on ${JSON.stringify(junk)}`);
+      assert.doesNotMatch(text, /undefined|NaN|Invalid Date|\[object/,
+        `${render.name} leaked a placeholder for ${JSON.stringify(junk)}`);
+    }
+  }
+});
