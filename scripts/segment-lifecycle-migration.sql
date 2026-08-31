@@ -277,7 +277,7 @@ BEGIN
   -- Already archived means somebody already chose to keep it. A second request
   -- must not quietly upgrade that decision into a destruction.
   IF v_segment.archived_at IS NOT NULL THEN
-    v_blockers := v_blockers || 'already_archived';
+    v_blockers := v_blockers || 'already_archived'::text;
   END IF;
 
   IF EXISTS (
@@ -286,23 +286,23 @@ BEGIN
       AND (c.audience_definition->>'segmentId' = p_segment_id::text
         OR c.audience_definition->>'segment_id' = p_segment_id::text)
   ) THEN
-    v_blockers := v_blockers || 'campaign_reference';
+    v_blockers := v_blockers || 'campaign_reference'::text;
   END IF;
 
   IF v_segment.last_computed_at IS NOT NULL OR v_segment.last_run_id IS NOT NULL THEN
-    v_blockers := v_blockers || 'engine_has_run';
+    v_blockers := v_blockers || 'engine_has_run'::text;
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM public.sms_campaign_segment_runs WHERE segment_id = p_segment_id
   ) THEN
-    v_blockers := v_blockers || 'recompute_history';
+    v_blockers := v_blockers || 'recompute_history'::text;
   END IF;
 
   IF EXISTS (
     SELECT 1 FROM public.sms_campaign_segment_overrides WHERE segment_id = p_segment_id
   ) THEN
-    v_blockers := v_blockers || 'override_history';
+    v_blockers := v_blockers || 'override_history'::text;
   END IF;
 
   IF EXISTS (
@@ -310,7 +310,7 @@ BEGIN
     WHERE segment_id = p_segment_id
       AND nullif(trim(coalesce(inclusion_evidence->>'reason', '')), '') IS NOT NULL
   ) THEN
-    v_blockers := v_blockers || 'member_reasons';
+    v_blockers := v_blockers || 'member_reasons'::text;
   END IF;
 
   IF p_mode = 'archive' OR array_length(v_blockers, 1) IS NOT NULL THEN

@@ -807,28 +807,28 @@ BEGIN
     v_blockers := v_blockers || ('status_' || v_campaign.status);
   END IF;
   IF v_campaign.approved_at IS NOT NULL OR v_campaign.approval_audit_recorded_at IS NOT NULL THEN
-    v_blockers := v_blockers || 'approved';
+    v_blockers := v_blockers || 'approved'::text;
   END IF;
   IF v_campaign.scheduled_for IS NOT NULL THEN
-    v_blockers := v_blockers || 'scheduled';
+    v_blockers := v_blockers || 'scheduled'::text;
   END IF;
   IF v_campaign.submitted_for_review_at IS NOT NULL THEN
-    v_blockers := v_blockers || 'submitted_for_review';
+    v_blockers := v_blockers || 'submitted_for_review'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM public.sms_campaign_approvals WHERE campaign_id = p_campaign_id) THEN
-    v_blockers := v_blockers || 'approval_history';
+    v_blockers := v_blockers || 'approval_history'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM public.sms_campaign_recipient_events WHERE campaign_id = p_campaign_id) THEN
-    v_blockers := v_blockers || 'recipient_events';
+    v_blockers := v_blockers || 'recipient_events'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM public.sms_commercial_contact_ledger WHERE campaign_id = p_campaign_id) THEN
-    v_blockers := v_blockers || 'commercial_contact_ledger';
+    v_blockers := v_blockers || 'commercial_contact_ledger'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM public.sms_messages WHERE campaign_id = p_campaign_id) THEN
-    v_blockers := v_blockers || 'linked_messages';
+    v_blockers := v_blockers || 'linked_messages'::text;
   END IF;
   IF EXISTS (SELECT 1 FROM public.sms_sent_log WHERE campaign_id = p_campaign_id) THEN
-    v_blockers := v_blockers || 'linked_sent_log';
+    v_blockers := v_blockers || 'linked_sent_log'::text;
   END IF;
   -- Any recipient that reached, or started reaching, a provider.
   IF EXISTS (
@@ -842,7 +842,7 @@ BEGIN
         OR failed_at IS NOT NULL
         OR state IN ('claimed', 'sending', 'sent', 'delivered', 'failed', 'reconciliation_required'))
   ) THEN
-    v_blockers := v_blockers || 'recipient_reached_provider';
+    v_blockers := v_blockers || 'recipient_reached_provider'::text;
   END IF;
   -- revenue_attributions is created by scripts/analytics-migration.sql, which
   -- may not be applied yet. Probe dynamically rather than failing to compile.
@@ -850,7 +850,7 @@ BEGIN
     EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.revenue_attributions WHERE campaign_id = $1)'
       INTO v_has_attribution USING p_campaign_id;
     IF v_has_attribution THEN
-      v_blockers := v_blockers || 'revenue_attribution';
+      v_blockers := v_blockers || 'revenue_attribution'::text;
     END IF;
   END IF;
 
