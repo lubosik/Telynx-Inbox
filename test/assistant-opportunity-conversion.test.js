@@ -81,21 +81,41 @@ test('the size lives at cohort.size, which is what the tool must read', () => {
   assert.equal(opportunity.cohort.size, 511);
 });
 
-test('the converter output must be TRIMMED before the contract will take it back', () => {
-  // The sharp edge worth a test: opportunityFromFinding decorates its result
-  // with contractVersion and kindLabel, and the very contract that produced it
-  // then rejects both. Round-tripping its own output fails.
+test('the converter output is accepted by the contract that produced it', () => {
+  // ── THIS TEST USED TO ASSERT THE OPPOSITE ────────────────────────────────
+  //
+  // It was called "the converter output must be TRIMMED before the contract
+  // will take it back", and it asserted that round-tripping THREW:
+  //
+  //     assert.throws(() => normaliseOpportunity(opportunity),
+  //       /Unexpected opportunity field: contractVersion, kindLabel/);
+  //
+  // It was an accurate description of the behaviour and it pinned a bug in
+  // place as though it were a decision. normaliseOpportunity derives both
+  // fields, adds them to its output, and its input list forbade them — so its
+  // own output was invalid input, and the one caller that did not know to trim
+  // was the automatic daily path.
+  //
+  // Measured in production before the fix: six findings offered every day for
+  // six consecutive days, drafted 0, saved 0, every one rejected, with the
+  // enabling flag switched ON the entire time. A green test suite the whole
+  // way, because this test asserted the failure was correct.
+  //
+  // A test that documents a sharp edge is worth having. A test that makes the
+  // edge permanent is not. The contract now accepts what it produces.
   const { opportunity } = opportunityFromFinding(FINDING);
   assert.ok('contractVersion' in opportunity);
   assert.ok('kindLabel' in opportunity);
-  assert.throws(() => normaliseOpportunity(opportunity),
-    /Unexpected opportunity field: contractVersion, kindLabel/);
+  assert.doesNotThrow(() => normaliseOpportunity(opportunity),
+    'the contract must accept its own output, or the automatic proposal path '
+    + 'throws on every finding, every day, in silence');
 
+  // The trimmed shape still works, so routes/assistant.js trimming is now
+  // belt-and-braces rather than load-bearing.
   const allowed = ['id', 'kind', 'title', 'cohort', 'facts', 'sizing', 'detectedAt', 'detectorVersion'];
   const trimmed = {};
   for (const field of allowed) trimmed[field] = opportunity[field];
-  assert.doesNotThrow(() => normaliseOpportunity(trimmed),
-    'the trimmed shape is what drafting actually accepts');
+  assert.doesNotThrow(() => normaliseOpportunity(trimmed));
 });
 
 test('the route adapter returns something drafting will actually accept', () => {
