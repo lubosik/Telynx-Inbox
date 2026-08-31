@@ -353,3 +353,48 @@ test('archive and unarchive specifically, since the app has always called them',
   assert.match(routes, /router\.post\('\/:id\/archive'/);
   assert.match(routes, /router\.post\('\/:id\/unarchive'/);
 });
+
+test('archive and unarchive return the shape the client decodes', async () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // THE SECOND HALF OF THE SAME BUG
+  //
+  //   The previous fix built the routes the app was calling, and the app then
+  //   said "Unexpected response from server" instead. Both routes returned
+  //   `remove()`'s {outcome, status}, and the client decodes
+  //   CampaignActionResponse, whose `campaign` is NOT optional. A route that
+  //   worked, reported as a route that broke.
+  //
+  //   Declaring the path is half a contract. This is the other half.
+  // ═══════════════════════════════════════════════════════════════════════
+  const routes = fs.readFileSync(path.join(ROOT, 'routes', 'campaigns.js'), 'utf8');
+  const models = fs.readFileSync(
+    path.join(ROOT, 'ios', 'ViciInbox', 'Core', 'CampaignModels.swift'), 'utf8'
+  );
+
+  // Every non-optional stored property of CampaignRecord, by its wire name.
+  const record = models.slice(
+    models.indexOf('struct CampaignRecord'),
+    models.indexOf('}', models.indexOf('private enum CodingKeys', models.indexOf('struct CampaignRecord')))
+  );
+  const required = [];
+  for (const line of record.split('\n')) {
+    const declared = line.match(/^\s{4}let\s+([A-Za-z]+):\s+([A-Za-z<>\[\]]+)(\?)?\s*$/);
+    if (!declared || declared[3]) continue;               // optionals may be absent
+    const key = record.match(new RegExp(`case ${declared[1]} = "([a-z_]+)"`));
+    required.push(key ? key[1] : declared[1]);
+  }
+  assert.ok(required.length >= 8, `expected several required fields, found ${required.length}`);
+
+  // Both handlers must answer with a `campaign` built from a full row. A
+  // narrow select cannot satisfy the required list above, and which columns
+  // are missing is invisible until a phone tries to decode it.
+  for (const handler of ['/:id/archive', '/:id/unarchive']) {
+    const start = routes.indexOf(`router.post('${handler}'`);
+    assert.ok(start > 0, `${handler} must exist`);
+    const body = routes.slice(start, routes.indexOf('router.', start + 10));
+    assert.match(body, /res\.json\(\{\s*campaign:/,
+      `${handler} must return { campaign: ... } or CampaignActionResponse cannot decode`);
+    assert.match(body, /\.select\('\*'\)/,
+      `${handler} must read the whole row; CampaignRecord requires ${required.slice(0, 4).join(', ')} and more`);
+  }
+});

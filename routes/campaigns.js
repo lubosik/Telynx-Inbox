@@ -892,6 +892,13 @@ function createCampaignRouter({
       const preview = await campaigns.deletionPreview(req.params.id);
       // mode 'archive' never destroys, whatever the campaign's state.
       const result = await campaigns.remove(req.params.id, { mode: 'archive', reason }, req.actor);
+      // The client decodes CampaignActionResponse, whose `campaign` is NOT
+      // optional. `remove` returns {outcome, status} and nothing else, so
+      // returning it raw failed to decode and surfaced as "Unexpected response
+      // from server" — a route that worked, reported as a route that broke.
+      const { data: archived } = await db()
+        .from('sms_campaigns').select('*')
+        .eq('id', req.params.id).eq('workspace_id', 'vici').maybeSingle();
       await auditCampaign('campaign.archived', req, preview.campaign, {
         summary: `Archived ${campaignSummaryName(preview.campaign)}`,
         previousState: { status: preview.campaign.status, archived: false },
@@ -899,7 +906,7 @@ function createCampaignRouter({
         metadata: { revision: preview.campaign.revision, requested_mode: 'archive', reason },
         fingerprint: `campaign-archived:${preview.campaign.id}`
       });
-      return res.json(result);
+      return res.json({ campaign: archived, outcome: result.outcome, status: result.status });
     } catch (error) { return sendError(res, error, 'archiving this campaign'); }
   });
 
@@ -916,7 +923,10 @@ function createCampaignRouter({
         .from('sms_campaigns')
         .update({ archived_at: null, updated_at: new Date().toISOString() })
         .eq('id', req.params.id).eq('workspace_id', 'vici')
-        .select('id, title, status, revision, archived_at')
+        // The whole row, for the same reason: CampaignRecord requires
+        // campaign_type, workflow_category, proposed_message, created_at and
+        // updated_at, none of which a narrow select returns.
+        .select('*')
         .maybeSingle();
       if (error) {
         throw Object.assign(new Error(error.message), { code: 'CAMPAIGN_UNARCHIVE_FAILED', status: 500 });
