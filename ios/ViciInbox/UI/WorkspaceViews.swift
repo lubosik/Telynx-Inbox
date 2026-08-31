@@ -318,8 +318,25 @@ private struct ContactEditor: View {
 struct CheckInAutomationSection: View {
     @EnvironmentObject private var session: SessionModel
     @State private var automation: CheckInAutomation?
+
+    /// ── WHY THE SWITCH HAS ITS OWN STATE ─────────────────────────────────
+    ///
+    /// It used to be driven by `Binding(get: { automation.enabled }, set: ...)`,
+    /// where `automation` was an immutable snapshot unwrapped in the view body.
+    /// Tapping called `set`, which started an async request, and SwiftUI then
+    /// re-read `get` — which still returned the OLD value. So the switch flicked
+    /// back under the owner's finger and only settled after a full round trip.
+    ///
+    /// He reported it as the toggle not working. The audit log shows him
+    /// tapping it five times in a row, which is exactly what that bug looks
+    /// like from the outside: it had turned on the first time.
+    ///
+    /// So the switch now reads a state this view owns and moves immediately.
+    /// The request follows, and only a FAILURE moves it back.
+    @State private var isOn = false
     @State private var isBusy = false
     @State private var message: String?
+    @State private var failed = false
     @State private var loadFailed = false
 
     private var canApprove: Bool { session.can(Permission.campaignsApprove) }
@@ -327,54 +344,68 @@ struct CheckInAutomationSection: View {
     var body: some View {
         Section {
             if loadFailed {
-                Text("Could not load the check-in automation.")
-                    .foregroundStyle(.secondary)
-            } else if let automation {
+                Label("Could not load the check-in automation", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(ViciTheme.warning)
+                Button("Try again") { Task { await load() } }
+            } else if automation == nil {
+                HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
+            } else {
                 Toggle(isOn: Binding(
-                    get: { automation.enabled },
-                    set: { newValue in Task { await setEnabled(newValue) } }
+                    get: { isOn },
+                    set: { wanted in
+                        guard wanted != isOn, !isBusy else { return }
+                        isOn = wanted                  // move NOW, with the finger
+                        Task { await commit(wanted) }
+                    }
                 )) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text("Check in three weeks after an order")
-                        Text(automation.enabled ? "Running" : "Off")
-                            .font(.footnote)
-                            .foregroundStyle(automation.enabled ? ViciTheme.success : .secondary)
+                        // The state in words as well as in the switch, because
+                        // "is that grey or green" is not a question anybody
+                        // should have to squint at.
+                        if isBusy {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.mini)
+                                Text(isOn ? "Turning on" : "Turning off")
+                            }
+                            .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            Label(isOn ? "ON, running every day" : "OFF, nothing is sent",
+                                  systemImage: isOn ? "checkmark.circle.fill" : "pause.circle")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(isOn ? ViciTheme.success : .secondary)
+                        }
                     }
                 }
                 .disabled(!canApprove || isBusy)
 
-                if let next = automation.nextSendDate, automation.enabled {
+                if isOn, let next = automation?.nextSendDate {
                     LabeledContent("Next send") {
                         Text(next.formatted(date: .abbreviated, time: .shortened))
                             .foregroundStyle(.secondary)
                     }
                 }
-                if let last = automation.lastCampaign {
-                    // Named rather than counted. "Check in three weeks after an
-                    // order, by product, 2026-08-31" tells somebody which one
-                    // to open; "1 campaign this week" tells them nothing.
+                if let last = automation?.lastCampaign {
                     NavigationLink(value: AppRoute.campaign(id: last.id)) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(last.title ?? "This week's check-in")
-                                .lineLimit(2)
+                            Text(last.title ?? "This week's check-in").lineLimit(2)
                             Text((last.status ?? "").capitalized)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                 }
                 if let message {
-                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(failed ? ViciTheme.destructive : .secondary)
                 }
-            } else {
-                HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
             }
         } header: {
             Text("Automatic check-in")
         } footer: {
             if !canApprove {
                 Text("Your role can see this but cannot switch it on or off. Switching it on authorises check-ins to be sent without anyone approving them, so it needs the same permission as approving a campaign.")
-            } else if automation?.enabled == true {
+            } else if isOn {
                 Text("Everybody whose order passed the three-week mark in the last seven days is asked how it went. No offer, no code, and nobody is asked twice. It is built, approved and scheduled without you. Switching this off stops the next one; anything already scheduled still goes out unless you cancel it.")
             } else {
                 Text("Off. Nobody is checked in on unless you build the campaign yourself. Switching it on lets check-ins be approved and sent without you reading them first.")
@@ -385,27 +416,35 @@ struct CheckInAutomationSection: View {
 
     private func load() async {
         do {
-            automation = try await APIClient.shared.fetchCheckInAutomation()
+            let fresh = try await APIClient.shared.fetchCheckInAutomation()
+            automation = fresh
+            // Only adopt the server's value when no write is in flight, or a
+            // slow GET landing after a fast PUT would undo what was just set.
+            if !isBusy { isOn = fresh.enabled }
             loadFailed = false
         } catch {
             loadFailed = true
         }
     }
 
-    private func setEnabled(_ enabled: Bool) async {
-        guard !isBusy else { return }
+    private func commit(_ wanted: Bool) async {
         isBusy = true
+        message = nil
+        failed = false
         defer { isBusy = false }
         do {
-            let change = try await APIClient.shared.setCheckInAutomation(enabled: enabled)
+            let change = try await APIClient.shared.setCheckInAutomation(enabled: wanted)
+            // Trust the server's answer over the optimistic one.
+            isOn = change.enabled
             message = change.note
-            // Re-read rather than patching the local copy: switching on gives
-            // the server a next-send time to report, and guessing it here
-            // would put a different one on screen than the one it will use.
-            await load()
+            automation = try? await APIClient.shared.fetchCheckInAutomation()
         } catch {
+            // Put the switch back where it was. A control that stays where it
+            // was tapped while the change did not happen is worse than one that
+            // visibly refuses.
+            isOn = !wanted
+            failed = true
             message = error.localizedDescription
-            await load()
         }
     }
 }

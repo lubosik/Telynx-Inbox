@@ -331,3 +331,66 @@ test('the automation submits before it approves, in the source itself', () => {
     'a campaign must be finalised before it is scheduled'
   );
 });
+
+// ── The screen has to be able to answer "is it on?" ────────────────────────
+
+test('the route reads the last check-in, rather than querying a null workspace', async () => {
+  // sweptRecently had no default workspaceID and routes/campaigns.js called it
+  // without one, so the query became `.eq('workspace_id', undefined)`. That
+  // matches nothing and REPORTS it as "no check-in has run" rather than
+  // failing, so the screen showed no last campaign even while two were
+  // scheduled. The sweep itself passed the id, which is why only the screen
+  // was wrong and nothing sent twice.
+  const now = new Date();
+  const row = { id: 'c9', title: 'Check in', status: 'scheduled', created_at: now.toISOString() };
+  const seen = {};
+  const client = {
+    from() {
+      const chain = {
+        select() { return chain; },
+        eq(column, value) { seen[column] = value; return chain; },
+        neq() { return chain; }, gte() { return chain; }, order() { return chain; },
+        limit() { return Promise.resolve({ data: [row], error: null }); }
+      };
+      return chain;
+    }
+  };
+
+  const found = await sweptRecently({ client, now });
+  assert.equal(found.id, 'c9', 'a scheduled check-in must be found without naming the workspace');
+  assert.equal(seen.workspace_id, 'vici', 'and the query must name a real workspace');
+  assert.notEqual(seen.workspace_id, undefined);
+});
+
+test('the iOS switch owns its own state, so it moves when tapped', () => {
+  // The switch was bound to `Binding(get: { automation.enabled }, ...)` over an
+  // immutable snapshot. Tapping started an async request; SwiftUI re-read `get`
+  // and got the OLD value, so the switch flicked back under the finger and
+  // only settled a round trip later. The owner reported it as not working, and
+  // the audit log shows five taps in a row — it had turned on the first time.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'WorkspaceViews.swift'), 'utf8'
+  );
+  const whole = source.slice(
+    source.indexOf('struct CheckInAutomationSection'),
+    source.indexOf('struct AutomationQueueView')
+  );
+  // COMMENTS STRIPPED BEFORE MATCHING. The first version of this test failed
+  // against the doc comment directly above the fix, which quotes the broken
+  // binding in order to explain it. A test that reads prose and calls it code
+  // has already been written once in this repo; this is the second time.
+  const section = whole.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
+
+  assert.match(whole, /@State private var isOn = false/,
+    'the switch must read state this view owns, not a snapshot of the server response');
+  assert.doesNotMatch(section, /get:\s*\{\s*automation\.enabled\s*\}/,
+    'binding the switch straight to the fetched value is the bug');
+  assert.ok(section.indexOf('isOn = wanted') < section.indexOf('await commit(wanted)'),
+    'the switch must move before the request, not after it');
+  assert.match(section, /isOn = !wanted/, 'and move back only if the request fails');
+  // And it must say which state it is in, in words.
+  assert.match(section, /ON, running every day/);
+  assert.match(section, /OFF, nothing is sent/);
+});
