@@ -396,12 +396,28 @@ struct CampaignRecipeCatalogue: Codable, Hashable {
 /// Rejected drafts come back as rule ids with NO text, deliberately: a
 /// reviewer must not be able to lift a draft that failed validation out of a
 /// response and paste it into a campaign.
+/// Why a candidate was thrown away.
+///
+/// The server returns these already and iOS never decoded them, so a run where
+/// every draft failed validation showed "Every version broke a copy rule" and
+/// nothing else. The TEXT of a rejected draft is deliberately never returned —
+/// a reviewer must not be able to lift a non-compliant draft out of a response
+/// — but the rule ids and reasons are safe and are the only thing that makes
+/// the failure actionable.
+struct CampaignCopyRejection: Codable, Hashable {
+    let failedChecks: [String]?
+    let reasons: [String]?
+}
+
 struct CampaignCopySuggestions: Codable, Hashable {
     let workflowType: String?
     let brandName: String?
     let requested: Int?
     let returned: Int
     let candidates: [CampaignCopyCandidate]
+    /// Decoded so the app can say WHY nothing came back. Optional because the
+    /// field predates this and an older server may omit it.
+    let rejected: [CampaignCopyRejection]?
     let model: String?
     let copyStatus: String?
 }

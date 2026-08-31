@@ -32,7 +32,7 @@ test('an allowlisted code keeps its message, because that message helps', () => 
 test('anything else is hidden behind one sentence and a reference', () => {
   const log = recorder();
   const error = Object.assign(new Error('column sms_sent_log.created_at does not exist'), {
-    code: 'PGRST204', status: 400
+    code: 'CAMPAIGN_LOAD_FAILED', status: 400
   });
   const { status, body } = presentError(error, { action: 'approving this campaign', logger: log });
   assert.equal(status, 500, 'an internal fault is a 500 whatever status it carried');
@@ -45,6 +45,40 @@ test('anything else is hidden behind one sentence and a reference', () => {
   assert.equal(log.lines.length, 1);
   assert.match(log.lines[0], new RegExp(body.reference));
   assert.match(log.lines[0], /column sms_sent_log\.created_at does not exist/);
+});
+
+test('a pending migration says so, instead of reading as a mystery', () => {
+  // The owner switched on the automatic check-in and got "Something went wrong
+  // ... send this reference to Lubosi", which was true and useless. The real
+  // error was PGRST204: the column did not exist because the migration had not
+  // been run. That is a KNOWN, temporary, one-fix condition, and saying so is
+  // the difference between "the app is broken" and "the app is waiting".
+  const log = recorder();
+  const error = Object.assign(
+    new Error("Could not find the 'checkin_automation_enabled' column of 'sms_campaign_settings' in the schema cache"),
+    { code: 'PGRST204', status: 400 }
+  );
+  const { body } = presentError(error, { action: 'changing the check-in automation', logger: log });
+  assert.equal(body.code, 'PENDING_DATABASE_UPDATE');
+  assert.match(body.error, /database update that has not been applied/);
+  assert.match(body.error, /changing the check-in automation/);
+  assert.match(body.error, /VIC-[A-Z2-9]{6}/, 'the reference survives translation');
+  // Still no internals on the screen.
+  assert.doesNotMatch(body.error, /PGRST|schema cache|checkin_automation_enabled|column/);
+  // Still logged in full.
+  assert.match(log.lines[0], /checkin_automation_enabled/);
+});
+
+test('a translated fault may claim nothing changed, because nothing did', () => {
+  // The generic message deliberately never says "nothing was changed" — a
+  // failure during approval may have minted coupons before it threw. A
+  // rejected write is different: PGRST204 means the statement never ran, so
+  // the reassurance is true and worth giving.
+  const { body } = presentError(
+    Object.assign(new Error('Could not find the x column of y'), { code: 'PGRST204' }),
+    { action: 'saving this', logger: recorder() }
+  );
+  assert.match(body.error, /Nothing was changed/);
 });
 
 test('an error with no code at all is hidden too', () => {

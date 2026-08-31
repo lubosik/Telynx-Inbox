@@ -530,6 +530,16 @@ final class CampaignEditorModel: ObservableObject {
     /// dictation fills this by voice; nothing bespoke is needed for that.
     @Published var brief = ""
     @Published private(set) var suggestions: [CampaignCopyCandidate] = []
+    /// Which candidate the owner picked.
+    ///
+    /// The tap handler used to be one line, `model.message = candidate.text`,
+    /// and the message box is far enough down the form to be off screen. So
+    /// the copy changed and the screen did not, which reads as a dead button.
+    /// The owner reported exactly that.
+    @Published private(set) var chosenSuggestion: String?
+    /// How many times this draft has been refined. Shown so a run of
+    /// refinements reads as progress rather than as the same button again.
+    @Published private(set) var refinementCount = 0
     @Published private(set) var mergeFields: [CampaignMergeField] = []
     @Published private(set) var aiCopyEnabled = false
     @Published private(set) var isDrafting = false
@@ -627,24 +637,63 @@ final class CampaignEditorModel: ObservableObject {
         livePreview = nil
     }
 
-    func draftWithAI() async {
+    /**
+     * Ask the model for candidate copy.
+     *
+     * `refining` sends the message currently in the box along with the
+     * instruction, which turns "write me three messages" into "change THIS
+     * one, like so". Without it every request started from nothing, so an
+     * instruction like "make it warmer" had no referent and the drafts came
+     * back as unrelated generic messages — half of why the owner reported
+     * that it ignored him.
+     */
+    func draftWithAI(refining: Bool = false) async {
         let text = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let current = message.trimmingCharacters(in: .whitespacesAndNewlines)
         isDrafting = true
         copyError = nil
         defer { isDrafting = false }
         do {
-            let result = try await APIClient.shared.suggestCampaignCopy(brief: text)
+            let result = try await APIClient.shared.suggestCampaignCopy(
+                brief: text,
+                currentMessage: (refining && !current.isEmpty) ? current : nil
+            )
             suggestions = result.candidates
+            chosenSuggestion = nil
+            refinementCount = refining ? refinementCount + 1 : 0
             if result.candidates.isEmpty {
-                // Every draft failed validation. Their text is deliberately
-                // never returned, so there is nothing to show and the only
-                // useful thing to say is to try different words.
-                copyError = "Every version broke a copy rule, so none can be shown. Try describing it differently."
+                // The text of a rejected draft is deliberately never returned,
+                // so it cannot be shown. What CAN be shown is which rules they
+                // broke, and that is the difference between "it ignored me"
+                // and "it tried, and the compliance rules ate the results".
+                copyError = Self.rejectionMessage(result.rejected)
             }
         } catch {
             copyError = error.localizedDescription
         }
+    }
+
+    /// Say WHY there is nothing to show.
+    private static func rejectionMessage(_ rejected: [CampaignCopyRejection]?) -> String {
+        let reasons = (rejected ?? []).flatMap { $0.reasons ?? [] }
+        guard !reasons.isEmpty else {
+            return "Every version broke a copy rule, so none can be shown. Try describing it differently."
+        }
+        // Distinct, and capped: five identical reasons is one fact.
+        var seen: [String] = []
+        for reason in reasons where !seen.contains(reason) { seen.append(reason) }
+        let listed = seen.prefix(3).joined(separator: " ")
+        return "Every version broke a copy rule, so none can be shown. \(listed) "
+            + "Try asking for it differently."
+    }
+
+    /// Use a candidate, and say so.
+    func chooseSuggestion(_ candidate: CampaignCopyCandidate) {
+        message = candidate.text
+        chosenSuggestion = candidate.text
+        // The preview describes copy that no longer exists.
+        livePreview = nil
     }
 
     /// Render the copy currently in the box against the real audience.

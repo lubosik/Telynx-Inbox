@@ -33,7 +33,12 @@ const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
  * for identifier shapes before anything reaches a model.
  */
 const COPY_SUGGESTION_BODY_KEYS = new Set([
-  'workflowType', 'productName', 'cadence', 'brief', 'candidateCount', 'linkUrl', 'approvedProductCodes'
+  'workflowType', 'productName', 'cadence', 'brief', 'candidateCount', 'linkUrl', 'approvedProductCodes',
+  // The copy the owner is editing right now. Still campaign shape and not
+  // customer evidence: it is a TEMPLATE, so where a customer's name will
+  // eventually appear it currently reads {{first_name}}. copy-writer.js
+  // re-checks it for real identifiers before it reaches a model.
+  'currentMessage'
 ]);
 
 function generationRequest(body) {

@@ -1628,6 +1628,10 @@ struct CampaignEditorView: View {
                                     .allowsHitTesting(false)
                             }
                         }
+                    // Two buttons, because they ask for different things. The
+                    // second sends the message currently in the box, so an
+                    // instruction like "shorter, and lead with the code" has
+                    // something to act ON rather than starting from nothing.
                     Button {
                         Task { await model.draftWithAI() }
                     } label: {
@@ -1639,28 +1643,64 @@ struct CampaignEditorView: View {
                     }
                     .disabled(model.brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isDrafting)
 
-                    ForEach(model.suggestions) { candidate in
+                    if !model.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
-                            model.message = candidate.text
+                            Task { await model.draftWithAI(refining: true) }
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(candidate.text)
-                                    .font(.footnote)
-                                    .foregroundStyle(.primary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                HStack(spacing: 6) {
-                                    Text("\(candidate.septets) characters")
-                                    if !candidate.isSingleSegment {
-                                        Label("Two segments", systemImage: "exclamationmark.circle")
-                                            .foregroundStyle(ViciTheme.warning)
-                                    }
-                                }
-                                .font(.caption2).foregroundStyle(.secondary)
-                            }
+                            Label(model.refinementCount > 0 ? "Change it again" : "Change the message above",
+                                  systemImage: "arrow.triangle.2.circlepath")
                         }
+                        .disabled(model.brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isDrafting)
+                        .accessibilityHint("Rewrites the message you already have, using what you typed above")
+                    }
+
+                    ForEach(model.suggestions) { candidate in
+                        // ── THE TAP HAS TO BE VISIBLE ────────────────────────
+                        //
+                        // This used to be `model.message = candidate.text` and
+                        // nothing else. The message box is far enough down the
+                        // form to be off screen, so the copy changed where the
+                        // owner could not see it and the row looked dead. He
+                        // reported it as the variants not registering a tap.
+                        let isChosen = model.chosenSuggestion == candidate.text
+                        Button {
+                            model.chooseSuggestion(candidate)
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: isChosen ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(isChosen ? ViciTheme.success : Color.secondary)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(candidate.text)
+                                        .font(.footnote)
+                                        .foregroundStyle(.primary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    HStack(spacing: 6) {
+                                        if isChosen {
+                                            Text("In the message box")
+                                                .foregroundStyle(ViciTheme.success)
+                                        }
+                                        Text("\(candidate.septets) characters")
+                                        if !candidate.isSingleSegment {
+                                            Label("Two segments", systemImage: "exclamationmark.circle")
+                                                .foregroundStyle(ViciTheme.warning)
+                                        }
+                                    }
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .listRowBackground(isChosen ? ViciTheme.success.opacity(0.12) : nil)
+                        .accessibilityAddTraits(isChosen ? [.isSelected] : [])
+                        .accessibilityLabel(isChosen
+                                            ? "Selected version: \(candidate.text)"
+                                            : "Version: \(candidate.text)")
                     }
                     if !model.suggestions.isEmpty {
-                        Text("Every version above already passed the copy rules. Tap one to use it, then edit it however you like.")
+                        Text(model.chosenSuggestion == nil
+                             ? "Every version above already passed the copy rules. Tap one to put it in the message box."
+                             : "That version is now in the message box above. Edit it there, or type another instruction and tap Change it again.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

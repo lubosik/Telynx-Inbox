@@ -786,12 +786,21 @@ actor APIClient {
     /// The brief is campaign shape only: no recipient, no phone, no contact,
     /// no order. The server re-checks it for identifier shapes before anything
     /// reaches a model, and refuses the whole request rather than stripping.
-    func suggestCampaignCopy(brief: String, count: Int = 3) async throws -> CampaignCopySuggestions {
-        let (data, response) = try await post("/api/campaigns/copy-suggestions", body: [
+    /// `currentMessage` is the copy being edited. Sending it turns a request
+    /// for three new messages into a request to REVISE this one, which is what
+    /// an instruction like "make it warmer" needs in order to mean anything.
+    /// Still campaign shape, not customer evidence: it is a template, so a
+    /// customer's name appears in it as `{{first_name}}`.
+    func suggestCampaignCopy(
+        brief: String, count: Int = 3, currentMessage: String? = nil
+    ) async throws -> CampaignCopySuggestions {
+        var body: [String: Any] = [
             "workflowType": "manual",
             "brief": brief,
             "candidateCount": count
-        ])
+        ]
+        if let currentMessage, !currentMessage.isEmpty { body["currentMessage"] = currentMessage }
+        let (data, response) = try await post("/api/campaigns/copy-suggestions", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignCopySuggestions.self, from: data) }
         catch { throw APIError.decoding }

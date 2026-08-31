@@ -246,7 +246,7 @@ test('the requested candidate count is clamped to a sane range', async () => {
   for (const [asked, expected] of [[1, 2], [4, 4], [5, 5], [50, 5], [undefined, 4]]) {
     const record = {};
     await draft({ workflowType: 'winback', candidateCount: asked }, GOOD_DRAFTS, record);
-    assert.match(record.user, new RegExp(`Write ${expected} different candidate messages`), `asked ${asked}`);
+    assert.match(record.user, new RegExp(`Write ${expected} candidate messages`), `asked ${asked}`);
   }
 });
 
@@ -458,4 +458,167 @@ test('no test in this file can reach the network', async () => {
   } finally {
     global.fetch = realFetch;
   }
+});
+
+// ── The brief is the job, not a footnote ───────────────────────────────────
+//
+// The owner reported "it did not adhere to what I said". Four separate causes
+// were found, and each of these tests holds one of them shut.
+
+test('a real instruction reaches the model whole, not cut at 80 characters', async () => {
+  // THE decisive bug. assertBrief ran the brief through cleanLabel, a TITLE
+  // helper ending in .slice(0, 80), and the .slice(0, 200) beside it was dead
+  // code. Half of any real instruction was dropped in silence, which is
+  // exactly what "it ignored me" looks like from the outside.
+  const brief = 'Rewrite this so it leads with the offer instead of the greeting, mention that '
+    + 'the code works on the whole range and not just what they bought last time, and keep the '
+    + 'tone calm rather than salesy. Do not use the word discount.';
+  assert.ok(brief.length > 80 && brief.length < 600, 'fixture must exceed the old limit');
+
+  const record = {};
+  await draft({ workflowType: 'winback', brief }, GOOD_DRAFTS, record);
+  assert.ok(record.user.includes(brief), 'the whole instruction must reach the prompt');
+  assert.ok(record.user.includes('Do not use the word discount'), 'including its last sentence');
+});
+
+test('an over-long instruction is refused out loud rather than trimmed in silence', async () => {
+  await assert.rejects(
+    draft({ workflowType: 'winback', brief: 'a'.repeat(700) }, GOOD_DRAFTS),
+    error => error.code === 'CAMPAIGN_AI_COPY_BRIEF_TOO_LONG'
+      && /700 characters/.test(error.message)
+      && /limit is 600/.test(error.message)
+  );
+});
+
+test('a percentage can be asked for, because the rules invite one', async () => {
+  // copy-rules.js rule 12: "You may state a percentage only when the brief
+  // asks for one." BRIEF_PATTERN refused the % character outright, so the
+  // rules invited a brief that was impossible to write. Two components
+  // answering one question, and the wrong one winning.
+  const rules = renderPromptRules();
+  assert.match(rules, /percentage only when the brief asks/i, 'the invitation still exists');
+
+  const record = {};
+  await draft({ workflowType: 'winback', brief: 'lead with the 15% off and say it ends Sunday' },
+    GOOD_DRAFTS, record);
+  assert.ok(record.user.includes('15% off'));
+});
+
+test('ordinary writing punctuation survives', async () => {
+  for (const brief of [
+    "don't mention the price, just say it's back",
+    'make it warmer & shorter',
+    'ask "how did it go" instead of "all good"',
+    'push the bundle (not the single) this time'
+  ]) {
+    const record = {};
+    await draft({ workflowType: 'winback', brief }, GOOD_DRAFTS, record);
+    assert.ok(record.user.includes(brief), `refused: ${brief}`);
+  }
+});
+
+test('customer identity is still refused in a longer brief', async () => {
+  // Widening the pattern must not have widened the security boundary. An
+  // attempt to allow currency amounts here was caught by the existing PII
+  // test: "she spent $940 with us" matches the shop-pricing shape exactly.
+  for (const brief of [
+    'follow up with sarah at sarah@example.com about the reorder and keep it short',
+    'she spent $940 with us so make it worth her while',
+    'this is about order #10482 and the customer is unhappy about the delay'
+  ]) {
+    await assert.rejects(
+      draft({ workflowType: 'winback', brief }, GOOD_DRAFTS),
+      error => ['CAMPAIGN_AI_COPY_PII_REJECTED', 'CAMPAIGN_AI_COPY_INPUT_REJECTED'].includes(error.code),
+      `should have refused: ${brief}`
+    );
+  }
+});
+
+test('the instruction is stated before the constraints, not buried after them', async () => {
+  const record = {};
+  await draft({ workflowType: 'winback', brief: 'lead with the offer' }, GOOD_DRAFTS, record);
+  assert.ok(
+    record.user.indexOf('lead with the offer') < record.user.indexOf('Campaign type:'),
+    'the brief must come before the boilerplate context, or the model treats it as a hint'
+  );
+  assert.match(record.user, /WHAT YOU HAVE BEEN ASKED TO DO/);
+  assert.match(record.user, /That instruction is the job/);
+});
+
+// ── Revising, rather than starting again ───────────────────────────────────
+
+test('the message being edited reaches the model', async () => {
+  const current = `${BRAND}. Hi {{first_name}}, thanks for the {{last_product}} order. `
+    + `{{code}} is 15% off your next order. ${COPY_RULES.optOut.exactSuffix}`;
+  const record = {};
+  await draft(
+    { workflowType: 'winback', brief: 'make it warmer', currentMessage: current },
+    GOOD_DRAFTS, record
+  );
+  assert.ok(record.user.includes(current), 'the current draft must be in the prompt');
+  assert.match(record.user, /THE MESSAGE BEING REVISED/);
+  assert.match(record.user, /Revise THIS message/);
+});
+
+test('merge fields in the current message are not mistaken for customer identity', async () => {
+  // {{first_name}} is the shape the data takes when it has NOT been
+  // substituted, which is the opposite of identity. Refusing it would make
+  // every personalised message impossible to revise, and most of them are.
+  const record = {};
+  await draft(
+    { workflowType: 'winback', currentMessage: `${BRAND}. Hi {{first_name}}, hello. ${COPY_RULES.optOut.exactSuffix}` },
+    GOOD_DRAFTS, record
+  );
+  assert.ok(record.user.includes('{{first_name}}'));
+});
+
+test('a real name in the current message is still refused', async () => {
+  await assert.rejects(
+    draft({ workflowType: 'winback', currentMessage: 'Hi, call Sarah on +1 561 555 0100 today' }, GOOD_DRAFTS),
+    error => error.code === 'CAMPAIGN_AI_COPY_PII_REJECTED'
+  );
+});
+
+test('a brief with no current message asks for new copy, not a revision', async () => {
+  const record = {};
+  await draft({ workflowType: 'winback', brief: 'something for the bundle' }, GOOD_DRAFTS, record);
+  assert.doesNotMatch(record.user, /THE MESSAGE BEING REVISED/);
+});
+
+// ── The model is told how to write, not only what not to write ─────────────
+
+test('the prompt carries business context and craft, not just prohibitions', () => {
+  const system = buildSystemPrompt();
+  const { BUSINESS, TECHNIQUES } = require('../lib/campaigns/copy-craft');
+
+  // Who it is writing for.
+  assert.ok(system.includes(BUSINESS.what), 'the model must know what the shop sells');
+  assert.match(system, /Voice:/);
+
+  // How to write. Every technique, verbatim, the same way the rules are.
+  for (const technique of TECHNIQUES) {
+    assert.ok(system.includes(technique), `technique missing from prompt: ${technique.slice(0, 40)}`);
+  }
+
+  // The rules are still there, and still absolute.
+  assert.ok(system.includes(renderPromptRules()), 'the rules must reach the prompt verbatim');
+  assert.match(system, /thrown away/);
+
+  // And the ordering that matters: craft is guidance, rules are law, and the
+  // brief outranks both.
+  assert.ok(system.indexOf('HOW TO WRITE WELL') < system.indexOf('ABSOLUTE RULES'));
+  assert.match(system, /The rules are the floor, not the brief/);
+});
+
+test('the model is asked to check its own work against the brief', () => {
+  const system = buildSystemPrompt();
+  assert.match(system, /BEFORE YOU ANSWER/);
+  assert.match(system, /Does this message do what the brief asked for/);
+});
+
+test('candidates are asked to differ by approach rather than by synonym', async () => {
+  const record = {};
+  await draft({ workflowType: 'winback' }, GOOD_DRAFTS, record);
+  assert.match(record.user, /genuinely different from each other/);
+  assert.match(record.user, /Three wordings of one sentence is one candidate/);
 });
