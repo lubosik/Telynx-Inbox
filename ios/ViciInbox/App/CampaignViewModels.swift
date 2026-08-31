@@ -31,8 +31,6 @@ final class CampaignListModel: ObservableObject {
     @Published private(set) var campaigns: [CampaignRecord] = []
     @Published private(set) var reviewCount = 0
     @Published private(set) var isLoading = false
-    /// The extra sections still arriving after the screen has drawn.
-    @Published private(set) var isEnriching = false
     @Published private(set) var isLoadingMore = false
     @Published var errorMessage: String?
 
@@ -178,6 +176,8 @@ final class CampaignDetailModel: ObservableObject {
     @Published private(set) var financial: CampaignFinancialOverview?
     @Published private(set) var financialUnavailableMessage: String?
     @Published private(set) var isLoading = false
+    /// The extra sections still arriving after the screen has already drawn.
+    @Published private(set) var isEnriching = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var isActing = false
     @Published var errorMessage: String?
@@ -263,34 +263,59 @@ final class CampaignDetailModel: ObservableObject {
         isEnriching = true
         defer { isEnriching = false }
 
-        async let performanceTask: Void = {
-            // Performance was added after campaign detail. Keep detail usable
-            // during an additive rollout where this endpoint may not have
-            // reached every environment yet.
-            self.performance = try? await APIClient.shared.fetchCampaignPerformance(id: self.campaignID)
-        }()
+        // ── FETCH CONCURRENTLY, ASSIGN AFTERWARDS ────────────────────────
+        //
+        // The child task an `async let` starts is NOT on the main actor, so
+        // writing `self.performance = …` inside one is mutating main-actor
+        // state from a nonisolated context and does not compile. The two pure
+        // fetches are therefore `nonisolated static` helpers returning VALUES,
+        // and every assignment happens below, after the await, back here.
+        //
+        // The dry run and the preview are the exception: they are methods on
+        // this @MainActor class that already own their own state, so awaiting
+        // them hops back on its own.
+        async let performanceValue = Self.performanceOrNil(campaignID: campaignID)
+        async let financialValue = Self.financialOutcome(campaignID: campaignID, wanted: canFinancial)
+        async let dryRunDone: Void = dryRunIfWanted(canDryRun)
+        async let previewDone: Void = refreshPreview()
 
-        async let dryRunTask: Void = {
-            guard canDryRun else { return }
-            await self.refreshDryRun()
-        }()
+        let (performanceResult, financialResult, _, _) =
+            await (performanceValue, financialValue, dryRunDone, previewDone)
 
-        async let previewTask: Void = {
-            await self.refreshPreview()
-        }()
+        performance = performanceResult
 
-        async let financialTask: Void = {
-            guard canFinancial else { return }
-            do {
-                self.financial = try await APIClient.shared.fetchCampaignFinancialOverview(id: self.campaignID)
-                self.financialUnavailableMessage = nil
-            } catch {
-                self.financial = nil
-                self.financialUnavailableMessage = error.localizedDescription
-            }
-        }()
+        switch financialResult {
+        case .success(let overview):
+            financial = overview
+            financialUnavailableMessage = nil
+        case .failure(let error):
+            financial = nil
+            financialUnavailableMessage = error.localizedDescription
+        case .none:
+            break // Already cleared in load(), before the permission-gated fetch.
+        }
+    }
 
-        _ = await (performanceTask, dryRunTask, previewTask, financialTask)
+    private func dryRunIfWanted(_ wanted: Bool) async {
+        guard wanted else { return }
+        await refreshDryRun()
+    }
+
+    /// Performance was added after campaign detail. Keep detail usable during
+    /// an additive rollout where this endpoint may not have reached every
+    /// environment yet — hence the swallow rather than a thrown error.
+    nonisolated private static func performanceOrNil(campaignID: String) async -> CampaignPerformance? {
+        try? await APIClient.shared.fetchCampaignPerformance(id: campaignID)
+    }
+
+    /// nil when the role cannot see money at all, which is different from a
+    /// fetch that failed, and the screen says something different for each.
+    nonisolated private static func financialOutcome(
+        campaignID: String, wanted: Bool
+    ) async -> Result<CampaignFinancialOverview, Error>? {
+        guard wanted else { return nil }
+        do { return .success(try await APIClient.shared.fetchCampaignFinancialOverview(id: campaignID)) }
+        catch { return .failure(error) }
     }
 
     func loadMoreRecipientsIfNeeded(after recipient: CampaignRecipient) async {
