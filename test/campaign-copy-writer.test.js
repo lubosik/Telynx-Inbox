@@ -622,3 +622,80 @@ test('candidates are asked to differ by approach rather than by synonym', async 
   assert.match(record.user, /genuinely different from each other/);
   assert.match(record.user, /Three wordings of one sentence is one candidate/);
 });
+
+// ── What a phone keyboard actually produces ────────────────────────────────
+
+test('an instruction typed on a phone is accepted, curly apostrophes and all', async () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // THE BUG
+  //
+  //   "Your instruction contains a character that cannot be sent to the
+  //    drafting model."
+  //
+  //   The character was U+2019, which iOS substitutes for a straight
+  //   apostrophe automatically. So EVERY instruction containing a contraction
+  //   was refused from a phone: "don't", "can't", "it's", "we're" — close to
+  //   every sentence a person actually writes.
+  //
+  //   This is the owner's real instruction, verbatim, with the apostrophes iOS
+  //   gave it.
+  // ═══════════════════════════════════════════════════════════════════════
+  const asTyped = 'The part where it’s saying last product included is very misleading we do '
+    + 'want it to be personalised but be very clear on the marketing language and still reference '
+    + 'the last product they bought or most frequent but saying it’s included they could think '
+    + 'they’re getting that product for free.';
+
+  const record = {};
+  await draft({ workflowType: 'winback', brief: asTyped }, GOOD_DRAFTS, record);
+  assert.ok(record.user.includes("it's saying last product included"),
+    'the instruction must reach the model, with the apostrophe normalised');
+  assert.ok(!record.user.includes('’'), 'and no curly apostrophe should survive into the prompt');
+});
+
+test('every character a phone substitutes is normalised, not refused', async () => {
+  const { normaliseTypography } = require('../lib/campaigns/copy-writer');
+  assert.equal(normaliseTypography('it’s'), "it's");
+  assert.equal(normaliseTypography('“quoted”'), '"quoted"');
+  assert.equal(normaliseTypography('a — b'), 'a - b');
+  assert.equal(normaliseTypography('and…'), 'and...');
+  assert.equal(normaliseTypography('a b'), 'a b');
+
+  // And end to end, so the pattern really never sees them.
+  for (const brief of [
+    'don’t mention the price',
+    'say “how did it go” instead',
+    'shorter — and warmer',
+    'keep it calm… not salesy'
+  ]) {
+    const record = {};
+    await draft({ workflowType: 'winback', brief }, GOOD_DRAFTS, record);
+    assert.doesNotMatch(record.user, /[‘’“”–—…]/,
+      `smart punctuation survived into the prompt for: ${brief}`);
+  }
+});
+
+test('a character that really is refused is named, so it can be removed', async () => {
+  // "contains a character" tells nobody which one. The owner could not have
+  // found an apostrophe by reading that sentence.
+  // A brace is caught by the pattern before the identity guard sees it, so
+  // either refusal is correct here; what matters is that it names the brace.
+  const braces = await draft({ workflowType: 'winback', brief: 'use the {{first_name}} variable' },
+    GOOD_DRAFTS).catch(error => error);
+  assert.ok(['CAMPAIGN_AI_COPY_INPUT_REJECTED', 'CAMPAIGN_AI_COPY_PII_REJECTED'].includes(braces.code));
+  if (braces.code === 'CAMPAIGN_AI_COPY_INPUT_REJECTED') {
+    assert.match(braces.message, /"\{"/, 'the refused character must be named');
+  }
+  const thrown = await draft({ workflowType: 'winback', brief: 'push it → harder' }, GOOD_DRAFTS)
+    .catch(error => error);
+  assert.equal(thrown.code, 'CAMPAIGN_AI_COPY_INPUT_REJECTED');
+  assert.match(thrown.message, /"→"/, 'the refused character must be named in the message');
+});
+
+test('normalising cannot be used to smuggle identity past the guard', async () => {
+  // The normalisation runs BEFORE assertNoCustomerIdentity, so a smart-quoted
+  // email is still an email.
+  await assert.rejects(
+    draft({ workflowType: 'winback', brief: 'follow up with sarah’s address sarah@example.com' }, GOOD_DRAFTS),
+    error => ['CAMPAIGN_AI_COPY_PII_REJECTED', 'CAMPAIGN_AI_COPY_INPUT_REJECTED'].includes(error.code)
+  );
+});
