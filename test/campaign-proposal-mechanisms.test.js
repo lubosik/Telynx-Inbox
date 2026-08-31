@@ -86,7 +86,16 @@ test('the limit is clamped rather than trusted', () => {
   assert.equal(selectMechanisms({ limit: 0 }).length, MIN_MECHANISM_LIMIT,
     'zero clamps up to the minimum');
   // A non-numeric limit falls back to the default rather than throwing.
-  assert.equal(selectMechanisms({ limit: 'four' }).length, DEFAULT_MECHANISM_LIMIT);
+  //
+  // Compared against what an explicit default actually returns, not against
+  // the constant. Retiring free_shipping dropped the offerable count below
+  // DEFAULT_MECHANISM_LIMIT, and pinning the raw number turned "the fallback
+  // behaves like the default" — which is the property under test and is still
+  // true — into a test of how many mechanisms happen to exist today.
+  assert.equal(
+    selectMechanisms({ limit: 'four' }).length,
+    selectMechanisms({ limit: DEFAULT_MECHANISM_LIMIT }).length
+  );
 
   // A huge limit no longer returns the whole catalogue, and should not: only
   // one arm may cost margin, so the three monetary mechanisms cannot all be
@@ -298,4 +307,41 @@ test('when the repeat-purchase research lands, its DECISIONS reconcile with this
     missing, [],
     `\n\nThe research names mechanisms this catalogue does not have:\n  ${missing.join('\n  ')}\n`
   );
+});
+
+// ── Retired mechanisms ─────────────────────────────────────────────────────
+
+test('free shipping is never offered, because this system does not control shipping', () => {
+  // The owner's words: "I'm not involved in the shipping APIs and all that
+  // stuff. That's not really under our control."
+  //
+  // Every other mechanism resolves to something this system creates and can
+  // verify: a coupon it mints, a bundle it names, a question it asks. A
+  // shipping concession resolves to a change in a fulfilment pipeline nobody
+  // here touches, so the campaign promises something the app can neither
+  // apply, confirm, nor withdraw.
+  const { RETIRED_MECHANISMS, selectMechanisms, MECHANISMS } = require('../lib/campaigns/proposal-mechanisms');
+
+  assert.ok(RETIRED_MECHANISMS.free_shipping, 'the refusal must be recorded with its reason');
+
+  // Not at any limit, and not for any cohort.
+  for (const limit of [1, 3, 5, 99]) {
+    const offered = selectMechanisms({ limit }).map(m => m.id);
+    assert.ok(!offered.includes('free_shipping'), `offered at limit ${limit}`);
+  }
+
+  // Kept in the catalogue on purpose. A deleted mechanism gets re-added by the
+  // next person who thinks a shipping offer is an obvious thing for a shop to
+  // run; the definition stays so the refusal is attached to it.
+  assert.ok(MECHANISMS.free_shipping, 'the definition stays, carrying the reason it is refused');
+});
+
+test('retiring one mechanism did not empty the catalogue', () => {
+  const { selectMechanisms } = require('../lib/campaigns/proposal-mechanisms');
+  const offered = selectMechanisms({ limit: 99 });
+  assert.ok(offered.length >= 4, `only ${offered.length} mechanisms remain offerable`);
+  // The no-offer arm is the one that must always survive: it is the only
+  // mechanism that costs nothing and the only one a cohort can never be
+  // ineligible for.
+  assert.ok(offered.some(m => m.id === 'plain_check_in'));
 });

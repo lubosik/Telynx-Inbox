@@ -288,3 +288,68 @@ test('an archived segment is still reachable from the app', () => {
   assert.match(SEGMENT_VIEW_MODELS, /includeArchived: true/);
   assert.match(API_CLIENT, /func restoreSegment/);
 });
+
+test('EVERY api path the client calls is declared in the route policy', () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // THE BUG THIS GENERALISES FROM
+  //
+  //   APIClient.swift called POST /api/campaigns/:id/archive and
+  //   /unarchive, with the comment "ASSUMED CONTRACT" above them. The
+  //   assumption was wrong: neither route was ever built. The enforcer
+  //   default-denied the request — correctly, that is what default-deny is
+  //   for — and the owner saw "this endpoint has no authorization policy and
+  //   is therefore denied" while trying to archive cancelled campaigns.
+  //
+  //   The test above this one lists three segment paths BY HAND, so it could
+  //   never have caught a fourth. This one reads every path the client
+  //   actually calls, so a route added to Swift without a policy entry fails
+  //   here rather than on somebody's phone.
+  //
+  //   Path only, not method: inferring the verb through post()/get()/
+  //   decodedGET()/campaignMutation() wrappers would be guesswork, and a path
+  //   nobody declared at all is the failure that actually happened.
+  // ═══════════════════════════════════════════════════════════════════════
+  const { ROUTE_POLICY } = require('../lib/route-policy');
+  // Both sides reduced to the same shape. A parameter's NAME is not part of
+  // the contract — the policy calls one `:phone` and the Swift interpolates a
+  // phone into it — but its POSITION is, and a path with a segment nobody
+  // declared is the failure that actually happened.
+  const shapeOf = value => value.replace(/:[A-Za-z][A-Za-z0-9_]*/g, ':param');
+  const policedPaths = new Set(ROUTE_POLICY.map(entry => shapeOf(entry.path)));
+
+  const called = new Set();
+  for (const match of API_CLIENT.matchAll(/"(\/api\/[^"]*)"/g)) {
+    const shape = match[1]
+      // "\(encodedPathSegment(id))" is one path segment. The inner call has
+      // its own parentheses, so the match has to allow one level of nesting or
+      // it stops early and leaves a stray ")" on every id.
+      .replace(/\\\((?:[^()]|\([^()]*\))*\)/g, ':param')
+      .replace(/\?.*$/, '')
+      .replace(/\/+$/, '');
+    if (shape.startsWith('/api/')) called.add(shape);
+  }
+  assert.ok(called.size > 20, `expected to find many paths, found ${called.size}`);
+
+  const undeclared = [...called].filter(path => !policedPaths.has(shapeOf(path))).sort();
+  assert.deepEqual(undeclared, [],
+    'These paths are called by the iOS client and have no entry in lib/route-policy.js, '
+    + 'so the enforcer default-denies them and the feature is dead on the phone:\n  '
+    + undeclared.join('\n  '));
+});
+
+test('archive and unarchive specifically, since the app has always called them', () => {
+  const { ROUTE_POLICY } = require('../lib/route-policy');
+  const policed = new Set(ROUTE_POLICY.map(entry => `${entry.method} ${entry.path}`));
+  for (const signature of [
+    'POST /api/campaigns/:id/archive',
+    'POST /api/campaigns/:id/unarchive'
+  ]) {
+    assert.ok(policed.has(signature), `${signature} must be policed`);
+  }
+  // And actually implemented, not merely declared. A policy entry for a route
+  // that does not exist is a 404 rather than a 403, which is a different
+  // confusing answer to the same question.
+  const routes = fs.readFileSync(path.join(ROOT, 'routes', 'campaigns.js'), 'utf8');
+  assert.match(routes, /router\.post\('\/:id\/archive'/);
+  assert.match(routes, /router\.post\('\/:id\/unarchive'/);
+});

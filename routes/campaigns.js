@@ -866,6 +866,76 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'removing this campaign'); }
   });
 
+  /**
+   * Archive, explicitly.
+   *
+   * ── WHY THIS EXISTS SEPARATELY FROM DELETE ─────────────────────────────
+   *
+   * The app has always called POST /:id/archive. The route was never built:
+   * APIClient.swift carries the comment "ASSUMED CONTRACT" above it, and the
+   * assumption was wrong. The only archive path on the server was DELETE with
+   * `mode: "archive"` in the body.
+   *
+   * So the request hit no declared route, the policy enforcer default-denied
+   * it — correctly, that is what default-deny is for — and the owner saw
+   * "this endpoint has no authorization policy and is therefore denied" while
+   * trying to tidy up cancelled campaigns.
+   *
+   * Building the route the client already calls is the right fix rather than
+   * changing the client, because "archive this" and "delete this" are
+   * different intentions and a DELETE that sometimes archives reads as a
+   * delete that failed.
+   */
+  router.post('/:id/archive', async (req, res) => {
+    try {
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null;
+      const preview = await campaigns.deletionPreview(req.params.id);
+      // mode 'archive' never destroys, whatever the campaign's state.
+      const result = await campaigns.remove(req.params.id, { mode: 'archive', reason }, req.actor);
+      await auditCampaign('campaign.archived', req, preview.campaign, {
+        summary: `Archived ${campaignSummaryName(preview.campaign)}`,
+        previousState: { status: preview.campaign.status, archived: false },
+        newState: { status: result.status, archived: true },
+        metadata: { revision: preview.campaign.revision, requested_mode: 'archive', reason },
+        fingerprint: `campaign-archived:${preview.campaign.id}`
+      });
+      return res.json(result);
+    } catch (error) { return sendError(res, error, 'archiving this campaign'); }
+  });
+
+  /**
+   * The exact inverse. Puts a campaign back on the working list.
+   *
+   * A plain UPDATE rather than an RPC: archiving has to reason about approval
+   * and delivery evidence before it decides whether it may destroy anything,
+   * and un-archiving destroys nothing and needs to reason about none of it.
+   */
+  router.post('/:id/unarchive', async (req, res) => {
+    try {
+      const { data, error } = await db()
+        .from('sms_campaigns')
+        .update({ archived_at: null, updated_at: new Date().toISOString() })
+        .eq('id', req.params.id).eq('workspace_id', 'vici')
+        .select('id, title, status, revision, archived_at')
+        .maybeSingle();
+      if (error) {
+        throw Object.assign(new Error(error.message), { code: 'CAMPAIGN_UNARCHIVE_FAILED', status: 500 });
+      }
+      if (!data) {
+        throw Object.assign(new Error('That campaign no longer exists.'), {
+          code: 'CAMPAIGN_NOT_FOUND', status: 404
+        });
+      }
+      await auditCampaign('campaign.unarchived', req, data, {
+        summary: `Put ${campaignSummaryName(data)} back on the working list`,
+        previousState: { archived: true },
+        newState: { archived: false, status: data.status },
+        metadata: { revision: data.revision }
+      });
+      return res.json({ campaign: data, outcome: 'unarchived' });
+    } catch (error) { return sendError(res, error, 'unarchiving this campaign'); }
+  });
+
   return router;
 }
 

@@ -65,10 +65,6 @@ const DRAFTS = {
     message: `${BRAND}: how did things go with us, reply and let us know. Reply STOP to opt out.`,
     rationale: 'A written answer from one person tells the business more than a rate on a group this size.'
   },
-  free_shipping: {
-    message: `${BRAND}: there is something waiting on your next order, details on our site. Reply STOP to opt out.`,
-    rationale: 'Shipping is a cost the customer meets at checkout without having chosen it.'
-  },
   bundle: {
     message: `${BRAND}: there is a pairing in the range worth a look, ask us for details. Reply STOP to opt out.`,
     rationale: 'Changing what is on the table is different from changing what it costs.'
@@ -151,7 +147,7 @@ function opportunity(overrides = {}) {
   };
 }
 
-async function draft({ mechanisms = ['plain_check_in', 'product_education', 'ask_what_stopped_them', 'free_shipping'],
+async function draft({ mechanisms = ['plain_check_in', 'product_education', 'ask_what_stopped_them', 'bundle'],
   overrides = {}, input = {}, env = ON, content } = {}) {
   const completion = stubCompletion(content ?? reply(mechanisms, overrides));
   const result = await draftProposals(
@@ -230,9 +226,12 @@ test('MUTATION: three rewordings of one message yield ONE proposal, not three', 
 
 test('the similarity measure separates a reworded message from a different one', () => {
   const brand = 'Vici';
-  const a = contentTokens(DRAFTS.free_shipping.message, brand);
+  const a = contentTokens(DRAFTS.bundle.message, brand);
+  // A genuine reword of DRAFTS.bundle above. It used to reword the retired
+  // free_shipping message, so once `a` moved the two were simply different
+  // messages and the test was measuring nothing.
   const reworded = contentTokens(
-    `${BRAND}: something is waiting on your next order, details are on our site. Reply STOP to opt out.`, brand
+    `${BRAND}: there is a pairing in our range worth a look, just ask us for the details. Reply STOP to opt out.`, brand
   );
   const different = contentTokens(DRAFTS.plain_check_in.message, brand);
   assert.ok(similarity(a, reworded) >= MAX_COPY_SIMILARITY, 'a reword must read as a duplicate');
@@ -244,11 +243,11 @@ test('the similarity measure separates a reworded message from a different one',
 test('MUTATION: a draft that fails the copy validator is never surfaced', async () => {
   const { result } = await draft({
     overrides: {
-      free_shipping: { message: `${BRAND}: FREE shipping today only, save 20% now. Reply STOP to opt out.` }
+      bundle: { message: `${BRAND}: FREE shipping today only, save 20% now. Reply STOP to opt out.` }
     }
   });
-  assert.equal(result.proposals.some(item => item.mechanism === 'free_shipping'), false);
-  const refusal = result.refused.find(item => item.mechanism === 'free_shipping');
+  assert.equal(result.proposals.some(item => item.mechanism === 'bundle'), false);
+  const refusal = result.refused.find(item => item.mechanism === 'bundle');
   assert.equal(refusal.stage, 'copy_validator');
   assert.ok(refusal.failedChecks.length > 0);
 });
@@ -296,10 +295,10 @@ test('every surfaced proposal carries validated copy with no failed checks', asy
 
 test('MUTATION: a rationale containing a digit refuses the whole proposal', async () => {
   const { result } = await draft({
-    overrides: { free_shipping: { rationale: 'About 15 percent of this group should come back.' } }
+    overrides: { bundle: { rationale: 'About 15 percent of this group should come back.' } }
   });
-  assert.equal(result.proposals.some(item => item.mechanism === 'free_shipping'), false);
-  const refusal = result.refused.find(item => item.mechanism === 'free_shipping');
+  assert.equal(result.proposals.some(item => item.mechanism === 'bundle'), false);
+  const refusal = result.refused.find(item => item.mechanism === 'bundle');
   assert.equal(refusal.stage, 'rationale');
   assert.ok(refusal.reasons.includes('rationale_contains_a_number'));
 });
@@ -379,10 +378,15 @@ test('an unexpected input key is refused, because recipients are server-owned', 
 test('prose instead of JSON produces no proposals and a refusal for each mechanism', async () => {
   const { result } = await draft({ content: 'Here are some great ideas for you!' });
   assert.equal(result.returned, 0);
-  // One refusal per mechanism the writer actually asked about, which is the
-  // default limit rather than a hardcoded four. That default moved from four
-  // to six so the personalised arms are always offered.
-  assert.equal(result.refused.length, DEFAULT_MECHANISM_LIMIT);
+  // One refusal per mechanism the writer actually asked about.
+  //
+  // Measured, not assumed. This used to assert DEFAULT_MECHANISM_LIMIT, which
+  // held only while every mechanism in the catalogue was offerable. Retiring
+  // free_shipping dropped the offerable count below the default, and the
+  // property under test — a refusal for EACH mechanism asked about — is about
+  // the pairing, not about how many mechanisms happen to exist.
+  const asked = selectMechanisms({ limit: DEFAULT_MECHANISM_LIMIT }).length;
+  assert.equal(result.refused.length, asked);
   assert.ok(result.refused.every(item => item.reasons.includes('model_wrote_nothing_for_this_mechanism')));
 });
 
