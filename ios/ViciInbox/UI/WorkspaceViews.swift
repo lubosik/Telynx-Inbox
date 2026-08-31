@@ -304,6 +304,112 @@ private struct ContactEditor: View {
 /// NavigationStack inside that one would break every push from this screen,
 /// and the audit-trail shortcut that used to live in this toolbar has moved up
 /// to `GrowthView` so it cannot linger after a segment switch.
+/// The automatic 21-day check-in, at the top of the Automations screen.
+///
+/// ── WHY THE COPY IS BLUNT ────────────────────────────────────────────────
+///
+/// This toggle is not a preference. Switching it on authorises the system to
+/// approve and send check-ins to customers with nobody reading them first —
+/// the same substance as approving a campaign by hand, spread over every
+/// future sweep. A switch labelled "Automatic check-in" with no further words
+/// would be technically accurate and would misrepresent what it does, so the
+/// footer says plainly what turning it on means and what turning it off does
+/// NOT undo.
+struct CheckInAutomationSection: View {
+    @EnvironmentObject private var session: SessionModel
+    @State private var automation: CheckInAutomation?
+    @State private var isBusy = false
+    @State private var message: String?
+    @State private var loadFailed = false
+
+    private var canApprove: Bool { session.can(Permission.campaignsApprove) }
+
+    var body: some View {
+        Section {
+            if loadFailed {
+                Text("Could not load the check-in automation.")
+                    .foregroundStyle(.secondary)
+            } else if let automation {
+                Toggle(isOn: Binding(
+                    get: { automation.enabled },
+                    set: { newValue in Task { await setEnabled(newValue) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check in three weeks after an order")
+                        Text(automation.enabled ? "Running" : "Off")
+                            .font(.footnote)
+                            .foregroundStyle(automation.enabled ? ViciTheme.success : .secondary)
+                    }
+                }
+                .disabled(!canApprove || isBusy)
+
+                if let next = automation.nextSendDate, automation.enabled {
+                    LabeledContent("Next send") {
+                        Text(next.formatted(date: .abbreviated, time: .shortened))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let last = automation.lastCampaign {
+                    // Named rather than counted. "Check in three weeks after an
+                    // order, by product, 2026-08-31" tells somebody which one
+                    // to open; "1 campaign this week" tells them nothing.
+                    NavigationLink(value: AppRoute.campaign(id: last.id)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(last.title ?? "This week's check-in")
+                                .lineLimit(2)
+                            Text((last.status ?? "").capitalized)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if let message {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                }
+            } else {
+                HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
+            }
+        } header: {
+            Text("Automatic check-in")
+        } footer: {
+            if !canApprove {
+                Text("Your role can see this but cannot switch it on or off. Switching it on authorises check-ins to be sent without anyone approving them, so it needs the same permission as approving a campaign.")
+            } else if automation?.enabled == true {
+                Text("Everybody whose order passed the three-week mark in the last seven days is asked how it went. No offer, no code, and nobody is asked twice. It is built, approved and scheduled without you. Switching this off stops the next one; anything already scheduled still goes out unless you cancel it.")
+            } else {
+                Text("Off. Nobody is checked in on unless you build the campaign yourself. Switching it on lets check-ins be approved and sent without you reading them first.")
+            }
+        }
+        .task { if automation == nil { await load() } }
+    }
+
+    private func load() async {
+        do {
+            automation = try await APIClient.shared.fetchCheckInAutomation()
+            loadFailed = false
+        } catch {
+            loadFailed = true
+        }
+    }
+
+    private func setEnabled(_ enabled: Bool) async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let change = try await APIClient.shared.setCheckInAutomation(enabled: enabled)
+            message = change.note
+            // Re-read rather than patching the local copy: switching on gives
+            // the server a next-send time to report, and guessing it here
+            // would put a different one on screen than the one it will use.
+            await load()
+        } catch {
+            message = error.localizedDescription
+            await load()
+        }
+    }
+}
+
 struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
     @EnvironmentObject private var session: SessionModel
@@ -319,6 +425,10 @@ struct AutomationQueueView: View {
 
     var body: some View {
         List {
+            // First, because it is the only automation on this screen that
+            // messages customers on its own initiative rather than in reply to
+            // an order they just placed.
+            CheckInAutomationSection()
             if let stats = model.stats {
                 Section("Today") {
                     HStack {

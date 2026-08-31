@@ -754,6 +754,24 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    /// `GET /api/campaigns/automations/check-in`, `campaigns.read`.
+    func fetchCheckInAutomation() async throws -> CheckInAutomation {
+        try await decodedGET("/api/campaigns/automations/check-in")
+    }
+
+    /// `PUT /api/campaigns/automations/check-in`, `campaigns.approve`.
+    ///
+    /// Approve rather than manage: switching this on authorises every future
+    /// check-in to be approved and sent with nobody reading it.
+    @discardableResult
+    func setCheckInAutomation(enabled: Bool) async throws -> CheckInAutomationChange {
+        let (data, response) = try await put("/api/campaigns/automations/check-in",
+                                             body: ["enabled": enabled])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CheckInAutomationChange.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// `GET /api/campaigns/recipes`, `campaigns.read`.
     func fetchCampaignRecipeCatalogue() async throws -> CampaignRecipeCatalogue {
         try await decodedGET("/api/campaigns/recipes")
@@ -1729,6 +1747,14 @@ actor APIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         if let timeout { request.timeoutInterval = timeout }
         return try await perform(request, retryOn401: retryOn401)
+    }
+
+    private func put(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {
+        var request = URLRequest(url: try url(path))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await perform(request)
     }
 
     private func patch(_ path: String, body: [String: Any]) async throws -> (Data, HTTPURLResponse) {

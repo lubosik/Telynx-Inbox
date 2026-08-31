@@ -339,6 +339,50 @@ struct CampaignMergeField: Codable, Hashable, Identifiable {
 }
 
 /// The recipe catalogue plus what the editor needs to know about drafting.
+/// The automatic 21-day post-purchase check-in.
+///
+/// The check-in used to be a recipe somebody pressed a button on. It now runs
+/// itself: a sweep every few hours builds, approves and schedules it with no
+/// human step. The one thing a person controls is `enabled`, which is a
+/// standing authorisation rather than a preference, so the screen that shows
+/// it says as much.
+struct CheckInAutomation: Codable, Hashable {
+    let enabled: Bool
+    /// The business time zone the send hour is measured in, so the app can
+    /// show "noon in New York" rather than converting to the phone's zone and
+    /// quietly showing a different hour to somebody travelling.
+    let timeZone: String?
+    let sweepWindowDays: Int?
+    let lastCampaign: CheckInAutomationCampaign?
+    /// Null when this window has already been swept: there is no next send
+    /// until the window rolls over.
+    ///
+    /// A String, not a Date, because APIClient's decoder has no ISO8601 date
+    /// strategy — every other model in this file does the same. Typing it as
+    /// Date compiles cleanly and then throws .decoding at runtime, so the
+    /// section would have shown "Could not load" forever.
+    let nextSendAt: String?
+
+    var nextSendDate: Date? { AssistantThreadSummary.parse(nextSendAt) }
+}
+
+struct CheckInAutomationCampaign: Codable, Hashable {
+    let id: String
+    let title: String?
+    let status: String?
+    let createdAt: String?
+}
+
+/// The answer to switching it on or off.
+///
+/// `note` is the server's own sentence, shown verbatim. Switching off does not
+/// recall a campaign that is already scheduled, and that is exactly the thing
+/// somebody will assume unless told.
+struct CheckInAutomationChange: Codable, Hashable {
+    let enabled: Bool
+    let note: String?
+}
+
 struct CampaignRecipeCatalogue: Codable, Hashable {
     let recipes: [CampaignRecipeSummary]
     /// False when CAMPAIGN_AI_COPY_ENABLED is not set on the server. The

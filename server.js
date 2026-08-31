@@ -456,6 +456,97 @@ function startDoNotDisturbSync() {
   setInterval(run, SIX_HOURS);
 }
 
+/**
+ * The automatic 21-day check-in.
+ *
+ * Ticks every six hours rather than weekly. The sweep decides for itself
+ * whether this window has already been covered, so a frequent tick costs three
+ * cheap queries and buys two things a weekly timer cannot: a deploy no longer
+ * skips a week by resetting the clock, and a sweep that failed gets retried
+ * within hours instead of on the next Tuesday.
+ *
+ * Registered unconditionally. The gate is the standing authorisation in
+ * sms_campaign_settings.checkin_automation_enabled, read on every run, so the
+ * owner can switch this off from the app without a deploy.
+ */
+function startCheckInAutomation() {
+  let runCheckInSweep, createCampaignService, logAudit;
+  try {
+    ({ runCheckInSweep } = require('./lib/campaigns/check-in-automation'));
+    ({ createCampaignService } = require('./lib/campaigns/service'));
+    ({ logAudit } = require('./lib/audit/log'));
+  } catch (err) {
+    console.error('[CHECK-IN] Automation not started:', err.message);
+    return;
+  }
+
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+  /**
+   * The consent-bearing approval row.
+   *
+   * actorType 'system' on purpose. Writing the owner's name here so the
+   * records look uniform would be a false claim of human review, and the audit
+   * log's whole value is being true about who authorised messaging whom.
+   */
+  const audit = async ({ campaign, recipientCount, audienceHash, messageHash }) => {
+    const fingerprint = `campaign-approved:${campaign.id}:${campaign.revision}`;
+    const result = await logAudit({
+      eventType: 'campaign.approved',
+      actorType: 'system',
+      entityId: campaign.id,
+      summary: `Automatic 21-day check-in approved “${String(campaign.title || '').slice(0, 160)}” `
+        + `revision ${campaign.revision} for ${recipientCount} recipients`,
+      previousState: { status: 'review_required', revision: campaign.revision },
+      newState: { status: 'approval_pending', revision: campaign.revision },
+      metadata: {
+        revision: campaign.revision,
+        recipient_count: recipientCount,
+        audience_digest: audienceHash,
+        message_digest: messageHash,
+        message_length: String(campaign.final_message || '').length,
+        approved_by_automation: 'checkin_21d'
+      },
+      fingerprint
+    });
+    if (!result.recorded && result.reason !== 'duplicate') {
+      throw Object.assign(new Error('Check-in approval audit was not recorded.'), {
+        code: 'CAMPAIGN_APPROVAL_AUDIT_REQUIRED'
+      });
+    }
+    return { ...result, fingerprint };
+  };
+
+  const run = async () => {
+    try {
+      const summary = await runCheckInSweep({
+        client: supabase,
+        service: createCampaignService({ client: supabase, env: process.env }),
+        audit
+      });
+      // Silent when there is nothing to say. "Disabled" and "already swept" are
+      // the answer almost every tick, and logging them buries the one line that
+      // matters.
+      if (summary.reason === 'scheduled') {
+        const total = summary.scheduled.reduce((sum, row) => sum + row.recipients, 0);
+        console.log(
+          `[CHECK-IN] Scheduled ${summary.scheduled.length} campaign(s), `
+          + `${total} recipients, for ${summary.sendAt}`
+        );
+      } else if (summary.failures?.length) {
+        console.error(`[CHECK-IN] ${summary.failures.length} draft(s) could not be scheduled`);
+      }
+    } catch (err) {
+      console.error('[CHECK-IN] Sweep error:', err.message);
+    }
+  };
+
+  // Not at boot. A restart loop would otherwise retry a failing sweep every
+  // few seconds, and nothing here is urgent to the minute.
+  setTimeout(run, 2 * 60 * 1000);
+  setInterval(run, SIX_HOURS);
+}
+
 function startDailySegmentationCycle() {
   try {
     const { startDailyCycle } = require('./lib/daily-scheduler');
@@ -504,6 +595,7 @@ app.listen(PORT, async () => {
   startOpportunityRefresh();
   startDoNotDisturbSync();
   startDailySegmentationCycle();
+  startCheckInAutomation();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);

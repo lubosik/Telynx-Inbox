@@ -255,6 +255,98 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'creating this campaign'); }
   });
 
+  /**
+   * The automatic 21-day check-in: whether it is on, and what it will do next.
+   *
+   * Read-only, and deliberately answers the two questions somebody actually
+   * has when they open this screen — "is it running?" and "when does the next
+   * one go?" — rather than dumping the settings row.
+   */
+  router.get('/automations/check-in', async (_req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const { SWEEP_WINDOW_DAYS, nextSendTime, sweptRecently } =
+        require('../lib/campaigns/check-in-automation');
+      const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+
+      const settings = await loadCampaignSettings(db());
+      const now = new Date();
+      const timeZone = settings?.business_timezone || 'America/New_York';
+
+      // A history read that fails must not take the screen down with it. The
+      // sweep itself fails closed on the same error; here it only means we
+      // cannot say when the last one ran.
+      const last = await sweptRecently({ client: db(), now })
+        .catch(() => null);
+
+      return res.json({
+        enabled: settings?.checkin_automation_enabled === true,
+        timeZone,
+        sweepWindowDays: SWEEP_WINDOW_DAYS,
+        lastCampaign: last ? { id: last.id, title: last.title, status: last.status, createdAt: last.created_at } : null,
+        // Null when a sweep has already covered this window: there is no next
+        // send until the window rolls over, and inventing one would be a lie
+        // on the face of the screen.
+        nextSendAt: last ? null : nextSendTime(now, timeZone).toISOString()
+      });
+    } catch (error) { return sendError(res, error, 'loading the check-in automation'); }
+  });
+
+  /**
+   * Switch the automatic check-in on or off.
+   *
+   * `campaigns.approve`, because switching it on authorises every future
+   * check-in to be approved and sent without anybody reading it. Switching it
+   * off stops the next sweep and does NOT recall a campaign already scheduled
+   * — that is what cancelling the campaign is for, and the response says so
+   * rather than leaving somebody to assume.
+   */
+  router.put('/automations/check-in', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      if (typeof req.body?.enabled !== 'boolean') {
+        throw Object.assign(new Error('enabled must be true or false.'), {
+          code: 'INVALID_AUTOMATION_STATE', status: 400
+        });
+      }
+      const enabled = req.body.enabled;
+
+      const { data, error } = await db()
+        .from('sms_campaign_settings')
+        .update({ checkin_automation_enabled: enabled, updated_at: new Date().toISOString() })
+        .eq('workspace_id', 'vici')
+        .select('checkin_automation_enabled')
+        .maybeSingle();
+      if (error) {
+        throw Object.assign(new Error(error.message), { code: 'CAMPAIGN_SETTINGS_UPDATE_FAILED', status: 500 });
+      }
+      if (!data) {
+        throw Object.assign(new Error('Campaign settings are not configured for this workspace.'), {
+          code: 'CAMPAIGN_SETTINGS_MISSING', status: 409
+        });
+      }
+
+      await logAuditSafely({
+        eventType: 'campaign.settings_changed',
+        req,
+        summary: enabled
+          ? 'Switched ON the automatic 21-day check-in: future check-ins are approved and sent without human review'
+          : 'Switched OFF the automatic 21-day check-in',
+        previousState: { checkin_automation_enabled: !enabled },
+        newState: { checkin_automation_enabled: enabled },
+        changedFields: ['checkin_automation_enabled'],
+        metadata: { automation: 'checkin_21d', enabled }
+      });
+
+      return res.json({
+        enabled: data.checkin_automation_enabled === true,
+        note: enabled
+          ? 'The next sweep will build, approve and schedule a check-in on its own.'
+          : 'No further check-ins will be built. Anything already scheduled still goes out unless you cancel it.'
+      });
+    } catch (error) { return sendError(res, error, 'changing the check-in automation'); }
+  });
+
   router.get('/recipes', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
