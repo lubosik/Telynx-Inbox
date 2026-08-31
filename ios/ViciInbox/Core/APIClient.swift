@@ -754,6 +754,15 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    /// `GET /api/campaigns/opportunities`, `campaigns.read`.
+    ///
+    /// The full human-readable portfolio, including the `reasoning` trail.
+    /// Distinct from `fetchAssistantOpportunityPortfolio`, which returns the
+    /// stripped, model-visible shape and must never carry prose.
+    func fetchCampaignOpportunities() async throws -> CampaignOpportunityPortfolio {
+        try await decodedGET("/api/campaigns/opportunities")
+    }
+
     /// `GET /api/campaigns/automations/check-in`, `campaigns.read`.
     func fetchCheckInAutomation() async throws -> CheckInAutomation {
         try await decodedGET("/api/campaigns/automations/check-in")

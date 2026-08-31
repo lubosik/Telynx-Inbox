@@ -71,6 +71,21 @@ struct GrowthView: View {
                 // The automation-scoped shortcut into the audit trail. Kept on
                 // the Growth bar rather than inside the queue view so switching
                 // segments cannot leave a stale toolbar item behind.
+                // The opportunities screen has existed, fully built, with
+                // nothing anywhere navigating to it. This is the way in.
+                //
+                // On the Campaigns section because that is where somebody is
+                // standing when they wonder what to send next, and it is a
+                // read-only view of measured evidence, so campaigns.read is
+                // the right gate.
+                if router.growthSection == .campaigns && session.can(Permission.campaignsRead) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        NavigationLink(value: AppRoute.opportunities) {
+                            Image(systemName: "lightbulb")
+                        }
+                        .accessibilityLabel("Where the money is")
+                    }
+                }
                 if router.growthSection == .automations && session.can(Permission.auditRead) {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         NavigationLink(value: AppRoute.activity(category: AuditCategory.automations.rawValue)) {
@@ -137,105 +152,112 @@ struct GrowthView: View {
 /// actionability floors and refusals. It never refreshes the detector and has
 /// no campaign creation or send path.
 struct AssistantOpportunityEvidenceView: View {
-    @State private var portfolio: AssistantOpportunityPortfolioWire?
+    @State private var portfolio: CampaignOpportunityPortfolio?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
     var body: some View {
         List {
             if isLoading {
-                Section { ProgressView("Loading verified opportunity review...") }
+                Section { ProgressView("Reading the orders") }
             } else if let errorMessage {
                 Section {
-                    Label("Opportunity review unavailable",
-                          systemImage: "exclamationmark.triangle")
+                    Label("Not available", systemImage: "exclamationmark.triangle")
                         .font(.headline)
                     Text(errorMessage).foregroundStyle(.secondary)
                     Button("Try again") { Task { await load() } }
                 }
             } else if let portfolio {
-                Section("Verified summary") {
-                    LabeledContent("Findings", value: "\(portfolio.findings.count)")
-                    LabeledContent(
-                        "At or above actionability floor",
-                        value: "\(portfolio.findings.filter { !$0.actionability.belowFloor }.count)"
-                    )
-                    LabeledContent("Sizing refusals", value: "\(portfolio.refusals.count)")
-                    LabeledContent("Computed", value: compactDate(portfolio.computedAt))
-                    if portfolio.freshness.stale {
-                        Label("This stored review is stale. Verify it before acting.",
-                              systemImage: "clock.badge.exclamationmark")
-                            .foregroundStyle(ViciTheme.warning)
-                    }
-                }
-
                 if portfolio.findings.isEmpty {
                     Section {
-                        Label("No verified findings", systemImage: "checkmark.seal")
+                        Label("Nothing stands out", systemImage: "checkmark.seal")
                             .font(.headline)
-                        Text("The current stored review contains no findings.")
+                        Text("The orders were read and no group looked worth a campaign right now.")
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Section("Findings") {
-                        ForEach(Array(portfolio.findings.prefix(5).enumerated()), id: \.offset) { _, finding in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(label(finding.key)).font(.headline)
-                                LabeledContent("Population", value: "\(finding.population)")
-                                LabeledContent("Actionability floor", value: "\(finding.actionability.floor)")
-                                Text(finding.actionability.belowFloor
-                                     ? "Below the actionability floor"
-                                     : "Meets the actionability floor")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(finding.actionability.belowFloor
-                                                     ? Color.secondary : ViciTheme.tint)
-                            }
-                            .padding(.vertical, 4)
+                    Section {
+                        Text("Each of these is a group of real customers found in your own orders. "
+                             + "Every line under one is a number that was measured, not estimated.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if portfolio.freshness?.stale == true {
+                            Label("These figures are stale. Pull to refresh before acting on them.",
+                                  systemImage: "clock.badge.exclamationmark")
+                                .font(.footnote)
+                                .foregroundStyle(ViciTheme.warning)
                         }
                     }
-                }
 
-                if !portfolio.refusals.isEmpty {
-                    Section("Sizing refusals") {
-                        ForEach(Array(portfolio.refusals.prefix(12).enumerated()), id: \.offset) { _, refusal in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(label(refusal.finding)).font(.subheadline.weight(.semibold))
-                                Text(label(refusal.reason))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    // One section per finding. The working is the point of this
+                    // screen and does not read as a list item.
+                    ForEach(portfolio.findings.prefix(6), id: \.key) { finding in
+                        Section {
+                            if let people = finding.population {
+                                LabeledContent("People", value: "\(people)")
                             }
+                            if let floor = finding.actionability?.floor,
+                               let below = finding.actionability?.belowFloor {
+                                Text(below
+                                     ? "Below the size floor of \(floor), so it is not worth a campaign yet"
+                                     : "Above the size floor of \(floor)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(below ? Color.secondary : ViciTheme.tint)
+                            }
+
+                            // ── THE JOURNEY ──────────────────────────────
+                            //
+                            // Built server-side in reasoning-trail.js from the
+                            // detector's own measured figures. Nothing here is
+                            // inferred on the phone, and the step that says
+                            // what the numbers do NOT claim is included on
+                            // purpose: a baseline with no caveat reads as a
+                            // forecast.
+                            if let reasoning = finding.reasoning, !reasoning.isEmpty {
+                                ForEach(Array(reasoning.enumerated()), id: \.offset) { index, step in
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Text("\(index + 1)")
+                                            .font(.caption2.monospacedDigit().weight(.bold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 16, alignment: .trailing)
+                                        Text(step)
+                                            .font(.footnote)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .padding(.vertical, 1)
+                                }
+                            }
+                        } header: {
+                            Text(finding.title ?? label(finding.key))
                         }
                     }
                 }
             }
         }
-        .navigationTitle("Opportunity Evidence")
+        .navigationTitle("Where the money is")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await load() }
         .task { await load() }
     }
 
     @MainActor
     private func load() async {
         isLoading = true
-        errorMessage = nil
+        defer { isLoading = false }
         do {
-            portfolio = try await APIClient.shared.fetchAssistantOpportunityPortfolio()
+            portfolio = try await APIClient.shared.fetchCampaignOpportunities()
+            errorMessage = nil
         } catch {
             portfolio = nil
-            errorMessage = "The verified source could not be loaded."
+            errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
+    /// A finding key as a heading, for the case where the server sends no
+    /// title: `one_time_lapsed` becomes "One Time Lapsed".
     private func label(_ code: String) -> String {
         code.replacingOccurrences(of: "_", with: " ")
             .split(separator: " ")
             .map { $0.capitalized }
             .joined(separator: " ")
-    }
-
-    private func compactDate(_ value: String) -> String {
-        guard let date = ServerDate.parse(value) else { return "Verified source time" }
-        return date.formatted(date: .abbreviated, time: .shortened)
     }
 }

@@ -1100,9 +1100,27 @@ private struct CampaignRecipientRow: View {
                         .accessibilityLabel(CampaignReasonCopy.label(eligibility.reason))
                 }
             }
-            Text(recipient.inclusionSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // ── WHY THIS PERSON ─────────────────────────────────────────
+            //
+            // The step-by-step version when the server has evidence for it,
+            // the one-line summary when it does not. Both come from
+            // inclusion_reason; the difference is that the evidence used to be
+            // thrown away at proposal acceptance, so the only answer available
+            // was the segment's name.
+            if let why = recipient.whyIncluded, !why.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(why.enumerated()), id: \.offset) { _, step in
+                        Text(step)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                Text(recipient.inclusionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let reason = eligibility?.reason, reason != "eligible" {
                 Text(CampaignReasonCopy.label(reason))
                     .font(.caption)

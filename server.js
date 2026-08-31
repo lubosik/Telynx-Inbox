@@ -164,11 +164,68 @@ app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
 app.use('/api/assistant',     requireAuth, require('./routes/assistant')());
-app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')());
+app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')({
+  opportunityPortfolio: opportunityPortfolio()
+}));
+// ── ONE OPPORTUNITY PORTFOLIO, NOT THREE ──────────────────────────────────
+//
+// The detector reads every paid order, every contact and the live WooCommerce
+// catalogue, so a rebuild is expensive and the service caches it for six
+// hours. There were three separate instances: the scheduled refresh below made
+// its own, the campaigns router made its own, and the proposals router would
+// have made a third.
+//
+// So the scheduled rebuild every six hours warmed a cache that no HTTP request
+// ever read, and the first person to open the opportunities screen after a TTL
+// expiry paid for a full cold rebuild anyway. The background job was pure
+// waste and the screen was slow for no reason.
+//
+// Lazy, because constructing it must not require database or WooCommerce
+// credentials at module load: the route tests build these routers without any.
+let sharedOpportunityPortfolio = null;
+function opportunityPortfolio() {
+  if (!sharedOpportunityPortfolio) {
+    const { createOpportunityPortfolioService } = require('./lib/campaigns/opportunity-portfolio');
+    sharedOpportunityPortfolio = createOpportunityPortfolioService({ env: process.env });
+  }
+  return sharedOpportunityPortfolio;
+}
+
 // Its own mount rather than a path under /api/campaigns: a proposal is not a
 // campaign, and keeping the two apart means no literal proposal path can ever
 // be shadowed by GET /api/campaigns/:id.
-app.use('/api/campaign-proposals', requireAuth, require('./routes/campaign-proposals')());
+app.use('/api/campaign-proposals', requireAuth, require('./routes/campaign-proposals')({
+  // Wiring the detector in is what makes POST /draft work at all. Without it
+  // the handler refused every request with "No cohort opportunity detector is
+  // wired to this server yet", which is exactly what it said and nobody read.
+  //
+  // Findings are keyed by `key` (one_time_lapsed, one_time_above_typical_spend
+  // and so on), and the reader hands back the whole finding, so the proposal
+  // is drafted from measured evidence rather than from a count somebody typed.
+  opportunityReader: async id => {
+    const wanted = String(id || '');
+    if (!wanted) return null;
+    const payload = await opportunityPortfolio().current();
+    const finding = (payload.findings || []).find(entry => entry.key === wanted);
+    if (!finding) return null;
+
+    // NOT the raw finding. The detector emits {key, evidence, sizing, ...} and
+    // the drafter reads {id, kind, cohort: {label, size, segmentKey}, ...} —
+    // two different shapes for the same idea, and handing over the wrong one
+    // would have produced a proposal full of `undefined` that still looked
+    // like it worked. opportunity-contract.js owns the conversion and is the
+    // same one the daily cycle uses, so both paths agree by construction.
+    const { opportunityFromFinding } = require('./lib/campaigns/opportunity-contract');
+    const adapted = opportunityFromFinding(finding, {
+      detectorVersion: payload.detectorVersion || null,
+      detectedAt: payload.computedAt || null
+    });
+    // A finding that is real but is not an audience — "repeat buyers shop
+    // across products" is a fact about the shop, not a list of people to text.
+    // Refusing by returning null gives the caller a 404 that names it.
+    return adapted.ok ? adapted.opportunity : null;
+  }
+}));
 app.use('/api/segments',      requireAuth, require('./routes/segments')());
 app.use('/api/users',         requireAuth, require('./routes/users')());
 app.use('/api/invitations',   requireAuth, require('./routes/invitations')());
@@ -391,7 +448,9 @@ function startOpportunityRefresh() {
     const {
       startOpportunityPortfolioRefresh
     } = require('./lib/campaigns/opportunity-portfolio');
-    startOpportunityPortfolioRefresh({ env: process.env });
+    // The SAME instance the routes read, so the refresh warms their cache
+    // rather than a private one nobody looks at.
+    startOpportunityPortfolioRefresh({ service: opportunityPortfolio(), env: process.env });
   } catch (err) {
     console.error('[OPPORTUNITIES] Refresh loop not started:', err.message);
   }

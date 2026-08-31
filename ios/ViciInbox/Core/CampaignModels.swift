@@ -114,6 +114,52 @@ struct CampaignDetailResponse: Codable, Hashable {
     let latestApproval: CampaignApprovalRecord?
 }
 
+/**
+ * The opportunity portfolio, for a PERSON to read.
+ *
+ * ── WHY THIS IS NOT AssistantOpportunityFindingWire ──────────────────────
+ *
+ * That type lives in AssistantBusinessModels.swift, which is the
+ * MODEL-VISIBLE boundary: everything in it is fed to the on-device assistant,
+ * so a guard test in test/ios-assistant-grounded-data.test.js forbids `title`,
+ * `detail`, `summary` and every other prose field by name. Prose reaching a
+ * language model is how a customer's words become instructions.
+ *
+ * A first attempt added `reasoning` there and the guard caught it. The working
+ * is prose by definition, so it needs its own type on the human side of that
+ * line, fed by the ordinary campaigns endpoint.
+ */
+struct CampaignOpportunityPortfolio: Codable, Hashable {
+    let computedAt: String?
+    let currency: String?
+    let findings: [CampaignOpportunityFinding]
+    let freshness: CampaignOpportunityFreshness?
+}
+
+struct CampaignOpportunityFinding: Codable, Hashable {
+    let key: String
+    let title: String?
+    let segmentKey: String?
+    let population: Int?
+    let actionability: CampaignOpportunityActionability?
+    /// The step-by-step working, written server-side in
+    /// lib/campaigns/reasoning-trail.js from numbers the detector measured.
+    /// Nothing in it is inferred on the phone.
+    let reasoning: [String]?
+}
+
+struct CampaignOpportunityActionability: Codable, Hashable {
+    let people: Int?
+    let floor: Int?
+    let belowFloor: Bool?
+}
+
+struct CampaignOpportunityFreshness: Codable, Hashable {
+    let computedAt: String?
+    let ageSeconds: Int?
+    let stale: Bool?
+}
+
 struct CampaignRecipient: Codable, Identifiable, Hashable {
     let id: String
     let contactID: FlexibleID?
@@ -129,6 +175,16 @@ struct CampaignRecipient: Codable, Identifiable, Hashable {
     let deliveredAt: String?
     let failedAt: String?
 
+    /// The step-by-step reason this person is in this campaign, written by
+    /// the server from the evidence buyer-cohorts.js recorded when the segment
+    /// was computed: how many orders, when, what it was worth, whether they
+    /// can still buy it, whether they have ever been messaged.
+    ///
+    /// Optional and additive. It is absent for a manually chosen recipient,
+    /// which is correct — there is no evidence to show, and inventing a
+    /// sentence would be worse than the honest silence.
+    let whyIncluded: [String]?
+
     private enum CodingKeys: String, CodingKey {
         case id, selected, state
         case contactID = "contact_id"
@@ -141,6 +197,11 @@ struct CampaignRecipient: Codable, Identifiable, Hashable {
         case sentAt = "sent_at"
         case deliveredAt = "delivered_at"
         case failedAt = "failed_at"
+        // Sent camelCase by the server, so no raw value is needed. Must be
+        // listed: with an explicit CodingKeys, a stored property left out has
+        // nothing to initialise it and the synthesised init(from:) will not
+        // compile.
+        case whyIncluded
     }
 
     var inclusionSummary: String {

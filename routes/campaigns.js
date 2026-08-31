@@ -457,7 +457,22 @@ function createCampaignRouter({
         );
       }
       const refresh = String(req.query?.refresh ?? '') === 'true';
-      return res.json(await portfolio.current({ refresh }));
+      const payload = await portfolio.current({ refresh });
+
+      // Every fact needed to explain a finding was already in this payload,
+      // spread across evidence.*.countedFrom, sizing.baseline.rate and
+      // sizing.incremental.reason. Nothing read it, so the owner could see
+      // that 278 people were found and not why, or what the number does not
+      // mean. `reasoning` is those same facts as ordered sentences; the
+      // underlying fields are untouched beside it.
+      const { cohortTrail } = require('../lib/campaigns/reasoning-trail');
+      return res.json({
+        ...payload,
+        findings: (payload.findings || []).map(finding => ({
+          ...finding,
+          reasoning: cohortTrail(finding, { currency: payload.currency })
+        }))
+      });
     } catch (error) { return sendError(res, error, 'loading the opportunities'); }
   });
 
@@ -641,7 +656,20 @@ function createCampaignRouter({
   router.get('/:id/recipients', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      return res.json(await campaigns.recipients(req.params.id, req.query));
+      const page = await campaigns.recipients(req.params.id, req.query);
+
+      // "Why is this person here" answered on the campaign itself. The
+      // evidence rides in inclusion_reason.evidence, carried through
+      // acceptance by proposal-service.js; before that it was dropped and the
+      // only available answer was the segment's name.
+      const { personTrail } = require('../lib/campaigns/reasoning-trail');
+      return res.json({
+        ...page,
+        items: (page.items || []).map(item => {
+          const trail = personTrail(item?.inclusion_reason?.evidence);
+          return trail.length ? { ...item, whyIncluded: trail } : item;
+        })
+      });
     } catch (error) { return sendError(res, error, 'loading the recipients'); }
   });
 
