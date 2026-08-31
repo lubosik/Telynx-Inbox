@@ -97,12 +97,37 @@ function extractTracking(order) {
   return null;
 }
 
-async function wooGet(path, params = {}) {
+/**
+ * How long to wait for the store.
+ *
+ * There was no timeout at all, so a read waited for whatever the network gave
+ * it. When vicipeptides.com went down, Cloudflare held each request open for
+ * about twenty seconds before answering 522, and anything on a screen that
+ * needed the store inherited that wait.
+ *
+ * Twenty seconds is generous for a bulk sync and absurd for a phone, so
+ * callers on a screen pass something shorter. The default stays high enough
+ * not to break a paged order sync over a slow link.
+ */
+const WOO_TIMEOUT_MS = Number(process.env.WC_TIMEOUT_MS) || 20000;
+
+async function wooGet(path, params = {}, { timeoutMs = WOO_TIMEOUT_MS } = {}) {
   const url = new URL(`${WC_URL}${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const r = await fetch(url.toString(), { headers: wooAuth() });
-  if (!r.ok) throw new Error(`WooCommerce API ${path}: ${r.status}`);
-  return { data: await r.json(), headers: r.headers };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const r = await fetch(url.toString(), { headers: wooAuth(), signal: controller.signal });
+    if (!r.ok) throw new Error(`WooCommerce API ${path}: ${r.status}`);
+    return { data: await r.json(), headers: r.headers };
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`WooCommerce API ${path}: timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fetchOrders(page = 1, perPage = 100, status = 'any') {

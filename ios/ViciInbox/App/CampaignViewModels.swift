@@ -31,6 +31,8 @@ final class CampaignListModel: ObservableObject {
     @Published private(set) var campaigns: [CampaignRecord] = []
     @Published private(set) var reviewCount = 0
     @Published private(set) var isLoading = false
+    /// The extra sections still arriving after the screen has drawn.
+    @Published private(set) var isEnriching = false
     @Published private(set) var isLoadingMore = false
     @Published var errorMessage: String?
 
@@ -196,12 +198,31 @@ final class CampaignDetailModel: ObservableObject {
         campaign?.status.isEditable == true && (dryRun?.eligible ?? 0) > 0 && !isActing
     }
 
+    /**
+     * Load the campaign.
+     *
+     * ── THE SCREEN RENDERS ON THE ESSENTIALS, NOT ON EVERYTHING ─────────────
+     *
+     * This used to await five things in sequence with the spinner up for all
+     * of them: detail, recipients, performance, the dry run, the preview and
+     * the financial overview. Measured against production, the preview alone
+     * took twenty seconds, because it needs the product catalogue and
+     * vicipeptides.com was returning 522 with Cloudflare holding each request
+     * open for nineteen. So opening a campaign froze for the sum of every
+     * request, and the owner reported the app as slow when most of the wait
+     * was one third party being down.
+     *
+     * Now the spinner covers detail and recipients, which is everything the
+     * screen needs to draw. The rest arrives afterwards and CONCURRENTLY, each
+     * filling in its own section, so the slowest no longer sets the pace for
+     * the others and none of them holds the first paint.
+     */
     func load(canDryRun: Bool, canFinancial: Bool) async {
-        guard !isLoading else { return }
+        guard !isLoading && !isEnriching else { return }
         allowsDryRun = canDryRun
         allowsFinancial = canFinancial
         isLoading = true
-        defer { isLoading = false }
+
         do {
             async let detailRequest = APIClient.shared.fetchCampaign(id: campaignID)
             async let recipientRequest = APIClient.shared.fetchCampaignRecipients(id: campaignID)
@@ -211,29 +232,65 @@ final class CampaignDetailModel: ObservableObject {
             recipientTotal = values.1.total
             nextRecipientPage = 2
             errorMessage = nil
-            // Performance was added after campaign detail. Keep detail usable
-            // during an additive backend rollout where this endpoint may not
-            // have reached every environment yet.
-            performance = try? await APIClient.shared.fetchCampaignPerformance(id: campaignID)
-            if canDryRun { await refreshDryRun() }
-            await refreshPreview()
-            if canFinancial {
-                do {
-                    financial = try await APIClient.shared.fetchCampaignFinancialOverview(id: campaignID)
-                    financialUnavailableMessage = nil
-                } catch {
-                    financial = nil
-                    financialUnavailableMessage = error.localizedDescription
-                }
-            } else {
-                // Support must remain operational-only and must not retain
-                // financial data if effective permissions change mid-session.
-                financial = nil
-                financialUnavailableMessage = nil
-            }
         } catch {
             errorMessage = error.localizedDescription
+            isLoading = false
+            return
         }
+        isLoading = false
+
+        // Support must remain operational-only and must not retain financial
+        // data if effective permissions change mid-session. Cleared before the
+        // enrichment rather than inside it, so a permission change takes effect
+        // even if the fetch never runs.
+        if !canFinancial {
+            financial = nil
+            financialUnavailableMessage = nil
+        }
+
+        await enrich(canDryRun: canDryRun, canFinancial: canFinancial)
+    }
+
+    /**
+     * Everything the screen can render without: results, eligibility, the
+     * rendered messages, the money.
+     *
+     * All four at once. They touch different endpoints and none depends on
+     * another, so running them in sequence only ever added their latencies
+     * together.
+     */
+    private func enrich(canDryRun: Bool, canFinancial: Bool) async {
+        isEnriching = true
+        defer { isEnriching = false }
+
+        async let performanceTask: Void = {
+            // Performance was added after campaign detail. Keep detail usable
+            // during an additive rollout where this endpoint may not have
+            // reached every environment yet.
+            self.performance = try? await APIClient.shared.fetchCampaignPerformance(id: self.campaignID)
+        }()
+
+        async let dryRunTask: Void = {
+            guard canDryRun else { return }
+            await self.refreshDryRun()
+        }()
+
+        async let previewTask: Void = {
+            await self.refreshPreview()
+        }()
+
+        async let financialTask: Void = {
+            guard canFinancial else { return }
+            do {
+                self.financial = try await APIClient.shared.fetchCampaignFinancialOverview(id: self.campaignID)
+                self.financialUnavailableMessage = nil
+            } catch {
+                self.financial = nil
+                self.financialUnavailableMessage = error.localizedDescription
+            }
+        }()
+
+        _ = await (performanceTask, dryRunTask, previewTask, financialTask)
     }
 
     func loadMoreRecipientsIfNeeded(after recipient: CampaignRecipient) async {
