@@ -1591,7 +1591,7 @@ struct CampaignEditorView: View {
                     .focused($focusedField, equals: .message)
                     .accessibilityLabel("Campaign message")
                 HStack {
-                    Text("SMS length and carrier segmentation may vary.")
+                    Text("Over 160 characters a message is sent in two parts and costs two credits. The recipient still sees one message.")
                     Spacer()
                     Text("\(model.messageCount)/1600").monospacedDigit()
                 }
@@ -1699,9 +1699,11 @@ struct CampaignEditorView: View {
                                                 .foregroundStyle(ViciTheme.success)
                                         }
                                         Text("\(candidate.septets) characters")
+                                        // See the note on the preview below:
+                                        // one message, two credits, no alarm.
                                         if !candidate.isSingleSegment {
-                                            Label("Two segments", systemImage: "exclamationmark.circle")
-                                                .foregroundStyle(ViciTheme.warning)
+                                            Label("2 credits", systemImage: "info.circle")
+                                                .foregroundStyle(.secondary)
                                         }
                                     }
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -2007,9 +2009,23 @@ private struct CampaignPreviewSection: View {
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 8) {
                         Text("\(sample.message.count) characters")
+                        // ── NOT A WARNING ───────────────────────────────
+                        //
+                        // This said "Two segments" beside an exclamation mark
+                        // in warning colour, and the owner reasonably read it
+                        // as something being wrong — his first question was
+                        // whether people would receive the message twice.
+                        //
+                        // They do not. A segment is a billing unit, not a
+                        // message: a long text is sent in parts and every
+                        // handset joins them back into ONE message before
+                        // anybody sees it. The only real consequence is that
+                        // it costs two credits instead of one, so that is
+                        // what it now says, in those words, without alarm.
                         if !sample.isSingleSegment {
-                            Label("Two segments", systemImage: "exclamationmark.circle")
-                                .foregroundStyle(ViciTheme.warning)
+                            Label("Arrives as one message, costs 2 credits",
+                                  systemImage: "info.circle")
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .font(.caption2)
