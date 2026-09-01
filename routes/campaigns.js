@@ -886,6 +886,89 @@ function createCampaignRouter({
    * different intentions and a DELETE that sometimes archives reads as a
    * delete that failed.
    */
+  /**
+   * Send ONE real message, to a number the approver types, to see how it lands.
+   *
+   * ── WHY THIS IS NOT A PREVIEW ──────────────────────────────────────────
+   *
+   * The preview screen renders the text. It cannot show whether the link is
+   * tappable on an actual handset, whether a two-segment message arrives as
+   * one bubble, or how the whole thing reads on a phone rather than in a form.
+   * Those are the things somebody wants to check before sending to hundreds of
+   * people, and the only way to check them is to send one.
+   *
+   * ── WHAT MAKES IT SAFE ─────────────────────────────────────────────────
+   *
+   * It is a real send, so it is treated as one. `campaigns.approve`, because
+   * anybody who can send a message to an arbitrary number can send a message
+   * to a customer. Audited. Rate-limited by the same limiter as the rest of
+   * the send routes.
+   *
+   * It mints NO coupon. The message carries a placeholder code of exactly the
+   * length a real one has, so the layout is honest and no live discount is
+   * created for a test. It also touches no recipient row, writes nothing to
+   * the campaign, and does not consume anybody's frequency allowance.
+   */
+  router.post('/:id/test-send', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const { normalisePhone } = require('../lib/phone');
+      const to = normalisePhone(req.body?.to);
+      if (!to) {
+        throw Object.assign(new Error('A phone number in full international form is required, like +447700900123.'), {
+          code: 'CAMPAIGN_TEST_SEND_NUMBER_INVALID', status: 400
+        });
+      }
+
+      const campaign = await campaigns.detail(req.params.id);
+      const template = campaign?.campaign?.final_message || campaign?.campaign?.proposed_message;
+      if (!template) {
+        throw Object.assign(new Error('This campaign has no message to test yet.'), {
+          code: 'CAMPAIGN_TEST_SEND_NO_MESSAGE', status: 409
+        });
+      }
+
+      // Rendered against the FIRST real recipient's facts, so the test shows a
+      // real name, a real product and a real link rather than invented ones.
+      // A test that reads well with made-up values proves nothing about the
+      // send that follows it.
+      const { personaliseCampaign } = require('../lib/campaigns/personalise');
+      const page = await campaigns.recipients(req.params.id, { page: 1, pageSize: 1 });
+      const sample = (page.items || [])[0];
+      if (!sample) {
+        throw Object.assign(new Error('This campaign has no recipients to render a test from.'), {
+          code: 'CAMPAIGN_TEST_SEND_NO_RECIPIENTS', status: 409
+        });
+      }
+
+      const outcome = await personaliseCampaign({
+        client: db(),
+        campaignID: `test-${req.params.id}`,
+        template,
+        phones: [sample.contact_phone],
+        percentOff: campaign?.campaign?.discount_percent ?? 15,
+        dryRun: true            // placeholder code, no coupon minted
+      });
+      const text = outcome.rendered[0]?.message;
+      if (!text) {
+        throw Object.assign(new Error('That message could not be rendered for a real recipient.'), {
+          code: 'CAMPAIGN_TEST_SEND_RENDER_FAILED', status: 409
+        });
+      }
+
+      const { sendSMS } = require('../telnyx');
+      await sendSMS(to, text);
+
+      const { segmentsFor } = require('../lib/campaigns/cost');
+      await auditCampaign('campaign.test_sent', req, campaign?.campaign, {
+        summary: `Sent a test of ${campaignSummaryName(campaign?.campaign)} to ${to}`,
+        metadata: { to, segments: segmentsFor(text), characters: text.length }
+      });
+
+      return res.json({ sent: true, to, message: text, segments: segmentsFor(text) });
+    } catch (error) { return sendError(res, error, 'sending a test message'); }
+  });
+
   router.post('/:id/archive', async (req, res) => {
     try {
       const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : null;
