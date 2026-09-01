@@ -15,6 +15,7 @@ const { isOptOutRequest } = require('../lib/opt-out-language');
 const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-receipts');
 const { handleCheckInReply } = require('../lib/campaigns/check-in-reply');
 const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
+const { recordCampaignReplyEvents } = require('../lib/campaigns/reply-events');
 const { sendSMS } = require('../telnyx');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
@@ -278,6 +279,26 @@ module.exports = (broadcastSSE) => {
       } catch (dbErr) {
         console.error('Inbound DB insert error:', dbErr.message);
       }
+
+      // Tell the campaign that somebody answered it.
+      //
+      // Campaign analytics read sms_campaign_recipient_events for replies and
+      // opt-outs, and only the provider ever wrote there. A send where ten
+      // people texted STOP reported optOuts: 0 — not approximately wrong, but
+      // categorically wrong, and exactly the number somebody would use to
+      // decide whether to run the campaign again.
+      //
+      // Deliberately not awaited into the response path and never allowed to
+      // throw: the reply is already in the inbox and any opt-out is already
+      // honoured by the suppression sentinel. This only decides what a chart
+      // says, and must never risk the provider retrying a message whose real
+      // work is done.
+      recordCampaignReplyEvents({
+        client: supabase,
+        phone: fromPhone,
+        body: text,
+        occurredAt: messageCreatedAt
+      }).catch(error => console.warn('[CAMPAIGN REPLY] skipped:', error.message));
 
       await supabase.from('sms_contacts').update({
         last_seen: new Date().toISOString(),
