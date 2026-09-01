@@ -122,3 +122,77 @@ test('the single-email form still works, because the reply path uses it', () => 
   const spec = couponSpec({ code: 'vin-single01', percent: 15, emailRestriction: 'One@X.com' });
   assert.deepEqual(spec.email_restrictions, ['one@x.com']);
 });
+
+// ── A public code, chosen deliberately ─────────────────────────────────────
+
+test('a public code carries no email restriction but keeps every other limit', async () => {
+  // The owner's call: "it's a coupon code. They order, they punch it in, and
+  // they get the discount. Done and dusted."
+  //
+  // Restricting to billing emails protected a guessable code from leaking, and
+  // did so by risking the thing that matters more: a customer checking out
+  // with a different address than the shop holds is refused, silently, at the
+  // checkout. That failure is invisible and costs a sale. A leak is visible
+  // and capped.
+  let spec;
+  const phones = ['+15551110001', '+15551110002', '+15551110003'];
+  const out = await issueSharedCode({
+    campaignID: 'c1', phones,
+    facts: factsFor([[phones[0], 'a@x.com'], [phones[1], 'b@x.com'], [phones[2], null]]),
+    percentOff: 20, publicCode: true, fixedCode: 'SMS20',
+    coupons: stubCoupons(s => { spec = s; })
+  });
+
+  assert.equal(spec.email_restrictions, undefined, 'nobody is restricted');
+  assert.equal(spec.usage_limit_per_user, 1, 'still once each');
+  assert.equal(spec.usage_limit, 3, 'and the ceiling is still the audience size');
+  assert.ok(spec.date_expires, 'and it still expires');
+  assert.equal(spec.individual_use, true, 'and still cannot stack');
+  assert.equal(out.code, 'SMS20');
+  assert.equal(out.publicCode, true);
+});
+
+test('somebody with no email can redeem a public code', async () => {
+  // The whole point. Under the restricted design they were sent a code they
+  // could not use.
+  const phones = ['+15551110001'];
+  const out = await issueSharedCode({
+    campaignID: 'c1', phones, facts: factsFor([[phones[0], null]]),
+    percentOff: 20, publicCode: true, fixedCode: 'SMS20', coupons: stubCoupons()
+  });
+  assert.equal(out.byPhone.get(phones[0]), 'SMS20');
+});
+
+test('an unrestricted code is still refused when nobody ASKED for one', async () => {
+  // The loud failure stays for the accidental case: a campaign that meant to
+  // restrict and found no emails would otherwise create a public discount in
+  // silence, which is a different and far more expensive thing.
+  await assert.rejects(
+    issueSharedCode({
+      campaignID: 'c1', phones: ['+15551110001'],
+      facts: factsFor([['+15551110001', null]]),
+      percentOff: 20, coupons: stubCoupons()          // publicCode not set
+    }),
+    error => error.code === 'PERSONALISATION_NO_EMAILS'
+  );
+});
+
+test('going public clears a restriction the coupon already had', async () => {
+  // SMS20 is reused across campaigns. A coupon that was restricted last time
+  // must not keep that list, or the people it was made public for are refused
+  // anyway.
+  let patch;
+  await issueSharedCode({
+    campaignID: 'c1', phones: ['+15551110001'],
+    facts: factsFor([['+15551110001', 'a@x.com']]),
+    percentOff: 20, publicCode: true, fixedCode: 'SMS20',
+    coupons: {
+      generateCode: () => 'SMS20',
+      findCouponByCode: async () => ({ id: 7, code: 'sms20' }),
+      updateCoupon: async (id, p) => { patch = p; return {}; },
+      createCoupons: async () => { throw new Error('should have updated, not created'); }
+    }
+  });
+  assert.deepEqual(patch.email_restrictions, [], 'the old list must be emptied, not left');
+  assert.equal(patch.amount, '20');
+});
