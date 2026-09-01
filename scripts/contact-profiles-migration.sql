@@ -78,11 +78,18 @@ ALTER TABLE public.sms_customer_profiles
 ALTER TABLE public.sms_customer_profiles
   ADD COLUMN IF NOT EXISTS last_order_at timestamptz;
 
--- Denormalised on purpose. It is stale the moment it is written, and it is
--- still what makes "silent buyers who are overdue" a single indexed query
--- instead of a full scan with date arithmetic. The nightly sweep is what keeps
--- it honest; anything needing to-the-hour accuracy computes from last_order_at.
-ALTER TABLE public.sms_customer_profiles
+-- There is deliberately NO days_since_last_order column.
+--
+-- It is not a fact about the customer, it is a fact about now, and the
+-- fingerprint skip means an unchanged contact is never rewritten — so a stored
+-- copy would freeze at whatever it was the day the profile was built. Proven
+-- twice during review: the same rows 90 days on read 191 where the truth was
+-- 281, fingerprints identical, sweep skipping. A "lapsed buyer" segment
+-- reading it would permanently exclude everybody whose profile was built while
+-- they were fresh, which is exactly who the outreach exists for.
+--
+-- last_order_at is the durable fact, and segment-rule-evaluator.js already
+-- computes daysSinceLastOrder live from it.
 
 -- Cents, not the numeric dollars sms_orders.total carries, because money that
 -- is summed and averaged in floating point eventually reports a total ending
@@ -228,8 +235,18 @@ CREATE INDEX IF NOT EXISTS sms_customer_profiles_reorder_due_at_idx
 
 -- "Everyone who has never replied", which is 559 of 809 and is the single
 -- largest segment in the database.
+-- Partial on deterministic_built_at, so the cheap query cannot reach a row
+-- nobody has built yet.
+--
+-- analyseConversation() upserts on contact_phone and will create rows the
+-- profile builder has never touched. With NOT NULL DEFAULTs those read as a
+-- silent, zero-order, never-replied customer — indistinguishable from a real
+-- one, and served by exactly the index somebody would use to find them. The
+-- only discriminator is deterministic_built_at, so the index enforces it
+-- rather than trusting every future caller to remember.
 CREATE INDEX IF NOT EXISTS sms_customer_profiles_engagement_tier_idx
-  ON public.sms_customer_profiles (engagement_tier);
+  ON public.sms_customer_profiles (engagement_tier)
+  WHERE deterministic_built_at IS NOT NULL;
 
 -- "Who was checked in on recently", read by the check-in sweep's no-repeat
 -- rule. Partial for the same reason as reorder_due_at: most rows are NULL.
