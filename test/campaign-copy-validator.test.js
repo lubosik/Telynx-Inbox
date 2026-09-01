@@ -646,3 +646,36 @@ test('helper exports behave as the checks assume', () => {
   assert.equal(septetLength(''), 0);
   assert.equal(isGsm7('plain text'), true);
 });
+
+test('the brand may sit behind a greeting, and behind nothing else', () => {
+  // "Hi Adrian, it's Vin from Vici, saw you ordered..." names the sender in
+  // four words and reads like a person. The six-character limit refused it,
+  // because a first name is a variable and the brand's position moves with it.
+  //
+  // Raising the limit to 20 or 30 was the wrong fix, and this file already
+  // said so: at that distance the brand can sit behind a whole clause and
+  // "identified up front" stops meaning anything. The exception is a SHAPE,
+  // not a bigger number.
+  assertAccepted(`${BRAND}: hello there. ${OPT_OUT}`);
+  assertAccepted(`Hi Adrian, it's ${BRAND}, back in touch. ${OPT_OUT}`);
+  assertAccepted(`Hello Christopher, it's ${BRAND}, back in touch. ${OPT_OUT}`);
+  assertAccepted(`Hey Sam, it's ${BRAND}, back in touch. ${OPT_OUT}`);
+
+  // Everything that is not a bare greeting is still refused.
+  for (const hidden of [
+    `Amazing news for you today, it's ${BRAND}. ${OPT_OUT}`,
+    `Hi there, we have a huge sale on now, it's ${BRAND}. ${OPT_OUT}`,
+    `Buy now. Hi Adrian, it's ${BRAND}. ${OPT_OUT}`,
+    `Hi Adrian, our whole range is back, it's ${BRAND}. ${OPT_OUT}`
+  ]) {
+    assertRejectedFor('brand_identifies_sender_first', hidden);
+  }
+});
+
+test('a greeting cannot be stuffed with copy to hide the brand', () => {
+  // The name is capped and may not contain sentence punctuation, so no amount
+  // of text can be smuggled through as somebody's first name.
+  const longName = 'a'.repeat(30);
+  assertRejectedFor('brand_identifies_sender_first',
+    `Hi ${longName}, it's ${BRAND}. ${OPT_OUT}`);
+});
