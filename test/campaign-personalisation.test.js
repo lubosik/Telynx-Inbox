@@ -258,5 +258,15 @@ test('a code that is not code-shaped renders to nothing rather than to rubbish',
   for (const bad of ['', null, 'a', 'this-code-is-far-too-long-to-be-real', 'HAS SPACES']) {
     assert.equal(merge.sanitiseCode(bad), '');
   }
-  assert.equal(merge.sanitiseCode('THANKS-4X'), 'thanks-4x', 'codes are compared case-insensitively');
+  // Rendered AS WRITTEN, so a memorable code reads like a coupon: the message
+  // says SMS20, not sms20. It still redeems, because WooCommerce lowercases
+  // coupon codes on both storage and lookup — verified against the live store
+  // by creating "sms20probe" and finding it as "SMS20PROBE", not assumed.
+  //
+  // This test previously asserted the opposite while its own comment said
+  // "codes are compared case-insensitively", which is a different claim from
+  // "codes are lowercased".
+  assert.equal(merge.sanitiseCode('THANKS-4X'), 'THANKS-4X');
+  assert.equal(merge.sanitiseCode('SMS20'), 'SMS20');
+  assert.equal(merge.sanitiseCode('sms20'), 'sms20');
 });
