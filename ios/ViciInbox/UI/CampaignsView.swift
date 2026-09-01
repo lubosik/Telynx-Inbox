@@ -1029,6 +1029,31 @@ private struct CampaignEligibilitySection: View {
                 CampaignCountMetric(value: dryRun.suppressed, label: "Suppressed")
             }
 
+            // ── WHAT IT COSTS ────────────────────────────────────────────
+            //
+            // On the review screen, beside the audience, because this is where
+            // somebody decides whether to send. Approving committed real money
+            // and the screen said nothing about it: the owner had to ask where
+            // the figure was, having already been told by a warning badge that
+            // his message had become two segments.
+            if let cost = dryRun.cost {
+                LabeledContent("Estimated cost") {
+                    Text(cost.estimatedCostUsd, format: .currency(code: "USD"))
+                        .font(.body.weight(.semibold))
+                        .monospacedDigit()
+                }
+                // The arithmetic, so a number that looks wrong can be checked
+                // rather than believed. It is an estimate, and says so.
+                Text(cost.workedOut)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if cost.multiSegment > 0 {
+                    Text("\(cost.multiSegment.formatted()) of these are over 160 characters, so they cost two credits each and arrive as one message. At one credit each the whole send would be \(cost.ifAllSingleSegmentUsd.formatted(.currency(code: "USD"))).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Label(
                 dryRun.liveEligibility.allowed
                     ? "The live scheduling gate is enabled."

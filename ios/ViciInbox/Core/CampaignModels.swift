@@ -232,6 +232,24 @@ struct CampaignLiveEligibility: Codable, Hashable {
     let reasons: [String]
 }
 
+/// What a campaign will cost, worked out from the messages that will be sent.
+///
+/// A segment is a billing unit, not a message: up to 160 characters is one,
+/// and anything longer is sent in parts the handset joins back together. The
+/// recipient sees one message either way; the cost is what changes.
+struct CampaignCostEstimate: Codable, Hashable {
+    let recipients: Int
+    let segments: Int
+    let oneSegment: Int
+    let multiSegment: Int
+    let costPerSegmentUsd: Double
+    let estimatedCostUsd: Double
+    let ifAllSingleSegmentUsd: Double
+    /// The arithmetic in words, so a figure that looks wrong can be checked
+    /// rather than believed.
+    let workedOut: String
+}
+
 struct CampaignEligibilityResult: Codable, Hashable, Identifiable {
     let phone: String?
     let eligible: Bool
@@ -252,9 +270,12 @@ struct CampaignDryRun: Codable, Hashable {
     let liveEligibility: CampaignLiveEligibility
     let recipients: [CampaignEligibilityResult]
     let recipientsTruncated: Bool
+    /// What sending this will cost. Optional and additive: an older server
+    /// omits it and the screen simply shows no figure rather than a wrong one.
+    let cost: CampaignCostEstimate?
 
     private enum CodingKeys: String, CodingKey {
-        case revision, total, eligible, suppressed, reasons, liveEligibility, recipients, recipientsTruncated
+        case revision, total, eligible, suppressed, reasons, liveEligibility, recipients, recipientsTruncated, cost
         case campaignID = "campaignId"
     }
 }

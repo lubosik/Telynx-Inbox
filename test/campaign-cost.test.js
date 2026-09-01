@@ -93,3 +93,49 @@ test('the segment maths matches the rule the validator enforces', () => {
     'the longest allowed message must cost what the rule implies'
   );
 });
+
+// ── The message is the promise ─────────────────────────────────────────────
+
+test('a coupon may not be worth less than the message says', () => {
+  // WHAT WENT WRONG. audience_definition.discount_percent held 20, the
+  // sms_campaigns.discount_percent column was NULL because the RPC never
+  // writes it, and approval read the column, fell back to 15, and minted a
+  // 15% coupon for a message that said "20% off". Three places held the
+  // answer and the emptiest one won.
+  //
+  // The guard reads the percentage back OUT of the copy that will be sent. A
+  // coupon worth less than the message promises makes the business a liar at
+  // the checkout, one customer at a time, with no error anywhere.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'campaigns', 'service.js'), 'utf8');
+
+  assert.match(source, /function assertDiscountMatchesMessage/);
+  assert.match(source, /CAMPAIGN_DISCOUNT_MISMATCH/);
+
+  // It must run BEFORE anything is minted, for the same reason the migration
+  // check does: coupon creation is the irreversible step.
+  const freeze = source.slice(source.indexOf('async function renderAndFreeze('));
+  assert.ok(
+    freeze.indexOf('assertDiscountMatchesMessage') < freeze.indexOf('renderForRecipients')
+      || freeze.indexOf('assertDiscountMatchesMessage') < freeze.indexOf('issueSharedCode'),
+    'the check must run before any coupon is created'
+  );
+});
+
+test('the discount is read from where it is actually stored', () => {
+  // The column is null for every campaign built from a recipe, because
+  // create_sms_campaign_draft records the discount in audience_definition and
+  // never writes the column.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'campaigns', 'service.js'), 'utf8');
+  const fn = source.slice(source.indexOf('function campaignDiscountPercent('),
+    source.indexOf('function assertDiscountMatchesMessage('));
+
+  assert.match(fn, /audience_definition\?\.discount_percent/,
+    'it must fall back to the recipe value the builder actually recorded');
+  assert.ok(fn.indexOf('discount_percent') < fn.indexOf('audience_definition'),
+    'the column still wins when it is set');
+  assert.match(fn, /DEFAULT_DISCOUNT_PERCENT/, 'and there is still a last resort');
+});
