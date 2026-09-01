@@ -187,8 +187,8 @@ test('the handler honours an opt-out the phrase list would miss', () => {
   // And it must be checked BEFORE the code path, or a reply asking to be left
   // alone could still earn a discount.
   assert.ok(
-    source.indexOf('opt_out_intent') < source.indexOf('mayIssueCode('),
-    'the opt-out branch must come before the code budget'
+    source.indexOf('opt_out_intent') < source.indexOf('mayOfferCheckInCode('),
+    'the opt-out branch must come before the offer decision'
   );
 });
 
@@ -306,7 +306,7 @@ test('the code message composes the clause in and validates the whole thing', ()
   );
   // The commercial half must be identical whatever the clause says.
   for (const clause of [undefined, 'Glad it turned up quickly.', FALLBACK_ACKNOWLEDGEMENT]) {
-    assert.match(codeMessageTemplate(clause), /\{\{code\}\} is 15% off your next order\. Reply STOP to opt out\.$/);
+    assert.match(codeMessageTemplate(clause), /\{\{code\}\} is 20% off your next order\. Reply STOP to opt out\.$/);
   }
   assert.ok(FALLBACK_ACKNOWLEDGEMENT.length > 0);
 });

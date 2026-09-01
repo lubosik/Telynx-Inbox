@@ -274,8 +274,13 @@ test('both minting paths consult the gate', () => {
   const path = require('node:path');
   const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'lib', 'campaigns', f), 'utf8');
   // A rule enforced in only one of the two places is not a rule.
-  assert.match(read('check-in-reply.js'), /mayIssueCode\(/,
-    'the reply handler must check the budget before minting');
+  //
+  // The reply handler now asks mayOfferCheckInCode instead of mayIssueCode.
+  // The gate did not go away, it got a better question: order COUNT is not
+  // what makes an offer wasteful, sending one to somebody who just ordered is.
+  // See checkin-offer-policy.js.
+  assert.match(read('check-in-reply.js'), /mayOfferCheckInCode\(/,
+    'the reply handler must check eligibility before minting');
   assert.match(read('service.js'), /filterEligibleForCode\(/,
     'campaign approval must check the budget before minting');
 });
