@@ -394,9 +394,9 @@ function startDeliveryCheck() {
 // because rows abandoned by an earlier run should still be resolved after the
 // feature is switched back off.
 function startCampaignDelivery() {
-  let deliverBatch, liveSendEnabled, recoverExpiredClaims, sendSMS;
+  let deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses, sendSMS;
   try {
-    ({ deliverBatch, liveSendEnabled, recoverExpiredClaims } =
+    ({ deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses } =
       require('./lib/campaigns/delivery-worker'));
     ({ sendSMS } = require('./telnyx'));
   } catch (err) {
@@ -412,6 +412,10 @@ function startCampaignDelivery() {
   setInterval(async () => {
     try { await recoverExpiredClaims({ client: supabase }); }
     catch (err) { console.error('[CAMPAIGN SEND] Claim recovery error:', err.message); }
+    // Also on the slow timer, so a campaign that finished just before sending
+    // was switched off still stops describing itself as scheduled.
+    try { await reconcileCampaignStatuses({ client: supabase }); }
+    catch (err) { console.error('[CAMPAIGN STATUS] Reconcile error:', err.message); }
   }, FIFTEEN_MINUTES);
 
   if (!liveSendEnabled(process.env)) {
@@ -432,6 +436,12 @@ function startCampaignDelivery() {
     } catch (err) {
       console.error('[CAMPAIGN SEND] Delivery error:', err.message);
     }
+    // Every cycle, not only when something was claimed: the batch that empties
+    // a campaign is the one BEFORE the cycle where it has nothing left, so
+    // reconciling only on activity would leave the last campaign of a run
+    // permanently mid-send.
+    try { await reconcileCampaignStatuses({ client: supabase }); }
+    catch (err) { console.error('[CAMPAIGN STATUS] Reconcile error:', err.message); }
   }, TWO_MINUTES);
 }
 

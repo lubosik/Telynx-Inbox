@@ -1204,10 +1204,16 @@ private struct CampaignStatusBadge: View {
 
     private var color: Color {
         switch status {
+        // Green means the messages went out. Nothing else earns it.
         case .completed, .approved: return ViciTheme.success
-        case .reviewRequired, .approvalPending, .scheduled, .sending: return ViciTheme.warning
+        // Sending is not a warning, it is the campaign working. It shared the
+        // orange of "waiting for you" and so read as another thing needing
+        // attention, which is exactly backwards while it is the one state that
+        // needs nothing from anybody.
+        case .sending: return ViciTheme.tint
+        case .reviewRequired, .approvalPending, .scheduled: return ViciTheme.warning
         case .failed, .rejected, .cancelled: return ViciTheme.destructive
-        case .draft: return ViciTheme.tint
+        case .draft: return ViciTheme.inkSecondary
         }
     }
 }

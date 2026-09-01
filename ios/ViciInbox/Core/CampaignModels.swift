@@ -20,7 +20,10 @@ enum CampaignStatus: String, Codable, Hashable {
         case .approved: return "Approved"
         case .scheduled: return "Scheduled"
         case .sending: return "Sending"
-        case .completed: return "Completed"
+        // "Sent", not "Completed". The person reading this wants to know
+        // whether their messages went out, and "Completed" is a word about the
+        // job rather than about the messages.
+        case .completed: return "Sent"
         case .rejected: return "Rejected"
         case .cancelled: return "Cancelled"
         case .failed: return "Failed"
