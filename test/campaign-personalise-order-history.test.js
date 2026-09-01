@@ -129,16 +129,25 @@ test('somebody with no orders at all gets an empty array, not undefined', async 
   assert.equal(built.lastProductName, null);
 });
 
-test('the newest PAID order heads the history even when a later order was cancelled', async () => {
-  // The merge fields resolve from the newest order of any status, so here the
-  // two intentionally point at different rows. Asserted rather than left
-  // implicit, because it is the case a future reader would "fix".
+test('a cancelled order after a real one changes nothing a customer reads', async () => {
+  // This test used to assert the opposite, deliberately: "the merge fields
+  // still use the newest row of any status ... asserted rather than left
+  // implicit, because it is the case a future reader would fix."
+  //
+  // The instinct to pin surprising behaviour was right and the premise was
+  // wrong. QA measured what it was pinning: 12 of the 367 people who received
+  // the win-back had an unpaid newest order, so their message named a product
+  // and a month from an order they had cancelled. gatherFacts' own docstring
+  // already claimed it resolved the latest PAID order.
+  //
+  // Both answers now come from paid orders, so they cannot disagree.
   const built = await factsFor([
     { contact_phone: CONTACT.phone, status: 'delivered', created_at: daysAgo(50), total: '129.00', items: [{ name: 'RT', sku: 'RT20' }] },
     { contact_phone: CONTACT.phone, status: 'cancelled', created_at: daysAgo(1), total: '10.00', items: [{ name: 'BAC Water', sku: 'P-WA10' }] }
   ]);
   assert.equal(built.orderHistory[0].created_at, daysAgo(50), 'the history is paid-only');
-  assert.equal(built.lastOrderAt, daysAgo(1), 'the merge fields still use the newest row of any status');
+  assert.equal(built.lastOrderAt, daysAgo(50), 'and so is the date a customer reads');
+  assert.notEqual(built.lastProductName, 'BAC Water', 'the cancelled order names nothing');
 });
 
 test('orderHistory can never reach a rendered message', async () => {
@@ -173,4 +182,61 @@ test('the email that rides alongside the facts is untouched', async () => {
   // non-merge field must not disturb the first.
   const built = await factsFor([]);
   assert.equal(built.email, 'c@example.com');
+});
+
+test('the copy names the latest PAID order, never a cancelled one', () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // THIS WAS LIVE AND REACHED CUSTOMERS
+  //
+  //   `latest` took the newest order of ANY status, so {{last_product}} and
+  //   {{last_order_date}} could name an order the customer never received.
+  //   Measured on the win-back that went out: 12 of the 367 people it reached
+  //   had an unpaid newest order, and their copy read like
+  //
+  //       Saw you ordered RT in May
+  //
+  //   where the May order was cancelled and their real last purchase was in
+  //   February. Telling somebody you saw them buy a thing they cancelled is
+  //   worse than naming nothing at all, and gatherFacts' own docstring already
+  //   claimed it resolved the latest PAID order.
+  // ═══════════════════════════════════════════════════════════════════════
+  const contact = { phone: '+15551110001', name: 'Chloe Adams', email: 'c@example.com' };
+  const client = fakeClient({
+    contacts: [contact],
+    orders: [
+      { contact_phone: contact.phone, status: 'cancelled', created_at: '2026-05-25T10:00:00Z',
+        items: [{ name: 'Retatrutide - 20mg', sku: null, total: '129.00' }], total: '129.00' },
+      { contact_phone: contact.phone, status: 'delivered', created_at: '2026-02-21T10:00:00Z',
+        items: [{ name: 'Glutathione', sku: 'GT10', total: '89.00' }], total: '89.00' }
+    ]
+  });
+
+  return gatherFacts({ client, phones: [contact.phone] }).then(facts => {
+    const person = facts.get(contact.phone);
+    assert.equal(person.lastOrderAt, '2026-02-21T10:00:00Z',
+      'February, the real purchase, not the cancelled May row');
+    assert.notEqual(person.lastProductName, 'Retatrutide - 20mg',
+      'a cancelled order must never name the product');
+  });
+});
+
+test('somebody whose only orders were cancelled has no last order to name', () => {
+  // Not a gap. There is no honest product or date to put in a message for a
+  // person who never completed a purchase, and render-recipients drops anyone
+  // whose merge fields cannot be filled — which is the correct outcome rather
+  // than inventing one.
+  const contact = { phone: '+15551110002', name: 'Sam Reed', email: 's@example.com' };
+  const client = fakeClient({
+    contacts: [contact],
+    orders: [
+      { contact_phone: contact.phone, status: 'cancelled', created_at: '2026-05-25T10:00:00Z',
+        items: [{ name: 'Retatrutide - 20mg', sku: null, total: '129.00' }], total: '129.00' }
+    ]
+  });
+
+  return gatherFacts({ client, phones: [contact.phone] }).then(facts => {
+    const person = facts.get(contact.phone);
+    assert.equal(person.lastOrderAt, null);
+    assert.equal(person.lastProductName, null);
+  });
 });

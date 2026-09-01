@@ -189,7 +189,7 @@ test('a preview mints nothing and still reports honest counts', async () => {
   const coupons = stubCoupons();
   const client = stubClient({
     contacts: [{ phone: '+15550000001', name: 'Kenzie Brown' }],
-    orders: [{ contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '130.50' }], created_at: '2026-02-19T00:00:00Z' }]
+    orders: [{ status: 'delivered', contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '130.50' }], created_at: '2026-02-19T00:00:00Z' }]
   });
   const result = await personaliseCampaign({
     client,
@@ -214,7 +214,7 @@ test('a template with no {{code}} never touches WooCommerce even for a real run'
   const coupons = stubCoupons();
   const client = stubClient({
     contacts: [{ phone: '+15550000001', name: 'Kenzie Brown' }],
-    orders: [{ contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T00:00:00Z' }]
+    orders: [{ status: 'delivered', contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T00:00:00Z' }]
   });
   await personaliseCampaign({
     client, campaignID: 'c', template: 'Vin from Vici. Hi {{first_name}}, checking in. Reply STOP to opt out.',
@@ -230,8 +230,8 @@ test('somebody with no nameable product is excluded rather than sent a gap', asy
       { phone: '+15550000002', name: 'Sam Reid' }
     ],
     orders: [
-      { contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T00:00:00Z' },
-      { contact_phone: '+15550000002', items: [{ sku: 'NOTACODE', total: '1' }], created_at: '2026-02-19T00:00:00Z' }
+      { status: 'delivered', contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T00:00:00Z' },
+      { status: 'delivered', contact_phone: '+15550000002', items: [{ sku: 'NOTACODE', total: '1' }], created_at: '2026-02-19T00:00:00Z' }
     ]
   });
   const result = await personaliseCampaign({
@@ -255,7 +255,7 @@ test('an empty audience is refused rather than quietly succeeding', async () => 
 test('the rendered month is a name and never a calendar date', async () => {
   const client = stubClient({
     contacts: [{ phone: '+15550000001', name: 'Kenzie Brown' }],
-    orders: [{ contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T13:35:49.000Z' }]
+    orders: [{ status: 'delivered', contact_phone: '+15550000001', items: [{ sku: 'RT20', total: '1' }], created_at: '2026-02-19T13:35:49.000Z' }]
   });
   const result = await personaliseCampaign({
     client, campaignID: 'c',
