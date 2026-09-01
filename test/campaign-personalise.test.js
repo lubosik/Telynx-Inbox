@@ -37,7 +37,18 @@ function stubClient({ contacts = [], orders = [] } = {}) {
         in(column, values) {
           const set = new Set(values);
           const key = table === 'sms_contacts' ? 'phone' : 'contact_phone';
-          return Promise.resolve({ data: rows.filter(row => set.has(row[key])), error: null });
+          const matched = rows.filter(row => set.has(row[key]));
+          // Awaitable AND pageable, because the real client is both. A fake
+          // that only resolved could never express a 1000-row page, which is
+          // precisely why it never caught readIn truncating.
+          return {
+            range(from, to) {
+              return Promise.resolve({ data: matched.slice(from, to + 1), error: null });
+            },
+            then(resolve, reject) {
+              return Promise.resolve({ data: matched, error: null }).then(resolve, reject);
+            }
+          };
         }
       };
       return builder;

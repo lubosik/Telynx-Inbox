@@ -5,6 +5,7 @@ const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
 const { verifyWooSignature, wooDeliveryID } = require('../lib/woocommerce-webhook');
 const { recordTrustedProductEvent } = require('../lib/campaigns/product-webhooks');
+const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 
 // SMS flows
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
@@ -218,6 +219,20 @@ module.exports = (broadcastSSE) => {
         default:
           console.log(`[WEBHOOK] WooCommerce status=${status} | order=${orderId} — no SMS flow`);
       }
+
+      // An order is the single largest thing that can change a customer's
+      // profile: it moves their last order date, their spend, their reorder
+      // rhythm and possibly their whole cohort. Rebuilding here is why the
+      // nightly sweep is a safety net rather than the mechanism.
+      //
+      // Not awaited and structurally unable to throw — refreshProfileQuietly
+      // catches everything and returns a reason. This runs after every
+      // operational workflow above has completed, for the same reason
+      // analytics does: a profile column may never delay a payment-flow
+      // cancellation or a customer's confirmation SMS. If it fails, the sweep
+      // picks the contact up tonight, because a failed build stores no
+      // fingerprint.
+      if (phone) void refreshProfileQuietly({ client: supabase, phone });
 
       // Analytics runs only after every existing operational workflow has
       // completed. It is deliberately not awaited: a slow/missing analytics

@@ -402,6 +402,22 @@ client.
   into the friendly not-ready message. Reads, member edits, overrides and
   recomputes are untouched by the gap. It adds no permission key, so it cannot
   cause a startup crash loop.
+- `scripts/contact-profiles-migration.sql`: NOT applied yet. Additive columns on
+  the EXISTING `sms_customer_profiles` for deterministic client profiles, plus a
+  unique index on `contact_phone` that the table has never been proven to have
+  (it holds one row, so the `analyseConversation` upsert has effectively never
+  run). Nothing reads the new columns until it is applied, and until then the
+  nightly sweep in `startContactProfileSweep()` logs one named
+  `PROFILE_COLUMNS_MISSING` error and does nothing else — no route, no send path
+  and no webhook response depends on it.
+- `lib/profiles/profile-builder.js` is the SOLE writer of every column that
+  migration adds. `intelligence.js` keeps its eleven legacy columns, and
+  `last_checkin_variant` belongs to the check-in approval path; the builder
+  omits both from its upsert payload on purpose, so a nightly sweep cannot
+  erase a decision it did not make. Refresh runs from the WooCommerce order
+  webhook, from inbound SMS, and from the sweep — all three through the same
+  builder, none with its own logic. `refreshProfileQuietly()` is the webhook
+  entry point and cannot throw or reject by construction.
 - A SEGMENT is removed the same way a campaign is: `delete_sms_campaign_segment`
   decides, the caller cannot ask for the destructive path, and the audit row is
   written before the effect with the hard-failing `logAudit`. Destruction is

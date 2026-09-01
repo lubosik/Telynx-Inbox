@@ -634,6 +634,60 @@ function startCheckInAutomation() {
   setInterval(run, SIX_HOURS);
 }
 
+/**
+ * The nightly drift sweep for deterministic client profiles.
+ *
+ * The two live refresh triggers — the WooCommerce order webhook and inbound
+ * SMS — cover everything that normally changes a profile. This exists for
+ * everything that does not go through them: a manual status change in
+ * WooCommerce, an order synced by scripts/full-sync.js, a webhook that was
+ * dropped while a deploy was mid-flight, and `days_since_last_order`, which
+ * goes stale on its own without anybody touching a row.
+ *
+ * Nearly free by construction. Every profile carries a fingerprint of the rows
+ * it was built from, so a sweep over 843 contacts is a handful of paged reads
+ * and, on a quiet day, ZERO writes. That is why it can run unconditionally
+ * rather than behind a flag somebody has to remember to switch on.
+ *
+ * Wrapped like every other background job in this file: a customer-profile
+ * calculation may never take down the process that also carries the inbox, the
+ * dialler and order SMS.
+ */
+function startContactProfileSweep() {
+  let sweepProfileDrift;
+  try {
+    ({ sweepProfileDrift } = require('./lib/profiles/profile-builder'));
+  } catch (err) {
+    console.error('[PROFILE] Drift sweep not started:', err.message);
+    return;
+  }
+
+  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+
+  const run = async () => {
+    try {
+      const summary = await sweepProfileDrift({ client: supabase, env: process.env });
+      if (summary.disabled) return;
+      // Silent when nothing changed, which is the answer most nights. Logging
+      // "0 written" every night buries the run where something did.
+      if (summary.written > 0 || summary.failed.length > 0) {
+        console.log(
+          `[PROFILE] Swept ${summary.considered} contacts: `
+          + `${summary.written} rebuilt, ${summary.skipped} unchanged, ${summary.failed.length} failed`
+        );
+      }
+    } catch (err) {
+      console.error('[PROFILE] Drift sweep error:', err.message);
+    }
+  };
+
+  // Not at boot. A crash loop would otherwise re-sweep every few seconds, and
+  // nothing here is urgent to the minute — ten minutes after a deploy is early
+  // enough to catch whatever the deploy interrupted.
+  setTimeout(run, 10 * 60 * 1000);
+  setInterval(run, TWENTY_FOUR_HOURS);
+}
+
 function startDailySegmentationCycle() {
   try {
     const { startDailyCycle } = require('./lib/daily-scheduler');
@@ -683,6 +737,7 @@ app.listen(PORT, async () => {
   startDoNotDisturbSync();
   startDailySegmentationCycle();
   startCheckInAutomation();
+  startContactProfileSweep();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);

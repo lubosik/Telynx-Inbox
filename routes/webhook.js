@@ -16,6 +16,7 @@ const { recordCampaignDeliveryResult } = require('../lib/campaigns/delivery-rece
 const { handleCheckInReply } = require('../lib/campaigns/check-in-reply');
 const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
 const { recordCampaignReplyEvents } = require('../lib/campaigns/reply-events');
+const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 const { sendSMS } = require('../telnyx');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
@@ -299,6 +300,18 @@ module.exports = (broadcastSSE) => {
         body: text,
         occurredAt: messageCreatedAt
       }).catch(error => console.warn('[CAMPAIGN REPLY] skipped:', error.message));
+
+      // An inbound message changes this contact's engagement tier, their
+      // last_inbound_at and whether they have ever replied at all — and 559 of
+      // the 809 contacts with any message have never sent one, so the first
+      // reply somebody ever makes is the most significant profile change in
+      // the database.
+      //
+      // Same posture as the line above it: not awaited, and structurally
+      // unable to throw. The customer's message is already saved and any
+      // opt-out is already honoured by this point; a profile column must never
+      // make Telnyx retry a webhook whose real work is done.
+      void refreshProfileQuietly({ client: supabase, phone: fromPhone });
 
       await supabase.from('sms_contacts').update({
         last_seen: new Date().toISOString(),

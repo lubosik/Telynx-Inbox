@@ -28,6 +28,20 @@ const NOW = new Date('2026-09-01T12:00:00Z');
  * the builder makes before it decides anything, so they are the only three
  * things worth controlling.
  */
+/**
+ * A stand-in for a Supabase result that is both awaitable and pageable.
+ *
+ * The real client offers `.range()`; a fake that only resolved could never
+ * express a 1000-row page, which is exactly why these fakes never caught
+ * readIn truncating a chunk.
+ */
+function pageable(rows) {
+  return {
+    range(from, to) { return Promise.resolve({ data: rows.slice(from, to + 1), error: null }); },
+    then(resolve, reject) { return Promise.resolve({ data: rows, error: null }).then(resolve, reject); }
+  };
+}
+
 function stubClient({
   segments = [{ id: 'seg-1', segment_key: 'one_time_lapsed', member_count: 3 }],
   segmentMembers = [],
@@ -66,11 +80,11 @@ function stubClient({
         return b;
       }
       if (table === 'sms_contacts') {
-        const b = { select: () => b, in: () => Promise.resolve({ data: contacts, error: null }) };
+        const b = { select: () => b, in: () => pageable(contacts) };
         return b;
       }
       // sms_orders
-      const b = { select: () => b, in: () => Promise.resolve({ data: orders, error: null }) };
+      const b = { select: () => b, in: () => pageable(orders) };
       return b;
     },
     rpc(_name, params) {
