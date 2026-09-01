@@ -683,6 +683,98 @@ function AccountPanel({ actor, onClose, onChanged }) {
 
 // ─── Order Card (inside modal) ────────────────────────────────────────────────
 
+/**
+ * The computed client profile.
+ *
+ * Everything here is measured from orders and messages, never guessed and
+ * never written by a model: what they bought, how often they come back, how
+ * much they talk to us. The Intelligence tab beside this one holds the model's
+ * read of the conversation, which is a different kind of claim and is labelled
+ * as one.
+ *
+ * A profile is only meaningful once the builder has produced it.
+ * `deterministic_built_at` is the discriminator: analyseConversation creates
+ * rows too, and with NOT NULL defaults an untouched row reads as a silent,
+ * zero-order customer rather than as "we have not looked yet".
+ */
+function ProfilePanel({ profile }) {
+  if (!profile || !profile.deterministic_built_at) {
+    return (
+      <div className="intel-summary" style={{ color: 'var(--text3)' }}>
+        No profile built for this contact yet. It appears after their next order
+        or reply, or on the nightly sweep.
+      </div>
+    );
+  }
+
+  const money = (cents) =>
+    typeof cents === 'number' ? `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—';
+
+  const TIERS = {
+    silent: 'Never replied',
+    flicker: 'Replied once',
+    talker: 'Replies sometimes',
+    regular: 'Talks to us regularly'
+  };
+
+  // A shop-wide median is not a measurement of THIS person, and a screen that
+  // presents both identically invites somebody to build a campaign on a number
+  // nobody measured.
+  const cadenceNote = profile.reorder_interval_source === 'personal'
+    ? `their own rhythm, ${profile.cadence_confidence} confidence`
+    : 'shop average, not measured for them';
+
+  const rows = [
+    ['Orders', profile.order_count ?? 0],
+    ['Total spent', money(profile.total_spend_cents)],
+    ['Average order', money(profile.avg_order_value_cents)],
+    ['First order', profile.first_order_at ? relativeTime(profile.first_order_at) : '—'],
+    ['Last order', profile.last_order_at ? relativeTime(profile.last_order_at) : '—'],
+    ['Last product', profile.last_product_name || 'none we can name'],
+    ['Buys about every', profile.reorder_interval_days ? `${profile.reorder_interval_days} days` : '—'],
+    ['Due back', profile.reorder_due_at ? relativeTime(profile.reorder_due_at) : '—'],
+    ['Engagement', TIERS[profile.engagement_tier] || profile.engagement_tier || '—'],
+    ['Messages in / out', `${profile.inbound_message_count ?? 0} / ${profile.outbound_message_count ?? 0}`],
+    ['Campaigns received', profile.campaigns_received_count ?? 0]
+  ];
+
+  return (
+    <>
+      {profile.has_only_unpaid_orders && (
+        <div className="intel-section" style={{ color: 'var(--warning, #d97706)' }}>
+          Every order this contact placed was cancelled or failed. They have
+          never actually bought anything.
+        </div>
+      )}
+
+      <div className="intel-section">
+        <div className="intel-label">Profile</div>
+        {rows.map(([label, value]) => (
+          <div key={label} className="profile-row">
+            <span className="profile-row-label">{label}</span>
+            <span className="profile-row-value">{value}</span>
+          </div>
+        ))}
+        <div className="profile-note">{cadenceNote}</div>
+      </div>
+
+      {profile.top_skus?.length > 0 && (
+        <div className="intel-section">
+          <div className="intel-label">Comes back for</div>
+          <div>
+            {profile.top_skus.map(sku => <span key={sku} className="tag-chip green">{sku}</span>)}
+          </div>
+        </div>
+      )}
+
+      <div className="profile-note">
+        Measured from orders and messages, not written by a model.
+        Built {relativeTime(profile.deterministic_built_at)}.
+      </div>
+    </>
+  );
+}
+
 function OrderCard({ order }) {
   const smsDots = [
     { sent: order.order_sms_sent, title: 'Order confirmed SMS' },
@@ -848,6 +940,9 @@ function ContactModal({ phone, onClose, onGoToMessages, addToast }) {
               <button className={`modal-tab${tab === 'orders' ? ' active' : ''}`} onClick={() => setTab('orders')}>
                 Orders {profile.orders?.length > 0 && `(${profile.orders.length})`}
               </button>
+              <button className={`modal-tab${tab === 'profile' ? ' active' : ''}`} onClick={() => setTab('profile')}>
+                Profile
+              </button>
               <button className={`modal-tab${tab === 'intel' ? ' active' : ''}`} onClick={() => setTab('intel')}>
                 Intelligence
               </button>
@@ -867,6 +962,8 @@ function ContactModal({ phone, onClose, onGoToMessages, addToast }) {
                   )}
                 </>
               )}
+
+              {tab === 'profile' && <ProfilePanel profile={intel} />}
 
               {tab === 'intel' && (
                 <>
