@@ -31,8 +31,8 @@ const codes = [...RULES.defaultApprovedProductCodes, 'vin-2mxyurpcwx'];
 test('a link may only ever point at the shop', () => {
   // The destination is the whole rule. A link is the one part of a message
   // that takes somebody somewhere else, and only these hosts were approved.
-  assert.equal(approvedStoreLink('https://vicipeptides.com/product/rt/'),
-    'https://vicipeptides.com/product/rt/');
+  assert.equal(approvedStoreLink('https://vicipeptides.com/?p=551'),
+    'https://vicipeptides.com/?p=551');
   for (const hostile of [
     'https://evil.com/product/rt/',
     'https://vicipeptides.com.evil.com/x',
@@ -45,13 +45,19 @@ test('a link may only ever point at the shop', () => {
   }
 });
 
-test('query strings and fragments are dropped', () => {
-  // They cost characters the 160-septet budget does not have, and can carry
-  // tracking nobody here decided to add.
-  assert.equal(
-    approvedStoreLink('https://vicipeptides.com/product/rt/?utm_source=x&ref=y#top'),
-    'https://vicipeptides.com/product/rt/'
-  );
+test('only the product-id query survives; every other one is dropped', () => {
+  // `?p=<digits>` is a public WordPress post id, identical for everyone who
+  // bought that product, and it is the only reason the shop's own links fit in
+  // a message. Anything else can carry a customer identifier or tracking
+  // nobody here decided to add.
+  assert.equal(approvedStoreLink('https://vicipeptides.com/?p=551'),
+    'https://vicipeptides.com/?p=551');
+  // A readable permalink is now refused on LENGTH, not on the query string:
+  // the budget is sized for the 33-character shortlink and a permalink runs to
+  // 58. Either way it never reaches a customer with tracking attached.
+  assert.equal(approvedStoreLink('https://vicipeptides.com/product/rt/?utm_source=x#top'), '');
+  assert.equal(approvedStoreLink('https://vicipeptides.com/?p=551#top'),
+    'https://vicipeptides.com/?p=551');
 });
 
 test('a product page whose slug carries a banned name is refused', () => {
@@ -103,15 +109,18 @@ test('an unlinkable product renders empty, which moves that person to the plain 
 });
 
 test('the worst case the live store can produce still fits one segment', () => {
-  // 58 characters is the longest permalink on the store today, and
-  // FIELDS.product_link.maxLength must leave room for it.
-  const longest = 'https://vicipeptides.com/product/cjc-1295-without-dac-ipa/';
+  // The longest shortlink the store can produce. Permalinks are no longer
+  // used: they run to 58 characters and grow with the product name, so the
+  // longest names produced the longest URLs and nothing else fitted beside
+  // them.
+  const longest = 'https://vicipeptides.com/?p=99999';   // five digits, the ceiling
   assert.ok(longest.length <= FIELDS.product_link.maxLength,
     `maxLength ${FIELDS.product_link.maxLength} is under the real longest permalink`);
 
   const rendered = render(recipe('winback_one_time').copy.named, {
     contactName: 'Christopher', couponCode: 'vin-2mxyurpcwx',
-    lastProductName: 'CJC-1295', lastProductLink: longest
+    lastProductName: 'BPC-157 + TB-500', lastProductLink: longest,
+    lastOrderAt: '2026-09-01T00:00:00Z'
   });
   assert.deepEqual(rendered.missing, []);
   assert.ok(septetLength(rendered.text) <= 160,
@@ -137,4 +146,67 @@ test('only one link, so the message cannot grow a second', () => {
   const named = recipe('winback_one_time').copy.named;
   assert.equal((named.match(/\{\{product_link\}\}/g) || []).length, 1);
   assert.equal(RULES.links.maxPerMessage, 1);
+});
+
+// ── Readable names, and the budget they have to live in ────────────────────
+
+test('no approved product name can overflow the message budget', () => {
+  // The whole message is exactly 160 septets at worst case, so this is not a
+  // style rule: an approved name of 17 characters would silently push some
+  // recipient over one segment. maxLength does not save it — a truncated
+  // product name is nonsense.
+  const { FIELDS } = require('../lib/campaigns/merge-fields');
+  const tooLong = RULES.defaultApprovedProductCodes
+    .filter(name => name.length > FIELDS.last_product.maxLength);
+  assert.deepEqual(tooLong, [],
+    `these approved names exceed last_product.maxLength (${FIELDS.last_product.maxLength}) `
+    + 'and would be truncated into nonsense: ' + tooLong.join(', '));
+});
+
+test('a customer never reads an internal SKU', () => {
+  // "15% off P-WA10" was the actual output for somebody who bought BAC water.
+  // The SKU fallback is gone: a product that cannot be named in words the
+  // customer would recognise is not named at all.
+  const { displayNameFor } = require('../lib/campaigns/personalise');
+  const { approvedProductLabel } = require('../lib/campaigns/merge-fields');
+  for (const sku of ['P-WA10', 'TSM10', 'IP10', 'CP10', 'BBG70', 'ML10']) {
+    const asLabel = approvedProductLabel(displayNameFor(sku)) || '';
+    assert.equal(asLabel, '', `${sku} must never be a customer-facing label`);
+  }
+  // And the readable names are available.
+  for (const name of ['BAC Water', 'Melanotan II', 'Glutathione', 'BPC-157 + TB-500']) {
+    assert.equal(approvedProductLabel(name), name, `${name} should be writeable`);
+  }
+});
+
+test('the preview code is the same length as a real one', () => {
+  // The dry-run placeholder was one character LONGER than a minted code, so
+  // every preview measured a message that could not occur. Invisible until
+  // code.maxLength was tightened to the true 14, at which point every preview
+  // rendered empty and an entire rebuild produced zero recipients.
+  const { generateCode } = require('../lib/woocommerce-coupons');
+  const { FIELDS } = require('../lib/campaigns/merge-fields');
+  const real = generateCode({ prefix: 'vin', seed: 'anything' });
+  assert.equal(real.length, FIELDS.code.maxLength,
+    'code.maxLength must equal the length generateCode actually produces');
+
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'campaigns', 'personalise.js'), 'utf8'
+  );
+  const placeholder = source.match(/`\$\{COUPON_PREFIX\}-(preview\d+)`/);
+  assert.ok(placeholder, 'the dry-run placeholder should still exist');
+  assert.equal(`vin-${placeholder[1]}`.length, real.length,
+    'the preview placeholder must be exactly as long as a minted code');
+});
+
+test('the shortlink form is what the catalogue stores', () => {
+  // Readable permalinks run to 58 characters and grow with the product name,
+  // so the longest names produced the longest URLs and nothing else fitted.
+  // Shortlinks are a fixed 31 or 32 whatever the product.
+  const { FIELDS, approvedStoreLink } = require('../lib/campaigns/merge-fields');
+  assert.equal(approvedStoreLink('https://vicipeptides.com/?p=4861'),
+    'https://vicipeptides.com/?p=4861');
+  assert.ok('https://vicipeptides.com/?p=99999'.length <= FIELDS.product_link.maxLength);
 });

@@ -101,10 +101,26 @@ test('an unwriteable product does not cost somebody the whole message', () => {
   assert.equal(resolved.lastProductName, 'RT');
 });
 
-test('the SKU is used when the product name itself cannot be written', () => {
-  // The store calls it "Melanotan II"; ML10 is the approved code for it.
-  const resolved = facts([{ sku: 'ML10', name: 'Melanotan II - 10mg', total: '45.00' }]);
-  assert.equal(approvedProductLabel(resolved.lastProductName), 'ML10');
+test('a product that cannot be named readably is not named at all', () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE. It checked that the SKU was used
+  // when the product name could not be written, and that shipped: somebody who
+  // bought BAC water was told "15% off P-WA10".
+  //
+  // The owner's reaction was the correct one — that does not make any sense to
+  // the person reading it — so the store's own product names were added to the
+  // approved list instead, and the SKU fallback was removed. A product that
+  // cannot be named in words a customer would recognise now sends them the
+  // copy that names no product.
+  const { approvedProductLabel } = require('../lib/campaigns/merge-fields');
+
+  // Readable names resolve to themselves.
+  const named = facts([{ sku: 'ML10', name: 'Melanotan II - 10mg', total: '45.00' }]);
+  assert.equal(approvedProductLabel(named.lastProductName), 'Melanotan II');
+
+  // A banned compound name resolves to nothing, NOT to its SKU.
+  const banned = facts([{ sku: 'TSM20', name: 'Tesamorelin - 20mg', total: '595.00' }]);
+  assert.equal(approvedProductLabel(banned.lastProductName), '',
+    'a banned product must not be smuggled in as its SKU');
 });
 
 test('what is stored is what gets written, with no second lookup', () => {
