@@ -106,3 +106,61 @@ test('a failed write never throws into the webhook', async () => {
   assert.equal(out.replied, false, 'it must not claim a write it did not make');
   assert.ok(errors.some(l => /only the campaign numbers are affected/.test(l)));
 });
+
+// ── The sweep ──────────────────────────────────────────────────────────────
+
+test('the sweep attributes replies the webhook missed', async () => {
+  // The webhook answers Telnyx with 200 BEFORE doing this work, so nothing
+  // retries a miss. A restart, a database blip, or a deploy landing between
+  // the reply and the write loses a number nobody would go looking for —
+  // which is exactly what happened today: the code to record these did not
+  // exist while the replies were arriving, and they had to be backfilled by
+  // hand.
+  const { sweepUnattributedReplies } = require('../lib/campaigns/reply-events');
+
+  const inbound = [
+    { contact_phone: '+15551110001', body: 'Great stuff', created_at: '2026-09-01T18:05:00Z' },
+    { contact_phone: '+15551110001', body: 'STOP', created_at: '2026-09-01T18:06:00Z' }
+  ];
+  const written = [];
+  const client = {
+    from(table) {
+      const chain = {
+        select() { return chain; },
+        eq(col, val) {
+          if (table === 'sms_messages' && col === 'direction') return chain;
+          return chain;
+        },
+        gte() {
+          if (table === 'sms_messages') return chain;
+          return chain;
+        },
+        not() { return chain; },
+        order() {
+          if (table === 'sms_messages') return Promise.resolve({ data: inbound, error: null });
+          return chain;
+        },
+        limit() {
+          return Promise.resolve({
+            data: [{ id: 'rec-1', campaign_id: 'camp-1', sent_at: '2026-09-01T18:00:00Z' }],
+            error: null
+          });
+        },
+        upsert(rows) { written.push(...rows); return Promise.resolve({ error: null }); }
+      };
+      return chain;
+    }
+  };
+
+  const summary = await sweepUnattributedReplies({ client, log: { error() {} } });
+  assert.equal(summary.scanned, 2);
+  assert.equal(summary.replied, 2);
+  assert.equal(summary.optedOut, 1, 'only the STOP counts as leaving');
+
+  // Re-running must produce identical rows, because every write is keyed. That
+  // is what makes it safe to overlap the webhook rather than coordinate with it.
+  const types = written.map(r => r.event_type).sort();
+  assert.deepEqual(types, ['customer.replied', 'customer.replied', 'recipient.opted_out']);
+  const optOutKeys = written.filter(r => r.event_type === 'recipient.opted_out').map(r => r.dedupe_key);
+  assert.deepEqual(optOutKeys, ['optout:rec-1'], 'one person leaving is one key');
+});

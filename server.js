@@ -394,10 +394,12 @@ function startDeliveryCheck() {
 // because rows abandoned by an earlier run should still be resolved after the
 // feature is switched back off.
 function startCampaignDelivery() {
-  let deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses, sendSMS;
+  let deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses,
+      sweepUnattributedReplies, sendSMS;
   try {
     ({ deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses } =
       require('./lib/campaigns/delivery-worker'));
+    ({ sweepUnattributedReplies } = require('./lib/campaigns/reply-events'));
     ({ sendSMS } = require('./telnyx'));
   } catch (err) {
     // A campaign feature that is off for this workspace must never be able to
@@ -416,6 +418,22 @@ function startCampaignDelivery() {
     // was switched off still stops describing itself as scheduled.
     try { await reconcileCampaignStatuses({ client: supabase }); }
     catch (err) { console.error('[CAMPAIGN STATUS] Reconcile error:', err.message); }
+
+    // And catch any reply the webhook missed. It answers Telnyx with 200
+    // before doing that work, so nothing retries a miss: a restart, a database
+    // blip or a deploy landing between the reply and the write would lose a
+    // number nobody would ever go looking for. Re-attributing is free — every
+    // write is keyed — so this simply overlaps the webhook, which is usually
+    // first.
+    try {
+      const swept = await sweepUnattributedReplies({ client: supabase });
+      if (swept.replied > 0) {
+        console.log(
+          `[CAMPAIGN REPLY] Swept ${swept.scanned} inbound; `
+          + `${swept.replied} reply events, ${swept.optedOut} opt-outs recorded.`
+        );
+      }
+    } catch (err) { console.error('[CAMPAIGN REPLY] Sweep error:', err.message); }
   }, FIFTEEN_MINUTES);
 
   if (!liveSendEnabled(process.env)) {
