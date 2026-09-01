@@ -861,7 +861,7 @@ BEGIN
       RAISE EXCEPTION 'campaign_generated_draft_invalid' USING ERRCODE = 'P0001';
     END IF;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_preparation_key, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(31) || v_preparation_key, 0));
     SELECT * INTO v_campaign FROM public.sms_campaigns
     WHERE workspace_id = p_workspace_id AND preparation_key = v_preparation_key;
     IF FOUND THEN
@@ -1466,7 +1466,7 @@ BEGIN
     FOR UPDATE OF r SKIP LOCKED
   LOOP
     EXIT WHEN v_claimed_count >= p_limit;
-    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_candidate.contact_phone, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(31) || v_candidate.contact_phone, 0));
 
     -- Repeat every mutable suppression after the per-phone lock. Unknown or
     -- stale GHL DND state is ineligible; absence is never interpreted as false.
@@ -1606,7 +1606,7 @@ BEGIN
   SELECT * INTO v_settings FROM public.sms_campaign_settings
   WHERE workspace_id = p_workspace_id AND provider_approved = true AND live_send_enabled = true FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'campaign_live_send_disabled' USING ERRCODE = 'P0001'; END IF;
-  PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_recipient.contact_phone, 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(31) || v_recipient.contact_phone, 0));
 
   -- Last pre-provider safety check. Unknown/future/stale DND, authoritative
   -- suppressions, STOP and missing positive consent all fail closed.
@@ -1747,7 +1747,7 @@ BEGIN
   SELECT * INTO v_settings FROM public.sms_campaign_settings
   WHERE workspace_id = p_workspace_id AND provider_approved = true AND live_send_enabled = true FOR SHARE;
   IF NOT FOUND THEN RAISE EXCEPTION 'campaign_live_send_disabled' USING ERRCODE = 'P0001'; END IF;
-  PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_recipient.contact_phone, 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(31) || v_recipient.contact_phone, 0));
 
   IF EXISTS (
        SELECT 1 FROM public.sms_campaign_suppressions x

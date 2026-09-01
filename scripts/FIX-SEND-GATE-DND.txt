@@ -209,7 +209,7 @@ BEGIN
     FOR UPDATE OF r SKIP LOCKED
   LOOP
     EXIT WHEN v_claimed_count >= p_limit;
-    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(0) || v_candidate.contact_phone, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_workspace_id || chr(31) || v_candidate.contact_phone, 0));
 
     -- Repeat every mutable suppression after the per-phone lock. Unknown or
     -- stale GHL DND state is ineligible; absence is never interpreted as false.

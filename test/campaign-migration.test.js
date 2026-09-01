@@ -31,7 +31,13 @@ test('authoritative opportunity support state and atomic draft bundles fail clos
   assert.match(sql, /opportunity\.value->>'dedupeKey' = draft_key\.value/);
   assert.match(sql, /structuredContext,ruleVersion/);
   assert.match(sql, /inclusionReason,ruleVersion/);
-  assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\(p_workspace_id \|\| chr\(0\) \|\| v_preparation_key/);
+  // chr(31), not chr(0). This assertion pinned chr(0) in place for as long as
+  // the bug existed: PostgreSQL text cannot hold a NUL, so that line raised
+  // 54000 every time it ran and the whole send path was dead. The separator
+  // still has to be here — without one, 'vici' + '+1555…' and 'vic' +
+  // 'i+1555…' would take the same lock — it just has to be a character
+  // PostgreSQL permits. See test/campaign-sql-null-character.test.js.
+  assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\(p_workspace_id \|\| chr\(31\) \|\| v_preparation_key/);
   assert.match(sql, /campaign_generated_audience_set_invalid/);
   assert.match(sql, /inclusionReason,productID/);
   assert.match(sql, /inclusionReason,variationID/);
