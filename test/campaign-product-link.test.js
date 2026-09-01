@@ -108,7 +108,7 @@ test('an unlinkable product renders empty, which moves that person to the plain 
   assert.ok(outcome.missing.includes('product_link'));
 });
 
-test('the worst case the live store can produce still fits one segment', () => {
+test('the worst case the live store can produce still fits the two-segment ceiling', () => {
   // The longest shortlink the store can produce. Permalinks are no longer
   // used: they run to 58 characters and grow with the product name, so the
   // longest names produced the longest URLs and nothing else fitted beside
@@ -123,7 +123,12 @@ test('the worst case the live store can produce still fits one segment', () => {
     lastOrderAt: '2026-09-01T00:00:00Z'
   });
   assert.deepEqual(rendered.missing, []);
-  assert.ok(septetLength(rendered.text) <= 160,
+  // 306 is two concatenated GSM-7 segments at 153 each. The owner chose two
+  // segments deliberately so the message could carry a greeting, their name,
+  // the product, the month, "here's a code for 15% off your next order", the
+  // code, "order here" and a link — 207 septets, which one segment cannot
+  // hold and no phrasing could get under.
+  assert.ok(septetLength(rendered.text) <= RULES.length.maxSeptets,
     `worst case is ${septetLength(rendered.text)} septets: ${rendered.text}`);
   assert.equal(
     validateCopy(rendered.text, { brandName: BRAND, approvedProductCodes: codes }).ok, true

@@ -54,7 +54,7 @@ test('the prompt states the rules the validator actually enforces', () => {
   // validator will reject on, so the model must have been told about it.
   const prompt = renderPromptRules().toLowerCase();
   for (const phrase of [
-    '160 characters or fewer',
+    '306 characters or fewer',
     'reply stop to opt out.',
     'exclamation mark',
     'em dash',
@@ -114,7 +114,9 @@ test('the rule set is deeply frozen, so no caller can widen a compliance list', 
   assert.throws(() => { RULES.length.maxSeptets = 1600; }, TypeError);
   assert.throws(() => { RULES.bannedTerms.carrier_filter_high_risk.terms.push('anything'); }, TypeError);
   assert.throws(() => { RULES.optOut.exactSuffix = 'nope'; }, TypeError);
-  assert.equal(RULES.length.maxSeptets, 160);
+  // 306: two concatenated GSM-7 segments at 153 septets each, not 2 x 160.
+  // A concatenated SMS spends 7 septets a segment on the reassembly header.
+  assert.equal(RULES.length.maxSeptets, 306);
 });
 
 test('the approved codes are real catalogue entries, and name no GLP-1', () => {

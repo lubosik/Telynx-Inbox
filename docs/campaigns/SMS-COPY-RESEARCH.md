@@ -65,7 +65,9 @@ anywhere in the codebase.
     "exactSuffix": "Reply STOP to opt out."
   },
   "length": {
-    "maxSeptets": 160
+    "maxSeptets": 306,
+    "septetsPerSingleSegment": 160,
+    "septetsPerConcatenatedSegment": 153
   },
   "links": {
     "maxPerMessage": 1,
@@ -505,7 +507,7 @@ anywhere in the codebase.
   "checks": [
     {
       "id": "length_within_one_segment",
-      "title": "The whole message, including brand, link and opt-out, fits 160 GSM-7 septets."
+      "title": "The whole message, including brand, link and opt-out, fits 306 GSM-7 septets, which is two concatenated segments."
     },
     {
       "id": "gsm7_character_set_only",
@@ -554,7 +556,7 @@ anywhere in the codebase.
   ],
   "promptRules": [
     "Write one SMS message and nothing else.",
-    "The entire message, including the brand, any link and the opt-out sentence, must be 160 characters or fewer.",
+    "The entire message, including the brand, any link and the opt-out sentence, must be 306 characters or fewer. Shorter is better: under 160 it costs one segment instead of two.",
     "Begin the message with the brand name so the recipient can tell who is texting.",
     "End the message with the exact sentence: Reply STOP to opt out.",
     "Use only plain ASCII letters, digits, spaces and the punctuation . , ? : ; ( ) / ' \" - . Do not use an em dash, an en dash, a curly quote, an ellipsis character, an emoji, or any other non-ASCII character.",

@@ -83,16 +83,23 @@ test('a compliant draft with a verified product code and an approved link passes
 
 // ── 1. length ──────────────────────────────────────────────────────────────
 
-test('length is measured in GSM-7 septets, and 160 is the limit', () => {
-  const filler = 'a'.repeat(160 - septetLength(`${BRAND}: . ${OPT_OUT}`));
+test('length is measured in GSM-7 septets, and 306 is the limit', () => {
+  // 306 is TWO concatenated segments at 153 septets each, not 2 x 160: a
+  // concatenated SMS spends 7 septets a segment on the header that tells the
+  // handset how to reassemble it. The ceiling is still a ceiling; it refuses
+  // a third segment.
+  const { RULES } = require('../lib/campaigns/copy-rules');
+  assert.equal(RULES.length.maxSeptets, 306);
+
+  const filler = 'a'.repeat(306 - septetLength(`${BRAND}: . ${OPT_OUT}`));
   const exact = `${BRAND}: ${filler}. ${OPT_OUT}`;
-  assert.equal(septetLength(exact), 160);
+  assert.equal(septetLength(exact), 306);
   assertAccepted(exact);
 
   const oneOver = `${BRAND}: ${filler}a. ${OPT_OUT}`;
-  assert.equal(septetLength(oneOver), 161);
+  assert.equal(septetLength(oneOver), 307);
   const verdict = assertRejectedFor('length_within_one_segment', oneOver);
-  assert.match(verdict.failures[0].reason, /161 GSM-7 septets/);
+  assert.match(verdict.failures[0].reason, /307 GSM-7 septets/);
 });
 
 test('extension-table characters cost two septets, not one', () => {
@@ -102,10 +109,10 @@ test('extension-table characters cost two septets, not one', () => {
   assert.equal(septetLength('{}'), 4);
   assert.equal(septetLength('abc'), 3);
 
-  const filler = 'a'.repeat(160 - septetLength(`${BRAND}: ~. ${OPT_OUT}`));
+  const filler = 'a'.repeat(306 - septetLength(`${BRAND}: ~. ${OPT_OUT}`));
   const text = `${BRAND}: ~${filler}a. ${OPT_OUT}`;
-  assert.equal(text.length, 160, 'this message is 160 CHARACTERS');
-  assert.equal(septetLength(text), 161, 'but 161 SEPTETS, because ~ is an extension character');
+  assert.equal(text.length, 306, 'this message is 306 CHARACTERS');
+  assert.equal(septetLength(text), 307, 'but 307 SEPTETS, because ~ is an extension character');
   assertRejectedFor('length_within_one_segment', text);
 });
 
@@ -529,7 +536,7 @@ test('an APPROVED merge field is accepted, and an unknown one is not', () => {
 test('LENGTH IS MEASURED WITH THE VARIABLES AT THEIR LONGEST', () => {
   // A template that fits and a message that does not are the same bug, and it
   // only ever breaks for the person with the longest name.
-  const filler = 'a'.repeat(150 - `${BRAND}: . ${OPT_OUT}`.length);
+  const filler = 'a'.repeat(296 - `${BRAND}: . ${OPT_OUT}`.length);
   const tightWithName = `${BRAND}: {{first_name}} ${filler}. ${OPT_OUT}`;
   const verdict = validateCopy(tightWithName, { brandName: BRAND });
   assert.equal(verdict.ok, false, 'this fits as written and not once a name is in it');
@@ -616,7 +623,7 @@ test('every check in the twelve-point list is reachable by some rejection', () =
   // code path can ever report it.
   const fired = new Set();
   const corpus = [
-    `${BRAND}: ${'a'.repeat(200)}. ${OPT_OUT}`,
+    `${BRAND}: ${'a'.repeat(320)}. ${OPT_OUT}`,
     `Vici — back in stock. ${OPT_OUT}`,
     `Hello there. ${OPT_OUT}`,
     `${BRAND}: back in stock.`,
