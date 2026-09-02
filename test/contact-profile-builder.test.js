@@ -770,13 +770,26 @@ function backfillClient() {
   });
 }
 
-test('the backfill covers every buyer plus anybody who already has a row', async () => {
-  // A contact whose only order was cancelled is not a buyer and is not swept
-  // in on that basis; a contact created by an inbound-SMS refresh is, or their
-  // row is written once and drifts forever because they never bought anything.
+test('the backfill covers everybody who ORDERED, paid or not', async () => {
+  // This used to exclude a contact whose only order was cancelled, on the
+  // reasoning that they are not a buyer. True, and it made
+  // has_only_unpaid_orders — the column that exists precisely to stop such a
+  // person being treated as a returning customer — impossible for anybody to
+  // have. A guard that cannot reach the people it guards is not a guard.
+  //
+  // Measured on production: 125 contacts have only unpaid orders, $25,009.88
+  // of orders that never completed, 71 of them for RT. Two share an email with
+  // a paying customer and none shares a phone, so they are not duplicates of
+  // existing buyers — they are people who tried to buy and did not, and they
+  // were invisible to every segment.
+  //
+  // A contact created by an inbound-SMS refresh is still included too, or
+  // their row is written once and drifts forever.
   const client = backfillClient();
   const phones = await profileablePhones({ client });
-  assert.deepEqual(phones, ['+15551110001', '+15551110002', '+15551119999']);
+  assert.deepEqual(phones,
+    ['+15551110001', '+15551110002', '+15551110003', '+15551119999'],
+    'the cancelled-only contact is now in');
 });
 
 test('running the backfill twice changes nothing the second time', async () => {
@@ -784,7 +797,7 @@ test('running the backfill twice changes nothing the second time', async () => {
   // is unsure whether it finished can simply run it again.
   const client = backfillClient();
   const first = await backfillProfiles({ client, now: NOW, batchSize: 2 });
-  assert.equal(first.written, 3);
+  assert.equal(first.written, 4, 'three ordering contacts plus the existing row');
   assert.deepEqual(first.failed, []);
 
   // Feed the rows it just wrote back in as the stored state.
@@ -808,14 +821,14 @@ test('running the backfill twice changes nothing the second time', async () => {
   });
   const again = await backfillProfiles({ client: replay, now: NOW, batchSize: 2 });
   assert.equal(again.written, 0);
-  assert.equal(again.skipped, 3);
+  assert.equal(again.skipped, 4, 'all four unchanged on the replay');
   assert.deepEqual(replay.upserts, []);
 });
 
 test('a dry run reports the population and writes nothing', async () => {
   const client = backfillClient();
   const summary = await backfillProfiles({ client, now: NOW, dryRun: true });
-  assert.equal(summary.contacts, 3);
+  assert.equal(summary.contacts, 4);
   assert.equal(summary.written, 0);
   assert.deepEqual(client.upserts, []);
 });
@@ -854,7 +867,7 @@ test('the sweep is on by default and only the exact string "true" turns it off',
       client: backfillClient(), now: NOW, env: { CONTACT_PROFILES_SWEEP_DISABLED: value }
     });
     assert.equal(on.disabled, false, `"${value}" must not disable the sweep`);
-    assert.equal(on.written, 3);
+    assert.equal(on.written, 4);
   }
 });
 
