@@ -572,9 +572,9 @@ struct CampaignDetailView: View {
             if let preview = model.preview, preview.personalised {
                 CampaignPreviewSection(
                     preview: preview,
-                    status: campaign.status,
                     removing: model.removingRecipients,
-                    onRemove: { id in Task { await model.removeRecipient(id) } }
+                    onRemove: { id in Task { await model.removeRecipient(id) } },
+                    status: campaign.status
                 )
             }
 
