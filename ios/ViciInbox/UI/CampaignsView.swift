@@ -570,7 +570,7 @@ struct CampaignDetailView: View {
             }
 
             if let preview = model.preview, preview.personalised {
-                CampaignPreviewSection(preview: preview)
+                CampaignPreviewSection(preview: preview, status: campaign.status)
             }
 
             if let rejection = campaign.rejectionReason, !rejection.isEmpty {
@@ -2003,6 +2003,10 @@ private struct CampaignScheduleSheet: View {
 ///   nicely the first message reads.
 private struct CampaignPreviewSection: View {
     let preview: CampaignPreview
+    /// Whether the messages have already gone out. The section shows the same
+    /// numbers either way and means different things by them, so it needs to
+    /// know which question it is answering.
+    let status: CampaignStatus
 
     var body: some View {
         // ── WHAT THIS SECTION IS FOR CHANGES ONCE THE MESSAGES ARE GONE ──
@@ -2017,7 +2021,7 @@ private struct CampaignPreviewSection: View {
         // already excluded from a send that is finished. And it listed every
         // one of 375 messages, so reading the campaign meant scrolling past
         // all of them.
-        let isFinished = campaign.status == .completed || campaign.status == .sending
+        let isFinished = status == .completed || status == .sending
         let sampleLimit = isFinished ? 3 : preview.samples.count
 
         Section("What each person receives") {

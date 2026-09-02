@@ -52,10 +52,16 @@ test('only the product-id query survives; every other one is dropped', () => {
   // nobody here decided to add.
   assert.equal(approvedStoreLink('https://vicipeptides.com/?p=551'),
     'https://vicipeptides.com/?p=551');
-  // A readable permalink is now refused on LENGTH, not on the query string:
-  // the budget is sized for the 33-character shortlink and a permalink runs to
-  // 58. Either way it never reaches a customer with tracking attached.
-  assert.equal(approvedStoreLink('https://vicipeptides.com/product/rt/?utm_source=x#top'), '');
+  // A readable permalink is now allowed — the catalogue serves them and the
+  // limit is 58 — so this asserts the guarantee that actually matters rather
+  // than the one length was providing by accident: the tracking and the
+  // fragment are stripped and a clean link comes back.
+  //
+  // It previously expected '' here, which passed because the cleaned URL was
+  // 36 characters against a 33 ceiling. That is a side effect standing in for
+  // a property, and it stopped being true the moment the ceiling moved.
+  assert.equal(approvedStoreLink('https://vicipeptides.com/product/rt/?utm_source=x#top'),
+    'https://vicipeptides.com/product/rt/');
   assert.equal(approvedStoreLink('https://vicipeptides.com/?p=551#top'),
     'https://vicipeptides.com/?p=551');
 });
