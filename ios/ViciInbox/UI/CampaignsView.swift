@@ -2022,7 +2022,19 @@ private struct CampaignPreviewSection: View {
         // one of 375 messages, so reading the campaign meant scrolling past
         // all of them.
         let isFinished = status == .completed || status == .sending
-        let sampleLimit = isFinished ? 3 : preview.samples.count
+        // ── THREE, ALWAYS ────────────────────────────────────────────────
+        //
+        // This showed all of them before approval, on the reasoning that a
+        // reviewer deciding whether wording works should see the spread. The
+        // owner's answer, having actually done that review: he needs three,
+        // and a dozen means scrolling past a dozen to reach the approve
+        // button.
+        //
+        // The number that decides an approval is how many people DROP OUT,
+        // and that is stated above in one line. The samples are there to show
+        // that the merge fields substitute at all, which three demonstrate as
+        // well as three hundred.
+        let sampleLimit = 3
 
         Section("What each person receives") {
             HStack {
@@ -2095,7 +2107,7 @@ private struct CampaignPreviewSection: View {
                 .padding(.vertical, 2)
             }
 
-            if isFinished && preview.samples.count > sampleLimit {
+            if preview.samples.count > sampleLimit {
                 Text("Showing 3 of \(preview.samples.count) messages.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

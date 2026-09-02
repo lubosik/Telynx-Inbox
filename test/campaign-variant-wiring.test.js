@@ -158,13 +158,18 @@ test('a sent campaign stops giving advice about approving it', () => {
     'and is replaced by a statement of what happened');
 });
 
-test('a sent campaign shows three messages, not three hundred', () => {
-  // 375 rendered messages meant scrolling past all of them to read anything
-  // below. Before approval every one matters, because the reviewer is deciding
-  // whether the wording works; afterwards three is a sample.
+test('every campaign shows three messages, not three hundred', () => {
+  // First capped only after sending, on the reasoning that a reviewer
+  // deciding whether wording works should see the whole spread. The owner's
+  // answer, having actually done that review: three is what he needs, and a
+  // dozen means scrolling past a dozen to reach the approve button.
+  //
+  // The number that decides an approval is how many people DROP OUT, stated
+  // above in one line. The samples exist to show the merge fields substitute
+  // at all, which three demonstrate as well as three hundred.
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
-  assert.match(view, /let sampleLimit = isFinished \? 3 : preview\.samples\.count/);
+  assert.match(view, /let sampleLimit = 3/);
   assert.match(view, /ForEach\(preview\.samples\.prefix\(sampleLimit\)\)/);
   assert.match(view, /Showing 3 of \\\(preview\.samples\.count\) messages/,
     'and says it is showing a sample rather than hiding the rest silently');
@@ -175,8 +180,8 @@ test('the placeholder-code note disappears once the codes are real', () => {
   // afterwards: those are the codes that went to customers.
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
-  const section = view.slice(view.indexOf('if isFinished && preview.samples.count > sampleLimit'));
-  assert.match(section.slice(0, 800), /if !isFinished \{[\s\S]*?Codes shown here are placeholders/);
+  const section = view.slice(view.indexOf('if preview.samples.count > sampleLimit'));
+  assert.match(section.slice(0, 900), /if !isFinished \{[\s\S]*?Codes shown here are placeholders/);
 });
 
 test('a finished campaign reads as Live, not Sent or Completed', () => {
