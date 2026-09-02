@@ -331,6 +331,16 @@ struct CampaignPreviewExclusion: Codable, Hashable, Identifiable {
     let phone: String
     let reason: String
     let missing: [String]?
+    /// The row to remove. Absent on an older server, and the button hides
+    /// rather than guessing an id.
+    let recipientID: String?
+    let name: String?
+    /// What this person's message WOULD say, blanks and all.
+    ///
+    /// Shown rather than described: "Use code BACK20 here: Reply STOP to opt
+    /// out." makes the case for taking somebody out of the audience better
+    /// than any sentence explaining it.
+    let wouldRead: String?
     var id: String { phone }
 
     var readableReason: String {

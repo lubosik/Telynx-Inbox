@@ -695,6 +695,20 @@ actor APIClient {
         try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/submit-review")
     }
 
+    /// `POST /api/campaigns/:id/recipients/:recipientId/deselect`,
+    /// `campaigns.manage`.
+    ///
+    /// Deselects rather than deletes, and the server refuses once a campaign
+    /// is past approval. Returns nothing worth decoding — the caller reloads,
+    /// because removing somebody changes the eligible count, the cost, and
+    /// whether the campaign can be approved at all.
+    func removeCampaignRecipient(campaignID: String, recipientID: String) async throws {
+        let path = "/api/campaigns/\(encodedPathSegment(campaignID))"
+            + "/recipients/\(encodedPathSegment(recipientID))/deselect"
+        let (data, response) = try await post(path, body: [:])
+        try validate(data: data, response: response)
+    }
+
     func approveCampaign(id: String) async throws -> CampaignActionResponse {
         try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/approve")
     }

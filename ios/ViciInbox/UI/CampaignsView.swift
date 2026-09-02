@@ -570,7 +570,12 @@ struct CampaignDetailView: View {
             }
 
             if let preview = model.preview, preview.personalised {
-                CampaignPreviewSection(preview: preview, status: campaign.status)
+                CampaignPreviewSection(
+                    preview: preview,
+                    status: campaign.status,
+                    removing: model.removingRecipients,
+                    onRemove: { id in Task { await model.removeRecipient(id) } }
+                )
             }
 
             if let rejection = campaign.rejectionReason, !rejection.isEmpty {
@@ -2003,6 +2008,9 @@ private struct CampaignScheduleSheet: View {
 ///   nicely the first message reads.
 private struct CampaignPreviewSection: View {
     let preview: CampaignPreview
+    /// Ids currently being removed, so a second tap cannot fire the same call.
+    let removing: Set<String>
+    let onRemove: (String) -> Void
     /// Whether the messages have already gone out. The section shows the same
     /// numbers either way and means different things by them, so it needs to
     /// know which question it is answering.
@@ -2065,8 +2073,42 @@ private struct CampaignPreviewSection: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 ForEach(preview.excluded) { row in
-                    LabeledContent(row.phone.suffix(4).description, value: row.readableReason)
-                        .font(.caption)
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent(row.name ?? row.phone.suffix(4).description,
+                                       value: row.readableReason)
+                            .font(.caption)
+
+                        // What they would actually receive. Shown rather than
+                        // described: "Use code BACK20 here: Reply STOP to opt
+                        // out." makes the case for removal better than any
+                        // sentence explaining it.
+                        if let wouldRead = row.wouldRead, !wouldRead.isEmpty {
+                            Text(wouldRead)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+                        }
+
+                        // The remedy, beside the problem. The instruction named
+                        // a blocker and left somebody to find the number
+                        // themselves; an instruction with no remedy is worse
+                        // than no instruction.
+                        if let recipientID = row.recipientID {
+                            Button(role: .destructive) {
+                                onRemove(recipientID)
+                            } label: {
+                                Label("Remove from audience", systemImage: "person.badge.minus")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(ViciTheme.destructive)
+                            .disabled(removing.contains(recipientID))
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
             } else if isFinished && preview.excludedCount > 0 {
                 Text("\(preview.excludedCount) could not be personalised and were left out of the send.")

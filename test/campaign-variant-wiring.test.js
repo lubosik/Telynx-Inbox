@@ -150,7 +150,7 @@ test('a sent campaign stops giving advice about approving it', () => {
   // swiftc -parse accepted it because that only checks syntax, and the real
   // build failed on name resolution. A local parse is not a compile.
   assert.match(view, /let isFinished = status == \.completed \|\| status == \.sending/);
-  assert.match(view, /CampaignPreviewSection\(preview: preview, status: campaign\.status\)/,
+  assert.match(view, /CampaignPreviewSection\([\s\S]{0,200}status: campaign\.status/,
     'and the caller supplies it from a campaign it actually has');
   assert.match(view, /if !preview\.rendersForEveryone && !isFinished \{/,
     'the instruction is only shown while it is still actionable');

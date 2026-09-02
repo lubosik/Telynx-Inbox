@@ -680,6 +680,27 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'loading the results'); }
   });
 
+  /**
+   * Take one person out of the audience, in one tap.
+   *
+   * The preview names a blocker — "cannot be personalised and must be removed
+   * before this can be approved" — and until now offered no way to act on it.
+   * An instruction with no remedy is worse than no instruction.
+   */
+  router.post('/:id/recipients/:recipientId/deselect', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const result = await campaigns.deselectRecipient(
+        req.params.id, req.params.recipientId, req.actor
+      );
+      await auditCampaign('campaign.recipient_removed', req, result.campaign, {
+        summary: `Removed a recipient from ${campaignSummaryName(result.campaign)}`,
+        metadata: { recipient_id: req.params.recipientId, remaining: result.remaining }
+      });
+      return res.json({ removed: true, remaining: result.remaining });
+    } catch (error) { return sendError(res, error, 'removing this person from the audience'); }
+  });
+
   router.post('/:id/submit-review', async (req, res) => {
     try {
       const result = await campaigns.submitReview(req.params.id, req.actor);

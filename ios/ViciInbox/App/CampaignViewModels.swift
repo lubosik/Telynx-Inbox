@@ -172,6 +172,9 @@ final class CampaignDetailModel: ObservableObject {
     @Published private(set) var recipientTotal = 0
     @Published private(set) var dryRun: CampaignDryRun?
     @Published private(set) var preview: CampaignPreview?
+    /// Recipients whose removal is in flight, so a second tap cannot fire the
+    /// same call twice and a row can show it is working.
+    @Published private(set) var removingRecipients: Set<String> = []
     @Published private(set) var performance: CampaignPerformance?
     @Published private(set) var financial: CampaignFinancialOverview?
     @Published private(set) var financialUnavailableMessage: String?
@@ -293,6 +296,28 @@ final class CampaignDetailModel: ObservableObject {
             financialUnavailableMessage = error.localizedDescription
         case .none:
             break // Already cleared in load(), before the permission-gated fetch.
+        }
+    }
+
+    /**
+     * Take one person out of the audience, then reload.
+     *
+     * The reload is the point. Removing somebody changes the eligible count,
+     * the cost and whether the campaign can be approved at all, and a screen
+     * still showing "1 cannot be personalised" after the person has gone would
+     * teach somebody to distrust it.
+     */
+    func removeRecipient(_ recipientID: String) async {
+        guard !removingRecipients.contains(recipientID) else { return }
+        removingRecipients.insert(recipientID)
+        defer { removingRecipients.remove(recipientID) }
+        do {
+            try await APIClient.shared.removeCampaignRecipient(
+                campaignID: campaignID, recipientID: recipientID
+            )
+            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
