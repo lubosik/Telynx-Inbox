@@ -2005,12 +2005,30 @@ private struct CampaignPreviewSection: View {
     let preview: CampaignPreview
 
     var body: some View {
+        // ── WHAT THIS SECTION IS FOR CHANGES ONCE THE MESSAGES ARE GONE ──
+        //
+        // Before approval it is a decision aid: who renders, who has to come
+        // out of the audience, and what the wording looks like. After the
+        // campaign has sent it is a record, and the two need different things.
+        //
+        // A sent campaign was showing "1 cannot be personalised and must be
+        // removed from the audience before this can be approved" — advice
+        // about an approval that happened yesterday, on a person who was
+        // already excluded from a send that is finished. And it listed every
+        // one of 375 messages, so reading the campaign meant scrolling past
+        // all of them.
+        let isFinished = campaign.status == .completed || campaign.status == .sending
+        let sampleLimit = isFinished ? 3 : preview.samples.count
+
         Section("What each person receives") {
             HStack {
-                Label("\(preview.renderedCount) of \(preview.audienceCount) render",
-                      systemImage: preview.rendersForEveryone ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                Label(isFinished
+                        ? "\(preview.renderedCount) of \(preview.audienceCount) personalised"
+                        : "\(preview.renderedCount) of \(preview.audienceCount) render",
+                      systemImage: preview.rendersForEveryone || isFinished
+                        ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(preview.rendersForEveryone ? ViciTheme.success : ViciTheme.warning)
+                    .foregroundStyle(preview.rendersForEveryone || isFinished ? ViciTheme.success : ViciTheme.warning)
                 Spacer()
                 if let percent = preview.discountPercent {
                     Text("\(percent)% code")
@@ -2019,10 +2037,14 @@ private struct CampaignPreviewSection: View {
                 }
             }
 
-            if !preview.rendersForEveryone {
+            if !preview.rendersForEveryone && !isFinished {
                 // Not a warning to be dismissed. Approval is refused while any
                 // selected recipient cannot be rendered, so this is the list of
                 // people who have to come out of the audience first.
+                //
+                // Only before the send. Afterwards they were already left out,
+                // and telling somebody to act before an approval that has
+                // happened is noise dressed as an instruction.
                 Text("\(preview.excludedCount) cannot be personalised and must be removed from the audience before this can be approved.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -2030,9 +2052,13 @@ private struct CampaignPreviewSection: View {
                     LabeledContent(row.phone.suffix(4).description, value: row.readableReason)
                         .font(.caption)
                 }
+            } else if isFinished && preview.excludedCount > 0 {
+                Text("\(preview.excludedCount) could not be personalised and were left out of the send.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
-            ForEach(preview.samples) { sample in
+            ForEach(preview.samples.prefix(sampleLimit)) { sample in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(sample.message)
                         .font(.footnote)
@@ -2065,9 +2091,20 @@ private struct CampaignPreviewSection: View {
                 .padding(.vertical, 2)
             }
 
-            Text("Codes shown here are placeholders. The real single-use codes are created when you approve, not now.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if isFinished && preview.samples.count > sampleLimit {
+                Text("Showing 3 of \(preview.samples.count) messages.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Only true before approval. Afterwards the codes in these messages
+            // are the real ones that went out, and calling them placeholders
+            // would be a lie about a message somebody has already received.
+            if !isFinished {
+                Text("Codes shown here are placeholders. The real single-use codes are created when you approve, not now.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

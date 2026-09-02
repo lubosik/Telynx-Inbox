@@ -134,3 +134,59 @@ test('the narrative sweep cannot send anything', () => {
       `the narrative writer must not reach ${forbidden}`);
   }
 });
+
+// ── The campaign screen after the messages are gone ────────────────────────
+
+test('a sent campaign stops giving advice about approving it', () => {
+  // The screenshot: a campaign showing "Sent", above "1 cannot be personalised
+  // and must be removed from the audience before this can be approved."
+  // Advice about an approval that happened yesterday, concerning a person who
+  // was already left out of a send that has finished.
+  const view = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
+
+  assert.match(view, /let isFinished = campaign\.status == \.completed \|\| campaign\.status == \.sending/);
+  assert.match(view, /if !preview\.rendersForEveryone && !isFinished \{/,
+    'the instruction is only shown while it is still actionable');
+  assert.match(view, /could not be personalised and were left out of the send/,
+    'and is replaced by a statement of what happened');
+});
+
+test('a sent campaign shows three messages, not three hundred', () => {
+  // 375 rendered messages meant scrolling past all of them to read anything
+  // below. Before approval every one matters, because the reviewer is deciding
+  // whether the wording works; afterwards three is a sample.
+  const view = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
+  assert.match(view, /let sampleLimit = isFinished \? 3 : preview\.samples\.count/);
+  assert.match(view, /ForEach\(preview\.samples\.prefix\(sampleLimit\)\)/);
+  assert.match(view, /Showing 3 of \\\(preview\.samples\.count\) messages/,
+    'and says it is showing a sample rather than hiding the rest silently');
+});
+
+test('the placeholder-code note disappears once the codes are real', () => {
+  // "Codes shown here are placeholders" is true before approval and a lie
+  // afterwards: those are the codes that went to customers.
+  const view = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
+  const section = view.slice(view.indexOf('if isFinished && preview.samples.count > sampleLimit'));
+  assert.match(section.slice(0, 800), /if !isFinished \{[\s\S]*?Codes shown here are placeholders/);
+});
+
+test('a finished campaign reads as Live, not Sent or Completed', () => {
+  // "Completed" is a word about the job. "Sent" sounds filed away, and the
+  // campaign is not finished at that point: replies are arriving, codes are
+  // being redeemed, revenue lands against it for weeks.
+  const models = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'Core', 'CampaignModels.swift'), 'utf8');
+  assert.match(models, /case \.completed: return "Live"/);
+});
+
+test('the chart keeps its bars off the axis labels', () => {
+  // With a day or two of data the first bar sat flush against the y-axis and
+  // covered the "0", so the scale read as though it started at 200 — worst on
+  // exactly the data a brand new campaign produces.
+  const analytics = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'AnalyticsView.swift'), 'utf8');
+  assert.match(analytics, /\.chartXScale\(range: \.plotDimension\(startPadding: \d+/);
+});

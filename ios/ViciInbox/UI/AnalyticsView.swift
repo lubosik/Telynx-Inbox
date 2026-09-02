@@ -670,6 +670,14 @@ private struct MessagingCard: View {
                     }
                 }
                 .chartYAxis { AxisMarks(position: .leading) }
+                // ── KEEP THE BARS OFF THE AXIS LABELS ────────────────────
+                //
+                // With only a day or two of data the first bar sits flush
+                // against the y-axis and covers the "0", so the scale reads as
+                // though it starts at 200. Charts adds no leading inset of its
+                // own, and the fewer the points the worse it looks — exactly
+                // the case a new campaign produces.
+                .chartXScale(range: .plotDimension(startPadding: 28, endPadding: 20))
                 .frame(height: 180)
                 .accessibilityLabel("Sent and received messages over time")
             }
