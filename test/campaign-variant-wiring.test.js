@@ -100,3 +100,37 @@ test('no profiles means the wording the check-in has always used', () => {
     'a partial backfill is not a basis to split an audience on');
   assert.match(fn, /catch/, 'and a failed read is a fallback, not an outage');
 });
+
+// ── The narrative sweep ────────────────────────────────────────────────────
+
+test('the narrative sweep is registered, and off unless explicitly enabled', () => {
+  // The last handoff shipped a module nothing called. This one checks the
+  // wiring exists rather than assuming it.
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(server, /function startNarrativeProfileSweep\(/);
+  assert.match(server, /^startNarrativeProfileSweep\(\);$/m, 'and is actually invoked');
+
+  const fn = server.slice(server.indexOf('function startNarrativeProfileSweep'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+
+  // A job that spends money per contact must not start because somebody
+  // deployed. Exactly "true", following this repo's flag convention.
+  assert.match(body, /PROFILE_NARRATIVE_ENABLED !== 'true'/,
+    'off by default, and only the exact string enables it');
+
+  // Separate from the drift sweep on purpose: one flag turning off both the
+  // free thing and the expensive one would take the free thing with it, and
+  // the free thing is the one that must always run.
+  assert.doesNotMatch(body, /sweepProfileDrift/);
+});
+
+test('the narrative sweep cannot send anything', () => {
+  // Its worst outcome should be a paragraph somebody disagrees with, never a
+  // message a customer receives.
+  const writer = fs.readFileSync(
+    path.join(__dirname, '..', 'lib', 'profiles', 'narrative-writer.js'), 'utf8');
+  for (const forbidden of ['sendSMS', 'createCoupons', 'scheduleSMS', 'telnyx']) {
+    assert.ok(!writer.includes(forbidden),
+      `the narrative writer must not reach ${forbidden}`);
+  }
+});

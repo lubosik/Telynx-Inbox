@@ -42,6 +42,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  NARRATIVE_VERSION,
   NARRATIVE_COLUMNS,
   NARRATIVE_MAX_CHARS,
   NARRATIVE_TONES,
@@ -215,7 +216,12 @@ test('the version prefix invalidates every fingerprint at once', () => {
 
 test('the cooldown caps rebuild cost, and does not delay a first narrative', () => {
   // The cooldown is the cost ceiling: changed messages alone are not enough.
-  const changed = { narrative_source_fingerprint: 'n1:stale' };
+  //
+  // The stored prefix must be the CURRENT version, or this is accidentally
+  // testing a rules change instead — which now outranks the cooldown. It was
+  // hardcoded 'n1:' and started passing for the wrong reason the moment the
+  // version moved to 2.
+  const changed = { narrative_source_fingerprint: `n${NARRATIVE_VERSION}:stale` };
   assert.equal(narrativeGate({
     profile: profileRow({ ...changed, narrative_built_at: daysAgo(3) }), now: NOW, env: ON
   }).reason, 'cooldown');
@@ -235,6 +241,25 @@ test('the cooldown caps rebuild cost, and does not delay a first narrative', () 
   assert.equal(narrativeGate({
     profile: profileRow({ ...changed, narrative_built_at: daysAgo(10) }), now: NOW, env
   }).reason, 'cooldown');
+});
+
+test('a rules change outranks the cooldown', () => {
+  // The cooldown asks "has enough time passed to spend again under the same
+  // rules". A version bump means the rules changed, so that is no longer the
+  // question being asked.
+  //
+  // Found the hard way: version 1 stored "asked about product effects
+  // (sleepiness)" — a health claim recorded as a conversation topic, which no
+  // word list would have caught. The prompt was corrected, the version bumped,
+  // and nothing rebuilt: the cooldown held every affected row for seven days.
+  // A safety fix that cannot be applied for a week is not a fix, and the rows
+  // carrying the problem are the ones a cooldown protects longest.
+  const underOldRules = {
+    narrative_source_fingerprint: `n${NARRATIVE_VERSION - 1}:whatever`,
+    narrative_built_at: daysAgo(1)
+  };
+  assert.equal(narrativeGate({ profile: profileRow(underOldRules), now: NOW, env: ON }).build, true,
+    'rebuilt immediately, not in a week');
 });
 
 // ── Substance: the second gate, and why counting is not enough ─────────────

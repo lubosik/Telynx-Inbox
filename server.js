@@ -688,6 +688,68 @@ function startContactProfileSweep() {
   setInterval(run, TWENTY_FOUR_HOURS);
 }
 
+/**
+ * The narrative half of a profile: the part of a customer a query cannot
+ * answer, written by a model from what they actually said.
+ *
+ * ── WHY IT IS A SEPARATE JOB FROM THE DRIFT SWEEP ────────────────────────
+ *
+ * The deterministic sweep is two indexed reads and usually zero writes. This
+ * one spends money, so it must be separately disableable, separately budgeted
+ * and separately loggable. Folding it into the sweep would mean a single flag
+ * turning off both the free thing and the expensive one, and the free thing is
+ * the one that must always run.
+ *
+ * It is OFF unless PROFILE_NARRATIVE_ENABLED is exactly "true". A job that
+ * spends per contact should not start because somebody deployed.
+ *
+ * ── WHAT IT CANNOT DO ────────────────────────────────────────────────────
+ *
+ * Send anything. It writes six narrative_* columns and nothing else — no
+ * message, no campaign, no coupon. The worst outcome of a bug here is a
+ * paragraph in a database that a person reads and disagrees with.
+ */
+function startNarrativeProfileSweep() {
+  let refreshNarratives;
+  try {
+    ({ refreshNarratives } = require('./lib/profiles/narrative-writer'));
+  } catch (err) {
+    console.error('[NARRATIVE] Sweep not started:', err.message);
+    return;
+  }
+
+  if (process.env.PROFILE_NARRATIVE_ENABLED !== 'true') {
+    console.log('[NARRATIVE] Narrative profiles are off; no sweep started.');
+    return;
+  }
+
+  const SIX_HOURS = 6 * 60 * 60 * 1000;
+
+  const run = async () => {
+    try {
+      const summary = await refreshNarratives({ client: supabase, env: process.env });
+      const calls = summary?.llm?.calls || 0;
+      // Silent when it spent nothing, which is most runs once the backlog is
+      // cleared. A line every six hours saying "0 calls" buries the run that
+      // mattered.
+      if (calls > 0 || (summary?.failed?.length || 0) > 0) {
+        console.log(
+          `[NARRATIVE] ${summary.written || 0} written, ${summary.skipped || 0} skipped, `
+          + `${calls} model calls, ${summary.llm?.dailyCallsRemaining ?? '?'} left today`
+        );
+      }
+    } catch (err) {
+      console.error('[NARRATIVE] Sweep error:', err.message);
+    }
+  };
+
+  // Fifteen minutes after boot, then every six hours. Later than the drift
+  // sweep on purpose: a narrative is written from a profile, and reading one
+  // mid-rebuild would summarise a half-updated row.
+  setTimeout(run, 15 * 60 * 1000);
+  setInterval(run, SIX_HOURS);
+}
+
 function startDailySegmentationCycle() {
   try {
     const { startDailyCycle } = require('./lib/daily-scheduler');
@@ -738,6 +800,7 @@ app.listen(PORT, async () => {
   startDailySegmentationCycle();
   startCheckInAutomation();
   startContactProfileSweep();
+startNarrativeProfileSweep();
   startRecordingRetentionJob();
   console.log(`Vici SMS Inbox running on port ${PORT}`);
   console.log(`Telnyx: ${process.env.TELNYX_PHONE_NUMBER}`);
