@@ -592,18 +592,26 @@ struct CampaignDetailView: View {
                 }
             }
 
-            if session.can(Permission.analyticsRead) {
-                if let financial = model.financial, financial.availability.revenueAttribution {
-                    CampaignFinancialSection(campaignID: campaign.id, financial: financial)
-                } else {
-                    Section("Revenue Attribution") {
-                        Label("Campaign revenue is not available yet.", systemImage: "chart.bar.doc.horizontal")
-                            .foregroundStyle(.secondary)
-                        if let message = model.financialUnavailableMessage, !message.isEmpty {
-                            Text(message).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                }
+            // ── ONE REVENUE SECTION, NOT TWO ─────────────────────────────
+            //
+            // "Revenue from the codes" and "Revenue Attribution" answered the
+            // same question and disagreed: $626.10 against $0.00, for the same
+            // campaign, with the empty one owning the bigger font and the
+            // evidence link.
+            //
+            // It was not a display bug. NOTHING has ever written to
+            // sms_campaign_attributions, so the tiered section could only show
+            // zero, for every campaign, for ever. The section above is
+            // measured from real coupon redemptions on real paid orders.
+            //
+            // Kept only for a campaign that genuinely HAS tiered attribution
+            // data, so if that pipeline is ever built this comes back on its
+            // own rather than being rediscovered.
+            if session.can(Permission.analyticsRead),
+               let financial = model.financial,
+               financial.availability.revenueAttribution,
+               financial.orders.attributed > 0 || financial.orders.influenced > 0 {
+                CampaignFinancialSection(campaignID: campaign.id, financial: financial)
             }
 
             if let dryRun = model.dryRun {
@@ -2167,31 +2175,68 @@ private struct CampaignPreviewSection: View {
     }
 }
 
-/// What this campaign actually earned.
+/// What this campaign earned, and the orders that prove it.
 ///
-/// Measured, not modelled: every pound traces to a single-use code on a
-/// specific paid order. That is why `attribution-policy.js` scores this above
-/// a clicked link, and why the section says "measured" rather than
-/// "estimated". Refunded and cancelled orders are excluded upstream, so a
-/// campaign that attracted the wrong buyer does not get credit for it.
+/// ═══════════════════════════════════════════════════════════════════════════
+/// WHY THERE IS ONE SECTION HERE AND THERE WERE TWO
+///
+///   "Revenue from the codes" said $626.10. "Revenue Attribution", directly
+///   below it, said $0.00 — for the same campaign, in a bigger font, with the
+///   confidence tiers and the evidence link.
+///
+///   The owner's read was that they are the same thing, and he was right about
+///   something worse: NOTHING has ever written to sms_campaign_attributions,
+///   so the tiered section could only ever show zero. A headline number that
+///   is structurally incapable of being right, sitting above one that is
+///   measured, teaches somebody to distrust both.
+///
+///   So: one section, backed by the thing that actually works. Every pound
+///   traces to a code on a specific paid order, which is why it says measured
+///   rather than estimated.
+///
+/// WHY THE ORDERS ARE HERE RATHER THAN A SCREEN AWAY
+///
+///   The owner's words: so the client knows the app is not making this up. A
+///   number somebody has to navigate to verify is a number they stop
+///   verifying.
 private struct CampaignCouponRevenueSection: View {
     let coupons: CampaignCouponRevenue
 
     var body: some View {
-        Section("Revenue from the codes") {
-            HStack {
-                statTile("Issued", "\(coupons.issued ?? 0)")
-                Divider()
-                statTile("Redeemed", "\(coupons.redeemed ?? 0)")
-                Divider()
-                statTile("Rate", coupons.formattedRate)
-            }
-            LabeledContent("Revenue") {
+        Section("Revenue from this campaign") {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(coupons.formattedRevenue)
-                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .font(.title2.bold().monospacedDigit())
                     .foregroundStyle(ViciTheme.success)
+                Text("\(coupons.redeemed ?? 0) of \(coupons.issued ?? 0) codes redeemed, \(coupons.formattedRate)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text("Each code works once and belongs to one person, so every order here is that customer acting on this message. Refunded and cancelled orders are not counted.")
+
+            if let redemptions = coupons.redemptions, !redemptions.isEmpty {
+                DisclosureGroup("See the \(redemptions.count) order\(redemptions.count == 1 ? "" : "s")") {
+                    ForEach(redemptions) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("#\(row.wooOrderID)")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                Text(row.readableWho)
+                                    .font(.caption)
+                                Spacer()
+                                Text(row.formattedTotal)
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                            }
+                            Text("used \(row.code)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+                .font(.footnote)
+            }
+
+            Text("Every order here used a code from this campaign, on a paid order placed after the message reached that person. Refunded and cancelled orders are not counted.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -2207,17 +2252,6 @@ private struct CampaignCouponRevenueSection: View {
                 .font(.footnote)
             }
         }
-    }
-
-    private func statTile(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.headline.monospacedDigit())
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 

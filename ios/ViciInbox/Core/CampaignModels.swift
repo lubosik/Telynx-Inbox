@@ -608,6 +608,33 @@ struct CampaignPerformance: Codable, Hashable {
 /// which is why `attribution-policy.js` ranks it above a clicked link. A
 /// campaign that offered nothing reports `issued == 0` rather than a revenue
 /// figure it has no basis for.
+/// One order that a campaign's code paid for.
+///
+/// Every field is evidence somebody can check in WooCommerce: the order
+/// number, who placed it, which code, what it was worth, and the proof the
+/// message reached them BEFORE they ordered — which is what makes this
+/// attribution rather than coincidence.
+struct CampaignCouponRedemption: Codable, Hashable, Identifiable {
+    let code: String
+    let phone: String
+    let name: String?
+    let wooOrderID: Int
+    let orderTotal: Double
+    let orderedAt: String?
+    let deliveredAt: String?
+
+    var id: Int { wooOrderID }
+
+    /// A name if we have one, otherwise the last four digits. Never nothing:
+    /// a row of evidence with no subject is not evidence.
+    var readableWho: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        return "…" + phone.suffix(4)
+    }
+
+    var formattedTotal: String { "$" + String(format: "%.2f", orderTotal) }
+}
+
 struct CampaignCouponRevenue: Codable, Hashable {
     let available: Bool
     let reason: String?
@@ -616,6 +643,8 @@ struct CampaignCouponRevenue: Codable, Hashable {
     let revenue: Double?
     let redemptionRate: Double?
     let anomalies: [CampaignCouponAnomaly]?
+    /// The orders behind the number, so nobody has to take it on trust.
+    let redemptions: [CampaignCouponRedemption]?
 
     /// Worth showing at all. A campaign with no codes has nothing to say here.
     var hasCodes: Bool { available && (issued ?? 0) > 0 }
