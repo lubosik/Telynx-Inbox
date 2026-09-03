@@ -395,10 +395,10 @@ function startDeliveryCheck() {
 // feature is switched back off.
 function startCampaignDelivery() {
   let deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses,
-      sweepUnattributedReplies, sendSMS;
+      sendPaceFrom, sweepUnattributedReplies, sendSMS;
   try {
-    ({ deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses } =
-      require('./lib/campaigns/delivery-worker'));
+    ({ deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses,
+       sendPaceFrom } = require('./lib/campaigns/delivery-worker'));
     ({ sweepUnattributedReplies } = require('./lib/campaigns/reply-events'));
     ({ sendSMS } = require('./telnyx'));
   } catch (err) {
@@ -408,7 +408,16 @@ function startCampaignDelivery() {
     return;
   }
 
-  const TWO_MINUTES = 2 * 60 * 1000;
+  // ── THE PACE IS THE OWNER'S TO SET ─────────────────────────────────────
+  //
+  // 25 every two minutes was hardcoded here. It is now read from the campaign
+  // settings each cycle, so a change takes effect on the next tick without a
+  // deploy, and a mistyped value falls back to the pace that has always worked
+  // rather than stopping the send.
+  //
+  // Re-read every cycle rather than once at boot, because the reason to change
+  // it is usually a campaign that is going out right now.
+  const DEFAULT_TICK = 30 * 1000;
   const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
   setInterval(async () => {
@@ -441,10 +450,28 @@ function startCampaignDelivery() {
     return;
   }
 
-  console.log('[CAMPAIGN SEND] Live sending is ON. Delivery loop running every 2 minutes.');
+  console.log('[CAMPAIGN SEND] Live sending is ON. Pace is read from campaign settings.');
+
+  // The loop ticks every 30 seconds and only SENDS when the configured
+  // interval has elapsed. A fixed setInterval would have to be torn down and
+  // rebuilt whenever the pace changed; this just checks the clock.
+  let lastSendAt = 0;
   setInterval(async () => {
     try {
-      const summary = await deliverBatch({ client: supabase, send: sendSMS });
+      const { data: settings } = await supabase
+        .from('sms_campaign_settings')
+        .select('send_batch_size, send_interval_seconds')
+        .eq('workspace_id', 'vici')
+        .maybeSingle();
+      const pace = sendPaceFrom(settings);
+
+      const dueAt = lastSendAt + pace.intervalSeconds * 1000;
+      if (Date.now() < dueAt) return;
+      lastSendAt = Date.now();
+
+      const summary = await deliverBatch({
+        client: supabase, send: sendSMS, limit: pace.batchSize
+      });
       if (summary.claimed > 0) {
         console.log(
           `[CAMPAIGN SEND] claimed=${summary.claimed} accepted=${summary.accepted} `
@@ -460,7 +487,7 @@ function startCampaignDelivery() {
     // permanently mid-send.
     try { await reconcileCampaignStatuses({ client: supabase }); }
     catch (err) { console.error('[CAMPAIGN STATUS] Reconcile error:', err.message); }
-  }, TWO_MINUTES);
+  }, DEFAULT_TICK);
 }
 
 // Where the revenue actually is, recomputed on a schedule so the picture on

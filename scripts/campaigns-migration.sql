@@ -1401,7 +1401,7 @@ BEGIN
       updated_at = now()
   FROM public.sms_campaigns c, public.sms_campaign_settings s
   WHERE r.campaign_id = c.id AND s.workspace_id = c.workspace_id
-    AND c.workspace_id = p_workspace_id AND c.status = 'scheduled'
+    AND c.workspace_id = p_workspace_id AND c.status IN ('scheduled', 'sending')
     AND r.state IN ('pending', 'deferred')
     AND coalesce(r.next_attempt_at, r.planned_send_at, now()) <= now()
     AND (
@@ -1449,7 +1449,7 @@ BEGIN
     FROM public.sms_campaign_recipients r
     JOIN public.sms_campaigns c ON c.id = r.campaign_id
     WHERE c.workspace_id = p_workspace_id
-      AND c.status = 'scheduled'
+      AND c.status IN ('scheduled', 'sending')
       AND r.workspace_id = p_workspace_id
       AND r.state IN ('pending', 'deferred')
       AND coalesce(r.next_attempt_at, r.planned_send_at, now()) <= now()
@@ -1534,7 +1534,7 @@ BEGIN
       c.workflow_category, 'campaign-recipient:' || v_candidate.id::text,
       now(), now() + make_interval(secs => p_lease_seconds)
     FROM public.sms_campaigns c
-    WHERE c.id = v_candidate.campaign_id AND c.workspace_id = p_workspace_id AND c.status = 'scheduled'
+    WHERE c.id = v_candidate.campaign_id AND c.workspace_id = p_workspace_id AND c.status IN ('scheduled', 'sending')
     ON CONFLICT (workspace_id, idempotency_key) DO UPDATE
       SET reserved_at = EXCLUDED.reserved_at,
           reservation_expires_at = EXCLUDED.reservation_expires_at,
@@ -1598,7 +1598,7 @@ BEGIN
   WHERE id = p_recipient_id AND workspace_id = p_workspace_id
     AND campaign_id = v_campaign.id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'campaign_recipient_not_found' USING ERRCODE = 'P0002'; END IF;
-  IF v_campaign.status <> 'scheduled' OR v_recipient.state <> 'claimed'
+  IF v_campaign.status NOT IN ('scheduled', 'sending') OR v_recipient.state <> 'claimed'
      OR v_recipient.claim_token <> p_claim_token
      OR v_recipient.claim_expires_at IS NULL OR v_recipient.claim_expires_at <= now() THEN
     RAISE EXCEPTION 'campaign_claim_fence_failed' USING ERRCODE = 'P0001';
