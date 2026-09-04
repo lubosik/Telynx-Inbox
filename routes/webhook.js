@@ -4,7 +4,10 @@ const { verifyWebhookSignature, verifyWebhookSignatureV2 } = require('../telnyx'
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
 const { sendNativeMessagePush } = require('../lib/apns-notify');
-const { cancelScheduledForCustomer, isOptedOut, markOptedOut } = require('../flows/utils');
+const {
+  ALERT_DELIVERY_BLOCKED, cancelScheduledForCustomer, emitOperationalAlert,
+  isOptedOut, markOptedOut
+} = require('../flows/utils');
 const { suppressOptOut } = require('../lib/opt-out-suppression');
 const { rehostInboundMedia } = require('../lib/mms-media');
 const { parseTapback, findTapbackTarget } = require('../lib/tapbacks');
@@ -89,6 +92,47 @@ module.exports = (broadcastSSE) => {
         if (updated) {
           broadcastSSE({ type: 'status_update', messageId, status, phone: updated.contact_phone });
           console.log(`Delivery update: ${messageId} → ${status}`);
+
+          // ── A BLOCKED MESSAGE MUST NOT BE SILENT ───────────────────────
+          //
+          // A failed send was written to the database and nothing told
+          // anybody. Two customers never received a payment request, their
+          // orders sat unpaid at $1,458.88 between them, and it surfaced only
+          // because somebody happened to notice one of them by chance.
+          //
+          // Carrier spam filtering (Telnyx 40002) is the case that matters:
+          // the message never reached the handset, the customer has no idea
+          // they were asked for anything, and the shop is waiting for money
+          // that is never coming. Loudly, with the error code, so it can be
+          // searched for and counted.
+          if (status === 'failed') {
+            const carrierError = (event?.payload?.errors || [])[0]
+              || (payload?.to || [])[0]?.error_code
+              || null;
+            const code = carrierError?.code || carrierError || 'unknown';
+            const looksLikePayment = /zelle|venmo|balance|outstanding|\$/i.test(updated.body || '');
+            // Through the one definition site in flows/utils.js, not a
+            // hand-rolled prefix. A test reserves the operational-alert prefix
+            // precisely so an alarm built on it cannot be diluted into noise
+            // by ordinary logging, and it matches on the literal, so even
+            // naming it in a comment here trips it. That strictness is the
+            // point.
+            emitOperationalAlert(ALERT_DELIVERY_BLOCKED, {
+              severity: looksLikePayment ? 'critical' : 'warning',
+              code,
+              phone: `...${String(updated.contact_phone || '').slice(-4)}`,
+              payment_message: looksLikePayment,
+              message_id: messageId
+            });
+            broadcastSSE({
+              type: 'delivery_blocked',
+              messageId,
+              phone: updated.contact_phone,
+              code: String(code),
+              paymentMessage: looksLikePayment
+            });
+          }
+
           if (status === 'delivered' && analyticsSignatureValid) {
             trustedWrite
               .then(result => result.trusted && reconcileAttributionForDeliveredMessage(messageId));

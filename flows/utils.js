@@ -63,6 +63,16 @@ const OPERATIONAL_ALERT_PREFIX = '[ALERT]';
  */
 const ALERT_OPT_OUT_NOT_SUPPRESSED = 'SMS_OPT_OUT_NOT_SUPPRESSED';
 
+/**
+ * A message the carrier refused to deliver.
+ *
+ * Critical when it was asking somebody for money: they never saw the request,
+ * the shop is waiting for a payment that is not coming, and nothing else in
+ * the system would ever say so. Two customers sat like that for days at
+ * $1,458.88 between them, found only because somebody noticed one by chance.
+ */
+const ALERT_DELIVERY_BLOCKED = 'SMS_DELIVERY_BLOCKED';
+
 function emitOperationalAlert(code, fields = {}) {
   const detail = Object.entries(fields)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -576,6 +586,7 @@ async function checkOrderRecovered(orderId) {
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  ALERT_DELIVERY_BLOCKED,
   ALERT_OPT_OUT_NOT_SUPPRESSED,
   OPERATIONAL_ALERT_PREFIX,
   SENTINEL_WRITE_ATTEMPTS,

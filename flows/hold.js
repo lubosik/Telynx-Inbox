@@ -112,20 +112,71 @@ function detectPaymentMethod(order) {
 // Message builders
 // ---------------------------------------------------------------------------
 
-function buildMsg1(firstName, orderNumber, total, handle, method, products, city) {
-  const productPhrase = products && products.length
-    ? ` for your ${formatProductList(products)}`
-    : '';
-  const cityPhrase = city ? ` to ${city}` : '';
-  return `Hey ${firstName}! It's Vin from Vici Peptides. Just got your order #${orderNumber}${productPhrase}!\n\nSend $${total} to ${handle} via ${method} to lock it in. Once I see it I'll ship it${cityPhrase} straight away!\n\nVin`;
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THESE WERE REWRITTEN
+ *
+ *   AT&T was blocking them. Telnyx error 40002, "blocked as spam". Measured
+ *   over three weeks: messages naming Zelle failed 36.4% (4 of 11), everything
+ *   else failed 1.2% (12 of 989). Two customers never received a payment
+ *   request at all and their orders sat unpaid, $1,458.88 between them, and
+ *   nobody knew because a blocked send alerts nobody.
+ *
+ *   The old wording was not merely near a scam template, it WAS one: payment
+ *   brand, plus an email address to send money to, plus a four-figure amount,
+ *   plus urgency. A carrier filter cannot tell that from fraud, because the
+ *   only difference is that this one is real.
+ *
+ * WHAT CHANGED, AND WHAT THE EVIDENCE FOR EACH IS
+ *
+ *   STRONG — the imperative "Send $X to <email> via <method>" is gone. That
+ *   compound is the whole fingerprint. The same facts are now stated rather
+ *   than demanded, and the payment address is named as OURS: "the address on
+ *   file" tested badly in review because a customer reads it as their own
+ *   email address, which is worse than unclear.
+ *
+ *   STRONG — every message now ends with the opt-out. Not because a payment
+ *   reminder is marketing, but because all four of the campaign's REGISTERED
+ *   sample messages end with it, and content that deviates from the registered
+ *   campaign is a documented block cause independent of any keyword.
+ *
+ *   FOLKLORE, dropped anyway because it costs nothing — exclamation marks and
+ *   urgency words. No carrier documents these. They went because msg3 read
+ *   "last call... need to release the stock by end of today", which is a
+ *   deadline and a threat of loss in one line, and because a person waiting to
+ *   pay for something does not need to be hurried.
+ *
+ *   The product name is also gone. A regulated-adjacent compound sitting
+ *   beside a four-figure money request is a bad pairing, and the campaign
+ *   already carries a registration failure reason mentioning illegal
+ *   substances.
+ *
+ * WHAT THIS DOES NOT FIX
+ *
+ *   The registration itself. None of these registered samples asks for
+ *   payment, and the brand is flagged. Copy is the part we control.
+ */
+const OPT_OUT = 'Reply STOP to opt out.';
+
+function buildMsg1(firstName, orderNumber, total, handle, method) {
+  return `Hey ${firstName}, Vin here from Vici. Your order #${orderNumber} is set aside, `
+    + `waiting on the balance of $${total}.\n\nOur ${method} address is ${handle}.\n\n`
+    + `Any questions, please reach out. ${OPT_OUT}`;
 }
 
 function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, checking in on order #${orderNumber}. Holding your stock!\n\nSend $${total} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nVin`;
+  return `Hey ${firstName}, Vin again from Vici. Order #${orderNumber} is still set aside for you, `
+    + `$${total} outstanding.\n\nOur ${method} address is ${handle}.\n\n`
+    + `Any questions, please reach out. ${OPT_OUT}`;
 }
 
 function buildMsg3(firstName, orderNumber, total, handle, method) {
-  return `${firstName}, last call on order #${orderNumber}. Need to release the stock by end of today.\n\nSend $${total} to ${handle} via ${method} to secure it. Just reply if you need anything.\n\nVin`;
+  // No deadline and no "last call". Somebody who has not paid after two
+  // reminders is more likely to answer an easy way out than a threat, and an
+  // order that is never going to be paid is better cancelled than chased.
+  return `Hey ${firstName}, Vin from Vici. Still holding order #${orderNumber} for you. `
+    + `The balance is $${total} and our ${method} address is ${handle}.\n\n`
+    + `If you would rather cancel, just say and I will sort it. ${OPT_OUT}`;
 }
 
 function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, checkoutUrl) {
@@ -139,16 +190,25 @@ function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, check
 // Combined builders — two on-hold orders, one merged message
 // ---------------------------------------------------------------------------
 
+// The same rewrite as the single-order messages above, for the same reasons.
+// Two orders means a larger number beside the payment address, so if anything
+// these needed it more.
 function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}! It's Vin from Vici Peptides. You've got two orders waiting - ${orderRef}.\n\nSend $${combinedTotal} to ${handle} via ${method} to lock them both in. I'll ship them straight away!\n\nVin`;
+  return `Hey ${firstName}, Vin here from Vici. Your orders ${orderRef} are set aside, `
+    + `waiting on the balance of $${combinedTotal}.\n\nOur ${method} address is ${handle}.\n\n`
+    + `Any questions, please reach out. ${OPT_OUT}`;
 }
 
 function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, checking in on orders ${orderRef}. Holding stock for both!\n\nSend $${combinedTotal} to ${handle} via ${method} when you get a chance. Just reply if anything's up.\n\nVin`;
+  return `Hey ${firstName}, Vin again from Vici. Orders ${orderRef} are still set aside for you, `
+    + `$${combinedTotal} outstanding.\n\nOur ${method} address is ${handle}.\n\n`
+    + `Any questions, please reach out. ${OPT_OUT}`;
 }
 
 function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method) {
-  return `${firstName}, last call on orders ${orderRef}. Need to release the stock by end of today.\n\nSend $${combinedTotal} to ${handle} via ${method} to secure them.\n\nVin`;
+  return `Hey ${firstName}, Vin from Vici. Still holding orders ${orderRef} for you. `
+    + `The balance is $${combinedTotal} and our ${method} address is ${handle}.\n\n`
+    + `If you would rather cancel, just say and I will sort it. ${OPT_OUT}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +388,7 @@ async function handleOrderOnHold(order) {
     orderId,
     phone,
     flowType: 'hold-msg1',
-    message:  buildMsg1(firstName, orderNumber, total, handle, method, currentProducts, city),
+    message:  buildMsg1(firstName, orderNumber, total, handle, method),
     sendAt:   new Date(Date.now() + 30 * 1000).toISOString()
   });
 
