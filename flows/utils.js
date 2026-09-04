@@ -73,6 +73,15 @@ const ALERT_OPT_OUT_NOT_SUPPRESSED = 'SMS_OPT_OUT_NOT_SUPPRESSED';
  */
 const ALERT_DELIVERY_BLOCKED = 'SMS_DELIVERY_BLOCKED';
 
+/**
+ * A shipping notice suppressed because the order was completed too long ago.
+ *
+ * Worth hearing about rather than silently dropping: it means somebody edited
+ * an old order, and the reason we know that is a customer received "your order
+ * is on its way" about a parcel delivered four months earlier.
+ */
+const ALERT_STALE_SHIPPING_NOTICE = 'SMS_STALE_SHIPPING_NOTICE';
+
 function emitOperationalAlert(code, fields = {}) {
   const detail = Object.entries(fields)
     .filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -588,6 +597,7 @@ async function checkOrderRecovered(orderId) {
 module.exports = {
   ALERT_DELIVERY_BLOCKED,
   ALERT_OPT_OUT_NOT_SUPPRESSED,
+  ALERT_STALE_SHIPPING_NOTICE,
   OPERATIONAL_ALERT_PREFIX,
   SENTINEL_WRITE_ATTEMPTS,
   emitOperationalAlert,

@@ -316,6 +316,37 @@ async function pollForCarrierScans() {
         }
 
         const orderId     = record.woo_order_id;
+
+        // ── DO NOT ANNOUNCE A SHIPMENT FOR A CANCELLED ORDER ─────────────
+        //
+        // A ShipStation label being voided and a WooCommerce order being
+        // CANCELLED are different acts in different systems, and cancelling in
+        // WooCommerce does not void the label. The `voided` check above covers
+        // only the first, so a customer who cancelled could still be told their
+        // parcel was on its way as soon as the carrier scanned a label nobody
+        // had thought to void.
+        //
+        // Read from our own order mirror rather than WooCommerce: this runs
+        // every 30 minutes over up to 50 shipments and must not become 50 API
+        // calls. An order we have no row for is allowed through, because
+        // absence of evidence is not cancellation.
+        if (orderId) {
+          const { data: mirrored } = await supabase
+            .from('sms_orders')
+            .select('status')
+            .eq('woo_order_id', parseInt(orderId, 10))
+            .maybeSingle();
+          const orderStatus = String(mirrored?.status || '').toLowerCase();
+          if (['cancelled', 'refunded', 'failed', 'trash'].includes(orderStatus)) {
+            console.log(`[POLL] Order ${orderId} is ${orderStatus} — no shipping notice`);
+            await supabase.from('shipstation_tracking')
+              .update({ voided: true, updated_at: new Date().toISOString() })
+              .eq('id', record.id);
+            await sleep(1000);
+            continue;
+          }
+        }
+
         const baseShipped = buildShippedMessage(firstName, record.woo_order_number || record.woo_order_id, record.tracking_number);
 
         // Build context once — shared for shipped + delivery personalisation

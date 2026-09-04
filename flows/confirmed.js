@@ -6,7 +6,9 @@
  * completed   → handleOrderShipped    (order shipped, tracking from WC meta)
  */
 
-const { formatPhone, sendAndLog, alreadySent } = require('./utils');
+const {
+  ALERT_STALE_SHIPPING_NOTICE, alreadySent, emitOperationalAlert, formatPhone, sendAndLog
+} = require('./utils');
 const { supabase } = require('../db');
 const { privateCompletion } = require('../lib/openrouter-private');
 
@@ -430,6 +432,33 @@ async function handleOrderConfirmed(order) {
 // Order has been shipped. Reads tracking from WC order meta and texts the link.
 // ---------------------------------------------------------------------------
 
+/**
+ * How recently an order must have been completed for a shipping text to make
+ * sense.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS
+ *
+ *   A customer cancelled her pending order. Sixty-eight seconds later somebody
+ *   in WooCommerce touched a DIFFERENT order of hers — one completed and
+ *   shipped on 26 May, four months earlier. That edit fired order.updated,
+ *   this function saw `completed` with a tracking number, and texted her "your
+ *   order is officially on its way" about a parcel she had received in May.
+ *
+ *   The order was genuinely completed, so no status check would have caught
+ *   it. What was wrong was the AGE: a shipping notification is news about
+ *   something that just happened, and `date_completed` was sitting right there
+ *   unread.
+ *
+ *   Three days rather than one, because a webhook can be delayed or retried
+ *   and a real notification arriving late is better than one suppressed. Four
+ *   months is not a delay.
+ */
+const SHIPPED_NOTICE_MAX_AGE_DAYS = 3;
+
+/** Statuses where announcing a shipment would be wrong or absurd. */
+const NOT_SHIPPABLE = new Set(['cancelled', 'refunded', 'failed', 'trash', 'pending', 'on-hold']);
+
 async function handleOrderShipped(order) {
   const phone       = formatPhone(order.billing?.phone || order.shipping?.phone);
   const firstName   = order.billing?.first_name || 'there';
@@ -439,6 +468,37 @@ async function handleOrderShipped(order) {
   if (!phone) {
     console.log(`[SHIPPED] No phone | order=${orderId} — skipping`);
     return;
+  }
+
+  // ── GUARD 1: the order must not have been cancelled ────────────────────
+  //
+  // This is called on a `completed` transition, so in theory the status is
+  // always completed. In practice an order can be edited again in the same
+  // breath, webhooks arrive out of order, and a retry can deliver a stale
+  // payload after the customer has cancelled. Telling somebody their cancelled
+  // order is on its way is the worst message this system can send.
+  const status = String(order.status || '').toLowerCase();
+  if (NOT_SHIPPABLE.has(status)) {
+    console.log(`[SHIPPED] Order ${orderId} is ${status} — no shipping notice`);
+    return;
+  }
+
+  // ── GUARD 2: the shipment must be recent ───────────────────────────────
+  //
+  // The one that would have stopped the message actually sent. See the note on
+  // SHIPPED_NOTICE_MAX_AGE_DAYS.
+  const completedAt = Date.parse(order.date_completed_gmt || order.date_completed || '');
+  if (Number.isFinite(completedAt)) {
+    const ageDays = (Date.now() - completedAt) / (24 * 60 * 60 * 1000);
+    if (ageDays > SHIPPED_NOTICE_MAX_AGE_DAYS) {
+      emitOperationalAlert(ALERT_STALE_SHIPPING_NOTICE, {
+        order: orderId,
+        completed_days_ago: Math.round(ageDays),
+        phone: `...${phone.slice(-4)}`,
+        suppressed: true
+      });
+      return;
+    }
   }
 
   if (await alreadySent(orderId, 'shipped-msg1')) {
