@@ -102,11 +102,14 @@ const EVERY_PROFILE = Object.entries(PROFILE_SHAPES);
 
 // ── The bank itself ────────────────────────────────────────────────────────
 
-test('the bank holds at least five variants and every key matches its entry', () => {
-  // The contract asks for at least five. Six is what is here, three angles in
-  // a named and a plain form, and the count is asserted so a future edit that
-  // deletes one has to notice that it is shrinking the no-repeat headroom.
-  assert.ok(VARIANT_KEYS.length >= 5, `expected 5 or more variants, found ${VARIANT_KEYS.length}`);
+test('the bank holds at least four variants and every key matches its entry', () => {
+  // This asserted five, and it did its job: removing the `arrived_ok` angle
+  // failed here first, which is exactly the "notice that you are shrinking the
+  // no-repeat headroom" the original comment asked for. The headroom was
+  // shrunk deliberately — the shop owner asked for the yes-or-no question to
+  // stop going out — so the number is restated at the new floor rather than
+  // deleted. Two angles in a named and a plain form is four.
+  assert.ok(VARIANT_KEYS.length >= 4, `expected 4 or more variants, found ${VARIANT_KEYS.length}`);
   for (const key of VARIANT_KEYS) {
     assert.equal(VARIANTS[key].key, key, 'a variant whose key disagrees with its map entry would be selected under one name and recorded under another');
   }
@@ -278,22 +281,27 @@ test('every preference order is a full permutation of the angles', () => {
   }
 });
 
-test('every profile shape yields at least three candidates, none duplicated', () => {
-  // The structural reason a repeat is impossible. With three or more
-  // candidates and only one excluded key, `find` always has something to
-  // return, so the `|| candidates[0]` fallback in the selector is unreachable
-  // rather than merely unlikely.
+test('every profile shape yields at least two candidates, none duplicated', () => {
+  // The structural reason a repeat is impossible. With two or more candidates
+  // and only one excluded key, `find` always has something to return, so the
+  // `|| candidates[0]` fallback in the selector stays unreachable.
+  //
+  // Two rather than three because an angle was removed. The guarantee holds,
+  // but the margin is now exactly one: somebody with no resolvable product has
+  // two messages available, so a third check-in must reuse one of them. That
+  // is a real cost of dropping the angle and it is written down here so the
+  // next person to touch this knows the floor is the floor.
   for (const [name, profile] of EVERY_PROFILE) {
     const candidates = candidateKeysFor(profile);
-    assert.ok(candidates.length >= 3, `${name} produced only ${candidates.length} candidates`);
+    assert.ok(candidates.length >= 2, `${name} produced only ${candidates.length} candidates`);
     assert.equal(new Set(candidates).size, candidates.length, `${name} produced a duplicate candidate`);
     for (const key of candidates) {
       assert.ok(VARIANTS[key], `${name} produced the unknown candidate "${key}"`);
     }
   }
   // Including the shapes that are not objects at all.
-  assert.ok(candidateKeysFor(null).length >= 3);
-  assert.ok(candidateKeysFor(undefined).length >= 3);
+  assert.ok(candidateKeysFor(null).length >= 2);
+  assert.ok(candidateKeysFor(undefined).length >= 2);
 });
 
 test('selection never returns the variant this person last received', () => {
@@ -359,13 +367,14 @@ test('somebody who talks to us gets the open question', () => {
   assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_how_it_went');
 });
 
-test('a repeat buyer who has never replied gets the one-word question', () => {
-  // 559 of 809 contacts have never sent an inbound message. For them the
-  // lowest possible bar is the right one, and "did it arrive" is answerable
-  // with a single word where "how did it go" is not.
+test('a repeat buyer who has never replied is asked for nothing at all', () => {
+  // 559 of 809 contacts have never sent an inbound message, so for them the
+  // lowest possible bar is the right one. That used to be "did it arrive",
+  // answerable in one word. With that angle retired the open door is lower
+  // still: it asks no question whatsoever and simply says the shop is here.
   const profile = PROFILE_SHAPES.repeat_silent;
   assert.equal(selectionBasisFor(profile), 'quiet');
-  assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_arrived_ok');
+  assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_open_door');
 });
 
 test('one order is a first order and two orders is not', () => {
@@ -440,9 +449,9 @@ test('an approved product opens the named variants and keeps the plain ones behi
   // out, because that is what gives the no-repeat rule six places to go
   // instead of three.
   const candidates = candidateKeysFor(PROFILE_SHAPES.repeat_talker);
-  assert.equal(candidates.length, 6);
-  assert.deepEqual(candidates.slice(0, 3).map(k => k.startsWith('named_')), [true, true, true]);
-  assert.deepEqual(candidates.slice(3).map(k => k.startsWith('plain_')), [true, true, true]);
+  assert.equal(candidates.length, 4);
+  assert.deepEqual(candidates.slice(0, 2).map(k => k.startsWith('named_')), [true, true]);
+  assert.deepEqual(candidates.slice(2).map(k => k.startsWith('plain_')), [true, true]);
 });
 
 test('a profile that is not an object at all still selects a sendable message', () => {
@@ -502,13 +511,23 @@ test('the reason names the basis, the product state and any repeat avoided', () 
   assert.equal(selectCheckInVariant({ profile: PROFILE_SHAPES.repeat_talker, lastVariant: null }).reason, 'conversational');
   assert.equal(selectCheckInVariant({ profile: PROFILE_SHAPES.first_time_no_product, lastVariant: null }).reason, 'first_order+no_product');
   assert.equal(
-    selectCheckInVariant({ profile: PROFILE_SHAPES.repeat_silent, lastVariant: 'named_arrived_ok' }).reason,
+    selectCheckInVariant({ profile: PROFILE_SHAPES.repeat_silent, lastVariant: 'named_how_it_went' }).reason,
     'quiet+avoided_last_variant'
   );
   assert.equal(
-    selectCheckInVariant({ profile: PROFILE_SHAPES.repeat_flicker_no_product, lastVariant: 'plain_arrived_ok' }).reason,
+    selectCheckInVariant({ profile: PROFILE_SHAPES.repeat_flicker_no_product, lastVariant: 'plain_how_it_went' }).reason,
     'quiet+no_product+avoided_last_variant'
   );
+
+  // A RETIRED key is still stored against everybody who received one before
+  // the angle was dropped, and `last_checkin_variant` is read straight out of
+  // the database. Excluding a key that is no longer a candidate must be a
+  // no-op rather than an error or an empty candidate list.
+  const withRetired = selectCheckInVariant({
+    profile: PROFILE_SHAPES.repeat_silent, lastVariant: 'named_arrived_ok'
+  });
+  assert.equal(withRetired.reason, 'quiet', 'a retired key excludes nothing, so nothing was avoided');
+  assert.ok(VARIANT_KEYS.includes(withRetired.key), 'and a live variant is still chosen');
 });
 
 // ── The property that matters most ─────────────────────────────────────────
