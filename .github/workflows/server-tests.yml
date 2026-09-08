@@ -23,7 +23,53 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci || npm install
+
+      # ── WHY THE TEST STEP NEEDS AN ENVIRONMENT ───────────────────────────
+      #
+      # Every one of the first 20 runs of this workflow FAILED, on the same
+      # test, for the same reason, from the day it was added. `npm test`
+      # includes test/server-boots.test.js, which requires server.js to prove
+      # the deployed app would actually start. server.js reaches db.js, which
+      # calls createClient(process.env.SUPABASE_URL, ...), and a runner with no
+      # environment throws "supabaseUrl is required." before any code of ours
+      # runs.
+      #
+      # The cost was not a red tick. Railway gates deploys on CI, so the gate
+      # never opened: commits sat undeployed and reached production only
+      # because somebody ran `railway redeploy` by hand. And a suite that is
+      # permanently red cannot report anything — the outage this workflow was
+      # written to catch, the unbounded `.in()` of 20 August, would have failed
+      # into a run that was already failing and nobody would have looked.
+      #
+      # These values exist so that module-level construction succeeds. Nothing
+      # here reaches a real service and no test in this suite makes a network
+      # call. If a future test needs a real credential it wants a GitHub secret
+      # and a skip when that secret is absent; it does not want one written
+      # here.
+      #
+      # The VAPID pair is generated per run rather than committed. web-push
+      # validates the key SHAPE at startup, so an obviously-fake string will
+      # not do — and a valid-looking keypair sitting in a repository invites
+      # somebody to wonder whether it is real. Generating it here means the
+      # answer is visibly no.
+      - name: Generate a throwaway VAPID keypair for this run
+        run: |
+          node -e "
+            const { generateVAPIDKeys } = require('web-push');
+            const { publicKey, privateKey } = generateVAPIDKeys();
+            const out = require('node:fs');
+            out.appendFileSync(process.env.GITHUB_ENV,
+              'VAPID_PUBLIC_KEY=' + publicKey + '\n' +
+              'VAPID_PRIVATE_KEY=' + privateKey + '\n');
+          "
+
       - run: npm test
+        env:
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_KEY: not-a-real-key-ci-only
+          SESSION_SECRET: not-a-real-secret-ci-only-0000000000
+          INBOX_PASSWORD: not-a-real-password-ci-only
+          VAPID_SUBJECT: mailto:ci@example.invalid
 
       # public/app.js is a committed build artifact of public/app.jsx.
       #
