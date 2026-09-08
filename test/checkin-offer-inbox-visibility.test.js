@@ -49,6 +49,10 @@ test('it is written with the fields a thread needs to render', () => {
     assert.match(insert, new RegExp(field), `${field} is required to render the message`);
   }
   assert.match(insert, /direction:\s*'outbound'/, 'it came from the shop');
+  // Attributed to its campaign, like any other campaign send. Without this the
+  // message shows in the thread but the campaign gets no credit for the
+  // reorder it buys.
+  assert.match(insert, /campaign_id/, 'the offer belongs to the check-in campaign');
 });
 
 test('the thread is bumped so it surfaces in the inbox list', () => {
