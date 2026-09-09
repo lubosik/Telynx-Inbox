@@ -36,6 +36,22 @@ function relativeTime(ts) {
     day: 'numeric'
   });
 }
+
+/**
+ * The time AND the date on every message, in and out.
+ *
+ * This used to hide the date on anything sent today, on the reasonable-sounding
+ * theory that "7:04 PM" is unambiguous while you are looking at it. In practice
+ * a thread is read days later, screenshotted, and pasted into a chat with
+ * somebody else, and at that point a bare time is unanchored: you cannot tell a
+ * reply that came back in four minutes from one that came back the following
+ * afternoon. The shop owner asked for the date "because it's easier to keep
+ * track", which is exactly that problem.
+ *
+ * The year appears only when the message is not from this year. Every message
+ * carries a full timestamp already, so this is purely what gets shown — there
+ * was nothing to backfill.
+ */
 function formatTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -45,18 +61,22 @@ function formatTime(ts) {
     minute: '2-digit',
     hour12: true
   });
-  const todayStr = new Date().toLocaleDateString('en-US', {
-    timeZone: TZ
+  // Compared through the same timezone as everything else, so a message sent
+  // late on 31 December is not labelled with the viewer's local year.
+  const yearOf = date => date.toLocaleDateString('en-US', {
+    timeZone: TZ,
+    year: 'numeric'
   });
-  const msgStr = d.toLocaleDateString('en-US', {
-    timeZone: TZ
-  });
-  if (todayStr === msgStr) return time;
-  return `${time} · ${d.toLocaleDateString('en-US', {
+  const sameYear = yearOf(d) === yearOf(new Date());
+  const date = d.toLocaleDateString('en-US', {
     timeZone: TZ,
     month: 'short',
-    day: 'numeric'
-  })}`;
+    day: 'numeric',
+    ...(sameYear ? {} : {
+      year: 'numeric'
+    })
+  });
+  return `${time} · ${date}`;
 }
 function formatDate(ts) {
   if (!ts) return '—';

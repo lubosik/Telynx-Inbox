@@ -321,6 +321,12 @@ private struct MessageBubble: View {
     let message: MessageRecord
     let reply: () -> Void
     let react: (String) -> Void
+    // The same timezone Settings displays and the appearance schedule uses:
+    // the account's, the workspace default, or this device, in that order. A
+    // bubble that read the device clock directly would disagree with the rest
+    // of the app, and once the DATE is on screen that disagreement is visible
+    // — an evening message in New York is the next day in London.
+    @EnvironmentObject private var appearance: AppearanceModel
     @State private var isSavingAttachments = false
     @State private var saveNotice: String?
 
@@ -342,7 +348,13 @@ private struct MessageBubble: View {
                 }
                 HStack(spacing: 5) {
                     if let date = ServerDate.parse(message.createdAt) {
-                        Text(date, style: .time).font(.caption2).foregroundStyle(.secondary)
+                        // Time AND date, matching the web inbox. `style: .time`
+                        // showed only "7:04 PM", which is unambiguous while you
+                        // are looking at it and useless in a screenshot read
+                        // days later: you cannot tell a reply that came back in
+                        // four minutes from one that came the next afternoon.
+                        Text(MessageStamp.format(date, timeZone: appearance.effectiveTimeZone))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     if !message.isInbound, let status = message.status {
                         Text(statusLabel(status)).font(.caption2)
