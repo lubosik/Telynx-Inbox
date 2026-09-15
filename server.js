@@ -13,9 +13,12 @@ const { requireAuth, resolveActor } = require('./lib/authz');
 const { collapseDuplicateSlashes, rejectMiscasedApiPaths } = require('./lib/request-normalise');
 const { createPolicyEnforcer, assertPolicyPermissionsExist } = require('./lib/enforce-policy');
 const { syncLegacySharedRole } = require('./routes/auth');
+const { createCartRecoveryService } = require('./lib/cart-recovery/service');
 require('./push-notify'); // initialises VAPID on startup
 
 const app = express();
+const cartRecovery = createCartRecoveryService({ client: supabase, env: process.env });
+require('./lib/cart-recovery/runtime').setCartRecoveryService(cartRecovery);
 
 const sseClients = new Set();
 function broadcastSSE(event) {
@@ -65,6 +68,9 @@ app.use('/webhook/woocommerce-customer', express.raw({ type: 'application/json' 
 app.use('/webhook/woocommerce-product', express.raw({ type: 'application/json' }));
 // Voice Call Control webhook — must be raw before the global express.json() runs
 app.use('/webhooks/voice',              express.raw({ type: 'application/json' }));
+// The WordPress connector signs the exact bytes. This mount must precede the
+// global JSON parser, just like the provider webhooks above.
+app.use('/v1/woocommerce/events', require('./routes/cart-recovery').connectorEvents(cartRecovery));
 
 // Parsed JSON for the rest
 app.use('/webhook/ghl',        express.json());
@@ -187,6 +193,7 @@ app.use('/api/mobile-push',   requireAuth, require('./routes/mobile-push')());
 app.use('/api/activity',      requireAuth, require('./routes/activity'));
 app.use('/api/voice',         requireAuth, require('./routes/voice'));
 app.use('/api/analytics',     requireAuth, require('./routes/analytics')());
+app.use('/api/cart-recovery', requireAuth, require('./routes/cart-recovery').analytics(cartRecovery));
 app.use('/api/assistant',     requireAuth, require('./routes/assistant')({ services: { opportunities: opportunityPortfolio() } }));
 app.use('/api/campaigns',     requireAuth, require('./routes/campaigns')({
   opportunityPortfolio: opportunityPortfolio()
@@ -488,6 +495,22 @@ function startCampaignDelivery() {
     try { await reconcileCampaignStatuses({ client: supabase }); }
     catch (err) { console.error('[CAMPAIGN STATUS] Reconcile error:', err.message); }
   }, DEFAULT_TICK);
+}
+
+function startCartRecovery() {
+  const run = async () => {
+    try {
+      const summary = await cartRecovery.runDue();
+      if (!summary.disabled && summary.claimed > 0) {
+        console.log(`[CART RECOVERY] claimed=${summary.claimed} dry_run=${summary.dryRun} sent=${summary.sent} deferred=${summary.deferred} uncertain=${summary.uncertain}`);
+      }
+    } catch (error) {
+      const missing = ['42P01', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code);
+      console.error(`[CART RECOVERY] ${missing ? 'Migration not ready' : 'Worker error'}:`, error.code || error.message);
+    }
+  };
+  setTimeout(run, 20 * 1000);
+  setInterval(run, 60 * 1000);
 }
 
 // Where the revenue actually is, recomputed on a schedule so the picture on
@@ -822,6 +845,7 @@ app.listen(PORT, async () => {
   startShipmentPoll();
   startDeliveryCheck();
   startCampaignDelivery();
+  startCartRecovery();
   startOpportunityRefresh();
   startDoNotDisturbSync();
   startDailySegmentationCycle();
