@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LUKO Vici Connector
  * Description: WooCommerce abandoned-cart recovery, SMS consent bridge and LUKO event connector for Vici.
- * Version: 0.3.0
+ * Version: 0.3.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.3.0';
+    const VERSION = '0.3.1';
     private static $restoring = false;
     private static $cart_dirty = false;
 
@@ -133,6 +133,28 @@ final class LUKO_Vici_Connector {
     public static function render_registration_consent() {
         $privacy = self::privacy_url();
         $terms = self::terms_url();
+        echo '<style>
+            [data-luko-sms-consent="1"] label { cursor:pointer; }
+            [data-luko-sms-consent="1"] input[name="luko_sms_consent"] {
+                -webkit-appearance:checkbox !important;
+                appearance:auto !important;
+                box-sizing:border-box !important;
+                display:block !important;
+                flex:0 0 24px !important;
+                width:24px !important;
+                min-width:24px !important;
+                max-width:24px !important;
+                height:24px !important;
+                min-height:24px !important;
+                margin:2px 0 0 !important;
+                padding:0 !important;
+                opacity:1 !important;
+                position:static !important;
+                transform:none !important;
+                accent-color:#158c83;
+                cursor:pointer;
+            }
+        </style>';
         echo '<div data-luko-sms-consent="1" class="eael-lr-form-group" style="margin:14px 0;font-size:12px;line-height:1.45">';
         echo '<label style="display:flex;gap:9px;align-items:flex-start"><input type="checkbox" name="luko_sms_consent" value="1"><span>' . esc_html( self::disclosure_text() ) . '</span></label>';
         echo '<div><a target="_blank" rel="noopener" href="' . esc_url( $privacy ) . '">Privacy Policy</a> &middot; <a target="_blank" rel="noopener" href="' . esc_url( $terms ) . '">Terms</a></div>';
