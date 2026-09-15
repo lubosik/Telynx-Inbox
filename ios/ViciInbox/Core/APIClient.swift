@@ -518,6 +518,75 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    // MARK: - Abandoned cart recovery
+
+    /// Aggregate state for the Growth card. This is read-only and deliberately
+    /// reuses the cart recovery root instead of introducing a second analytics
+    /// endpoint whose figures could drift from the journey list.
+    func fetchCartRecoveryDashboard() async throws -> CartRecoveryDashboard {
+        try await decodedGET("/api/cart-recovery")
+    }
+
+    func fetchCartRecoveryJourneys(status: String? = nil,
+                                    limit: Int = 50,
+                                    cursor: String? = nil) async throws -> CartRecoveryJourneyPage {
+        var query = [URLQueryItem(name: "limit", value: String(min(100, max(1, limit))))]
+        if let status, status != "all" { query.append(URLQueryItem(name: "status", value: status)) }
+        if let cursor, !cursor.isEmpty { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await decodedGET("/api/cart-recovery/journeys", queryItems: query)
+    }
+
+    func fetchCartRecoveryJourney(id: String) async throws -> CartRecoveryJourneyDetail {
+        try await decodedGET("/api/cart-recovery/journeys/\(encodedPathSegment(id))")
+    }
+
+    func fetchCartRecoverySettings() async throws -> CartRecoverySettings {
+        let envelope: CartRecoverySettingsEnvelope = try await decodedGET("/api/cart-recovery/settings")
+        return envelope.settings
+    }
+
+    @discardableResult
+    func updateCartRecoverySettings(_ settings: CartRecoverySettings) async throws -> CartRecoverySettings {
+        let (data, response) = try await put("/api/cart-recovery/settings", body: settings.requestBody)
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CartRecoverySettingsEnvelope.self, from: data).settings }
+        catch { throw APIError.decoding }
+    }
+
+    @discardableResult
+    func updateCartRecoveryReplyDraft(journeyID: String,
+                                      replyID: String,
+                                      draft: String) async throws -> CartRecoveryReply {
+        let path = "/api/cart-recovery/journeys/\(encodedPathSegment(journeyID))"
+            + "/replies/\(encodedPathSegment(replyID))/draft"
+        let (data, response) = try await patch(path, body: ["draft": draft])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CartRecoveryReplyEnvelope.self, from: data).reply }
+        catch { throw APIError.decoding }
+    }
+
+    @discardableResult
+    func approveCartRecoveryReply(journeyID: String,
+                                  replyID: String) async throws -> CartRecoveryReplyActionResponse {
+        let path = "/api/cart-recovery/journeys/\(encodedPathSegment(journeyID))"
+            + "/replies/\(encodedPathSegment(replyID))/approve"
+        let (data, response) = try await post(path, body: [:])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CartRecoveryReplyActionResponse.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    @discardableResult
+    func discardCartRecoveryReply(journeyID: String,
+                                  replyID: String) async throws -> CartRecoveryReply {
+        let path = "/api/cart-recovery/journeys/\(encodedPathSegment(journeyID))"
+            + "/replies/\(encodedPathSegment(replyID))/discard"
+        let (data, response) = try await post(path, body: [:])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CartRecoveryReplyEnvelope.self, from: data).reply }
+        catch { throw APIError.decoding }
+    }
+
     // MARK: - Campaigns
 
     func fetchCampaigns(page: Int = 1, pageSize: Int = 25) async throws -> CampaignPage {

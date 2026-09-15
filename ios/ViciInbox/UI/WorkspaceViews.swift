@@ -292,29 +292,724 @@ private struct ContactEditor: View {
     }
 }
 
-/// The live scheduled-SMS queue, previously the whole "Automations" tab.
-///
-/// It no longer owns a NavigationStack, a title or a toolbar: it is now the
-/// first segment of `GrowthView`, which provides all three. Nesting a second
-/// NavigationStack inside that one would break every push from this screen.
-/// The live scheduled-SMS queue, previously the whole "Automations" tab.
-///
-/// It no longer owns a NavigationStack, a title or a toolbar: it is now the
-/// first segment of `GrowthView`, which provides all three. Nesting a second
-/// NavigationStack inside that one would break every push from this screen,
-/// and the audit-trail shortcut that used to live in this toolbar has moved up
-/// to `GrowthView` so it cannot linger after a segment switch.
+/// Growth summary and entry point for the abandoned-cart sales engine.
+struct AbandonedCartRecoverySection: View {
+    @StateObject private var model = CartRecoveryDashboardModel()
+    @EnvironmentObject private var session: SessionModel
+
+    private var canRead: Bool { session.can(Permission.automationRead) }
+    private var canConfigure: Bool { session.can(Permission.campaignsApprove) }
+
+    var body: some View {
+        Section {
+            if !canRead {
+                Label("Your role cannot view recovery journeys", systemImage: "lock")
+                    .foregroundStyle(.secondary)
+            } else if model.isLoading && model.dashboard == nil {
+                HStack { ProgressView(); Text("Loading recovery activity").foregroundStyle(.secondary) }
+            } else if let dashboard = model.dashboard {
+                NavigationLink {
+                    CartRecoveryJourneyListView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Label(dashboard.automation?.enabled == true ? "Running" : "Off",
+                                  systemImage: dashboard.automation?.enabled == true
+                                  ? "arrow.triangle.2.circlepath.circle.fill" : "pause.circle")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(dashboard.automation?.enabled == true
+                                                 ? ViciTheme.success : Color.secondary)
+                            Spacer()
+                            if dashboard.mode.lowercased() != "live" {
+                                Text(dashboard.mode.replacingOccurrences(of: "_", with: " ").uppercased())
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 7).padding(.vertical, 3)
+                                    .background(ViciTheme.warning.opacity(0.14))
+                                    .foregroundStyle(ViciTheme.warning)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        Text("A personal checkout-help text after 45 minutes, then a guarded app offer after 48 hours.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 0) {
+                            CartRecoveryMiniStat(value: dashboard.metrics.active, label: "Active")
+                            CartRecoveryMiniStat(value: dashboard.metrics.replied, label: "Replied")
+                            CartRecoveryMiniStat(value: dashboard.metrics.converted, label: "Won")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                if let revenue = dashboard.metrics.recoveredRevenue {
+                    LabeledContent("Recovered revenue",
+                                   value: cartRecoveryMoney(revenue, currency: dashboard.metrics.currency))
+                }
+
+                NavigationLink {
+                    CartRecoverySettingsView(canEdit: canConfigure)
+                } label: {
+                    Label("Recovery settings", systemImage: "slider.horizontal.3")
+                }
+            } else if let error = model.errorMessage {
+                Label("Recovery activity unavailable", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(ViciTheme.warning)
+                Text(error).font(.footnote).foregroundStyle(.secondary)
+                Button("Try again") { Task { await model.load() } }
+            }
+        } header: {
+            Text("Abandoned cart recovery")
+        } footer: {
+            Text("AI may classify a customer reply and prepare a draft. It never sends that draft without a person approving it.")
+        }
+        .task { if canRead && model.dashboard == nil { await model.load() } }
+    }
+}
+
+private struct CartRecoveryMiniStat: View {
+    let value: Int
+    let label: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(String(value)).font(.headline.monospacedDigit())
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct CartRecoveryJourneyListView: View {
+    @StateObject private var model = CartRecoveryJourneyListModel()
+    @StateObject private var dashboardModel = CartRecoveryDashboardModel()
+
+    private let filters = [
+        ("all", "All"), ("active", "Active"), ("replied", "Replied"),
+        ("blocked", "Blocked"), ("converted", "Won"), ("cancelled", "Cancelled")
+    ]
+
+    var body: some View {
+        List {
+            if let metrics = dashboardModel.dashboard?.metrics {
+                Section("Performance") {
+                    HStack(spacing: 0) {
+                        CartRecoveryMiniStat(value: metrics.sent, label: "Sent")
+                        CartRecoveryMiniStat(value: metrics.clicked, label: "Clicked")
+                        CartRecoveryMiniStat(value: metrics.replied, label: "Replied")
+                        CartRecoveryMiniStat(value: metrics.converted, label: "Won")
+                    }
+                    if let revenue = metrics.recoveredRevenue {
+                        LabeledContent("Recovered revenue",
+                                       value: cartRecoveryMoney(revenue, currency: metrics.currency))
+                    }
+                    if !metrics.topReasons.isEmpty {
+                        ForEach(metrics.topReasons.prefix(5)) { reason in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(cartRecoveryLabel(reason.category))
+                                    Spacer()
+                                    Text(String(reason.count)).foregroundStyle(.secondary)
+                                }
+                                HStack(spacing: 10) {
+                                    if let rate = reason.recoveryRate {
+                                        Text("\(rate.formatted(.percent.precision(.fractionLength(0)))) recovered")
+                                    }
+                                    if let revenue = reason.recoveredRevenue {
+                                        Text(cartRecoveryMoney(revenue, currency: metrics.currency))
+                                    }
+                                }
+                                .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    DisclosureGroup("All automation counts") {
+                        LabeledContent("Abandoned carts", value: String(metrics.abandonedCartsIdentified))
+                        LabeledContent("SMS eligible", value: String(metrics.smsEligible))
+                        LabeledContent("SMS queued", value: String(metrics.queued))
+                        LabeledContent("SMS delivered", value: String(metrics.delivered))
+                        LabeledContent("AI drafts", value: String(metrics.aiDrafts))
+                        LabeledContent("Push queued", value: String(metrics.pushScheduled))
+                        LabeledContent("Push sent", value: String(metrics.pushSent))
+                        LabeledContent("Push clicked", value: String(metrics.pushClicked))
+                        LabeledContent("Push blocked", value: String(metrics.pushBlocked))
+                        LabeledContent("Recovered orders", value: String(metrics.recoveredOrders))
+                    }
+                }
+            }
+
+            Section {
+                Picker("Status", selection: $model.status) {
+                    ForEach(filters, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                .pickerStyle(.menu)
+            }
+
+            Section("Journeys") {
+                if model.isLoading && model.journeys.isEmpty {
+                    HStack { ProgressView(); Text("Loading journeys").foregroundStyle(.secondary) }
+                } else if model.journeys.isEmpty {
+                    EmptyState(icon: "cart", title: "No journeys",
+                               detail: "No recovery journeys match this status.")
+                } else {
+                    ForEach(model.journeys) { journey in
+                        NavigationLink {
+                            CartRecoveryJourneyDetailView(journeyID: journey.id)
+                        } label: {
+                            CartRecoveryJourneyRow(journey: journey)
+                        }
+                        .task { await model.loadMoreIfNeeded(current: journey) }
+                    }
+                    if model.isLoadingMore {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Cart Recovery")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            async let journeys: Void = model.load()
+            async let dashboard: Void = dashboardModel.load()
+            _ = await (journeys, dashboard)
+        }
+        .task {
+            async let journeys: Void = model.load()
+            async let dashboard: Void = dashboardModel.load()
+            _ = await (journeys, dashboard)
+        }
+        .onChange(of: model.status) { _ in Task { await model.reloadForStatus() } }
+        .alert("Cart recovery error", isPresented: Binding(
+            get: { model.errorMessage != nil || dashboardModel.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil; dashboardModel.errorMessage = nil } }
+        )) { Button("OK", role: .cancel) {} } message: {
+            Text(model.errorMessage ?? dashboardModel.errorMessage ?? "Unknown error")
+        }
+    }
+}
+
+private struct CartRecoveryJourneyRow: View {
+    let journey: CartRecoveryJourney
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(journey.displayName).fontWeight(.semibold)
+                Spacer()
+                CartRecoveryStatusBadge(status: journey.status)
+            }
+            Text(journey.primaryProduct ?? journey.products.first?.name ?? "Cart")
+                .font(.subheadline).lineLimit(2)
+            HStack {
+                if let amount = journey.cartValue {
+                    Text(cartRecoveryMoney(amount, currency: journey.currency)).fontWeight(.semibold)
+                }
+                if journey.itemCount > 0 {
+                    Text("\(journey.itemCount) item\(journey.itemCount == 1 ? "" : "s")")
+                }
+                Spacer()
+                if let date = ServerDate.parse(journey.lastActivityAt) {
+                    Text(date, style: .relative)
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            if journey.category != "UNKNOWN" {
+                Label(cartRecoveryLabel(journey.category), systemImage: "text.bubble")
+                    .font(.caption).foregroundStyle(ViciTheme.tint)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+struct CartRecoveryJourneyDetailView: View {
+    @StateObject private var model: CartRecoveryJourneyDetailModel
+    @EnvironmentObject private var session: SessionModel
+    @State private var editReply: CartRecoveryReply?
+    @State private var approveReply: CartRecoveryReply?
+    @State private var discardReply: CartRecoveryReply?
+
+    init(journeyID: String) {
+        _model = StateObject(wrappedValue: CartRecoveryJourneyDetailModel(journeyID: journeyID))
+    }
+
+    private var canSend: Bool { session.can(Permission.messageSend) }
+
+    var body: some View {
+        Group {
+            if model.isLoading && model.detail == nil {
+                ProgressView("Loading journey")
+            } else if let detail = model.detail {
+                List {
+                    journeySummary(detail.journey)
+                    cartSection(detail.journey)
+                    messageSection(detail.journey)
+                    pushSection(detail.journey)
+
+                    if !detail.replies.isEmpty {
+                        Section("Customer replies") {
+                            ForEach(detail.replies) { reply in
+                                CartRecoveryReplyCard(
+                                    reply: reply,
+                                    isBusy: model.mutatingReplyID == reply.id,
+                                    canSend: canSend,
+                                    onEdit: { editReply = reply },
+                                    onApprove: { approveReply = reply },
+                                    onDiscard: { discardReply = reply }
+                                )
+                            }
+                        }
+                    }
+
+                    Section("Timeline") {
+                        if detail.timeline.isEmpty {
+                            Text("No timeline events yet").foregroundStyle(.secondary)
+                        } else {
+                            ForEach(detail.timeline) { event in
+                                CartRecoveryTimelineRow(event: event)
+                            }
+                        }
+                    }
+                }
+                .refreshable { await model.load() }
+            } else {
+                EmptyState(icon: "cart.badge.questionmark", title: "Journey unavailable",
+                           detail: "Pull to try again.")
+            }
+        }
+        .navigationTitle("Recovery Journey")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.load() }
+        .sheet(item: $editReply) { reply in
+            CartRecoveryDraftEditor(
+                reply: reply,
+                saving: model.mutatingReplyID == reply.id,
+                onSave: { text in await model.saveDraft(replyID: reply.id, text: text) }
+            )
+        }
+        .confirmationDialog("Approve this reviewed reply?", isPresented: Binding(
+            get: { approveReply != nil }, set: { if !$0 { approveReply = nil } }
+        ), titleVisibility: .visible) {
+            Button("Approve Reply") {
+                if let reply = approveReply {
+                    Task { _ = await model.approve(replyID: reply.id); approveReply = nil }
+                }
+            }
+            Button("Keep reviewing", role: .cancel) { approveReply = nil }
+        } message: {
+            Text("In live mode this sends the reviewed text now. In dry-run mode it records a preview and sends nothing. AI never approves this step.")
+        }
+        .confirmationDialog("Discard this AI draft?", isPresented: Binding(
+            get: { discardReply != nil }, set: { if !$0 { discardReply = nil } }
+        ), titleVisibility: .visible) {
+            Button("Discard Draft", role: .destructive) {
+                if let reply = discardReply {
+                    Task { _ = await model.discard(replyID: reply.id); discardReply = nil }
+                }
+            }
+            Button("Keep Draft", role: .cancel) { discardReply = nil }
+        }
+        .alert("Cart recovery", isPresented: Binding(
+            get: { model.errorMessage != nil || model.successMessage != nil },
+            set: { if !$0 { model.errorMessage = nil; model.successMessage = nil } }
+        )) { Button("OK", role: .cancel) {} } message: {
+            Text(model.errorMessage ?? model.successMessage ?? "Updated")
+        }
+    }
+
+    @ViewBuilder
+    private func journeySummary(_ journey: CartRecoveryJourney) -> some View {
+        Section {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(journey.displayName).font(.title3.bold())
+                    if let phone = journey.phone { Text(PhoneFormatter.pretty(phone)).foregroundStyle(.secondary) }
+                }
+                Spacer()
+                CartRecoveryStatusBadge(status: journey.status)
+            }
+            if let last = ServerDate.parse(journey.lastActivityAt) {
+                LabeledContent("Last cart activity") { Text(last.formatted(date: .abbreviated, time: .shortened)) }
+            }
+            LabeledContent("Phone available", value: journey.phoneAvailable ? "Yes" : "No")
+            LabeledContent("SMS consent", value: journey.smsConsent ? "Valid" : "Not available")
+            LabeledContent("Push permission", value: journey.pushPermission ? "Valid" : "Not available")
+            if journey.identityResolutionAmbiguous {
+                Label("Identity match needs review. Automated SMS is blocked.", systemImage: "person.crop.circle.badge.exclamationmark")
+                    .font(.footnote).foregroundStyle(ViciTheme.warning)
+            }
+            if let purchase = journey.purchaseStatus {
+                LabeledContent("Purchase", value: cartRecoveryLabel(purchase))
+            }
+            if let order = journey.orderID { LabeledContent("Order", value: "#\(order)") }
+            if let recovered = journey.recoveredRevenue {
+                LabeledContent("Recovered revenue",
+                               value: cartRecoveryMoney(recovered, currency: journey.currency))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cartSection(_ journey: CartRecoveryJourney) -> some View {
+        Section("Cart") {
+            if journey.products.isEmpty {
+                Text(journey.primaryProduct ?? "Cart details unavailable").foregroundStyle(.secondary)
+            } else {
+                ForEach(journey.products) { product in
+                    HStack {
+                        Text(product.name)
+                        Spacer()
+                        Text("×\(product.quantity)").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let amount = journey.cartValue {
+                LabeledContent("Cart value", value: cartRecoveryMoney(amount, currency: journey.currency))
+            }
+            if let urlString = journey.recoveryURL, let url = URL(string: urlString) {
+                Link(destination: url) { Label("Open recovery checkout", systemImage: "arrow.up.right.square") }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func messageSection(_ journey: CartRecoveryJourney) -> some View {
+        Section("Checkout help SMS") {
+            LabeledContent("Status", value: cartRecoveryLabel(journey.smsStatus ?? "not queued"))
+            if let queued = ServerDate.parse(journey.smsQueuedAt) {
+                LabeledContent("Queued for") { Text(queued.formatted(date: .abbreviated, time: .shortened)) }
+            }
+            if let copy = journey.smsContent { Text(copy).textSelection(.enabled) }
+            if journey.category != "UNKNOWN" {
+                LabeledContent("Reason", value: cartRecoveryLabel(journey.category))
+                if let confidence = journey.classificationConfidence {
+                    LabeledContent("Classification confidence",
+                                   value: confidence.formatted(.percent.precision(.fractionLength(0))))
+                }
+            }
+            if let summary = journey.aiSummary { Text(summary).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    @ViewBuilder
+    private func pushSection(_ journey: CartRecoveryJourney) -> some View {
+        Section("48-hour app follow-up") {
+            LabeledContent("Status", value: cartRecoveryLabel(journey.pushStatus ?? "not queued"))
+            if let queued = ServerDate.parse(journey.pushQueuedAt) {
+                LabeledContent("Queued for") { Text(queued.formatted(date: .abbreviated, time: .shortened)) }
+            }
+            if let copy = journey.pushContent { Text(copy).textSelection(.enabled) }
+            if let destination = journey.pushDestination {
+                LabeledContent("Destination", value: destination)
+            }
+            if let blocked = journey.pushBlockedReason {
+                Label(cartRecoveryLabel(blocked), systemImage: "exclamationmark.shield")
+                    .font(.footnote).foregroundStyle(ViciTheme.warning)
+            }
+        }
+    }
+}
+
+private struct CartRecoveryReplyCard: View {
+    let reply: CartRecoveryReply
+    let isBusy: Bool
+    let canSend: Bool
+    let onEdit: () -> Void
+    let onApprove: () -> Void
+    let onDiscard: () -> Void
+
+    private var mayReviewDraft: Bool {
+        let status = reply.draftStatus.lowercased()
+        return reply.draft != nil && status != "sent" && status != "discarded"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let message = reply.customerMessage {
+                Text("Customer").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(message).textSelection(.enabled)
+            }
+            HStack {
+                CartRecoveryStatusBadge(status: reply.category)
+                if let confidence = reply.confidence {
+                    Text(confidence.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let summary = reply.summary {
+                Text(summary).font(.footnote).foregroundStyle(.secondary)
+            }
+            if reply.medicalEscalation {
+                Label("Medical or safety question. A qualified person must review this.",
+                      systemImage: "cross.case")
+                    .font(.footnote.weight(.semibold)).foregroundStyle(ViciTheme.warning)
+            }
+            if let draft = reply.draft {
+                Divider()
+                Text("AI draft, not sent").font(.caption.weight(.semibold)).foregroundStyle(ViciTheme.tint)
+                Text(draft).textSelection(.enabled)
+            }
+            if mayReviewDraft {
+                HStack {
+                    Button("Edit", action: onEdit).buttonStyle(.bordered)
+                    Button("Approve & Send", action: onApprove).buttonStyle(.borderedProminent)
+                    Button("Discard", role: .destructive, action: onDiscard).buttonStyle(.borderless)
+                }
+                .font(.footnote.weight(.semibold))
+                .disabled(!canSend || isBusy)
+                if !canSend {
+                    Text("Your role can review this draft but cannot send messages.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Label(cartRecoveryLabel(reply.draftStatus),
+                      systemImage: reply.draftStatus.lowercased() == "sent" ? "checkmark.circle" : "doc")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            if isBusy { ProgressView("Updating") }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct CartRecoveryDraftEditor: View {
+    let reply: CartRecoveryReply
+    let saving: Bool
+    let onSave: (String) async -> Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String
+
+    init(reply: CartRecoveryReply, saving: Bool, onSave: @escaping (String) async -> Bool) {
+        self.reply = reply
+        self.saving = saving
+        self.onSave = onSave
+        _text = State(initialValue: reply.draft ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let customer = reply.customerMessage {
+                    Section("Customer said") { Text(customer) }
+                }
+                Section {
+                    TextEditor(text: $text).frame(minHeight: 140)
+                } header: {
+                    Text("Reply")
+                } footer: {
+                    Text("Review every claim. Saving updates the draft only. It does not send anything.")
+                }
+                if reply.medicalEscalation {
+                    Section {
+                        Label("Do not provide unsupported medical, treatment, dosing, or safety advice.",
+                              systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(ViciTheme.warning)
+                    }
+                }
+            }
+            .navigationTitle("Edit Draft")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving" : "Save") {
+                        Task { if await onSave(text.trimmingCharacters(in: .whitespacesAndNewlines)) { dismiss() } }
+                    }
+                    .disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct CartRecoveryTimelineRow: View {
+    let event: CartRecoveryTimelineEvent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(event.title).fontWeight(.semibold)
+                if let detail = event.detail { Text(detail).font(.subheadline).foregroundStyle(.secondary) }
+                if let date = ServerDate.parse(event.createdAt) {
+                    Text(date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption).foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var icon: String {
+        let type = event.type.lowercased()
+        if type.contains("purchase") || type.contains("paid") || type.contains("convert") { return "checkmark.seal.fill" }
+        if type.contains("reply") { return "bubble.left.and.bubble.right.fill" }
+        if type.contains("click") { return "cursorarrow.click.2" }
+        if type.contains("push") { return "bell.fill" }
+        if type.contains("sms") || type.contains("message") { return "message.fill" }
+        if type.contains("cancel") || type.contains("block") { return "nosign" }
+        return "circle.fill"
+    }
+
+    private var color: Color {
+        let type = event.type.lowercased()
+        if type.contains("purchase") || type.contains("paid") || type.contains("convert") { return ViciTheme.success }
+        if type.contains("cancel") || type.contains("block") || type.contains("fail") { return ViciTheme.warning }
+        return ViciTheme.tint
+    }
+}
+
+struct CartRecoverySettingsView: View {
+    let canEdit: Bool
+    @StateObject private var model = CartRecoverySettingsModel()
+    @State private var draft: CartRecoverySettings?
+
+    var body: some View {
+        Form {
+            if model.isLoading && draft == nil {
+                Section { HStack { ProgressView(); Text("Loading settings") } }
+            } else if draft != nil {
+                Section {
+                    Toggle("Enabled", isOn: binding(\.enabled, fallback: false))
+                    LabeledContent("First SMS delay", value: "45 minutes")
+                } footer: {
+                    Text("The default journey waits 45 minutes after the customer's last cart activity.")
+                }
+
+                Section("First SMS template") {
+                    TextEditor(text: binding(\.firstSmsTemplate, fallback: ""))
+                        .frame(minHeight: 150)
+                        .disabled(true)
+                }
+
+                Section {
+                    Toggle("48-hour app follow-up", isOn: binding(\.pushEnabled, fallback: false))
+                    Stepper("Push after \(binding(\.pushDelayHours, fallback: 48).wrappedValue) hours",
+                            value: binding(\.pushDelayHours, fallback: 48), in: 1...168)
+                    TextField("Push title", text: binding(\.pushTitle, fallback: ""))
+                    TextField("Push body", text: binding(\.pushBody, fallback: ""), axis: .vertical)
+                        .lineLimit(2...5)
+                    LabeledContent("Discount", value: "15% with Vici15")
+                    LabeledContent("One product", value: "Exact product")
+                    LabeledContent("Multiple products", value: "Shop")
+                } header: {
+                    Text("App push")
+                } footer: {
+                    Text("A push is sent only when the customer has a valid app destination, Vici15 applies to the purchase, and every final eligibility check passes. Otherwise Growth shows it as blocked.")
+                }
+
+                Section {
+                    Toggle("Use factual low-stock wording",
+                           isOn: binding(\.lowStockMessagingEnabled, fallback: false))
+                    Stepper("Low stock at \(binding(\.lowStockThreshold, fallback: 5).wrappedValue) or fewer",
+                            value: binding(\.lowStockThreshold, fallback: 5), in: 1...50)
+                } header: { Text("Stock") }
+                footer: { Text("Only current WooCommerce stock can trigger this wording. No fake scarcity.") }
+
+                Section {
+                    Toggle("Classify customer replies",
+                           isOn: binding(\.aiClassificationEnabled, fallback: true))
+                    Toggle("Prepare AI draft replies",
+                           isOn: binding(\.aiDraftRepliesEnabled, fallback: true))
+                    Toggle("Automatic AI sending", isOn: .constant(false)).disabled(true)
+                    if draft?.automaticAiSending == true {
+                        Label("The server reported automatic AI sending as on. Save these settings to force it off.",
+                              systemImage: "exclamationmark.octagon.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(ViciTheme.destructive)
+                    }
+                } header: { Text("Conversation assistance") }
+                footer: { Text("Automatic AI sending is always off. A person must edit or approve every reply.") }
+
+                if !canEdit {
+                    Section {
+                        Label("Your role can view these settings but cannot change them.", systemImage: "lock")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else if let error = model.errorMessage {
+                Section {
+                    Label("Settings unavailable", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(ViciTheme.warning)
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Try again") { Task { await load() } }
+                }
+            }
+        }
+        .disabled(!canEdit && draft != nil)
+        .navigationTitle("Recovery Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(model.isSaving ? "Saving" : "Save") {
+                    guard let draft else { return }
+                    Task { if await model.save(draft) { self.draft = model.settings } }
+                }
+                .disabled(!canEdit || model.isSaving || draft == nil
+                          || (draft == model.settings && draft?.automaticAiSending != true))
+            }
+        }
+        .task { await load() }
+        .alert("Recovery settings", isPresented: Binding(
+            get: { model.errorMessage != nil || model.savedMessage != nil },
+            set: { if !$0 { model.errorMessage = nil; model.savedMessage = nil } }
+        )) { Button("OK", role: .cancel) {} } message: {
+            Text(model.errorMessage ?? model.savedMessage ?? "Updated")
+        }
+    }
+
+    private func load() async {
+        await model.load()
+        draft = model.settings
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<CartRecoverySettings, Value>,
+                                fallback: Value) -> Binding<Value> {
+        Binding(
+            get: { draft?[keyPath: keyPath] ?? fallback },
+            set: { value in draft?[keyPath: keyPath] = value }
+        )
+    }
+}
+
+private struct CartRecoveryStatusBadge: View {
+    let status: String
+    var body: some View {
+        Text(cartRecoveryLabel(status))
+            .font(.caption2.weight(.bold))
+            .lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(color.opacity(0.14))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    private var color: Color {
+        let value = status.lowercased()
+        if value.contains("convert") || value.contains("deliver") || value == "sent" { return ViciTheme.success }
+        if value.contains("fail") || value.contains("block") || value.contains("cancel") { return ViciTheme.warning }
+        if value.contains("reply") { return ViciTheme.tint }
+        return .secondary
+    }
+}
+
+private func cartRecoveryLabel(_ raw: String) -> String {
+    raw.replacingOccurrences(of: "_", with: " ")
+        .replacingOccurrences(of: "-", with: " ")
+        .lowercased().capitalized
+}
+
+private func cartRecoveryMoney(_ amount: FlexibleDecimal, currency: String) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .currency
+    formatter.currencyCode = currency.isEmpty ? "USD" : currency.uppercased()
+    return formatter.string(from: NSDecimalNumber(decimal: amount.value))
+        ?? "\(formatter.currencySymbol ?? "$")\(amount.currencyText)"
+}
+
 /// The automatic 21-day check-in, at the top of the Automations screen.
-///
-/// ── WHY THE COPY IS BLUNT ────────────────────────────────────────────────
-///
-/// This toggle is not a preference. Switching it on authorises the system to
-/// approve and send check-ins to customers with nobody reading them first —
-/// the same substance as approving a campaign by hand, spread over every
-/// future sweep. A switch labelled "Automatic check-in" with no further words
-/// would be technically accurate and would misrepresent what it does, so the
-/// footer says plainly what turning it on means and what turning it off does
-/// NOT undo.
+/// Enabling it authorizes future automatic customer messages, so its copy is
+/// intentionally explicit about what the switch does.
 struct CheckInAutomationSection: View {
     @EnvironmentObject private var session: SessionModel
     @State private var automation: CheckInAutomation?
@@ -464,6 +1159,7 @@ struct AutomationQueueView: View {
 
     var body: some View {
         List {
+            AbandonedCartRecoverySection()
             // First, because it is the only automation on this screen that
             // messages customers on its own initiative rather than in reply to
             // an order they just placed.

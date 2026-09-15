@@ -14,6 +14,7 @@ import Foundation
 /// operator, never a security boundary — the server enforces every one of them
 /// independently on the request itself.
 enum Permission {
+    static let messageSend      = "message.send"
     static let automationRead   = "automation.read"
     static let automationCancel = "automation.cancel"
     static let analyticsRead    = "analytics.read"

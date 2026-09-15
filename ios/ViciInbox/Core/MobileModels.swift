@@ -286,6 +286,419 @@ struct ActivityRecord: Codable, Identifiable, Hashable {
     }
 }
 
+// MARK: - Abandoned cart recovery
+
+/// A small dynamic-key decoder keeps this client compatible while the growth
+/// endpoint moves from database-shaped snake_case records to the documented
+/// camelCase API. It is intentionally scoped to this feature so it cannot make
+/// unrelated wire contracts silently permissive.
+private struct CartRecoveryWireKey: CodingKey {
+    let stringValue: String
+    let intValue: Int? = nil
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+
+private extension KeyedDecodingContainer where Key == CartRecoveryWireKey {
+    func first<T: Decodable>(_ type: T.Type, _ names: String...) -> T? {
+        for name in names {
+            guard let key = CartRecoveryWireKey(stringValue: name) else { continue }
+            guard contains(key), (try? decodeNil(forKey: key)) != true else { continue }
+            if let value = try? decode(type, forKey: key) { return value }
+        }
+        return nil
+    }
+}
+
+struct CartRecoveryDashboard: Decodable, Hashable {
+    let mode: String
+    let metrics: CartRecoveryMetrics
+    let automation: CartRecoveryAutomationSnapshot?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        mode = values.first(String.self, "mode") ?? "unavailable"
+        metrics = values.first(CartRecoveryMetrics.self, "metrics") ?? .empty
+        automation = values.first(CartRecoveryAutomationSnapshot.self, "automation")
+    }
+}
+
+struct CartRecoveryAutomationSnapshot: Decodable, Hashable {
+    let enabled: Bool
+    let smsDelayMinutes: Int
+    let pushEnabled: Bool
+    let pushDelayHours: Int
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        enabled = values.first(Bool.self, "enabled") ?? false
+        smsDelayMinutes = values.first(Int.self, "smsDelayMinutes", "sms_delay_minutes") ?? 45
+        pushEnabled = values.first(Bool.self, "pushEnabled", "push_enabled") ?? false
+        pushDelayHours = values.first(Int.self, "pushDelayHours", "push_delay_hours") ?? 48
+    }
+}
+
+struct CartRecoveryMetrics: Decodable, Hashable {
+    let abandonedCartsIdentified: Int
+    let smsEligible: Int
+    let active: Int
+    let queued: Int
+    let sent: Int
+    let delivered: Int
+    let clicked: Int
+    let replied: Int
+    let aiDrafts: Int
+    let pushScheduled: Int
+    let pushBlocked: Int
+    let pushSent: Int
+    let pushClicked: Int
+    let converted: Int
+    let recoveredOrders: Int
+    let recoveredRevenue: FlexibleDecimal?
+    let currency: String
+    let topReasons: [CartRecoveryReasonMetric]
+
+    static let empty = CartRecoveryMetrics(abandonedCartsIdentified: 0, smsEligible: 0,
+                                           active: 0, queued: 0, sent: 0,
+                                           delivered: 0, clicked: 0, replied: 0, aiDrafts: 0,
+                                           pushScheduled: 0, pushBlocked: 0,
+                                           pushSent: 0, pushClicked: 0,
+                                           converted: 0, recoveredOrders: 0,
+                                           recoveredRevenue: nil, currency: "USD",
+                                           topReasons: [])
+
+    private init(abandonedCartsIdentified: Int, smsEligible: Int,
+                 active: Int, queued: Int, sent: Int, delivered: Int, clicked: Int,
+                 replied: Int, aiDrafts: Int, pushScheduled: Int, pushBlocked: Int,
+                 pushSent: Int, pushClicked: Int, converted: Int, recoveredOrders: Int,
+                 recoveredRevenue: FlexibleDecimal?, currency: String,
+                 topReasons: [CartRecoveryReasonMetric]) {
+        self.abandonedCartsIdentified = abandonedCartsIdentified
+        self.smsEligible = smsEligible
+        self.active = active
+        self.queued = queued
+        self.sent = sent
+        self.delivered = delivered
+        self.clicked = clicked
+        self.replied = replied
+        self.aiDrafts = aiDrafts
+        self.pushScheduled = pushScheduled
+        self.pushBlocked = pushBlocked
+        self.pushSent = pushSent
+        self.pushClicked = pushClicked
+        self.converted = converted
+        self.recoveredOrders = recoveredOrders
+        self.recoveredRevenue = recoveredRevenue
+        self.currency = currency
+        self.topReasons = topReasons
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        abandonedCartsIdentified = values.first(Int.self, "abandonedCartsIdentified", "abandoned_carts_identified") ?? 0
+        smsEligible = values.first(Int.self, "smsEligible", "sms_eligible") ?? 0
+        active = values.first(Int.self, "active", "activeJourneys", "active_journeys") ?? 0
+        queued = values.first(Int.self, "queued", "queuedJourneys", "queued_journeys") ?? 0
+        sent = values.first(Int.self, "sent", "messagesSent", "messages_sent") ?? 0
+        delivered = values.first(Int.self, "delivered", "messagesDelivered", "messages_delivered") ?? 0
+        clicked = values.first(Int.self, "clicked", "linkClicks", "link_clicks") ?? 0
+        replied = values.first(Int.self, "replied", "replies") ?? 0
+        aiDrafts = values.first(Int.self, "aiDrafts", "ai_drafts") ?? 0
+        pushScheduled = values.first(Int.self, "pushScheduled", "push_scheduled") ?? 0
+        pushBlocked = values.first(Int.self, "pushBlocked", "push_blocked") ?? 0
+        pushSent = values.first(Int.self, "pushSent", "push_sent") ?? 0
+        pushClicked = values.first(Int.self, "pushClicked", "push_clicked") ?? 0
+        converted = values.first(Int.self, "converted", "conversions") ?? 0
+        recoveredOrders = values.first(Int.self, "recoveredOrders", "recovered_orders") ?? converted
+        recoveredRevenue = values.first(FlexibleDecimal.self, "recoveredRevenue", "recovered_revenue")
+        currency = values.first(String.self, "currency") ?? "USD"
+        topReasons = values.first([CartRecoveryReasonMetric].self, "topReasons", "top_reasons") ?? []
+    }
+}
+
+struct CartRecoveryReasonMetric: Decodable, Hashable, Identifiable {
+    let category: String
+    let count: Int
+    let recoveryRate: Double?
+    let recoveredRevenue: FlexibleDecimal?
+    var id: String { category }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        category = values.first(String.self, "category", "reason", "primaryCategory", "primary_category") ?? "UNKNOWN"
+        count = values.first(Int.self, "count", "replies") ?? 0
+        recoveryRate = values.first(Double.self, "recoveryRate", "recovery_rate")
+        recoveredRevenue = values.first(FlexibleDecimal.self, "recoveredRevenue", "recovered_revenue")
+    }
+}
+
+struct CartRecoveryJourneyPage: Decodable, Hashable {
+    let journeys: [CartRecoveryJourney]
+    let nextCursor: String?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        journeys = values.first([CartRecoveryJourney].self, "journeys", "items") ?? []
+        nextCursor = values.first(String.self, "nextCursor", "next_cursor")
+    }
+}
+
+struct CartRecoveryJourneyDetail: Decodable, Hashable {
+    let journey: CartRecoveryJourney
+    let timeline: [CartRecoveryTimelineEvent]
+    let replies: [CartRecoveryReply]
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        guard let journey = values.first(CartRecoveryJourney.self, "journey") else {
+            throw DecodingError.keyNotFound(CartRecoveryWireKey(stringValue: "journey")!,
+                                            .init(codingPath: decoder.codingPath,
+                                                  debugDescription: "Missing journey"))
+        }
+        self.journey = journey
+        timeline = values.first([CartRecoveryTimelineEvent].self, "timeline", "events") ?? []
+        replies = values.first([CartRecoveryReply].self, "replies") ?? []
+    }
+}
+
+struct CartRecoveryProduct: Decodable, Hashable, Identifiable {
+    let productID: String?
+    let variationID: String?
+    let name: String
+    let quantity: Int
+    let permalink: String?
+    var id: String { [productID, variationID, name].compactMap { $0 }.joined(separator: ":") }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        productID = values.first(String.self, "productId", "product_id")
+            ?? values.first(Int.self, "productId", "product_id").map(String.init)
+        variationID = values.first(String.self, "variationId", "variation_id")
+            ?? values.first(Int.self, "variationId", "variation_id").map(String.init)
+        name = values.first(String.self, "name", "productName", "product_name") ?? "Product"
+        quantity = values.first(Int.self, "quantity") ?? 1
+        permalink = values.first(String.self, "permalink", "url", "productUrl", "product_url")
+    }
+}
+
+struct CartRecoveryJourney: Decodable, Hashable, Identifiable {
+    let id: String
+    let status: String
+    let customerName: String?
+    let firstName: String?
+    let phone: String?
+    let phoneAvailable: Bool
+    let smsConsent: Bool
+    let pushPermission: Bool
+    let identityResolutionAmbiguous: Bool
+    let products: [CartRecoveryProduct]
+    let cartValue: FlexibleDecimal?
+    let currency: String
+    let lastActivityAt: String?
+    let primaryProduct: String?
+    let recoveryURL: String?
+    let smsQueuedAt: String?
+    let smsContent: String?
+    let smsStatus: String?
+    let pushQueuedAt: String?
+    let pushContent: String?
+    let pushDestination: String?
+    let pushStatus: String?
+    let pushBlockedReason: String?
+    let replyStatus: String?
+    let category: String
+    let secondaryCategory: String?
+    let classificationConfidence: Double?
+    let aiSummary: String?
+    let aiDraftStatus: String?
+    let purchaseStatus: String?
+    let orderID: String?
+    let recoveredRevenue: FlexibleDecimal?
+    let createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        id = values.first(String.self, "id") ?? values.first(Int.self, "id").map(String.init) ?? ""
+        status = values.first(String.self, "status", "journeyStatus", "journey_status") ?? "UNKNOWN"
+        customerName = values.first(String.self, "customerName", "customer_name", "name")
+        firstName = values.first(String.self, "firstName", "first_name")
+        phone = values.first(String.self, "phone", "customerPhone", "customer_phone")
+        phoneAvailable = values.first(Bool.self, "phoneAvailable", "phone_available") ?? !(phone ?? "").isEmpty
+        smsConsent = values.first(Bool.self, "smsConsent", "sms_consent", "consentGranted", "consent_granted") ?? false
+        pushPermission = values.first(Bool.self, "pushPermission", "push_permission", "customerPushPermission", "customer_push_permission") ?? false
+        identityResolutionAmbiguous = values.first(Bool.self, "identityResolutionAmbiguous", "identity_resolution_ambiguous") ?? false
+        products = values.first([CartRecoveryProduct].self, "products", "items", "cartItems", "cart_items") ?? []
+        cartValue = values.first(FlexibleDecimal.self, "cartValue", "cart_value", "total")
+        currency = values.first(String.self, "currency") ?? "USD"
+        lastActivityAt = values.first(String.self, "lastActivityAt", "last_activity_at", "lastActivity")
+        primaryProduct = values.first(String.self, "primaryProduct", "primary_product", "productName", "product_name")
+        recoveryURL = values.first(String.self, "recoveryUrl", "recoveryURL", "recovery_url")
+        smsQueuedAt = values.first(String.self, "smsQueuedAt", "sms_queued_at", "dueAt", "due_at")
+        smsContent = values.first(String.self, "smsContent", "sms_content", "message", "messageBody", "message_body")
+        smsStatus = values.first(String.self, "smsStatus", "sms_status")
+        pushQueuedAt = values.first(String.self, "pushQueuedAt", "push_queued_at", "pushDueAt", "push_due_at")
+        pushContent = values.first(String.self, "pushContent", "push_content", "pushBody", "push_body")
+        pushDestination = values.first(String.self, "pushDestination", "push_destination")
+        pushStatus = values.first(String.self, "pushStatus", "push_status")
+        pushBlockedReason = values.first(String.self, "pushBlockedReason", "push_blocked_reason")
+        replyStatus = values.first(String.self, "replyStatus", "reply_status")
+        category = values.first(String.self, "category", "primaryCategory", "primary_category") ?? "UNKNOWN"
+        secondaryCategory = values.first(String.self, "secondaryCategory", "secondary_category")
+        classificationConfidence = values.first(Double.self, "classificationConfidence", "classification_confidence", "confidence")
+        aiSummary = values.first(String.self, "aiSummary", "ai_summary", "summary")
+        aiDraftStatus = values.first(String.self, "aiDraftStatus", "ai_draft_status")
+        purchaseStatus = values.first(String.self, "purchaseStatus", "purchase_status")
+        orderID = values.first(String.self, "orderId", "orderID", "order_id")
+            ?? values.first(Int.self, "orderId", "orderID", "order_id").map(String.init)
+        recoveredRevenue = values.first(FlexibleDecimal.self, "recoveredRevenue", "recovered_revenue")
+        createdAt = values.first(String.self, "createdAt", "created_at")
+    }
+
+    var displayName: String {
+        if let customerName, !customerName.isEmpty { return customerName }
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let phone, !phone.isEmpty { return PhoneFormatter.pretty(phone) }
+        return "Customer"
+    }
+
+    var itemCount: Int { products.reduce(0) { $0 + max(1, $1.quantity) } }
+}
+
+struct CartRecoveryTimelineEvent: Decodable, Hashable, Identifiable {
+    let id: String
+    let type: String
+    let title: String
+    let detail: String?
+    let createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        id = values.first(String.self, "id") ?? UUID().uuidString
+        type = values.first(String.self, "type", "eventType", "event_type") ?? "event"
+        title = values.first(String.self, "title", "label")
+            ?? type.replacingOccurrences(of: "_", with: " ").capitalized
+        detail = values.first(String.self, "detail", "description", "message")
+        createdAt = values.first(String.self, "createdAt", "created_at", "occurredAt", "occurred_at")
+    }
+}
+
+struct CartRecoveryReply: Decodable, Hashable, Identifiable {
+    let id: String
+    let customerMessage: String?
+    let category: String
+    let secondaryCategory: String?
+    let confidence: Double?
+    let summary: String?
+    let draft: String?
+    let draftStatus: String
+    let medicalEscalation: Bool
+    let receivedAt: String?
+    let sentAt: String?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        id = values.first(String.self, "id") ?? values.first(Int.self, "id").map(String.init) ?? ""
+        customerMessage = values.first(String.self, "customerMessage", "customer_message", "message", "body")
+        category = values.first(String.self, "category", "primaryCategory", "primary_category") ?? "UNKNOWN"
+        secondaryCategory = values.first(String.self, "secondaryCategory", "secondary_category")
+        confidence = values.first(Double.self, "confidence", "confidenceScore", "confidence_score")
+        summary = values.first(String.self, "summary", "aiSummary", "ai_summary")
+        draft = values.first(String.self, "draft", "draftReply", "draft_reply")
+        draftStatus = values.first(String.self, "draftStatus", "draft_status", "status") ?? "NONE"
+        medicalEscalation = values.first(Bool.self, "medicalEscalation", "medical_escalation", "requiresMedicalReview") ?? false
+        receivedAt = values.first(String.self, "receivedAt", "received_at", "createdAt", "created_at")
+        sentAt = values.first(String.self, "sentAt", "sent_at")
+    }
+}
+
+struct CartRecoveryReplyEnvelope: Decodable {
+    let reply: CartRecoveryReply
+}
+
+struct CartRecoveryReplyActionResponse: Decodable {
+    let reply: CartRecoveryReply
+    let dryRun: Bool
+    let sent: Bool
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        guard let reply = values.first(CartRecoveryReply.self, "reply") else {
+            throw DecodingError.keyNotFound(CartRecoveryWireKey(stringValue: "reply")!,
+                                            .init(codingPath: decoder.codingPath,
+                                                  debugDescription: "Missing reply"))
+        }
+        self.reply = reply
+        dryRun = values.first(Bool.self, "dryRun", "dry_run") ?? false
+        sent = values.first(Bool.self, "sent") ?? false
+    }
+}
+
+struct CartRecoverySettingsEnvelope: Decodable {
+    let settings: CartRecoverySettings
+}
+
+struct CartRecoverySettings: Decodable, Hashable {
+    var enabled: Bool
+    var firstSmsDelayMinutes: Int
+    var firstSmsTemplate: String
+    var pushEnabled: Bool
+    var pushDelayHours: Int
+    var pushTitle: String
+    var pushBody: String
+    var discountPercent: Int
+    var discountCode: String
+    var singleProductDestination: String
+    var multiProductDestination: String
+    var lowStockMessagingEnabled: Bool
+    var lowStockThreshold: Int
+    var aiClassificationEnabled: Bool
+    var aiDraftRepliesEnabled: Bool
+    let automaticAiSending: Bool
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
+        enabled = values.first(Bool.self, "enabled") ?? false
+        firstSmsDelayMinutes = values.first(Int.self, "firstSmsDelayMinutes", "first_sms_delay_minutes", "smsDelayMinutes") ?? 45
+        firstSmsTemplate = values.first(String.self, "firstSmsTemplate", "first_sms_template", "smsTemplate") ?? ""
+        pushEnabled = values.first(Bool.self, "pushEnabled", "push_enabled") ?? false
+        pushDelayHours = values.first(Int.self, "pushDelayHours", "push_delay_hours") ?? 48
+        pushTitle = values.first(String.self, "pushTitle", "push_title") ?? "Still thinking it over?"
+        pushBody = values.first(String.self, "pushBody", "push_body") ?? "Use Vici15 for 15% off."
+        discountPercent = values.first(Int.self, "discountPercent", "discount_percent") ?? 15
+        discountCode = values.first(String.self, "discountCode", "discount_code") ?? "Vici15"
+        singleProductDestination = values.first(String.self, "singleProductDestination", "single_product_destination") ?? "product"
+        multiProductDestination = values.first(String.self, "multiProductDestination", "multi_product_destination") ?? "shop"
+        lowStockMessagingEnabled = values.first(Bool.self, "lowStockMessagingEnabled", "low_stock_messaging_enabled") ?? false
+        lowStockThreshold = values.first(Int.self, "lowStockThreshold", "low_stock_threshold") ?? 5
+        aiClassificationEnabled = values.first(Bool.self, "aiClassificationEnabled", "ai_classification_enabled") ?? true
+        aiDraftRepliesEnabled = values.first(Bool.self, "aiDraftRepliesEnabled", "ai_draft_replies_enabled") ?? true
+        automaticAiSending = values.first(Bool.self, "automaticAiSending", "automatic_ai_sending") ?? false
+    }
+
+    var requestBody: [String: Any] {
+        [
+            "enabled": enabled,
+            "firstSmsDelayMinutes": firstSmsDelayMinutes,
+            "firstSmsTemplate": firstSmsTemplate,
+            "pushEnabled": pushEnabled,
+            "pushDelayHours": pushDelayHours,
+            "pushTitle": pushTitle,
+            "pushBody": pushBody,
+            "discountPercent": discountPercent,
+            "discountCode": discountCode,
+            "singleProductDestination": singleProductDestination,
+            "multiProductDestination": multiProductDestination,
+            "lowStockMessagingEnabled": lowStockMessagingEnabled,
+            "lowStockThreshold": lowStockThreshold,
+            "aiClassificationEnabled": aiClassificationEnabled,
+            "aiDraftRepliesEnabled": aiDraftRepliesEnabled,
+            // Included explicitly so a future backend cannot mistake omission
+            // for permission to enable autonomous AI messages.
+            "automaticAiSending": false
+        ]
+    }
+}
+
 struct CallLogRecord: Codable, Identifiable, Hashable {
     let recordID: FlexibleID
     let direction: String?

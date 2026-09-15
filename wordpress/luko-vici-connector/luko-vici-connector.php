@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LUKO Vici Connector
  * Description: WooCommerce abandoned-cart recovery, SMS consent bridge and LUKO event connector for Vici.
- * Version: 0.3.2
+ * Version: 0.3.3
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.3.2';
+    const VERSION = '0.3.3';
     private static $restoring = false;
     private static $cart_dirty = false;
 
@@ -282,7 +282,11 @@ final class LUKO_Vici_Connector {
         $e = get_user_meta( $user_id, '_luko_consent_evidence', true );
         return [
             'wordpress_user_id' => (int) $user_id, 'email' => $u ? $u->user_email : '',
-            'phone' => self::resolve_phone( $user_id ), 'sms_consent' => self::has_consent( $user_id ),
+            'first_name' => $u ? sanitize_text_field( (string) $u->first_name ) : '',
+            'phone' => self::resolve_phone( $user_id ),
+            'phone_available' => '' !== self::resolve_phone( $user_id ),
+            'sms_consent' => self::has_consent( $user_id ),
+            'push_permission' => false,
             'sms_consent_at' => $e['occurred_at'] ?? '', 'consent_version' => $e['version'] ?? '',
         ];
     }
@@ -303,16 +307,27 @@ final class LUKO_Vici_Connector {
         if ( ! self::$cart_dirty || self::$restoring || ! is_user_logged_in() || ! function_exists( 'WC' ) || ! WC()->cart ) return;
         self::$cart_dirty = false;
         $user_id = get_current_user_id();
-        if ( ! self::has_consent( $user_id ) ) return;
         if ( WC()->cart->is_empty() ) { self::cart_emptied(); return; }
 
         $items = [];
         foreach ( WC()->cart->get_cart() as $item ) {
+            $product = isset( $item['data'] ) && $item['data'] instanceof WC_Product ? $item['data'] : wc_get_product( (int) ( $item['variation_id'] ?: $item['product_id'] ) );
+            $parent_id = (int) $item['product_id'];
+            $stock_managed = $product && $product->managing_stock();
+            $stock_quantity = $stock_managed ? $product->get_stock_quantity() : null;
             $items[] = [
-                'product_id' => (int) $item['product_id'],
+                'product_id' => $parent_id,
                 'variation_id' => (int) $item['variation_id'],
                 'quantity' => (int) $item['quantity'],
                 'variation' => is_array( $item['variation'] ?? null ) ? $item['variation'] : [],
+                'product_name' => $product ? wp_strip_all_tags( $product->get_name() ) : '',
+                'sku' => $product ? (string) $product->get_sku() : '',
+                'product_url' => $product ? get_permalink( $parent_id ) : '',
+                'category_ids' => function_exists( 'wc_get_product_cat_ids' ) ? array_map( 'intval', wc_get_product_cat_ids( $parent_id ) ) : [],
+                'on_sale' => $product ? (bool) $product->is_on_sale() : false,
+                'stock_managed' => (bool) $stock_managed,
+                'stock_quantity' => null === $stock_quantity ? null : (int) $stock_quantity,
+                'stock_status' => $product ? (string) $product->get_stock_status() : '',
             ];
         }
 
@@ -335,7 +350,7 @@ final class LUKO_Vici_Connector {
                 'token_hash' => $token_hash,
                 'token_encrypted' => self::seal( $raw_token ),
                 'version' => $version,
-                'payload' => wp_json_encode( [ 'items' => $items ] ),
+                'payload' => wp_json_encode( [ 'items' => $items, 'applied_coupons' => array_values( WC()->cart->get_applied_coupons() ) ] ),
                 'currency' => $currency,
                 'total' => $total,
                 'status' => 'active',
@@ -354,7 +369,7 @@ final class LUKO_Vici_Connector {
                 'token_hash' => $token_hash,
                 'token_encrypted' => self::seal( $raw_token ),
                 'version' => $version,
-                'payload' => wp_json_encode( [ 'items' => $items ] ),
+                'payload' => wp_json_encode( [ 'items' => $items, 'applied_coupons' => array_values( WC()->cart->get_applied_coupons() ) ] ),
                 'currency' => $currency,
                 'total' => $total,
                 'status' => 'active',
@@ -377,6 +392,7 @@ final class LUKO_Vici_Connector {
                 'expires_at' => gmdate( 'c', strtotime( $expires . ' UTC' ) ),
                 'recovery_url' => home_url( '/r/' . rawurlencode( $raw_token ) ),
                 'items' => $items,
+                'applied_coupons' => array_values( WC()->cart->get_applied_coupons() ),
             ],
         ] );
     }
@@ -394,11 +410,15 @@ final class LUKO_Vici_Connector {
 
     private static function new_token() { return rtrim( strtr( base64_encode( random_bytes( 32 ) ), '+/', '-_' ), '=' ); }
 
-    public static function rewrite() { add_rewrite_rule( '^r/([A-Za-z0-9_-]{43}|[A-Fa-f0-9]{64})/?$', 'index.php?luko_recover=$matches[1]', 'top' ); }
-    public static function query_vars( $vars ) { $vars[] = 'luko_recover'; return $vars; }
+    public static function rewrite() {
+        add_rewrite_rule( '^r/([A-Za-z0-9_-]{43}|[A-Fa-f0-9]{64})/?$', 'index.php?luko_recover=$matches[1]', 'top' );
+        add_rewrite_rule( '^luko-go/([A-Za-z0-9_-]{43}|[A-Fa-f0-9]{64})/?$', 'index.php?luko_push=$matches[1]', 'top' );
+    }
+    public static function query_vars( $vars ) { $vars[] = 'luko_recover'; $vars[] = 'luko_push'; return $vars; }
 
     public static function handle_recovery() {
-        $token = (string) get_query_var( 'luko_recover' );
+        $push_token = (string) get_query_var( 'luko_push' );
+        $token = $push_token ?: (string) get_query_var( 'luko_recover' );
         if ( ! $token ) return;
         if ( ! preg_match( '/^(?:[A-Za-z0-9_-]{43}|[A-Fa-f0-9]{64})$/', $token ) ) { status_header( 404 ); exit( esc_html__( 'Invalid recovery link.', 'luko-vici-connector' ) ); }
         if ( ! self::allow_request( 'recovery', 30, 10 * MINUTE_IN_SECONDS ) ) { status_header( 429 ); exit( esc_html__( 'Please try again shortly.', 'luko-vici-connector' ) ); }
@@ -407,6 +427,27 @@ final class LUKO_Vici_Connector {
         if ( ! $row || strtotime( $row->expires_at . ' UTC' ) < time() || in_array( $row->status, [ 'emptied', 'ordered', 'paid', 'recovered', 'expired' ], true ) ) { status_header( 410 ); exit( esc_html__( 'This recovery link is no longer available.', 'luko-vici-connector' ) ); }
         if ( function_exists( 'wc_load_cart' ) && ( ! function_exists( 'WC' ) || null === WC()->cart ) ) wc_load_cart();
         if ( ! function_exists( 'WC' ) || ! WC()->cart ) { status_header( 500 ); exit( esc_html__( 'Cart unavailable.', 'luko-vici-connector' ) ); }
+        if ( $push_token ) {
+            $target = isset( $_GET['to'] ) ? esc_url_raw( wp_unslash( $_GET['to'] ) ) : '';
+            $target_parts = $target ? wp_parse_url( $target ) : [];
+            $home_parts = wp_parse_url( home_url( '/' ) );
+            if ( ! is_array( $target_parts ) || ! is_array( $home_parts )
+                || 'https' !== strtolower( (string) ( $target_parts['scheme'] ?? '' ) )
+                || strtolower( (string) ( $target_parts['host'] ?? '' ) ) !== strtolower( (string) ( $home_parts['host'] ?? '' ) ) ) {
+                $target = function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'shop' ) : home_url( '/shop/' );
+            }
+            $version = (int) $row->version + 1;
+            $clicked = gmdate( 'c' );
+            $wpdb->update( self::table(), [ 'status' => 'clicked', 'version' => $version, 'clicked_at' => current_time( 'mysql', true ), 'updated_at' => current_time( 'mysql', true ) ], [ 'id' => $row->id ] );
+            if ( WC()->session ) WC()->session->set( 'luko_recovery_context', [
+                'external_cart_id' => (string) $row->external_cart_id,
+                'clicked_at' => $clicked,
+                'expires_at' => gmdate( 'c', time() + DAY_IN_SECONDS ),
+            ] );
+            self::emit( 'cart.clicked', [ 'customer' => self::customer_payload( (int) $row->user_id ),
+                'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => $version, 'click_channel' => 'push' ] ] );
+            wp_safe_redirect( $target ); exit;
+        }
         $payload = json_decode( $row->payload, true );
         $items = is_array( $payload['items'] ?? null ) ? $payload['items'] : [];
         if ( ! $items ) { status_header( 410 ); exit( esc_html__( 'This cart has no recoverable items.', 'luko-vici-connector' ) ); }
@@ -592,12 +633,14 @@ final class LUKO_Vici_Connector {
         global $wpdb;
         $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE external_cart_id=%s LIMIT 1', $external ) );
         $payload = $row ? json_decode( (string) $row->payload, true ) : [];
-        $eligible = $row && 'active' === $row->status && ! $row->order_id && strtotime( $row->expires_at . ' UTC' ) > time() && self::has_consent( (int) $row->user_id ) && ! empty( $payload['items'] );
+        $eligible = $row && 'active' === $row->status && ! $row->order_id && strtotime( $row->expires_at . ' UTC' ) > time() && ! empty( $payload['items'] );
         return rest_ensure_response( [
             'request_id' => $request_id,
             'external_cart_id' => $external,
             'eligible' => (bool) $eligible,
+            'phone_available' => $row ? '' !== self::resolve_phone( (int) $row->user_id ) : false,
             'current_consent' => $row ? self::has_consent( (int) $row->user_id ) : false,
+            'push_permission' => false,
             'version' => $row ? (int) $row->version : 0,
             'items' => $row && is_array( $payload['items'] ?? null ) ? $payload['items'] : [],
             'order_id' => $row && $row->order_id ? (int) $row->order_id : null,

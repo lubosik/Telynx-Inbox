@@ -211,6 +211,183 @@ final class ActivityModel: ObservableObject {
 }
 
 @MainActor
+final class CartRecoveryDashboardModel: ObservableObject {
+    @Published private(set) var dashboard: CartRecoveryDashboard?
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = dashboard == nil
+        defer { isLoading = false }
+        do {
+            dashboard = try await APIClient.shared.fetchCartRecoveryDashboard()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+@MainActor
+final class CartRecoveryJourneyListModel: ObservableObject {
+    @Published private(set) var journeys: [CartRecoveryJourney] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published var status = "all"
+    @Published var errorMessage: String?
+    private var nextCursor: String?
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = journeys.isEmpty
+        defer { isLoading = false }
+        do {
+            let page = try await APIClient.shared.fetchCartRecoveryJourneys(status: status)
+            journeys = page.journeys
+            nextCursor = page.nextCursor
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func reloadForStatus() async {
+        nextCursor = nil
+        journeys = []
+        await load()
+    }
+
+    func loadMoreIfNeeded(current journey: CartRecoveryJourney) async {
+        guard journey.id == journeys.last?.id,
+              let cursor = nextCursor,
+              !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await APIClient.shared.fetchCartRecoveryJourneys(
+                status: status, cursor: cursor
+            )
+            let existing = Set(journeys.map(\.id))
+            journeys.append(contentsOf: page.journeys.filter { !existing.contains($0.id) })
+            nextCursor = page.nextCursor
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+@MainActor
+final class CartRecoveryJourneyDetailModel: ObservableObject {
+    @Published private(set) var detail: CartRecoveryJourneyDetail?
+    @Published private(set) var isLoading = false
+    @Published private(set) var mutatingReplyID: String?
+    @Published var errorMessage: String?
+    @Published var successMessage: String?
+    let journeyID: String
+
+    init(journeyID: String) { self.journeyID = journeyID }
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = detail == nil
+        defer { isLoading = false }
+        do {
+            detail = try await APIClient.shared.fetchCartRecoveryJourney(id: journeyID)
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func saveDraft(replyID: String, text: String) async -> Bool {
+        await mutate(replyID: replyID, success: "Draft saved") {
+            try await APIClient.shared.updateCartRecoveryReplyDraft(
+                journeyID: journeyID, replyID: replyID, draft: text
+            )
+        }
+    }
+
+    func approve(replyID: String) async -> Bool {
+        guard mutatingReplyID == nil else { return false }
+        mutatingReplyID = replyID
+        successMessage = nil
+        defer { mutatingReplyID = nil }
+        do {
+            let result = try await APIClient.shared.approveCartRecoveryReply(
+                journeyID: journeyID, replyID: replyID
+            )
+            detail = try await APIClient.shared.fetchCartRecoveryJourney(id: journeyID)
+            errorMessage = nil
+            successMessage = result.dryRun
+                ? "Dry-run approval recorded. Nothing was sent."
+                : (result.sent ? "Reply approved and sent" : "Reply approval recorded")
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func discard(replyID: String) async -> Bool {
+        await mutate(replyID: replyID, success: "Draft discarded") {
+            try await APIClient.shared.discardCartRecoveryReply(
+                journeyID: journeyID, replyID: replyID
+            )
+        }
+    }
+
+    private func mutate(replyID: String,
+                        success: String,
+                        action: () async throws -> CartRecoveryReply) async -> Bool {
+        guard mutatingReplyID == nil else { return false }
+        mutatingReplyID = replyID
+        successMessage = nil
+        defer { mutatingReplyID = nil }
+        do {
+            _ = try await action()
+            detail = try await APIClient.shared.fetchCartRecoveryJourney(id: journeyID)
+            errorMessage = nil
+            successMessage = success
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+}
+
+@MainActor
+final class CartRecoverySettingsModel: ObservableObject {
+    @Published private(set) var settings: CartRecoverySettings?
+    @Published private(set) var isLoading = false
+    @Published private(set) var isSaving = false
+    @Published var errorMessage: String?
+    @Published var savedMessage: String?
+
+    func load() async {
+        guard !isLoading else { return }
+        isLoading = settings == nil
+        defer { isLoading = false }
+        do {
+            settings = try await APIClient.shared.fetchCartRecoverySettings()
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func save(_ candidate: CartRecoverySettings) async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        savedMessage = nil
+        defer { isSaving = false }
+        do {
+            settings = try await APIClient.shared.updateCartRecoverySettings(candidate)
+            errorMessage = nil
+            savedMessage = "Settings saved"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+}
+
+@MainActor
 final class CallHistoryModel: ObservableObject {
     @Published private(set) var logs: [CallLogRecord] = []
     @Published private(set) var isLoading = false

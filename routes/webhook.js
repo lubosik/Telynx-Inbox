@@ -183,6 +183,14 @@ module.exports = (broadcastSSE) => {
         // everybody who texted STOP gets somebody added back to a campaign by
         // hand. Never throws: the STOP is already honoured by this point.
         await suppressOptOut(fromPhone);
+        try {
+          await require('../lib/cart-recovery/runtime').handleOptOut({
+            phone: fromPhone,
+            occurredAt: payload.received_at || new Date().toISOString()
+          });
+        } catch (cartOptOutError) {
+          console.error('[CART RECOVERY] Could not annotate STOP cancellation:', cartOptOutError.message);
+        }
         // Log the inbound stop message but do not send any auto-reply.
         //
         // This used to end in `.catch(() => {})`. A Supabase query builder is a
@@ -389,7 +397,21 @@ module.exports = (broadcastSSE) => {
       //
       // Deliberately not awaited into the response path for anything except
       // its log line: the customer's message is already saved by this point.
-      handleCheckInReply({ client: supabase, phone: fromPhone, text, sendSMS })
+      let cartReply = { attached: false };
+      try {
+        cartReply = await require('../lib/cart-recovery/runtime').handleInboundReply({
+          phone: fromPhone,
+          text,
+          messageId: insertedRow?.id || messageId,
+          occurredAt: messageCreatedAt
+        });
+      } catch (cartReplyError) {
+        console.error('[CART RECOVERY] Reply attachment failed:', cartReplyError.message);
+      }
+
+      if (cartReply?.attached) {
+        console.log(`[CART RECOVERY] Attached reply to journey ${cartReply.recovery_id}`);
+      } else handleCheckInReply({ client: supabase, phone: fromPhone, text, sendSMS })
         .then(async outcome => {
           if (outcome.sent) {
             console.log(`[CHECK-IN] Sent ${outcome.code} to ...${fromPhone.slice(-4)} after their reply`);

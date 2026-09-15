@@ -160,7 +160,7 @@ BEGIN
       p_event->>'recovery_ciphertext',(p_event->>'expires_at')::timestamptz,
       CASE WHEN v_granted THEN 'active' ELSE 'suppressed' END,
       (p_event->>'last_activity_at')::timestamptz,
-      (p_event->>'last_activity_at')::timestamptz + interval '30 minutes',true
+      (p_event->>'last_activity_at')::timestamptz + interval '45 minutes',true
     )
     ON CONFLICT (workspace_id,external_cart_id) DO UPDATE SET
       wordpress_user_id=EXCLUDED.wordpress_user_id,
