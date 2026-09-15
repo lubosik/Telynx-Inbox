@@ -10,7 +10,8 @@ const { signBody, verifySignature, seal, unseal } = require('../lib/cart-recover
 const { attributionDecision, attributionPayload, RECOVERY_COUPON } = require('../lib/cart-recovery/attribution');
 const { aggregateRevenue, aggregateRevenueDrivers } = require('../lib/analytics/aggregate');
 const { decodeVerifiedTelnyxEvent, claimTelnyxEvent } = require('../lib/telnyx-webhook-claim');
-const { LOCKED_SMS_TEMPLATE, productSummary, renderLockedSMS } = require('../lib/cart-recovery/copy');
+const { LOCKED_SMS_TEMPLATE, productSummary, renderLockedSMS, renderSMSTemplate,
+  validateSMSTemplate } = require('../lib/cart-recovery/copy');
 const { deterministicCategory } = require('../lib/cart-recovery/reply');
 const { verifyCouponForCart, reliableScarcity, customerPushDestination, DISCOUNT_CODE } = require('../lib/cart-recovery/push');
 const { trackedPushDestination } = require('../lib/cart-recovery/push');
@@ -180,6 +181,47 @@ test('locked Vin SMS is personalized, readable, and summarizes multi-item carts 
   const personalized = renderLockedSMS({ customerFirstName: 'Maya', items: [{ product_name: 'RT', quantity: 1 }], recoveryURL: url });
   assert.equal(personalized, LOCKED_SMS_TEMPLATE.replace('{{first_name}}', 'Maya').replace('{{product_name}}', 'RT').replace('{{recovery_url}}', url));
   assert.match(renderLockedSMS({ customerFirstName: '', items: [], recoveryURL: url }), /^Hey, it's Vin from Vici\./);
+});
+
+test('editable recovery SMS preserves personalization, recovery attribution, and STOP language', () => {
+  const url = `https://vicipeptides.com/r/${'b'.repeat(43)}`;
+  const template = 'Hi {{first_name}}, your {{product_name}} cart is ready: {{recovery_url}} Reply STOP to opt out.';
+  assert.deepEqual(validateSMSTemplate(template), { ok: true, template });
+  assert.equal(renderSMSTemplate({
+    template,
+    customerFirstName: 'Maya',
+    items: [{ product_name: 'RT', quantity: 1 }],
+    recoveryURL: url
+  }), `Hi Maya, your RT cart is ready: ${url} Reply STOP to opt out.`);
+  assert.equal(validateSMSTemplate('Hi there. Reply STOP to opt out.').ok, false);
+  assert.equal(validateSMSTemplate('{{recovery_url}} {{recovery_url}} Reply STOP to opt out.').ok, false);
+  assert.equal(validateSMSTemplate('{{recovery_url}} {{discount_code}} Reply STOP to opt out.').ok, false);
+  assert.equal(validateSMSTemplate('{{recovery_url}}').ok, false);
+});
+
+test('settings save persists an approved editable SMS template and rejects unsafe edits', async () => {
+  let saved;
+  const client = {
+    from: table => {
+      assert.equal(table, 'luko_cart_recovery_settings');
+      return {
+        upsert: patch => {
+          saved = patch;
+          return { select: () => ({ single: async () => ({ data: patch, error: null }) }) };
+        }
+      };
+    }
+  };
+  const service = createCartRecoveryService({ client, env: ENV, now: () => NOW });
+  const template = 'Hi {{first_name}}, finish your {{product_name}} order here: {{recovery_url}} Reply STOP to opt out.';
+  const result = await service.updateSettings({ input: { firstSmsTemplate: template }, actor: { id: 7 } });
+  assert.equal(saved.first_sms_template, template);
+  assert.equal(saved.first_sms_template_locked, false);
+  assert.equal(result.settings.firstSmsTemplate, template);
+  await assert.rejects(
+    service.updateSettings({ input: { firstSmsTemplate: 'No tracked link. Reply STOP to opt out.' }, actor: { id: 7 } }),
+    { code: 'INVALID_CART_RECOVERY_SMS_TEMPLATE', status: 400 }
+  );
 });
 
 test('cart reply classification uses the required objections and escalates medical language', () => {
@@ -581,7 +623,10 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /name="luko_sms_consent" value="1"/);
   assert.doesNotMatch(plugin, /name="luko_sms_consent"[^>]*checked/);
   assert.match(plugin, /automated marketing SMS messages from Vici Peptides/);
-  assert.match(plugin, /luko_vici_sms_disclosure_version', 'v2'/);
+  assert.match(plugin, /luko_vici_sms_disclosure_version', 'v3'/);
+  assert.match(plugin, /Get Vici updates first/);
+  assert.match(plugin, /Restock alerts/);
+  assert.match(plugin, /Consent is not a condition of purchase/);
   assert.match(plugin, /random_bytes\( 32 \)/);
   assert.match(plugin, /luko_recovery_outbox/);
   assert.match(plugin, /luko_recovery_context/);
@@ -590,7 +635,7 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /\^luko-go\//);
   assert.match(plugin, /'click_channel' => 'push'/);
   assert.match(plugin, /'applied_coupons' => array_values/);
-  assert.match(plugin, /Version: 0\.3\.4/);
+  assert.match(plugin, /Version: 0\.3\.5/);
   assert.match(plugin, /FeaturesUtil::declare_compatibility\( 'custom_order_tables'/);
   assert.match(plugin, /woocommerce_checkout_create_order/);
   assert.match(plugin, /woocommerce_store_api_checkout_update_order_meta/);

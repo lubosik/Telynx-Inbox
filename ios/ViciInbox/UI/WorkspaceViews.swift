@@ -888,6 +888,7 @@ struct CartRecoverySettingsView: View {
     let canEdit: Bool
     @StateObject private var model = CartRecoverySettingsModel()
     @State private var draft: CartRecoverySettings?
+    @State private var isEditingFirstSMS = false
 
     var body: some View {
         Form {
@@ -901,10 +902,45 @@ struct CartRecoverySettingsView: View {
                     Text("The default journey waits 45 minutes after the customer's last cart activity.")
                 }
 
-                Section("First SMS template") {
-                    TextEditor(text: binding(\.firstSmsTemplate, fallback: ""))
-                        .frame(minHeight: 150)
-                        .disabled(true)
+                Section {
+                    if isEditingFirstSMS {
+                        TextEditor(text: binding(\.firstSmsTemplate, fallback: ""))
+                            .frame(minHeight: 150)
+                            .textInputAutocapitalization(.sentences)
+                        HStack {
+                            Text("\(draft?.firstSmsTemplate.count ?? 0)/500 characters")
+                            Spacer()
+                            Button("Done") { isEditingFirstSMS = false }
+                                .fontWeight(.semibold)
+                        }
+                        .font(.caption)
+                        .foregroundStyle((draft?.firstSmsTemplate.count ?? 0) > 500
+                                         ? ViciTheme.destructive : .secondary)
+                    } else {
+                        Text(draft?.firstSmsTemplate ?? "")
+                            .textSelection(.enabled)
+                    }
+                } header: {
+                    HStack {
+                        Text("First SMS template")
+                        Spacer()
+                        Button {
+                            isEditingFirstSMS = true
+                        } label: {
+                            Label("Edit message", systemImage: "pencil")
+                                .labelStyle(.iconOnly)
+                        }
+                        .disabled(!canEdit)
+                        .accessibilityLabel("Edit abandoned cart message")
+                    }
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Available fields: {{first_name}}, {{product_name}}, {{recovery_url}}")
+                        Text("Keep {{recovery_url}} exactly once and include “Reply STOP to opt out”. Changes affect future messages only.")
+                        if let problem = firstSMSProblem {
+                            Text(problem).foregroundStyle(ViciTheme.destructive)
+                        }
+                    }
                 }
 
                 Section {
@@ -976,9 +1012,15 @@ struct CartRecoverySettingsView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button(model.isSaving ? "Saving" : "Save") {
                     guard let draft else { return }
-                    Task { if await model.save(draft) { self.draft = model.settings } }
+                    Task {
+                        if await model.save(draft) {
+                            self.draft = model.settings
+                            isEditingFirstSMS = false
+                        }
+                    }
                 }
                 .disabled(!canEdit || model.isSaving || draft == nil
+                          || firstSMSProblem != nil
                           || (draft == model.settings && draft?.automaticAiSending != true))
             }
         }
@@ -1002,6 +1044,22 @@ struct CartRecoverySettingsView: View {
             get: { draft?[keyPath: keyPath] ?? fallback },
             set: { value in draft?[keyPath: keyPath] = value }
         )
+    }
+
+    private var firstSMSProblem: String? {
+        guard let message = draft?.firstSmsTemplate.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        if message.isEmpty { return "The message cannot be empty." }
+        if message.count > 500 { return "Keep the message to 500 characters or fewer." }
+        if message.components(separatedBy: "{{recovery_url}}").count - 1 != 1 {
+            return "Include {{recovery_url}} exactly once."
+        }
+        let lower = message.lowercased()
+        if !lower.contains("reply stop to opt out") && !lower.contains("reply stop to unsubscribe") {
+            return "Include “Reply STOP to opt out”."
+        }
+        return nil
     }
 }
 
