@@ -55,7 +55,9 @@ test('recovery URLs are encrypted with randomized authenticated encryption', () 
   const second = seal(value, SECRET);
   assert.notEqual(first, second);
   assert.equal(unseal(first, SECRET), value);
-  assert.throws(() => unseal(`${first.slice(0, -1)}x`, SECRET));
+  const tampered = first.split('.');
+  tampered[3] = `${tampered[3][0] === 'A' ? 'B' : 'A'}${tampered[3].slice(1)}`;
+  assert.throws(() => unseal(tampered.join('.'), SECRET));
 });
 
 test('connector validation binds consent to the same normalized phone and Vici origin', () => {
