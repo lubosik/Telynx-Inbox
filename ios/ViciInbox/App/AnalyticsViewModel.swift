@@ -104,6 +104,59 @@ final class AnalyticsViewModel: ObservableObject {
 }
 
 @MainActor
+final class AbandonedCartAnalyticsViewModel: ObservableObject {
+    @Published private(set) var report: AbandonedCartAnalyticsOverview?
+    @Published private(set) var orders: [AbandonedCartRecoveredOrder] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published var errorMessage: String?
+
+    private var query: AnalyticsQuery?
+    private var page = 0
+    private var generation = UUID()
+
+    func load(query: AnalyticsQuery, force: Bool = false) async {
+        guard force || self.query != query || report == nil else { return }
+        self.query = query
+        generation = UUID()
+        let current = generation
+        isLoading = report == nil
+        defer { if generation == current { isLoading = false } }
+        do {
+            let loaded = try await APIClient.shared.fetchAbandonedCartAnalytics(query: query)
+            guard generation == current else { return }
+            report = loaded
+            orders = loaded.orders
+            page = loaded.pagination.page
+            errorMessage = nil
+        } catch {
+            guard generation == current else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreIfNeeded(current order: AbandonedCartRecoveredOrder) async {
+        guard let query, report?.pagination.hasMore == true,
+              orders.last?.id == order.id, !isLoadingMore else { return }
+        let current = generation
+        isLoadingMore = true
+        defer { if generation == current { isLoadingMore = false } }
+        do {
+            let loaded = try await APIClient.shared.fetchAbandonedCartAnalytics(query: query, page: page + 1)
+            guard generation == current else { return }
+            let known = Set(orders.map(\.id))
+            orders.append(contentsOf: loaded.orders.filter { !known.contains($0.id) })
+            page = loaded.pagination.page
+            report = loaded
+            errorMessage = nil
+        } catch {
+            guard generation == current else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+@MainActor
 final class AttributionListModel: ObservableObject {
     @Published private(set) var records: [AttributionRecord] = []
     @Published private(set) var currency = "USD"

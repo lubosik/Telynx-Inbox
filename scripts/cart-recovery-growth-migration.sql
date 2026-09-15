@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS public.luko_cart_recovery_settings (
   push_delay_hours integer NOT NULL DEFAULT 48 CHECK (push_delay_hours BETWEEN 1 AND 720),
   push_title_template text NOT NULL DEFAULT 'Still thinking about {{product_name}}?',
   push_body_template text NOT NULL DEFAULT 'Vin here. I managed to get you 15% off if you still want to go ahead. Use code {{discount_code}}.',
-  discount_code text NOT NULL DEFAULT 'Vici15',
+  discount_code text NOT NULL DEFAULT 'VICI15',
   discount_percent numeric(5,2) NOT NULL DEFAULT 15 CHECK (discount_percent=15),
   single_product_destination text NOT NULL DEFAULT 'exact_product' CHECK (single_product_destination='exact_product'),
   multi_product_destination text NOT NULL DEFAULT 'shop' CHECK (multi_product_destination='shop'),

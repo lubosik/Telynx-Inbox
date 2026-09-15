@@ -41,6 +41,20 @@ test('analytics routes pass validated params and prevent caching', async () => {
   assert.equal(received.scope, 'attributed');
 });
 
+test('abandoned-cart Analytics reuses period validation and is non-cacheable', async () => {
+  let received;
+  const router = createAnalyticsRouter({
+    service: {},
+    cartRecoveryService: { overview: async params => { received = params; return { metrics: { recoveredOrders: 0 } }; } }
+  });
+  const res = responseRecorder();
+  await routeHandler(router, '/cart-recovery')({ query: { period: 'quarter', page: '2' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['Cache-Control'], 'no-store, private');
+  assert.equal(received.period, 'quarter');
+  assert.equal(received.page, '2');
+});
+
 test('invalid requests fail closed before calling the analytics service', async () => {
   let calls = 0;
   const router = createAnalyticsRouter({ service: { overview: async () => { calls += 1; } } });
@@ -161,6 +175,7 @@ test('both analytics endpoints remain behind the session and role boundary', () 
   const { ROUTE_POLICY } = require('../lib/route-policy');
   for (const path of [
     '/api/analytics/overview', '/api/analytics/attributions',
+    '/api/analytics/cart-recovery',
     '/api/analytics/campaigns/:id', '/api/analytics/campaigns/:id/attributions'
   ]) {
     const entry = ROUTE_POLICY.find(row => row.path === path && row.method === 'GET');

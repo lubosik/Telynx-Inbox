@@ -641,8 +641,20 @@ struct CartRecoveryJourneyDetailView: View {
             }
             if let order = journey.orderID { LabeledContent("Order", value: "#\(order)") }
             if let recovered = journey.recoveredRevenue {
-                LabeledContent("Recovered revenue",
+                LabeledContent("Net recovered revenue",
                                value: cartRecoveryMoney(recovered, currency: journey.currency))
+            }
+            if let gross = journey.grossRecoveredRevenue {
+                LabeledContent("Gross recovered revenue", value: cartRecoveryMoney(gross, currency: journey.currency))
+            }
+            if let refund = journey.refundAmount, refund.value > 0 {
+                LabeledContent("Refunds deducted", value: cartRecoveryMoney(refund, currency: journey.currency))
+            }
+            if let method = journey.attributionMethod {
+                LabeledContent("Attribution", value: cartRecoveryLabel(method))
+            }
+            if let strength = journey.attributionStrength {
+                LabeledContent("Confidence", value: strength.uppercased())
             }
         }
     }
@@ -831,6 +843,19 @@ private struct CartRecoveryTimelineRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.title).fontWeight(.semibold)
                 if let detail = event.detail { Text(detail).font(.subheadline).foregroundStyle(.secondary) }
+                if let method = event.attributionMethod, let strength = event.attributionStrength {
+                    Text("\(strength) · \(cartRecoveryLabel(method))")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(ViciTheme.success)
+                }
+                if let order = event.orderID { Text("Order #\(order)").font(.caption).foregroundStyle(.secondary) }
+                if let revenue = event.netRevenue {
+                    Text("Recovered revenue: \(cartRecoveryMoney(revenue, currency: event.currency ?? "USD"))")
+                        .font(.caption.weight(.semibold))
+                }
+                if let refund = event.refundAmount, refund.value > 0 {
+                    Text("Refunds deducted: \(cartRecoveryMoney(refund, currency: event.currency ?? "USD"))")
+                        .font(.caption).foregroundStyle(ViciTheme.destructive)
+                }
                 if let date = ServerDate.parse(event.createdAt) {
                     Text(date.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption).foregroundStyle(.tertiary)
@@ -889,13 +914,13 @@ struct CartRecoverySettingsView: View {
                     TextField("Push title", text: binding(\.pushTitle, fallback: ""))
                     TextField("Push body", text: binding(\.pushBody, fallback: ""), axis: .vertical)
                         .lineLimit(2...5)
-                    LabeledContent("Discount", value: "15% with Vici15")
+                    LabeledContent("Discount", value: "15% with VICI15")
                     LabeledContent("One product", value: "Exact product")
                     LabeledContent("Multiple products", value: "Shop")
                 } header: {
                     Text("App push")
                 } footer: {
-                    Text("A push is sent only when the customer has a valid app destination, Vici15 applies to the purchase, and every final eligibility check passes. Otherwise Growth shows it as blocked.")
+                    Text("A push is sent only when the customer has a valid app destination, VICI15 applies to the purchase, and every final eligibility check passes. Otherwise Growth shows it as blocked.")
                 }
 
                 Section {
@@ -905,6 +930,14 @@ struct CartRecoverySettingsView: View {
                             value: binding(\.lowStockThreshold, fallback: 5), in: 1...50)
                 } header: { Text("Stock") }
                 footer: { Text("Only current WooCommerce stock can trigger this wording. No fake scarcity.") }
+
+                Section {
+                    Stepper("Recovery window: \(binding(\.attributionWindowDays, fallback: 7).wrappedValue) days",
+                            value: binding(\.attributionWindowDays, fallback: 7), in: 1...30)
+                    Stepper("Shop push click window: \(binding(\.pushShopAttributionWindowHours, fallback: 24).wrappedValue) hours",
+                            value: binding(\.pushShopAttributionWindowHours, fallback: 24), in: 1...168)
+                } header: { Text("Revenue attribution") }
+                footer: { Text("Tracked SMS and product push clicks are DIRECT. VICI15 without a tracked click is STRONG only inside an eligible recovery episode.") }
 
                 Section {
                     Toggle("Classify customer replies",

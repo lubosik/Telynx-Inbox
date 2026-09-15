@@ -74,13 +74,13 @@ struct CartRecoveryModelsSmoke {
           "pushEnabled":false,
           "pushDelayHours":48,
           "discountPercent":15,
-          "discountCode":"Vici15",
+          "discountCode":"VICI15",
           "automaticAiSending":true
         }}
         """#.utf8)
         let settings = try JSONDecoder().decode(CartRecoverySettingsEnvelope.self,
                                                 from: settingsJSON).settings
-        require(settings.discountCode == "Vici15", "customer-facing coupon code should decode exactly")
+        require(settings.discountCode == "VICI15", "customer-facing coupon code should decode exactly")
         require(settings.automaticAiSending, "client should accurately show an unsafe server state")
         require(settings.requestBody["automaticAiSending"] as? Bool == false,
                 "client must never request automatic AI sending")

@@ -7,7 +7,7 @@ const test = require('node:test');
 const crypto = require('node:crypto');
 const { normalizeEvent, createCartRecoveryService } = require('../lib/cart-recovery/service');
 const { signBody, verifySignature, seal, unseal } = require('../lib/cart-recovery/security');
-const { attributionPayload } = require('../lib/cart-recovery/attribution');
+const { attributionDecision, attributionPayload, RECOVERY_COUPON } = require('../lib/cart-recovery/attribution');
 const { aggregateRevenue, aggregateRevenueDrivers } = require('../lib/analytics/aggregate');
 const { decodeVerifiedTelnyxEvent, claimTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 const { LOCKED_SMS_TEMPLATE, productSummary, renderLockedSMS } = require('../lib/cart-recovery/copy');
@@ -191,7 +191,7 @@ test('cart reply classification uses the required objections and escalates medic
   assert.equal(medical.medical, true);
 });
 
-test('Vici15 push is offered only when WooCommerce proves exact cart applicability', () => {
+test('VICI15 push is offered only when WooCommerce proves exact cart applicability', () => {
   const coupon = { status: 'publish', code: 'vici15', discount_type: 'percent', amount: '15.00',
     minimum_amount: '100', maximum_amount: '', usage_limit: null, usage_count: 0,
     product_ids: [], excluded_product_ids: [99], product_categories: [], excluded_product_categories: [], exclude_sale_items: false };
@@ -406,23 +406,102 @@ test('live delivery requires the provider gate and performs a second WordPress p
   assert.ok(rpcCalls.some(call => call.name === 'finish_luko_cart_recovery'));
 });
 
-test('attribution requires delivery, a bound click, payment, and the 24-hour window', () => {
-  const base = {
-    status: 'recovered', dry_run: false, attribution_valid: true, workspace_id: 'vici',
-    external_cart_id: 'cart-123456', wordpress_user_id: '42', contact_phone: '+15551234567',
-    telnyx_message_id: 'msg-1', order_id: '1001', order_status: 'processing', order_currency: 'USD', order_total: '120.00',
-    delivered_at: '2026-09-15T12:00:00Z', clicked_at: '2026-09-15T12:05:00Z', order_paid_at: '2026-09-15T12:20:00Z'
+function attributionFixture() {
+  const smsClick = '11111111-1111-4111-8111-111111111111';
+  const pushClick = '22222222-2222-4222-8222-222222222222';
+  return {
+    smsClick,
+    pushClick,
+    cart: {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', workspace_id: 'vici', external_cart_id: 'cart-123456',
+      wordpress_user_id: '42', customer_identity_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      contact_phone: '+15551234567', cart_total: '140.00', last_activity_at: '2026-09-15T10:00:00Z',
+      recovery_expires_at: '2026-09-22T10:00:00Z', dry_run: false, telnyx_message_id: 'sms-provider-1',
+      sent_at: '2026-09-15T10:45:00Z', delivered_at: '2026-09-15T10:46:00Z',
+      sms_recovery_click_id: smsClick, clicked_at: '2026-09-15T10:50:00Z',
+      push_due_at: '2026-09-17T10:00:00Z', push_provider_message_id: 'push-provider-1',
+      push_sent_at: '2026-09-17T10:00:00Z', push_recovery_click_id: pushClick,
+      push_clicked_at: '2026-09-17T10:05:00Z', push_destination_type: 'product', customer_push_permission: true
+    },
+    order: {
+      order_id: '1001', status: 'processing', paid_at: '2026-09-15T11:00:00Z', currency: 'USD',
+      total: '119.00', discount_total: '21.00', refunded_amount: '0.00', attribution_valid: true,
+      recovery_channel: 'sms', recovery_click_id: smsClick, recovery_clicked_at: '2026-09-15T10:50:00Z',
+      coupon_code: 'VICI15', coupon_verified: true
+    }
   };
-  assert.equal(attributionPayload(base).confidence_level, 'direct');
-  assert.equal(attributionPayload({ ...base, dry_run: true }), null);
-  assert.equal(attributionPayload({ ...base, order_paid_at: '2026-09-17T12:20:00Z' }), null);
-  const push = attributionPayload({
-    ...base, dry_run: true, telnyx_message_id: null, delivered_at: null, clicked_at: null,
-    push_provider_message_id: 'push-1', push_sent_at: '2026-09-15T12:00:00Z',
-    push_clicked_at: '2026-09-15T12:05:00Z'
+}
+
+test('DIRECT trace: SMS recovery click uses actual paid order revenue and keeps coupon secondary', () => {
+  const { cart, order } = attributionFixture();
+  const decision = attributionDecision(cart, order);
+  assert.equal(decision.attribution_method, 'sms_recovery_link');
+  assert.equal(decision.attribution_strength, 'direct');
+  assert.equal(decision.gross_recovered_revenue, 119);
+  assert.equal(decision.original_cart_value, 140);
+  assert.equal(decision.secondary_signals.coupon_used, 'VICI15');
+  const payload = attributionPayload(decision);
+  assert.equal(payload.confidence_level, 'direct');
+  assert.equal(payload.originating_action_type, 'sms_recovery_link');
+  assert.equal(payload.gross_amount, 119);
+});
+
+test('tracked push click is DIRECT and wins over coupon fallback without double counting', () => {
+  const { cart, order, pushClick } = attributionFixture();
+  const decision = attributionDecision(cart, {
+    ...order, paid_at: '2026-09-17T10:20:00Z', recovery_channel: 'push',
+    recovery_click_id: pushClick, recovery_clicked_at: '2026-09-17T10:05:00Z'
   });
-  assert.equal(push.originating_action_type, 'push');
-  assert.equal(push.originating_action_id, 'push-1');
+  assert.equal(decision.attribution_method, 'push');
+  assert.equal(decision.attribution_strength, 'direct');
+  assert.equal(decision.secondary_signals.coupon_used, 'VICI15');
+  assert.equal(decision.secondary_signals.push_clicked, true);
+});
+
+test('STRONG trace: verified VICI15 plus eligible active episode attributes coupon fallback', () => {
+  const { cart, order } = attributionFixture();
+  const decision = attributionDecision({ ...cart, sms_recovery_click_id: null, clicked_at: null,
+    push_recovery_click_id: null, push_clicked_at: null }, {
+    ...order, paid_at: '2026-09-17T12:00:00Z', recovery_channel: null,
+    recovery_click_id: null, recovery_clicked_at: null
+  });
+  assert.equal(RECOVERY_COUPON, 'VICI15');
+  assert.equal(decision.attribution_method, 'recovery_coupon');
+  assert.equal(decision.attribution_strength, 'strong');
+  assert.equal(attributionPayload(decision).confidence_level, 'strong');
+});
+
+test('coupon without an active eligible episode, outside the window, or unverified never attributes', () => {
+  const { cart, order } = attributionFixture();
+  const candidate = { ...order, paid_at: '2026-09-17T12:00:00Z', recovery_channel: null,
+    recovery_click_id: null, recovery_clicked_at: null };
+  const noClicks = { ...cart, sms_recovery_click_id: null, clicked_at: null,
+    push_recovery_click_id: null, push_clicked_at: null };
+  assert.equal(attributionDecision({ ...noClicks, push_due_at: null }, candidate), null);
+  assert.equal(attributionDecision(noClicks, { ...candidate, coupon_verified: false }), null);
+  assert.equal(attributionDecision(noClicks, { ...candidate, coupon_code: 'VG15' }), null);
+  assert.equal(attributionDecision(noClicks, { ...candidate, paid_at: '2026-09-24T12:00:00Z' }), null);
+  assert.equal(attributionDecision({ ...noClicks, push_sent_at: null, customer_push_permission: false }, candidate), null);
+});
+
+test('failed, cancelled, and unpaid orders do not count but paid processing/completed orders do', () => {
+  const { cart, order } = attributionFixture();
+  assert.equal(attributionDecision(cart, { ...order, status: 'failed' }), null);
+  assert.equal(attributionDecision(cart, { ...order, status: 'cancelled' }), null);
+  assert.equal(attributionDecision(cart, { ...order, paid_at: null }), null);
+  assert.ok(attributionDecision(cart, order));
+  assert.ok(attributionDecision(cart, { ...order, status: 'completed' }));
+});
+
+test('attribution financials retain currency and subtract partial or full refunds', () => {
+  const { cart, order } = attributionFixture();
+  const partial = attributionDecision(cart, { ...order, refunded_amount: '19.00' });
+  assert.equal(partial.order_currency, 'USD');
+  assert.equal(partial.gross_recovered_revenue, 119);
+  assert.equal(partial.refund_amount, 19);
+  assert.equal(partial.net_recovered_revenue, 100);
+  const full = attributionDecision(cart, { ...order, refunded_amount: '119.00' });
+  assert.equal(full.net_recovered_revenue, 0);
 });
 
 test('recovered cart revenue appears in LUKO as its own revenue driver', () => {
@@ -438,11 +517,12 @@ test('recovered cart revenue appears in LUKO as its own revenue driver', () => {
 
 test('cart migrations are pasteable, fail closed, service-role only, and reload PostgREST', () => {
   const root = path.join(__dirname, '..');
-  for (const name of ['cart-recovery-migration.sql', 'telnyx-webhook-security-migration.sql']) {
+  for (const name of ['cart-recovery-migration.sql', 'telnyx-webhook-security-migration.sql',
+    'cart-recovery-attribution-migration.sql']) {
     const sql = fs.readFileSync(path.join(root, 'scripts', name), 'utf8');
     assert.match(sql, /^BEGIN;$/m);
     assert.match(sql, /^COMMIT;$/m);
-    assert.match(sql, /NOTIFY pgrst, 'reload schema'/);
+    assert.match(sql, /NOTIFY pgrst,\s*'reload schema'/);
     assert.match(sql, /FROM public,anon,authenticated/);
     assert.match(sql, /TO service_role/);
   }
@@ -461,6 +541,17 @@ test('cart migrations are pasteable, fail closed, service-role only, and reload 
   assert.match(growth, /phone_available|contact_phone/);
   assert.match(growth, /interval '45 minutes'|make_interval\(mins=>v_sms_delay\)/);
   assert.match(growth, /automatic_ai_sending boolean NOT NULL DEFAULT false/);
+  const attribution = fs.readFileSync(path.join(root, 'scripts/cart-recovery-attribution-migration.sql'), 'utf8');
+  assert.match(attribution, /CREATE TABLE IF NOT EXISTS public\.luko_cart_recovered_orders/);
+  assert.match(attribution, /UNIQUE\(workspace_id,order_id\)/);
+  assert.match(attribution, /UNIQUE\(workspace_id,recovery_id\)/);
+  assert.match(attribution, /persist_luko_cart_recovered_order/);
+  assert.match(attribution, /reconcile_luko_cart_recovered_order_financials/);
+  assert.match(attribution, /luko_cart_recovery_analytics/);
+  assert.match(attribution, /upper\(coalesce\(p_decision->>'coupon_code',''\)\)<>'VICI15'/);
+  assert.match(attribution, /pg_advisory_xact_lock/);
+  assert.match(attribution, /p_status NOT IN \('processing','completed','refunded','cancelled','failed'\)/);
+  assert.match(attribution, /net_recovered_revenue=p_gross-p_refunded/);
 });
 
 test('Telnyx events must pass Ed25519 verification before a durable claim is requested', async () => {
@@ -482,7 +573,7 @@ test('Telnyx events must pass Ed25519 verification before a durable claim is req
   assert.match(route, /await failTelnyxEvent/);
 });
 
-test('WordPress connector preserves OTP flow and removes the unsafe v0.2 token and cookie design', () => {
+test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order attribution', () => {
   const plugin = fs.readFileSync(path.join(__dirname, '../wordpress/luko-vici-connector/luko-vici-connector.php'), 'utf8');
   assert.match(plugin, /eael\/login-register\/new-user-data/);
   assert.match(plugin, /_eael_otp_pending/);
@@ -499,6 +590,22 @@ test('WordPress connector preserves OTP flow and removes the unsafe v0.2 token a
   assert.match(plugin, /\^luko-go\//);
   assert.match(plugin, /'click_channel' => 'push'/);
   assert.match(plugin, /'applied_coupons' => array_values/);
+  assert.match(plugin, /Version: 0\.3\.4/);
+  assert.match(plugin, /FeaturesUtil::declare_compatibility\( 'custom_order_tables'/);
+  assert.match(plugin, /woocommerce_checkout_create_order/);
+  assert.match(plugin, /woocommerce_store_api_checkout_update_order_meta/);
+  assert.match(plugin, /woocommerce_order_refunded/);
+  assert.match(plugin, /_luko_attributed/);
+  assert.match(plugin, /_luko_abandonment_episode_id/);
+  assert.match(plugin, /_luko_attribution_strength/);
+  assert.match(plugin, /_luko_attribution_method/);
+  assert.match(plugin, /_luko_click_id/);
+  assert.match(plugin, /_luko_attribution_model_version/);
+  assert.match(plugin, /RECOVERY_COUPON = 'VICI15'/);
+  assert.match(plugin, /get_items\( 'coupon' \)/);
+  assert.match(plugin, /get_total_refunded\(\)/);
+  assert.doesNotMatch(plugin, /update_post_meta\s*\(/);
+  assert.doesNotMatch(plugin, /luko_recovery_token/);
   assert.doesNotMatch(plugin, /if \( ! self::has_consent\( \$user_id \) \) return;/);
   assert.doesNotMatch(plugin, /luko_raw_token_/);
   assert.doesNotMatch(plugin, /\$_COOKIE\['luko_recovery_cart'\]/);

@@ -514,6 +514,11 @@ struct CartRecoveryJourney: Decodable, Hashable, Identifiable {
     let purchaseStatus: String?
     let orderID: String?
     let recoveredRevenue: FlexibleDecimal?
+    let grossRecoveredRevenue: FlexibleDecimal?
+    let refundAmount: FlexibleDecimal?
+    let attributionMethod: String?
+    let attributionStrength: String?
+    let orderPaidAt: String?
     let createdAt: String?
 
     init(from decoder: Decoder) throws {
@@ -551,6 +556,11 @@ struct CartRecoveryJourney: Decodable, Hashable, Identifiable {
         orderID = values.first(String.self, "orderId", "orderID", "order_id")
             ?? values.first(Int.self, "orderId", "orderID", "order_id").map(String.init)
         recoveredRevenue = values.first(FlexibleDecimal.self, "recoveredRevenue", "recovered_revenue")
+        grossRecoveredRevenue = values.first(FlexibleDecimal.self, "grossRecoveredRevenue", "gross_recovered_revenue")
+        refundAmount = values.first(FlexibleDecimal.self, "refundAmount", "refund_amount")
+        attributionMethod = values.first(String.self, "attributionMethod", "attribution_method")
+        attributionStrength = values.first(String.self, "attributionStrength", "attribution_strength")
+        orderPaidAt = values.first(String.self, "orderPaidAt", "order_paid_at")
         createdAt = values.first(String.self, "createdAt", "created_at")
     }
 
@@ -569,6 +579,12 @@ struct CartRecoveryTimelineEvent: Decodable, Hashable, Identifiable {
     let type: String
     let title: String
     let detail: String?
+    let orderID: String?
+    let attributionMethod: String?
+    let attributionStrength: String?
+    let netRevenue: FlexibleDecimal?
+    let refundAmount: FlexibleDecimal?
+    let currency: String?
     let createdAt: String?
 
     init(from decoder: Decoder) throws {
@@ -578,6 +594,13 @@ struct CartRecoveryTimelineEvent: Decodable, Hashable, Identifiable {
         title = values.first(String.self, "title", "label")
             ?? type.replacingOccurrences(of: "_", with: " ").capitalized
         detail = values.first(String.self, "detail", "description", "message")
+        orderID = values.first(String.self, "orderId", "orderID", "order_id")
+            ?? values.first(Int.self, "orderId", "orderID", "order_id").map(String.init)
+        attributionMethod = values.first(String.self, "attributionMethod", "attribution_method")
+        attributionStrength = values.first(String.self, "attributionStrength", "attribution_strength")
+        netRevenue = values.first(FlexibleDecimal.self, "netRevenue", "net_revenue")
+        refundAmount = values.first(FlexibleDecimal.self, "refundAmount", "refund_amount")
+        currency = values.first(String.self, "currency")
         createdAt = values.first(String.self, "createdAt", "created_at", "occurredAt", "occurred_at")
     }
 }
@@ -651,6 +674,8 @@ struct CartRecoverySettings: Decodable, Hashable {
     var multiProductDestination: String
     var lowStockMessagingEnabled: Bool
     var lowStockThreshold: Int
+    var attributionWindowDays: Int
+    var pushShopAttributionWindowHours: Int
     var aiClassificationEnabled: Bool
     var aiDraftRepliesEnabled: Bool
     let automaticAiSending: Bool
@@ -663,13 +688,15 @@ struct CartRecoverySettings: Decodable, Hashable {
         pushEnabled = values.first(Bool.self, "pushEnabled", "push_enabled") ?? false
         pushDelayHours = values.first(Int.self, "pushDelayHours", "push_delay_hours") ?? 48
         pushTitle = values.first(String.self, "pushTitle", "push_title") ?? "Still thinking it over?"
-        pushBody = values.first(String.self, "pushBody", "push_body") ?? "Use Vici15 for 15% off."
+        pushBody = values.first(String.self, "pushBody", "push_body") ?? "Use VICI15 for 15% off."
         discountPercent = values.first(Int.self, "discountPercent", "discount_percent") ?? 15
-        discountCode = values.first(String.self, "discountCode", "discount_code") ?? "Vici15"
+        discountCode = values.first(String.self, "discountCode", "discount_code") ?? "VICI15"
         singleProductDestination = values.first(String.self, "singleProductDestination", "single_product_destination") ?? "product"
         multiProductDestination = values.first(String.self, "multiProductDestination", "multi_product_destination") ?? "shop"
         lowStockMessagingEnabled = values.first(Bool.self, "lowStockMessagingEnabled", "low_stock_messaging_enabled") ?? false
         lowStockThreshold = values.first(Int.self, "lowStockThreshold", "low_stock_threshold") ?? 5
+        attributionWindowDays = values.first(Int.self, "attributionWindowDays", "attribution_window_days") ?? 7
+        pushShopAttributionWindowHours = values.first(Int.self, "pushShopAttributionWindowHours", "push_shop_attribution_window_hours") ?? 24
         aiClassificationEnabled = values.first(Bool.self, "aiClassificationEnabled", "ai_classification_enabled") ?? true
         aiDraftRepliesEnabled = values.first(Bool.self, "aiDraftRepliesEnabled", "ai_draft_replies_enabled") ?? true
         automaticAiSending = values.first(Bool.self, "automaticAiSending", "automatic_ai_sending") ?? false
@@ -690,6 +717,8 @@ struct CartRecoverySettings: Decodable, Hashable {
             "multiProductDestination": multiProductDestination,
             "lowStockMessagingEnabled": lowStockMessagingEnabled,
             "lowStockThreshold": lowStockThreshold,
+            "attributionWindowDays": attributionWindowDays,
+            "pushShopAttributionWindowHours": pushShopAttributionWindowHours,
             "aiClassificationEnabled": aiClassificationEnabled,
             "aiDraftRepliesEnabled": aiDraftRepliesEnabled,
             // Included explicitly so a future backend cannot mistake omission

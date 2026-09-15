@@ -1260,6 +1260,15 @@ actor APIClient {
         try await decodedGET("/api/analytics/overview", queryItems: query.queryItems)
     }
 
+    func fetchAbandonedCartAnalytics(query: AnalyticsQuery,
+                                     page: Int = 1,
+                                     pageSize: Int = 25) async throws -> AbandonedCartAnalyticsOverview {
+        var items = query.queryItems
+        items.append(URLQueryItem(name: "page", value: String(max(1, page))))
+        items.append(URLQueryItem(name: "pageSize", value: String(min(100, max(1, pageSize)))))
+        return try await decodedGET("/api/analytics/cart-recovery", queryItems: items)
+    }
+
     func fetchAttributions(query: AnalyticsQuery,
                            page: Int = 1,
                            pageSize: Int = 25,

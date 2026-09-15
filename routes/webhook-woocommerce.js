@@ -6,6 +6,7 @@ const { searchContactByEmail } = require('../ghl');
 const { verifyWooSignature, wooDeliveryID } = require('../lib/woocommerce-webhook');
 const { recordTrustedProductEvent } = require('../lib/campaigns/product-webhooks');
 const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
+const { reconcileWooOrder: reconcileCartRecoveryOrder } = require('../lib/cart-recovery/runtime');
 
 // SMS flows
 const { handleOrderFailed, handleOrderRecovered } = require('../flows/failed');
@@ -233,6 +234,12 @@ module.exports = (broadcastSSE) => {
       // picks the contact up tonight, because a failed build stores no
       // fingerprint.
       if (phone) void refreshProfileQuietly({ client: supabase, phone });
+
+      // The connector outbox is authoritative for initial attribution. A
+      // separately signed Woo order webhook provides an idempotent financial
+      // reconciliation path for later status and refund changes.
+      if (signatureValid) void reconcileCartRecoveryOrder(order)
+        .catch(error => console.error('[CART RECOVERY] Woo reconciliation deferred:', error.code || 'write_error'));
 
       // Analytics runs only after every existing operational workflow has
       // completed. It is deliberately not awaited: a slow/missing analytics

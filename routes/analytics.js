@@ -5,8 +5,9 @@ const {
   AnalyticsNotReadyError,
   createAnalyticsService
 } = require('../lib/analytics/aggregate');
+const { CartRecoveryAnalyticsNotReadyError, createCartRecoveryAnalyticsService } = require('../lib/cart-recovery/analytics');
 
-const ALLOWED_PERIODS = new Set(['today', 'week', 'month', 'year', 'all', 'custom']);
+const ALLOWED_PERIODS = new Set(['today', 'week', 'month', 'quarter', 'year', 'all', 'custom']);
 const ALLOWED_CONFIDENCE = new Set(['direct', 'strong', 'influenced', 'unattributed']);
 const ALLOWED_SCOPES = new Set(['attributed', 'influenced', 'unattributed', 'all']);
 const SAFE_CATEGORY = /^[a-z][a-z0-9_]{0,63}$/;
@@ -62,6 +63,12 @@ function sendError(res, error) {
       code: 'ANALYTICS_NOT_READY'
     });
   }
+  if (error instanceof CartRecoveryAnalyticsNotReadyError || error?.code === 'CART_RECOVERY_ANALYTICS_NOT_READY') {
+    return res.status(503).json({
+      error: 'Abandoned-cart Analytics is not available until its additive database migration is applied.',
+      code: 'CART_RECOVERY_ANALYTICS_NOT_READY'
+    });
+  }
   if (error?.code === 'CAMPAIGNS_NOT_READY') {
     return res.status(503).json({
       error: 'Campaign analytics is not available until its additive database migration is applied.',
@@ -75,8 +82,17 @@ function sendError(res, error) {
   return res.status(500).json({ error: 'Analytics could not be loaded.', code: 'ANALYTICS_LOAD_FAILED' });
 }
 
-function createAnalyticsRouter({ service } = {}) {
+function createAnalyticsRouter({ service, cartRecoveryService } = {}) {
   const analyticsService = service || createAnalyticsService({ client: require('../db').supabase });
+  let cartAnalytics = cartRecoveryService;
+  const cartAnalyticsService = () => {
+    if (!cartAnalytics) cartAnalytics = createCartRecoveryAnalyticsService({
+      client: require('../db').supabase,
+      workspace: process.env.LUKO_WP_STORE_ID || 'vici',
+      reliableFrom: process.env.ANALYTICS_RELIABLE_FROM || '2026-01-16'
+    });
+    return cartAnalytics;
+  };
   const router = express.Router();
 
   router.get('/overview', async (req, res) => {
@@ -92,6 +108,16 @@ function createAnalyticsRouter({ service } = {}) {
   router.get('/attributions', async (req, res) => {
     try {
       const result = await analyticsService.attributions(requestParams(req.query));
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(result);
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  router.get('/cart-recovery', async (req, res) => {
+    try {
+      const result = await cartAnalyticsService().overview(requestParams(req.query));
       res.set('Cache-Control', 'no-store, private');
       return res.json(result);
     } catch (error) {

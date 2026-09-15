@@ -4,6 +4,7 @@ enum AnalyticsPeriod: String, CaseIterable, Identifiable, Codable {
     case today
     case week
     case month
+    case quarter
     case year
     case all
     case custom
@@ -13,13 +14,96 @@ enum AnalyticsPeriod: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .today: return "Today"
-        case .week: return "Week"
-        case .month: return "Month"
-        case .year: return "Year"
+        case .week: return "This Week"
+        case .month: return "This Month"
+        case .quarter: return "This Quarter"
+        case .year: return "This Year"
         case .all: return "All Time"
         case .custom: return "Custom"
         }
     }
+}
+
+struct AbandonedCartAnalyticsMetrics: Codable, Hashable {
+    let recoveredRevenue: FlexibleDecimal?
+    let recoveredOrders: Int
+    let abandonedCarts: Int
+    let recoveryRate: Double
+    let recoveryRateNumerator: Int
+    let recoveryRateDenominator: Int
+    let smsSent: Int
+    let smsDelivered: Int
+    let recoveryLinkClicks: Int
+    let pushSent: Int
+    let pushClicks: Int
+    let discountRecoveries: Int
+    let averageRecoveredOrderValue: FlexibleDecimal?
+    let currency: String
+    let mixedCurrencies: Bool
+}
+
+struct AbandonedCartFunnelStep: Codable, Hashable, Identifiable {
+    let key: String
+    let label: String
+    let count: Int
+    var id: String { key }
+}
+
+struct AbandonedCartRevenueMethod: Codable, Hashable, Identifiable {
+    let method: String
+    let revenue: FlexibleDecimal
+    let orders: Int
+    let currency: String
+    var id: String { method }
+}
+
+struct AbandonedCartSecondarySignals: Codable, Hashable {
+    let couponUsed: String?
+    let conversationOccurred: Bool
+    let pushClicked: Bool
+    let smsRecoveryLinkClicked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case couponUsed = "coupon_used"
+        case conversationOccurred = "conversation_occurred"
+        case pushClicked = "push_clicked"
+        case smsRecoveryLinkClicked = "sms_recovery_link_clicked"
+    }
+}
+
+struct AbandonedCartRecoveredOrder: Codable, Hashable, Identifiable {
+    let id: String
+    let abandonmentEpisodeId: String
+    let externalCartId: String
+    let customerName: String
+    let products: [String]
+    let abandonedCartValue: FlexibleDecimal
+    let recoveryMethod: String
+    let channel: String
+    let messageId: String?
+    let pushId: String?
+    let coupon: String?
+    let orderId: String
+    let grossRecoveredRevenue: FlexibleDecimal
+    let discountAmount: FlexibleDecimal
+    let refundAmount: FlexibleDecimal
+    let netRecoveredRevenue: FlexibleDecimal
+    let currency: String
+    let paidAt: String
+    let attributionStrength: String
+    let conversationOccurred: Bool
+    let secondarySignals: AbandonedCartSecondarySignals
+}
+
+struct AbandonedCartAnalyticsOverview: Codable, Hashable {
+    let generatedAt: String
+    let range: AnalyticsDateRange
+    let metrics: AbandonedCartAnalyticsMetrics
+    let funnel: [AbandonedCartFunnelStep]
+    let revenueByMethod: [AbandonedCartRevenueMethod]
+    let orders: [AbandonedCartRecoveredOrder]
+    let pagination: AnalyticsPagination
+    let warnings: [AnalyticsWarning]
 }
 
 struct AnalyticsDateRange: Codable, Hashable {

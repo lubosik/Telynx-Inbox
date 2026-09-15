@@ -435,6 +435,7 @@ enum AssistantGroundedRenderer {
         case .today: return "today"
         case .week: return "this week"
         case .month: return "this month"
+        case .quarter: return "this quarter"
         case .year: return "this year"
         case .all: return "all time"
         case .custom: return "the selected period"

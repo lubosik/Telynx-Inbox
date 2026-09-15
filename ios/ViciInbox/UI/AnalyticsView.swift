@@ -127,6 +127,27 @@ struct AnalyticsView: View {
             }
         }
 
+        NavigationLink {
+            AbandonedCartAnalyticsView(initialQuery: model.query)
+        } label: {
+            AnalyticsCard {
+                HStack(spacing: 12) {
+                    Image(systemName: "cart.badge.clock")
+                        .font(.title2)
+                        .foregroundStyle(ViciTheme.tint)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Abandoned Cart Recovery").font(.headline)
+                        Text("Recovered revenue, funnel, attribution methods and auditable orders")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+
         if overview.availability.paymentRecovery {
             NavigationLink(value: AnalyticsRouteValues.route(
                 query: model.query,
@@ -169,6 +190,223 @@ struct AnalyticsView: View {
                            detail: "Activity will appear here once verified data is available for this period.")
                     .frame(maxWidth: .infinity)
             }
+        }
+    }
+}
+
+private struct AbandonedCartAnalyticsView: View {
+    @StateObject private var model = AbandonedCartAnalyticsViewModel()
+    @State private var period: AnalyticsPeriod
+    @State private var customStart: Date
+    @State private var customEnd: Date
+    @State private var showingCustomRange = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private let periods: [AnalyticsPeriod] = [.today, .week, .month, .quarter, .year, .custom]
+
+    init(initialQuery: AnalyticsQuery) {
+        _period = State(initialValue: initialQuery.period == .all ? .month : initialQuery.period)
+        _customStart = State(initialValue: initialQuery.start ?? Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date())
+        _customEnd = State(initialValue: initialQuery.end ?? Date())
+    }
+
+    private var query: AnalyticsQuery {
+        AnalyticsQuery(period: period,
+                       start: period == .custom ? customStart : nil,
+                       end: period == .custom ? customEnd : nil)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                AnalyticsPeriodPicker(selected: period, options: periods) { selected in
+                    if selected == .custom {
+                        showingCustomRange = true
+                    } else {
+                        period = selected
+                        Task { await model.load(query: query, force: true) }
+                    }
+                }
+
+                if model.isLoading && model.report == nil {
+                    ProgressView("Loading verified recovery revenue…")
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                } else if let report = model.report {
+                    content(report)
+                } else {
+                    AnalyticsUnavailableView(message: model.errorMessage) {
+                        Task { await model.load(query: query, force: true) }
+                    }
+                    .frame(minHeight: 280)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 28)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Cart Recovery")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await model.load(query: query, force: true) }
+        .task { await model.load(query: query) }
+        .sheet(isPresented: $showingCustomRange) {
+            AnalyticsDateRangeSheet(start: customStart, end: customEnd) { start, end in
+                customStart = Calendar.current.startOfDay(for: min(start, end))
+                customEnd = Calendar.current.startOfDay(for: max(start, end))
+                period = .custom
+                Task { await model.load(query: query, force: true) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ report: AbandonedCartAnalyticsOverview) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "clock.arrow.circlepath")
+            Text("Updated \(ServerDate.parse(report.generatedAt) ?? Date(), style: .relative)")
+            Spacer()
+            Text(period.title)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+        ForEach(report.warnings) { warning in
+            Label(warning.message, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(ViciTheme.warning.opacity(0.13), in: RoundedRectangle(cornerRadius: 14))
+        }
+
+        AnalyticsCard(emphasized: true) {
+            AnalyticsSectionHeader(title: "Recovered Impact", symbol: "dollarsign.arrow.circlepath")
+            LazyVGrid(columns: AnalyticsLayout.columns(for: dynamicTypeSize), spacing: 16) {
+                AnalyticsPrimaryMetric(
+                    value: report.metrics.recoveredRevenue.map { AnalyticsFormatting.money($0, currency: report.metrics.currency) } ?? "Not available",
+                    label: "Net recovered revenue"
+                )
+                AnalyticsPrimaryMetric(value: report.metrics.recoveredOrders.formatted(), label: "Recovered orders")
+                AnalyticsPrimaryMetric(value: report.metrics.abandonedCarts.formatted(), label: "Abandoned carts")
+                AnalyticsPrimaryMetric(value: AnalyticsFormatting.percent(report.metrics.recoveryRate), label: "Cohort recovery rate")
+            }
+            Text("Recovery rate: \(report.metrics.recoveryRateNumerator) recovered episode\(report.metrics.recoveryRateNumerator == 1 ? "" : "s") out of \(report.metrics.recoveryRateDenominator) carts abandoned in this date range.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Recovery Signals", symbol: "point.3.filled.connected.trianglepath.dotted")
+            LazyVGrid(columns: AnalyticsLayout.columns(for: dynamicTypeSize), spacing: 14) {
+                AnalyticsMetric(value: report.metrics.smsSent.formatted(), label: "SMS sent")
+                AnalyticsMetric(value: report.metrics.smsDelivered.formatted(), label: "SMS delivered")
+                AnalyticsMetric(value: report.metrics.recoveryLinkClicks.formatted(), label: "Recovery link clicks")
+                AnalyticsMetric(value: report.metrics.pushSent.formatted(), label: "Push sent")
+                AnalyticsMetric(value: report.metrics.pushClicks.formatted(), label: "Push clicks")
+                AnalyticsMetric(value: report.metrics.discountRecoveries.formatted(), label: "VICI15 recoveries")
+                AnalyticsMetric(
+                    value: report.metrics.averageRecoveredOrderValue.map { AnalyticsFormatting.money($0, currency: report.metrics.currency) } ?? "Not available",
+                    label: "Average recovered order"
+                )
+            }
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Recovery Funnel", symbol: "chart.bar.fill")
+            ForEach(Array(report.funnel.enumerated()), id: \.element.id) { index, step in
+                if index > 0 { Divider() }
+                HStack {
+                    Text(step.label).font(.subheadline)
+                    Spacer()
+                    Text(step.count.formatted()).font(.headline.monospacedDigit())
+                }
+            }
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Revenue by Primary Method", symbol: "square.grid.2x2.fill")
+            if report.revenueByMethod.isEmpty {
+                Text("No attributed recovered orders in this period.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(report.revenueByMethod.enumerated()), id: \.element.id) { index, method in
+                    if index > 0 { Divider() }
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(methodLabel(method.method)).font(.subheadline.weight(.semibold))
+                            Text("\(method.orders) order\(method.orders == 1 ? "" : "s")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(AnalyticsFormatting.money(method.revenue, currency: method.currency))
+                            .font(.headline.monospacedDigit())
+                    }
+                }
+            }
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Recovered Orders", symbol: "list.bullet.rectangle.portrait")
+            if model.orders.isEmpty {
+                Text("No recovered orders in this period.").font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(model.orders.enumerated()), id: \.element.id) { index, order in
+                    if index > 0 { Divider() }
+                    NavigationLink {
+                        CartRecoveryJourneyDetailView(journeyID: order.abandonmentEpisodeId)
+                    } label: {
+                        recoveredOrderRow(order)
+                    }
+                    .buttonStyle(.plain)
+                    .onAppear { Task { await model.loadMoreIfNeeded(current: order) } }
+                }
+                if model.isLoadingMore { ProgressView().frame(maxWidth: .infinity) }
+            }
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Attribution Confidence", symbol: "checkmark.shield.fill")
+            Text("DIRECT means a tracked SMS or push click is deterministically linked to the paid order. STRONG means an active recovery episode and verified evidence such as VICI15 link the purchase without a final tracked click.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func recoveredOrderRow(_ order: AbandonedCartRecoveredOrder) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(order.customerName).font(.subheadline.weight(.semibold))
+                    Text(order.products.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                Text(AnalyticsFormatting.money(order.netRecoveredRevenue, currency: order.currency))
+                    .font(.headline.monospacedDigit())
+            }
+            HStack(spacing: 8) {
+                Text(order.attributionStrength.uppercased())
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(ViciTheme.tint.opacity(0.14), in: Capsule())
+                Text(methodLabel(order.recoveryMethod)).font(.caption)
+                if let coupon = order.coupon { Text(coupon).font(.caption.monospaced()) }
+                Spacer()
+                Text("#\(order.orderId)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            if order.refundAmount.value > 0 {
+                Text("Refunds deducted: \(AnalyticsFormatting.money(order.refundAmount, currency: order.currency))")
+                    .font(.caption2).foregroundStyle(ViciTheme.destructive)
+            }
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func methodLabel(_ method: String) -> String {
+        switch method {
+        case "sms_recovery_link": return "SMS Recovery Link"
+        case "push": return "Push Recovery"
+        case "conversation_assisted": return "Conversation-Assisted Recovery"
+        case "recovery_coupon": return "Recovery Coupon Fallback"
+        default: return AnalyticsFormatting.humanized(method)
         }
     }
 }
@@ -244,12 +482,13 @@ private struct RevenueDriversCard: View {
 
 private struct AnalyticsPeriodPicker: View {
     let selected: AnalyticsPeriod
+    var options: [AnalyticsPeriod] = AnalyticsPeriod.allCases
     let select: (AnalyticsPeriod) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(AnalyticsPeriod.allCases) { period in
+                ForEach(options) { period in
                     Button(period.title) { select(period) }
                         .font(.subheadline.weight(selected == period ? .semibold : .regular))
                         .foregroundStyle(selected == period ? Color.white : Color.primary)

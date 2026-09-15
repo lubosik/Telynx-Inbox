@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LUKO Vici Connector
  * Description: WooCommerce abandoned-cart recovery, SMS consent bridge and LUKO event connector for Vici.
- * Version: 0.3.3
+ * Version: 0.3.4
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,9 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.3.3';
+    const VERSION = '0.3.4';
+    const ATTRIBUTION_MODEL_VERSION = 'vici-cart-recovery-v2';
+    const RECOVERY_COUPON = 'VICI15';
     private static $restoring = false;
     private static $cart_dirty = false;
 
@@ -41,9 +43,13 @@ final class LUKO_Vici_Connector {
 
         add_action( 'woocommerce_checkout_order_created', [ __CLASS__, 'order_created' ], 20 );
         add_action( 'woocommerce_store_api_checkout_order_processed', [ __CLASS__, 'order_created' ], 20 );
+        add_action( 'woocommerce_checkout_create_order', [ __CLASS__, 'stamp_checkout_context' ], 20, 2 );
+        add_action( 'woocommerce_store_api_checkout_update_order_meta', [ __CLASS__, 'stamp_checkout_context' ], 20, 1 );
         add_action( 'woocommerce_payment_complete', [ __CLASS__, 'order_paid' ], 20 );
         add_action( 'woocommerce_order_status_processing', [ __CLASS__, 'order_paid' ], 20 );
         add_action( 'woocommerce_order_status_completed', [ __CLASS__, 'order_paid' ], 20 );
+        add_action( 'woocommerce_order_refunded', [ __CLASS__, 'order_refunded' ], 20, 2 );
+        add_action( 'woocommerce_order_status_changed', [ __CLASS__, 'order_status_changed' ], 20, 4 );
 
         add_action( 'admin_menu', [ __CLASS__, 'admin_menu' ] );
         add_action( 'admin_init', [ __CLASS__, 'admin_settings' ] );
@@ -92,6 +98,23 @@ final class LUKO_Vici_Connector {
             UNIQUE KEY event_id (event_id),
             KEY due (available_at, locked_until)
         ) {$charset};" );
+        $clicks = self::click_table();
+        dbDelta( "CREATE TABLE {$clicks} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            recovery_click_id CHAR(36) NOT NULL,
+            external_cart_id CHAR(36) NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            channel VARCHAR(24) NOT NULL,
+            destination_type VARCHAR(24) NULL,
+            clicked_at DATETIME NOT NULL,
+            expires_at DATETIME NOT NULL,
+            consumed_order_id BIGINT UNSIGNED NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY recovery_click_id (recovery_click_id),
+            KEY cart_click (external_cart_id, clicked_at),
+            KEY consumed_order (consumed_order_id)
+        ) {$charset};" );
         update_option( 'luko_vici_schema_version', self::VERSION, false );
         self::rewrite();
         flush_rewrite_rules();
@@ -128,6 +151,17 @@ final class LUKO_Vici_Connector {
     private static function table() {
         global $wpdb;
         return $wpdb->prefix . 'luko_recovery_carts';
+    }
+
+    private static function click_table() {
+        global $wpdb;
+        return $wpdb->prefix . 'luko_recovery_clicks';
+    }
+
+    public static function declare_compatibility() {
+        if ( class_exists( '\\Automattic\\WooCommerce\\Utilities\\FeaturesUtil' ) ) {
+            \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
+        }
     }
 
     private static function disclosure_text() {
@@ -353,7 +387,7 @@ final class LUKO_Vici_Connector {
                 'payload' => wp_json_encode( [ 'items' => $items, 'applied_coupons' => array_values( WC()->cart->get_applied_coupons() ) ] ),
                 'currency' => $currency,
                 'total' => $total,
-                'status' => 'active',
+                'status' => 'clicked' === (string) $row->status ? 'clicked' : 'active',
                 'last_activity_at' => $now,
                 'expires_at' => $expires,
                 'updated_at' => $now,
@@ -416,6 +450,135 @@ final class LUKO_Vici_Connector {
     }
     public static function query_vars( $vars ) { $vars[] = 'luko_recover'; $vars[] = 'luko_push'; return $vars; }
 
+    private static function is_uuid( $value ) {
+        return 1 === preg_match( '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', (string) $value );
+    }
+
+    private static function record_recovery_click( $row, $channel, $destination_type = '' ) {
+        if ( ! $row || ! in_array( $channel, [ 'sms', 'push' ], true ) ) return [];
+        $click_id = wp_generate_uuid4();
+        $clicked_at = gmdate( 'c' );
+        $ttl = max( 1, (int) get_option( 'luko_vici_recovery_ttl_days', 7 ) );
+        $cart_expiry = strtotime( (string) $row->expires_at . ' UTC' );
+        $expires_ts = min( $cart_expiry ?: time() + DAY_IN_SECONDS * $ttl, time() + DAY_IN_SECONDS * $ttl );
+        global $wpdb;
+        $inserted = $wpdb->insert( self::click_table(), [
+            'recovery_click_id' => $click_id,
+            'external_cart_id' => (string) $row->external_cart_id,
+            'user_id' => (int) $row->user_id,
+            'channel' => $channel,
+            'destination_type' => $destination_type ?: null,
+            'clicked_at' => current_time( 'mysql', true ),
+            'expires_at' => gmdate( 'Y-m-d H:i:s', $expires_ts ),
+            'created_at' => current_time( 'mysql', true ),
+        ] );
+        if ( false === $inserted ) return [];
+        $context = [
+            'external_cart_id' => (string) $row->external_cart_id,
+            'recovery_click_id' => $click_id,
+            'channel' => $channel,
+            'destination_type' => $destination_type ?: null,
+            'cart_owner_id' => (int) $row->user_id,
+            'clicked_at' => $clicked_at,
+            'expires_at' => gmdate( 'c', $expires_ts ),
+        ];
+        if ( function_exists( 'WC' ) && WC()->session ) WC()->session->set( 'luko_recovery_context', $context );
+        return $context;
+    }
+
+    private static function verified_click( $click_id, $external, $order_user_id = 0, $consumed_order_id = 0 ) {
+        if ( ! self::is_uuid( $click_id ) || ! $external ) return null;
+        global $wpdb;
+        $click = $wpdb->get_row( $wpdb->prepare(
+            'SELECT * FROM ' . self::click_table() . ' WHERE recovery_click_id=%s AND external_cart_id=%s LIMIT 1',
+            $click_id, $external
+        ) );
+        if ( ! $click ) return null;
+        if ( strtotime( (string) $click->expires_at . ' UTC' ) < time()
+            && ( ! $consumed_order_id || (int) $click->consumed_order_id !== (int) $consumed_order_id ) ) return null;
+        if ( $order_user_id > 0 && (int) $click->user_id > 0 && $order_user_id !== (int) $click->user_id ) return null;
+        if ( is_user_logged_in() && (int) $click->user_id !== get_current_user_id() ) return null;
+        return $click;
+    }
+
+    private static function coupon_lines( $order ) {
+        $lines = [];
+        if ( ! $order instanceof WC_Order ) return $lines;
+        foreach ( $order->get_items( 'coupon' ) as $item ) {
+            $lines[] = [
+                'code' => sanitize_text_field( (string) $item->get_code() ),
+                'discount' => wc_format_decimal( $item->get_discount(), 2 ),
+                'discount_tax' => wc_format_decimal( $item->get_discount_tax(), 2 ),
+            ];
+        }
+        return $lines;
+    }
+
+    private static function verified_recovery_coupon( $order ) {
+        if ( ! $order instanceof WC_Order || (float) $order->get_discount_total() <= 0 ) return null;
+        $expected = function_exists( 'wc_format_coupon_code' ) ? wc_format_coupon_code( self::RECOVERY_COUPON ) : strtolower( self::RECOVERY_COUPON );
+        $present = false;
+        foreach ( self::coupon_lines( $order ) as $line ) {
+            $actual = function_exists( 'wc_format_coupon_code' ) ? wc_format_coupon_code( $line['code'] ) : strtolower( $line['code'] );
+            if ( $actual === $expected && (float) $line['discount'] > 0 ) { $present = true; break; }
+        }
+        if ( ! $present ) return null;
+        $coupon = new WC_Coupon( self::RECOVERY_COUPON );
+        if ( ! $coupon->get_id() || 'publish' !== $coupon->get_status()
+            || 'percent' !== $coupon->get_discount_type() || 15.0 !== (float) $coupon->get_amount() ) return null;
+        $expires = $coupon->get_date_expires();
+        if ( $expires && $expires->getTimestamp() <= time() ) return null;
+        return [ 'code' => self::RECOVERY_COUPON, 'percent' => 15, 'verified' => true ];
+    }
+
+    private static function order_items_payload( $order ) {
+        $items = [];
+        foreach ( $order->get_items() as $item ) {
+            $items[] = [
+                'product_id' => (int) $item->get_product_id(),
+                'variation_id' => (int) $item->get_variation_id(),
+                'quantity' => (int) $item->get_quantity(),
+                'name' => sanitize_text_field( (string) $item->get_name() ),
+                'total' => wc_format_decimal( $item->get_total(), 2 ),
+            ];
+        }
+        return $items;
+    }
+
+    private static function utc_order_date( $date ) {
+        if ( ! $date ) return null;
+        $copy = clone $date;
+        $copy->setTimezone( new DateTimeZone( 'UTC' ) );
+        return $copy->format( 'c' );
+    }
+
+    private static function order_event_payload( $order ) {
+        $coupon = self::verified_recovery_coupon( $order );
+        $gross = max( 0, (float) $order->get_total() );
+        $refunded = min( $gross, max( 0, (float) $order->get_total_refunded() ) );
+        return [
+            'order_id' => $order->get_id(),
+            'currency' => $order->get_currency(),
+            'total' => wc_format_decimal( $gross, 2 ),
+            'discount_total' => wc_format_decimal( $order->get_discount_total(), 2 ),
+            'refunded_amount' => wc_format_decimal( $refunded, 2 ),
+            'net_total' => wc_format_decimal( max( 0, $gross - $refunded ), 2 ),
+            'status' => $order->get_status(),
+            'created_at' => self::utc_order_date( $order->get_date_created() ),
+            'paid_at' => self::utc_order_date( $order->get_date_paid() ),
+            'recovery_clicked_at' => $order->get_meta( '_luko_recovery_clicked_at', true ) ?: null,
+            'recovery_click_id' => $order->get_meta( '_luko_click_id', true ) ?: null,
+            'recovery_channel' => $order->get_meta( '_luko_recovery_channel', true ) ?: null,
+            'attribution_method' => $order->get_meta( '_luko_attribution_method', true ) ?: null,
+            'attribution_strength' => $order->get_meta( '_luko_attribution_strength', true ) ?: null,
+            'attribution_valid' => 'yes' === $order->get_meta( '_luko_recovery_attribution_valid', true ),
+            'coupon_code' => $coupon ? self::RECOVERY_COUPON : null,
+            'coupon_verified' => (bool) $coupon,
+            'coupon_lines' => self::coupon_lines( $order ),
+            'items' => self::order_items_payload( $order ),
+        ];
+    }
+
     public static function handle_recovery() {
         $push_token = (string) get_query_var( 'luko_push' );
         $token = $push_token ?: (string) get_query_var( 'luko_recover' );
@@ -437,15 +600,14 @@ final class LUKO_Vici_Connector {
                 $target = function_exists( 'wc_get_page_permalink' ) ? wc_get_page_permalink( 'shop' ) : home_url( '/shop/' );
             }
             $version = (int) $row->version + 1;
-            $clicked = gmdate( 'c' );
             $wpdb->update( self::table(), [ 'status' => 'clicked', 'version' => $version, 'clicked_at' => current_time( 'mysql', true ), 'updated_at' => current_time( 'mysql', true ) ], [ 'id' => $row->id ] );
-            if ( WC()->session ) WC()->session->set( 'luko_recovery_context', [
-                'external_cart_id' => (string) $row->external_cart_id,
-                'clicked_at' => $clicked,
-                'expires_at' => gmdate( 'c', time() + DAY_IN_SECONDS ),
-            ] );
+            $destination_type = false !== strpos( wp_parse_url( $target, PHP_URL_PATH ) ?: '', '/product/' ) ? 'exact_product' : 'shop';
+            $context = self::record_recovery_click( $row, 'push', $destination_type );
+            if ( ! $context ) { status_header( 503 ); exit( esc_html__( 'Recovery tracking unavailable.', 'luko-vici-connector' ) ); }
             self::emit( 'cart.clicked', [ 'customer' => self::customer_payload( (int) $row->user_id ),
-                'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => $version, 'click_channel' => 'push' ] ] );
+                'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => $version, 'click_channel' => 'push',
+                    'recovery_click_id' => $context['recovery_click_id'], 'clicked_at' => $context['clicked_at'],
+                    'destination_type' => $destination_type ] ] );
             wp_safe_redirect( $target ); exit;
         }
         $payload = json_decode( $row->payload, true );
@@ -467,39 +629,63 @@ final class LUKO_Vici_Connector {
         if ( ! $restored ) { status_header( 410 ); exit( esc_html__( 'The items in this cart are no longer available.', 'luko-vici-connector' ) ); }
         WC()->cart->calculate_totals();
         $version = (int) $row->version + 1;
-        $clicked = gmdate( 'c' );
         $wpdb->update( self::table(), [ 'status' => 'clicked', 'version' => $version, 'clicked_at' => current_time( 'mysql', true ), 'updated_at' => current_time( 'mysql', true ) ], [ 'id' => $row->id ] );
-        if ( WC()->session ) WC()->session->set( 'luko_recovery_context', [
-            'external_cart_id' => (string) $row->external_cart_id,
-            'clicked_at' => $clicked,
-            'expires_at' => gmdate( 'c', time() + DAY_IN_SECONDS ),
-        ] );
-        self::emit( 'cart.clicked', [ 'customer' => self::customer_payload( (int) $row->user_id ), 'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => $version ] ] );
+        $context = self::record_recovery_click( $row, 'sms', 'checkout' );
+        if ( ! $context ) { status_header( 503 ); exit( esc_html__( 'Recovery tracking unavailable.', 'luko-vici-connector' ) ); }
+        self::emit( 'cart.clicked', [ 'customer' => self::customer_payload( (int) $row->user_id ),
+            'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => $version, 'click_channel' => 'sms',
+                'recovery_click_id' => $context['recovery_click_id'], 'clicked_at' => $context['clicked_at'],
+                'destination_type' => 'checkout' ] ] );
         wp_safe_redirect( wc_get_checkout_url() ); exit;
+    }
+
+    public static function stamp_checkout_context( $order, $data = [] ) {
+        if ( ! $order instanceof WC_Order || ! function_exists( 'WC' ) || ! WC()->session ) return;
+        $context = WC()->session->get( 'luko_recovery_context' );
+        if ( ! is_array( $context ) || strtotime( (string) ( $context['expires_at'] ?? '' ) ) < time() ) return;
+        $external = sanitize_text_field( (string) ( $context['external_cart_id'] ?? '' ) );
+        $click_id = sanitize_text_field( (string) ( $context['recovery_click_id'] ?? '' ) );
+        $click = self::verified_click( $click_id, $external, (int) $order->get_user_id() );
+        if ( ! $click ) return;
+        $method = 'push' === $click->channel ? 'push' : 'sms_recovery_link';
+        $order->update_meta_data( '_luko_attributed', 'pending' );
+        $order->update_meta_data( '_luko_external_cart_id', $external );
+        $order->update_meta_data( '_luko_recovery_cart_id', $external );
+        $order->update_meta_data( '_luko_attribution_strength', 'direct' );
+        $order->update_meta_data( '_luko_attribution_method', $method );
+        $order->update_meta_data( '_luko_recovery_channel', (string) $click->channel );
+        $order->update_meta_data( '_luko_click_id', $click_id );
+        $order->update_meta_data( '_luko_recovery_clicked_at', gmdate( 'c', strtotime( $click->clicked_at . ' UTC' ) ) );
+        $order->update_meta_data( '_luko_attribution_model_version', self::ATTRIBUTION_MODEL_VERSION );
     }
 
     public static function order_created( $order ) {
         if ( ! $order instanceof WC_Order || $order->get_meta( '_luko_order_created_event_id', true ) ) return;
+        self::stamp_checkout_context( $order );
         global $wpdb;
-        $context = function_exists( 'WC' ) && WC()->session ? WC()->session->get( 'luko_recovery_context' ) : [];
-        $external = is_array( $context ) ? sanitize_text_field( (string) ( $context['external_cart_id'] ?? '' ) ) : '';
+        $external = sanitize_text_field( (string) $order->get_meta( '_luko_external_cart_id', true ) );
         if ( ! $external ) $external = sanitize_text_field( (string) $order->get_meta( '_luko_recovery_cart_id', true ) );
-        $clicked_at = is_array( $context ) ? (string) ( $context['clicked_at'] ?? '' ) : '';
-        if ( ! $clicked_at ) $clicked_at = (string) $order->get_meta( '_luko_recovery_clicked_at', true );
-        $context_valid = $external && strtotime( (string) ( $context['expires_at'] ?? '' ) ) >= time();
         $row = $external ? $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE external_cart_id=%s LIMIT 1', $external ) ) : self::active_cart_for_user( (int) $order->get_user_id() );
         if ( ! $row ) return;
-        $attribution_valid = 'yes' === $order->get_meta( '_luko_recovery_attribution_valid', true ) || ( $context_valid && 'clicked' === $row->status && self::order_matches_cart( $order, $row ) );
+        $external = (string) $row->external_cart_id;
+        $click = self::verified_click( (string) $order->get_meta( '_luko_click_id', true ), $external, (int) $order->get_user_id() );
+        $coupon = self::verified_recovery_coupon( $order );
+        $cart_match = self::order_matches_cart( $order, $row );
+        $attribution_valid = $cart_match && ( $click || $coupon );
         $event_id = wp_generate_uuid4();
-        $order->update_meta_data( '_luko_recovery_cart_id', $row->external_cart_id );
-        $order->update_meta_data( '_luko_recovery_clicked_at', $clicked_at );
+        $order->update_meta_data( '_luko_external_cart_id', $external );
+        $order->update_meta_data( '_luko_recovery_cart_id', $external );
+        $order->update_meta_data( '_luko_attributed', $attribution_valid ? 'pending' : 'no' );
         $order->update_meta_data( '_luko_recovery_attribution_valid', $attribution_valid ? 'yes' : 'no' );
+        $order->update_meta_data( '_luko_attribution_model_version', self::ATTRIBUTION_MODEL_VERSION );
+        if ( $coupon ) $order->update_meta_data( '_luko_coupon_code', self::RECOVERY_COUPON );
         $order->save();
         $wpdb->update( self::table(), [ 'order_id' => $order->get_id(), 'status' => 'ordered', 'updated_at' => current_time( 'mysql', true ) ], [ 'id' => $row->id ] );
+        if ( $click ) $wpdb->update( self::click_table(), [ 'consumed_order_id' => $order->get_id() ], [ 'id' => $click->id ] );
         $queued = self::emit( 'order.created', [
             'customer' => self::customer_payload( (int) $order->get_user_id() ),
-            'cart' => [ 'external_cart_id' => $row->external_cart_id, 'version' => (int) $row->version ],
-            'order' => [ 'order_id' => $order->get_id(), 'currency' => $order->get_currency(), 'total' => $order->get_total(), 'status' => $order->get_status(), 'recovery_clicked_at' => $clicked_at ?: null, 'attribution_valid' => $attribution_valid ],
+            'cart' => [ 'external_cart_id' => $external, 'version' => (int) $row->version ],
+            'order' => self::order_event_payload( $order ),
         ], $event_id );
         if ( $queued ) { $order->update_meta_data( '_luko_order_created_event_id', $event_id ); $order->save(); }
         if ( function_exists( 'WC' ) && WC()->session ) WC()->session->__unset( 'luko_recovery_context' );
@@ -514,14 +700,45 @@ final class LUKO_Vici_Connector {
         $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE external_cart_id=%s LIMIT 1', $external ) );
         if ( ! $row ) return;
         $event_id = wp_generate_uuid4();
-        $valid = 'yes' === $order->get_meta( '_luko_recovery_attribution_valid', true );
         $wpdb->update( self::table(), [ 'status' => 'paid', 'updated_at' => current_time( 'mysql', true ) ], [ 'id' => $row->id ] );
         $queued = self::emit( 'order.paid', [
             'customer' => self::customer_payload( (int) $order->get_user_id() ),
             'cart' => [ 'external_cart_id' => $external, 'version' => (int) $row->version ],
-            'order' => [ 'order_id' => $order->get_id(), 'currency' => $order->get_currency(), 'total' => $order->get_total(), 'status' => $order->get_status(), 'paid_at' => gmdate( 'c' ), 'recovery_clicked_at' => $order->get_meta( '_luko_recovery_clicked_at', true ) ?: null, 'attribution_valid' => $valid ],
+            'order' => self::order_event_payload( $order ),
         ], $event_id );
         if ( $queued ) { $order->update_meta_data( '_luko_order_paid_event_id', $event_id ); $order->save(); }
+    }
+
+    public static function order_refunded( $order_id, $refund_id ) {
+        $order = wc_get_order( $order_id );
+        if ( $order ) self::emit_financial_update( $order, 'refund', (string) $refund_id );
+    }
+
+    public static function order_status_changed( $order_id, $old_status, $new_status, $order ) {
+        if ( in_array( $new_status, [ 'cancelled', 'failed', 'refunded' ], true ) && $order instanceof WC_Order ) {
+            self::emit_financial_update( $order, 'status_' . $new_status, '' );
+        }
+    }
+
+    private static function emit_financial_update( $order, $cause, $refund_id ) {
+        $external = (string) $order->get_meta( '_luko_external_cart_id', true );
+        if ( ! $external ) $external = (string) $order->get_meta( '_luko_recovery_cart_id', true );
+        if ( ! $external ) return;
+        global $wpdb;
+        $row = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE external_cart_id=%s LIMIT 1', $external ) );
+        if ( ! $row ) return;
+        $facts = self::order_event_payload( $order );
+        $fingerprint = hash( 'sha256', wp_json_encode( [ $facts['status'], $facts['total'], $facts['refunded_amount'], $refund_id ] ) );
+        if ( $fingerprint === $order->get_meta( '_luko_last_financial_fingerprint', true ) ) return;
+        $event_id = 'luko-fin-' . $order->get_id() . '-' . substr( $fingerprint, 0, 20 );
+        if ( self::emit( 'order.updated', [
+            'customer' => self::customer_payload( (int) $order->get_user_id() ),
+            'cart' => [ 'external_cart_id' => $external, 'version' => (int) $row->version ],
+            'order' => array_merge( $facts, [ 'financial_update_cause' => $cause, 'refund_id' => $refund_id ?: null ] ),
+        ], $event_id ) ) {
+            $order->update_meta_data( '_luko_last_financial_fingerprint', $fingerprint );
+            $order->save();
+        }
     }
 
     private static function order_matches_cart( $order, $row ) {
@@ -610,6 +827,11 @@ final class LUKO_Vici_Connector {
             'permission_callback' => [ __CLASS__, 'verify_rest_hmac' ],
             'callback' => [ __CLASS__, 'cart_status' ],
         ] );
+        register_rest_route( 'luko/v1', '/order-attribution', [
+            'methods' => 'POST',
+            'permission_callback' => [ __CLASS__, 'verify_rest_hmac' ],
+            'callback' => [ __CLASS__, 'order_attribution' ],
+        ] );
     }
 
     public static function verify_rest_hmac( $request ) {
@@ -647,6 +869,70 @@ final class LUKO_Vici_Connector {
         ] );
     }
 
+    public static function order_attribution( $request ) {
+        $data = $request->get_json_params();
+        $order_id = absint( $data['order_id'] ?? 0 );
+        $recovery_id = sanitize_text_field( (string) ( $data['recovery_id'] ?? '' ) );
+        $external = sanitize_text_field( (string) ( $data['external_cart_id'] ?? '' ) );
+        $method = sanitize_key( (string) ( $data['attribution_method'] ?? '' ) );
+        $strength = sanitize_key( (string) ( $data['attribution_strength'] ?? '' ) );
+        $model = sanitize_text_field( (string) ( $data['attribution_model_version'] ?? '' ) );
+        $allowed = [
+            'sms_recovery_link' => 'direct',
+            'push' => 'direct',
+            'conversation_assisted' => 'strong',
+            'recovery_coupon' => 'strong',
+        ];
+        if ( ! $order_id || ! self::is_uuid( $recovery_id ) || ! self::is_uuid( $external )
+            || ! isset( $allowed[$method] ) || $allowed[$method] !== $strength || self::ATTRIBUTION_MODEL_VERSION !== $model ) {
+            return new WP_Error( 'luko_invalid_attribution', 'Invalid attribution.', [ 'status' => 400 ] );
+        }
+        $order = wc_get_order( $order_id );
+        if ( ! $order instanceof WC_Order ) return new WP_Error( 'luko_order_missing', 'Order not found.', [ 'status' => 404 ] );
+        if ( ! in_array( $order->get_status(), [ 'processing', 'completed' ], true ) || ! $order->get_date_paid() ) {
+            return new WP_Error( 'luko_order_unpaid', 'Only a paid order can be attributed.', [ 'status' => 409 ] );
+        }
+        $stored_external = (string) $order->get_meta( '_luko_external_cart_id', true );
+        if ( ! $stored_external ) $stored_external = (string) $order->get_meta( '_luko_recovery_cart_id', true );
+        if ( ! hash_equals( $stored_external, $external ) ) return new WP_Error( 'luko_order_mismatch', 'Order mismatch.', [ 'status' => 409 ] );
+
+        $click_id = sanitize_text_field( (string) ( $data['recovery_click_id'] ?? '' ) );
+        $channel = sanitize_key( (string) ( $data['recovery_channel'] ?? '' ) );
+        if ( in_array( $method, [ 'sms_recovery_link', 'push' ], true ) ) {
+            $expected_channel = 'push' === $method ? 'push' : 'sms';
+            $click = self::verified_click( $click_id, $external, (int) $order->get_user_id(), $order_id );
+            if ( ! $click || $expected_channel !== $channel || $expected_channel !== (string) $click->channel
+                || ( $click->consumed_order_id && (int) $click->consumed_order_id !== $order_id ) ) {
+                return new WP_Error( 'luko_click_mismatch', 'Recovery click mismatch.', [ 'status' => 409 ] );
+            }
+        }
+        $coupon = self::verified_recovery_coupon( $order );
+        if ( 'recovery_coupon' === $method && ! $coupon ) {
+            return new WP_Error( 'luko_coupon_mismatch', 'Recovery coupon mismatch.', [ 'status' => 409 ] );
+        }
+
+        $existing_recovery = (string) $order->get_meta( '_luko_abandonment_episode_id', true );
+        if ( self::is_uuid( $existing_recovery ) && ! hash_equals( $existing_recovery, $recovery_id ) ) {
+            return new WP_Error( 'luko_attribution_conflict', 'Order already belongs to another recovery.', [ 'status' => 409 ] );
+        }
+        $attributed_at = sanitize_text_field( (string) ( $data['attributed_at'] ?? '' ) );
+        if ( ! strtotime( $attributed_at ) ) $attributed_at = gmdate( 'c' );
+        $order->update_meta_data( '_luko_attributed', 'yes' );
+        $order->update_meta_data( '_luko_abandonment_episode_id', $recovery_id );
+        $order->update_meta_data( '_luko_external_cart_id', $external );
+        $order->update_meta_data( '_luko_attribution_strength', $strength );
+        $order->update_meta_data( '_luko_attribution_method', $method );
+        $order->update_meta_data( '_luko_recovery_channel', $channel );
+        $order->update_meta_data( '_luko_message_id', sanitize_text_field( (string) ( $data['message_id'] ?? '' ) ) );
+        $order->update_meta_data( '_luko_push_id', sanitize_text_field( (string) ( $data['push_id'] ?? '' ) ) );
+        $order->update_meta_data( '_luko_click_id', $click_id );
+        $order->update_meta_data( '_luko_coupon_code', $coupon ? self::RECOVERY_COUPON : '' );
+        $order->update_meta_data( '_luko_attributed_at', $attributed_at );
+        $order->update_meta_data( '_luko_attribution_model_version', self::ATTRIBUTION_MODEL_VERSION );
+        $order->save();
+        return rest_ensure_response( [ 'updated' => true, 'order' => self::order_event_payload( $order ) ] );
+    }
+
     public static function admin_menu() {
         add_submenu_page( 'woocommerce', 'LUKO Connector', 'LUKO Connector', 'manage_woocommerce', 'luko-vici', [ __CLASS__, 'admin_page' ] );
     }
@@ -681,6 +967,7 @@ final class LUKO_Vici_Connector {
 
 register_activation_hook( __FILE__, [ 'LUKO_Vici_Connector', 'activate' ] );
 register_deactivation_hook( __FILE__, [ 'LUKO_Vici_Connector', 'deactivate' ] );
+add_action( 'before_woocommerce_init', [ 'LUKO_Vici_Connector', 'declare_compatibility' ] );
 add_action( 'plugins_loaded', function() {
     if ( class_exists( 'WooCommerce' ) ) {
         LUKO_Vici_Connector::boot();

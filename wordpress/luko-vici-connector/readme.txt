@@ -3,7 +3,7 @@ Contributors: luko
 Tags: woocommerce, sms, abandoned-cart
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.3
+Stable tag: 0.3.4
 License: Proprietary
 
 Connects authenticated Vici WooCommerce carts to LUKO abandoned-cart recovery while keeping phone availability, SMS consent and push permission independent.
@@ -18,10 +18,16 @@ Leave live provider delivery disabled until the LUKO dry-run trace passes and th
 
 == Changelog ==
 
+= 0.3.4 =
+* Persists immutable recovery click IDs and safe channel context so checkout activity cannot erase direct attribution.
+* Adds HPOS-compatible order attribution metadata, actual coupon lines, authoritative paid timestamps and refund updates.
+* Adds the signed order-attribution callback used after LUKO selects one canonical DIRECT or STRONG winner.
+* Canonicalizes the verified recovery coupon display and metadata to VICI15.
+
 = 0.3.3 =
 * Adds customer first name and verified WooCommerce product, destination, category, sale and managed-stock facts to signed cart snapshots for the Growth Sales Engine.
 * Reuses valid existing billing_phone values and reports carts even when SMS consent is unavailable, without opting the customer in.
-* Adds same-site tracked push redirects for exact-product and Shop attribution, plus applied-coupon facts for Vici15 eligibility checks.
+* Adds same-site tracked push redirects for exact-product and Shop attribution, plus applied-coupon facts for VICI15 eligibility checks.
 
 = 0.3.2 =
 * Make the default disclosure explicit for US marketing SMS and advance new consent evidence to v2.

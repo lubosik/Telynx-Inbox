@@ -35,6 +35,18 @@ test('week starts on Monday in the business timezone', () => {
   assert.equal(range.start.toISOString(), '2026-08-17T04:00:00.000Z');
 });
 
+test('quarter starts on the business-local calendar quarter and compares the prior quarter', () => {
+  const range = rangeForPeriod({
+    period: 'quarter',
+    now: new Date('2026-08-20T15:30:00.000Z'),
+    timeZone: 'America/New_York'
+  });
+  assert.equal(range.start.toISOString(), '2026-07-01T04:00:00.000Z');
+  assert.equal(range.end.toISOString(), '2026-08-20T15:30:00.000Z');
+  assert.equal(range.previous.start.toISOString(), '2026-04-01T04:00:00.000Z');
+  assert.equal(range.previous.end.toISOString(), '2026-05-20T15:30:00.000Z');
+});
+
 test('custom end date is inclusive and DST-safe', () => {
   const range = rangeForPeriod({
     period: 'custom',
