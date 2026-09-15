@@ -1,6 +1,5 @@
 const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
-const { verifyWebhookSignature, verifyWebhookSignatureV2 } = require('../telnyx');
 const { analyseConversation } = require('../intelligence');
 const { sendPushToAll } = require('../push-notify');
 const { sendNativeMessagePush } = require('../lib/apns-notify');
@@ -21,6 +20,7 @@ const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
 const { recordCampaignReplyEvents } = require('../lib/campaigns/reply-events');
 const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 const { sendSMS } = require('../telnyx');
+const { decodeVerifiedTelnyxEvent, claimTelnyxEvent, finishTelnyxEvent, failTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
 
@@ -28,37 +28,31 @@ module.exports = (broadcastSSE) => {
   const router = require('express').Router();
 
   router.post('/telnyx', async (req, res) => {
-    res.sendStatus(200);
-
+    let claim = null;
+    let eventID = null;
     try {
-      const rawBody = req.body;
-      const body = JSON.parse(rawBody.toString());
-
-      // Existing message handling remains backwards-compatible, but Analytics
-      // trusts only current Telnyx v2 Ed25519 signatures with replay tolerance.
-      const signatureV2 = req.headers['telnyx-signature-ed25519'];
-      const timestampV2 = req.headers['telnyx-timestamp'];
-      const analyticsSignatureValid = verifyWebhookSignatureV2(
-        rawBody, signatureV2, timestampV2, process.env.TELNYX_PUBLIC_KEY
-      );
-      if (signatureV2 && !analyticsSignatureValid) {
-        console.warn('[ANALYTICS] Telnyx v2 signature invalid; event excluded from trusted metrics');
-      }
-
-      const sig = req.headers['x-telnyx-signature'];
-      if (sig) {
-        const valid = verifyWebhookSignature(rawBody, sig, process.env.WEBHOOK_SECRET);
-        if (!valid) console.warn('Webhook signature mismatch — processing anyway');
-      }
-
-      const event = body?.data;
+      const event = decodeVerifiedTelnyxEvent(req.body, req.headers, process.env.TELNYX_PUBLIC_KEY);
+      const analyticsSignatureValid = true;
       const eventType = event?.event_type;
       const payload = event?.payload;
+      eventID = String(event?.id || '');
+      if (!eventID || !payload?.id || !eventType) return res.sendStatus(400);
+      const earlyTo = Array.isArray(payload.to) ? payload.to[0] : payload.to;
+      const ledgerStatus = DELIVERY_EVENTS.has(eventType)
+        ? normaliseTelnyxStatus(earlyTo?.status || payload?.status || '', eventType === 'message.sent' ? 'sent' : null)
+        : eventType === 'message.received' ? 'delivered' : null;
+      claim = await claimTelnyxEvent(supabase, event, ledgerStatus);
+      if (claim?.duplicate) return res.sendStatus(200);
+      if (!claim?.claimed) return res.sendStatus(503);
+      const complete = async () => {
+        await finishTelnyxEvent(supabase, eventID, claim.token);
+        if (!res.headersSent) res.sendStatus(200);
+      };
 
       // ── Delivery status update ──────────────────────────────────────────────
       if (DELIVERY_EVENTS.has(eventType)) {
         const messageId = payload?.id;
-        if (!messageId) return;
+        if (!messageId) { await complete(); return; }
 
         const toEntry = Array.isArray(payload.to) ? payload.to[0] : payload.to;
         const providerStatus = toEntry?.status || payload?.status || '';
@@ -138,11 +132,13 @@ module.exports = (broadcastSSE) => {
               .then(result => result.trusted && reconcileAttributionForDeliveredMessage(messageId));
           }
         }
+        await require('../lib/cart-recovery/runtime').markDelivery({ messageId, status, occurredAt: event?.occurred_at });
+        await complete();
         return;
       }
 
       // ── Inbound message ─────────────────────────────────────────────────────
-      if (eventType !== 'message.received') return;
+      if (eventType !== 'message.received') { await complete(); return; }
 
       const messageId = payload?.id;
       const fromPhone = payload?.from?.phone_number;
@@ -150,14 +146,14 @@ module.exports = (broadcastSSE) => {
       const inboundMedia = Array.isArray(payload?.media) ? payload.media : [];
 
       // Accept text-only, media-only (picture with no caption), or both
-      if (!messageId || !fromPhone || (!text && inboundMedia.length === 0)) return;
+      if (!messageId || !fromPhone || (!text && inboundMedia.length === 0)) { await complete(); return; }
 
       const { data: existing } = await supabase
         .from('sms_messages')
         .select('id')
         .eq('telnyx_message_id', messageId)
         .maybeSingle();
-      if (existing) { console.log('Duplicate message, skipping:', messageId); return; }
+      if (existing) { console.log('Duplicate message, skipping:', messageId); await complete(); return; }
 
       // STOP / opt-out detection — check before anything else
       const trustedOptOutClassification = analyticsSignatureValid
@@ -213,6 +209,7 @@ module.exports = (broadcastSSE) => {
           console.error('[OPT-OUT] Could not record the STOP message:', stopLogErr.message);
         }
         broadcastSSE({ type: 'opt_out', phone: fromPhone });
+        await complete();
         return;
       }
 
@@ -271,6 +268,7 @@ module.exports = (broadcastSSE) => {
             }).catch(err => console.error('APNs tapback error:', err.message));
 
             console.log(`[TAPBACK] ${tapback.action} ${tapback.type} on msg ${target.id} from ...${fromPhone.slice(-4)}`);
+            await complete();
             return;
           }
           // No matching target — fall through and store as a normal message
@@ -454,8 +452,17 @@ module.exports = (broadcastSSE) => {
 
       setTimeout(() => analyseConversation(fromPhone).catch(console.error), 5000);
 
+      await complete();
+
     } catch (err) {
+      if (!claim && (err.status === 400 || err.status === 403)) return res.sendStatus(err.status);
       console.error('Webhook processing error:', err.message);
+      if (claim?.claimed && eventID) {
+        try { await failTelnyxEvent(supabase, eventID, claim.token, err); } catch (ledgerError) {
+          console.error('Webhook failure ledger error:', ledgerError.message);
+        }
+      }
+      if (!res.headersSent) res.sendStatus(500);
     }
   });
 
