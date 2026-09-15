@@ -3,7 +3,7 @@ Contributors: luko
 Tags: woocommerce, sms, abandoned-cart
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.1
+Stable tag: 0.3.2
 License: Proprietary
 
 Connects authenticated, consented Vici WooCommerce carts to LUKO abandoned-cart recovery.
@@ -17,6 +17,9 @@ Configure the LUKO API base as https://web-production-2551e.up.railway.app and s
 Leave live provider delivery disabled until the LUKO dry-run trace passes and the Telnyx messaging profile is confirmed for this exact cart-reminder use case.
 
 == Changelog ==
+
+= 0.3.2 =
+* Make the default disclosure explicit for US marketing SMS and advance new consent evidence to v2.
 
 = 0.3.1 =
 * Prevent theme styles from collapsing the SMS consent checkbox and provide a clear 24px control.
