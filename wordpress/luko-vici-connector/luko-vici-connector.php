@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LUKO Vici Connector
  * Description: WooCommerce abandoned-cart recovery, SMS consent bridge and LUKO event connector for Vici.
- * Version: 0.3.5
+ * Version: 0.3.6
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.3.5';
+    const VERSION = '0.3.6';
     const ATTRIBUTION_MODEL_VERSION = 'vici-cart-recovery-v2';
     const RECOVERY_COUPON = 'VICI15';
     private static $restoring = false;
@@ -126,8 +126,8 @@ final class LUKO_Vici_Connector {
         if ( get_option( 'luko_vici_schema_version' ) !== self::VERSION ) {
             self::activate();
             if ( '' === trim( (string) get_option( 'luko_vici_sms_disclosure', '' ) )
-                && in_array( (string) get_option( 'luko_vici_sms_disclosure_version', 'v1' ), [ 'v1', 'v2' ], true ) ) {
-                update_option( 'luko_vici_sms_disclosure_version', 'v3', false );
+                && in_array( (string) get_option( 'luko_vici_sms_disclosure_version', 'v1' ), [ 'v1', 'v2', 'v3' ], true ) ) {
+                update_option( 'luko_vici_sms_disclosure_version', 'v4', false );
             }
         }
     }
@@ -167,7 +167,7 @@ final class LUKO_Vici_Connector {
     private static function disclosure_text() {
         $saved = trim( (string) get_option( 'luko_vici_sms_disclosure', '' ) );
         if ( $saved ) return $saved;
-        return 'Yes, text me Vici updates. I agree to receive recurring automated marketing SMS messages from Vici Peptides, including back-in-stock alerts, early notice of new products, exclusive offers, shopping cart reminders, and other Vici marketing updates. Message frequency may vary. Standard message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of purchase. We will not sell or share mobile information with third parties for promotional or marketing purposes.';
+        return 'Yes, send me Vici Peptides marketing texts about restocks, new products, exclusive offers, and cart reminders. Message frequency may vary. Standard Message and Data Rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to purchase. We will not share your mobile number for marketing.';
     }
 
     public static function render_registration_consent() {
@@ -237,7 +237,7 @@ final class LUKO_Vici_Connector {
     }
 
     private static function disclosure_fingerprint() {
-        return hash_hmac( 'sha256', self::disclosure_text() . '|' . get_option( 'luko_vici_sms_disclosure_version', 'v3' ) . '|' . self::privacy_url() . '|' . self::terms_url(), wp_salt( 'auth' ) );
+        return hash_hmac( 'sha256', self::disclosure_text() . '|' . get_option( 'luko_vici_sms_disclosure_version', 'v4' ) . '|' . self::privacy_url() . '|' . self::terms_url(), wp_salt( 'auth' ) );
     }
 
     // EA 6.8.3 applies this AFTER validating its nonce and fields, BEFORE saving
@@ -251,7 +251,7 @@ final class LUKO_Vici_Connector {
         $evidence = [
             'granted' => $valid && $checked && '' !== $phone && '' !== self::privacy_url() && '' !== self::terms_url(),
             'disclosure' => self::disclosure_text(),
-            'version' => (string) get_option( 'luko_vici_sms_disclosure_version', 'v3' ),
+            'version' => (string) get_option( 'luko_vici_sms_disclosure_version', 'v4' ),
             'occurred_at' => gmdate( 'c' ),
             'source' => 'vici_registration',
             'source_url' => isset( $_POST['page_id'] ) ? get_permalink( absint( $_POST['page_id'] ) ) : ( wp_get_referer() ?: home_url( '/login/' ) ),
@@ -981,7 +981,7 @@ final class LUKO_Vici_Connector {
         <tr><th>LUKO API Base URL</th><td><input class="regular-text" name="luko_vici_api_base" value="<?php echo esc_attr(get_option('luko_vici_api_base','')); ?>"></td></tr>
         <tr><th>Signing Secret</th><td><input class="regular-text" type="password" name="luko_vici_signing_secret" value="" autocomplete="new-password" placeholder="Leave blank to keep the current secret"><p>Prefer LUKO_WP_SIGNING_SECRET in wp-config.php.</p></td></tr>
         <tr><th>Phone meta key</th><td><input class="regular-text" name="luko_vici_phone_meta_key" value="<?php echo esc_attr(get_option('luko_vici_phone_meta_key','eael_custom_profile_field_phone_number')); ?>"><p>Confirmed from the live field and Essential Addons 6.8.3 mapping.</p></td></tr>
-        <tr><th>Disclosure version</th><td><input name="luko_vici_sms_disclosure_version" value="<?php echo esc_attr(get_option('luko_vici_sms_disclosure_version','v3')); ?>"></td></tr>
+        <tr><th>Disclosure version</th><td><input name="luko_vici_sms_disclosure_version" value="<?php echo esc_attr(get_option('luko_vici_sms_disclosure_version','v4')); ?>"></td></tr>
         <tr><th>SMS disclosure</th><td><textarea class="large-text" rows="6" name="luko_vici_sms_disclosure"><?php echo esc_textarea(get_option('luko_vici_sms_disclosure','')); ?></textarea></td></tr>
         <tr><th>Terms URL</th><td><input class="regular-text" name="luko_vici_terms_url" value="<?php echo esc_attr(get_option('luko_vici_terms_url','')); ?>"></td></tr>
         <tr><th>Recovery TTL days</th><td><input type="number" min="1" max="30" name="luko_vici_recovery_ttl_days" value="<?php echo esc_attr(get_option('luko_vici_recovery_ttl_days',7)); ?>"></td></tr>
