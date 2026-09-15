@@ -210,6 +210,8 @@ test('WordPress connector preserves OTP flow and removes the unsafe v0.2 token a
   assert.match(plugin, /eael_custom_profile_field_phone_number/);
   assert.match(plugin, /name="luko_sms_consent" value="1"/);
   assert.doesNotMatch(plugin, /name="luko_sms_consent"[^>]*checked/);
+  assert.match(plugin, /automated marketing SMS messages from Vici Peptides/);
+  assert.match(plugin, /luko_vici_sms_disclosure_version', 'v2'/);
   assert.match(plugin, /random_bytes\( 32 \)/);
   assert.match(plugin, /luko_recovery_outbox/);
   assert.match(plugin, /luko_recovery_context/);
