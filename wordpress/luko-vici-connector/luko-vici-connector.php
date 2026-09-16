@@ -167,7 +167,7 @@ final class LUKO_Vici_Connector {
     private static function disclosure_text() {
         $saved = trim( (string) get_option( 'luko_vici_sms_disclosure', '' ) );
         if ( $saved ) return $saved;
-        return 'Yes, send me Vici Peptides marketing texts about restocks, new products, exclusive offers, and cart reminders. Message frequency may vary. Standard Message and Data Rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to purchase. We will not share your mobile number for marketing.';
+        return 'Yes, send me Vici Peptides marketing texts about restocks, new products, exclusive offers, and cart reminders. Message frequency may vary. Standard Message and Data Rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to purchase. We will not share your mobile number with third parties for marketing.';
     }
 
     public static function render_registration_consent() {

@@ -628,6 +628,7 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /Get Vici updates first/);
   assert.match(plugin, /Restock alerts/);
   assert.match(plugin, /Consent is not required to purchase/);
+  assert.match(plugin, /We will not share your mobile number with third parties for marketing/);
   assert.match(plugin, /random_bytes\( 32 \)/);
   assert.match(plugin, /luko_recovery_outbox/);
   assert.match(plugin, /luko_recovery_context/);
