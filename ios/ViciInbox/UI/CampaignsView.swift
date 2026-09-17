@@ -2566,10 +2566,17 @@ private struct CampaignPlannerSheet: View {
                 }
                 .disabled(isCreating || chosenCopy == nil
                           || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Text("Creates a segment and a draft campaign. Nothing is approved, scheduled or sent, and no code exists until you approve.")
+                Text(audienceCreationDescription(plan))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func audienceCreationDescription(_ plan: CampaignPlan) -> String {
+        let audience = plan.audience?.kind == "all_contacts"
+            ? "The full contact list is frozen into a draft campaign."
+            : "The segment is saved, its members are calculated, and a draft campaign is created."
+        return "\(audience) You can edit it, submit it for review, approve it, then schedule it. Nothing is sent from this screen."
     }
 
     private func makePlan() async {

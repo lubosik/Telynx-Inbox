@@ -56,6 +56,56 @@ test('accepting an All Contacts plan creates a draft without segment drafting', 
   assert.equal(res.payload.created[0].id, 'draft-1');
 });
 
+test('accepting described rules recomputes the saved segment before building its campaign', async () => {
+  const order = [];
+  const router = createCampaignRouter({
+    service: {}, campaignClient: {},
+    segmentPlanningService: {
+      async createFromRules() {
+        order.push('create-segment');
+        return { segment: { id: 'segment-1', key: 'rules:rt-buyers:abc' } };
+      },
+      async recompute(id) {
+        assert.equal(id, 'segment-1');
+        order.push('recompute-members');
+        return { run: { memberCount: 42 } };
+      }
+    },
+    segmentCampaignBuilder: async input => {
+      order.push('build-campaign');
+      assert.deepEqual(input.segmentKeys, ['rules:rt-buyers:abc']);
+      return { audience: 42, created: [{ id: 'campaign-1', recipients: 42 }] };
+    }
+  });
+  const res = response();
+  await handler(router, 'post', '/plan/accept')({
+    body: { title: 'RT buyers', ruleSet: { match: 'all', conditions: [] }, message: 'Vin from Vici: Hello. Reply STOP to opt out.' },
+    actor: { id: 9 }, params: {}
+  }, res);
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(order, ['create-segment', 'recompute-members', 'build-campaign']);
+  assert.equal(res.payload.created[0].id, 'campaign-1');
+});
+
+test('a described audience with no eligible recipients reports no draft', async () => {
+  const router = createCampaignRouter({
+    service: {}, campaignClient: {},
+    segmentPlanningService: {
+      createFromRules: async () => ({ segment: { id: 'segment-1', key: 'rules:empty:abc' } }),
+      recompute: async () => ({ run: { memberCount: 0 } })
+    },
+    segmentCampaignBuilder: async () => ({ audience: 0, created: [], note: 'Nobody is eligible.' })
+  });
+  const res = response();
+  await handler(router, 'post', '/plan/accept')({
+    body: { title: 'Empty group', ruleSet: { match: 'all', conditions: [] }, message: 'Vin from Vici: Hello. Reply STOP to opt out.' },
+    actor: { id: 9 }, params: {}
+  }, res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.payload.code, 'CAMPAIGN_NO_ELIGIBLE_AUDIENCE');
+  assert.match(res.payload.error, /no campaign draft was created/i);
+});
+
 test('opportunity generation accepts control inputs only and defaults to dry-run', async () => {
   const calls = [];
   const router = createCampaignRouter({

@@ -156,6 +156,42 @@ test('an audience below the floor is warned about and is not ready', async () =>
   const floor = plan.warnings.find(w => w.code === 'below_floor');
   assert.ok(floor, 'four people is not a campaign and the plan must say so');
   assert.match(floor.message, /below the 25/);
+  assert.equal(plan.ready, false, 'the app must not offer a Create action that the builder will refuse');
+});
+
+test('transient rule-writing and preview failures retry before returning a plan', async () => {
+  let writes = 0;
+  let previews = 0;
+  const segments = {
+    draftRules: async () => {
+      writes += 1;
+      if (writes === 1) throw Object.assign(new Error('provider down'), { code: 'SEGMENT_AI_BUILDER_UNAVAILABLE' });
+      return { status: 'drafted', ruleSet: { match: 'all', conditions: [] } };
+    },
+    previewRules: async ({ rules }) => {
+      previews += 1;
+      if (previews === 1) throw Object.assign(new Error('stale generated rule'), { code: 'SEGMENT_RULES_INVALID' });
+      return { ruleSet: rules, matchedCount: 50, consideredCount: 1128, sample: [], warnings: [] };
+    }
+  };
+  const plan = await planCampaign({ client: stubClient(), brief: 'Reach recent buyers', segments, drafter: stubDrafter() });
+  assert.equal(plan.ready, true);
+  assert.equal(writes, 3);
+  assert.equal(previews, 2);
+});
+
+test('a genuine clarification request is returned without repeating the same model call', async () => {
+  let calls = 0;
+  const plan = await planCampaign({
+    client: stubClient(), brief: 'Reach the right people', drafter: stubDrafter(),
+    segments: { draftRules: async () => {
+      calls += 1;
+      return { status: 'question', questions: ['Which people do you mean?'] };
+    } }
+  });
+  assert.equal(calls, 1);
+  assert.equal(plan.ready, false);
+  assert.match(plan.audienceError.message, /Which people/);
 });
 
 test('an empty audience is not ready even with good copy', async () => {

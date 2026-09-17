@@ -147,7 +147,9 @@ function createCampaignRouter({
   campaignDeletionAuditWriter,
   copyDrafter,
   opportunityPortfolio,
-  campaignClient
+  campaignClient,
+  segmentPlanningService,
+  segmentCampaignBuilder = buildFromSegment
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -173,7 +175,7 @@ function createCampaignRouter({
   const db = () => (campaignClient || require('../db').supabase);
   // Lazy for the same reason: constructing it must not require credentials.
   let segments = null;
-  const segmentService = () => (segments ||= createSegmentService({ client: db() }));
+  const segmentService = () => (segments ||= segmentPlanningService || createSegmentService({ client: db() }));
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -272,9 +274,16 @@ function createCampaignRouter({
         rules: req.body?.ruleSet
       }, req.actor);
 
-      const result = await buildFromSegment({
+      // Saving a rule segment deliberately stores no members. Recompute it
+      // before building the campaign, or a valid described audience produces
+      // an empty draft result even though its preview matched customers.
+      const segmentID = segment?.segment?.id || segment?.id;
+      const segmentKey = segment?.segment?.key || segment?.segment?.segment_key || segment?.segment_key;
+      await segmentService().recompute(segmentID, req.actor);
+
+      const result = await segmentCampaignBuilder({
         client: db(),
-        segmentKeys: [segment?.segment?.segment_key || segment?.segment_key],
+        segmentKeys: [segmentKey],
         title,
         message: req.body?.message,
         discountPercent: Number(req.body?.discountPercent) || null,
@@ -283,18 +292,23 @@ function createCampaignRouter({
         actorID
       });
 
-      if (result.created?.length) {
-        await auditCampaign('campaign.created', req, { id: result.created[0].id }, {
-          summary: `Planned "${title}" from a brief for ${result.audience} people`,
-          newState: { status: 'draft' },
-          metadata: {
-            planned: true,
-            segment: segment?.segment?.segment_key || null,
-            audience: result.audience,
-            suppressed_as_duplicate: result.suppressedAsDuplicate
-          }
-        });
+      if (!result.created?.length) {
+        throw new CampaignRequestError(
+          `The segment was saved, but no campaign draft was created. ${result.note || 'No contacts are currently eligible.'} Edit that segment or describe a wider audience.`,
+          'CAMPAIGN_NO_ELIGIBLE_AUDIENCE', 409
+        );
       }
+
+      await auditCampaign('campaign.created', req, { id: result.created[0].id }, {
+        summary: `Planned "${title}" from a brief for ${result.audience} people`,
+        newState: { status: 'draft' },
+        metadata: {
+          planned: true,
+          segment: segmentKey || null,
+          audience: result.audience,
+          suppressed_as_duplicate: result.suppressedAsDuplicate
+        }
+      });
       return res.status(201).json({ ...result, segment });
     } catch (error) { return sendError(res, error, 'creating this campaign'); }
   });

@@ -868,9 +868,24 @@ actor APIClient {
         if let audienceKind { body["audienceKind"] = audienceKind }
         if let ruleSet { body["ruleSet"] = ruleSet.rawValue }
         if let discountPercent { body["discountPercent"] = discountPercent }
-        let (data, response) = try await post(
-            "/api/campaigns/plan/accept", body: body, timeout: 60
-        )
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            // Rule segments must be saved and recomputed before their member
+            // list can be frozen into a draft. A slow, healthy run should not
+            // be mistaken for failure at the default 20-second timeout.
+            (data, response) = try await post(
+                "/api/campaigns/plan/accept", body: body, timeout: 120
+            )
+        } catch APIError.transport(_) {
+            // The server may have finished after the connection dropped. Do
+            // not replay this write blindly and risk duplicate drafts.
+            throw APIError.server(
+                "The connection ended while creating the draft. Check Campaigns before trying again.",
+                statusCode: 503,
+                code: "CAMPAIGN_PLAN_RESULT_UNKNOWN"
+            )
+        }
         try validate(data: data, response: response)
         guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let created = payload["created"] as? [[String: Any]],
