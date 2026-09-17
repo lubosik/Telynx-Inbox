@@ -225,6 +225,45 @@ function createCampaignRouter({
       const actorID = Number(req.actor?.id) || null;
       const title = String(req.body?.title || '').trim() || 'Campaign';
 
+      // "All Contacts" is resolved and frozen by the campaign service. The
+      // client sends no phone list, so a stale 500-row page can neither trim
+      // the audience nor smuggle an ineligible hand-picked replacement into
+      // this mode. Eligibility is still checked after creation and at send.
+      if (req.body?.audienceKind === 'all_contacts') {
+        const created = await campaigns.create({
+          title,
+          message: req.body?.message,
+          workflowCategory: req.body?.workflowCategory || 'custom',
+          audience: { kind: 'all_contacts' }
+        }, req.actor);
+        await auditCampaign('campaign.created', req, created.campaign, {
+          summary: `Planned "${title}" from a brief for ${created.recipientCount} contacts`,
+          newState: { status: 'draft' },
+          metadata: {
+            planned: true,
+            audience_kind: 'all_contacts',
+            audience: created.recipientCount
+          }
+        });
+        return res.status(201).json({
+          recipe: 'described_campaign',
+          name: title,
+          candidates: created.recipientCount,
+          suppressedAsDuplicate: 0,
+          dedupeDays: 0,
+          priorCampaigns: 0,
+          audience: created.recipientCount,
+          created: [{
+            id: created.campaign.id,
+            title: created.campaign.title,
+            variant: 'all_contacts',
+            recipients: created.recipientCount
+          }],
+          note: null,
+          dryRun: false
+        });
+      }
+
       // The segment is saved first: a campaign built from an unsaved rule set
       // could never be rebuilt or audited later.
       const segment = await segmentService().createFromRules({

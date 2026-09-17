@@ -35,6 +35,27 @@ test('campaign router exposes the complete review lifecycle', () => {
   ]) handler(router, method, path);
 });
 
+test('accepting an All Contacts plan creates a draft without segment drafting', async () => {
+  let received;
+  const router = createCampaignRouter({
+    service: {
+      create: async (input, actor) => {
+        received = { input, actor };
+        return { campaign: { id: 'draft-1', title: input.title }, recipientCount: 1128 };
+      }
+    }
+  });
+  const res = response();
+  await handler(router, 'post', '/plan/accept')({
+    body: { title: 'Payment options', audienceKind: 'all_contacts', message: 'Vin from Vici: Hello. Reply STOP to opt out.' },
+    actor: { id: 9 }, params: {}
+  }, res);
+  assert.equal(res.statusCode, 201);
+  assert.deepEqual(received.input.audience, { kind: 'all_contacts' });
+  assert.equal(received.input.recipients, undefined);
+  assert.equal(res.payload.created[0].id, 'draft-1');
+});
+
 test('opportunity generation accepts control inputs only and defaults to dry-run', async () => {
   const calls = [];
   const router = createCampaignRouter({

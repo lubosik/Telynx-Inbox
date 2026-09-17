@@ -737,24 +737,28 @@ actor APIClient {
 
     func createCampaign(title: String,
                         message: String,
-                        recipients: [CampaignRecipientInput]) async throws -> CampaignActionResponse {
-        try await campaignMutation("/api/campaigns", body: [
+                        recipients: [CampaignRecipientInput],
+                        allContacts: Bool = false) async throws -> CampaignActionResponse {
+        var body: [String: Any] = [
             "title": title,
             "message": message,
             "workflowCategory": "manual",
             "recipients": recipients.map(\.requestBody)
-        ])
+        ]
+        if allContacts { body["audience"] = ["kind": "all_contacts"] }
+        return try await campaignMutation("/api/campaigns", body: body)
     }
 
     func editCampaign(id: String,
                       title: String,
                       message: String,
-                      recipients: [CampaignRecipientInput]) async throws -> CampaignActionResponse {
-        let (data, response) = try await patch("/api/campaigns/\(encodedPathSegment(id))", body: [
+                      recipients: [CampaignRecipientInput]?) async throws -> CampaignActionResponse {
+        var body: [String: Any] = [
             "title": title,
-            "message": message,
-            "recipients": recipients.map(\.requestBody)
-        ])
+            "message": message
+        ]
+        if let recipients { body["recipients"] = recipients.map(\.requestBody) }
+        let (data, response) = try await patch("/api/campaigns/\(encodedPathSegment(id))", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignActionResponse.self, from: data) }
         catch { throw APIError.decoding }
@@ -804,10 +808,41 @@ actor APIClient {
     /// Writes nothing. Describe the campaign and it works out who, chooses the
     /// offer, drafts the copy and says whether it may be sent.
     func planCampaign(brief: String) async throws -> CampaignPlan {
-        let (data, response) = try await post("/api/campaigns/plan", body: ["brief": brief])
-        try validate(data: data, response: response)
-        do { return try decoder.decode(CampaignPlan.self, from: data) }
-        catch { throw APIError.decoding }
+        var lastError: Error?
+        for attempt in 1...3 {
+            do {
+                // Audience drafting and copy drafting are sequential and each
+                // may legitimately take close to 20 seconds. The global 20s
+                // timeout made a healthy planner look broken on a slower run.
+                let (data, response) = try await post(
+                    "/api/campaigns/plan",
+                    body: ["brief": brief],
+                    timeout: 60
+                )
+                try validate(data: data, response: response)
+                do { return try decoder.decode(CampaignPlan.self, from: data) }
+                catch { throw APIError.decoding }
+            } catch {
+                lastError = error
+                guard attempt < 3, Self.isRetryableCampaignPlanError(error) else { throw error }
+                try? await Task.sleep(nanoseconds: UInt64(attempt) * 600_000_000)
+            }
+        }
+        throw lastError ?? APIError.decoding
+    }
+
+    private static func isRetryableCampaignPlanError(_ error: Error) -> Bool {
+        switch error {
+        case APIError.transport:
+            return true
+        case APIError.badResponse(let status):
+            return status == 429 || status >= 500
+        case APIError.server(_, let status, _):
+            guard let status else { return false }
+            return status == 429 || status >= 500
+        default:
+            return false
+        }
     }
 
     /// `POST /api/campaigns/plan/accept`, `campaigns.manage`.
@@ -818,23 +853,36 @@ actor APIClient {
     func acceptCampaignPlan(
         title: String,
         audienceDescription: String,
-        ruleSet: JSONValue,
+        audienceKind: String?,
+        ruleSet: JSONValue?,
         message: String,
         discountPercent: Int?,
         workflowCategory: String
-    ) async throws -> CampaignBuildResult {
+    ) async throws {
         var body: [String: Any] = [
             "title": title,
             "audienceDescription": audienceDescription,
-            "ruleSet": ruleSet.rawValue,
             "message": message,
             "workflowCategory": workflowCategory
         ]
+        if let audienceKind { body["audienceKind"] = audienceKind }
+        if let ruleSet { body["ruleSet"] = ruleSet.rawValue }
         if let discountPercent { body["discountPercent"] = discountPercent }
-        let (data, response) = try await post("/api/campaigns/plan/accept", body: body)
+        let (data, response) = try await post(
+            "/api/campaigns/plan/accept", body: body, timeout: 60
+        )
         try validate(data: data, response: response)
-        do { return try decoder.decode(CampaignBuildResult.self, from: data) }
-        catch { throw APIError.decoding }
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let created = payload["created"] as? [[String: Any]],
+              !created.isEmpty,
+              created.contains(where: { ($0["id"] as? String)?.isEmpty == false })
+        else {
+            throw APIError.server(
+                "No draft was created. Check Campaigns before trying again.",
+                statusCode: 409,
+                code: "CAMPAIGN_PLAN_CREATED_NO_DRAFT"
+            )
+        }
     }
 
     /// `GET /api/campaigns/opportunities`, `campaigns.read`.

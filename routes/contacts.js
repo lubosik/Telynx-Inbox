@@ -64,7 +64,12 @@ router.get('/', async (req, res) => {
     const start = (pageNumber - 1) * limit;
     const contacts = normalised.slice(start, start + limit);
 
-    res.json({ contacts, page: pageNumber, hasMore: start + limit < normalised.length });
+    res.json({
+      contacts,
+      page: pageNumber,
+      total: normalised.length,
+      hasMore: start + limit < normalised.length
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load contacts' });
   }

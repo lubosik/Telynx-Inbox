@@ -5,7 +5,6 @@ struct CampaignsView: View {
     @EnvironmentObject private var router: AppRouter
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
-    @State private var showingRecipes = false
     @State private var showingPlanner = false
 
     /// The campaign a confirmation is currently being asked about, and which
@@ -64,11 +63,6 @@ struct CampaignsView: View {
                             Label("Describe a campaign", systemImage: "text.bubble")
                         }
                         Button {
-                            showingRecipes = true
-                        } label: {
-                            Label("Build a standard one", systemImage: "wand.and.stars")
-                        }
-                        Button {
                             showingNewCampaign = true
                         } label: {
                             Label("Write one from scratch", systemImage: "square.and.pencil")
@@ -82,11 +76,6 @@ struct CampaignsView: View {
         }
         .sheet(isPresented: $showingNewCampaign) {
             CampaignEditorView {
-                Task { await model.load(reset: true) }
-            }
-        }
-        .sheet(isPresented: $showingRecipes) {
-            CampaignRecipeSheet {
                 Task { await model.load(reset: true) }
             }
         }
@@ -1474,17 +1463,16 @@ struct CampaignEditorView: View {
                     }
                 }
                 .foregroundStyle(.primary)
-                .disabled(mode == .allContacts && !model.allContactsAvailable)
                 .accessibilityAddTraits(model.audienceMode == mode ? .isSelected : [])
             }
             if model.isLoadingContacts && !model.hasLoadedContactSnapshot {
                 ProgressView("Checking contact-list size")
             } else if !model.hasLoadedContactSnapshot {
-                Text("All Contacts stays unavailable until the contact list can be loaded safely.")
+                Text("Loading the current contact total.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if !model.allContactsAvailable {
-                Text("All Contacts becomes available only when the complete workspace contains \(CampaignEditorModel.maximumAllContactsAudience.formatted()) contacts or fewer.")
+                Text("No contacts are available yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1555,11 +1543,11 @@ struct CampaignEditorView: View {
     }
 
     private var allContactsStep: some View {
-        Section("All Contacts Snapshot") {
-            LabeledContent("Contacts", value: model.allContactsSnapshot.count.formatted())
-            Label("This is not a list of eligible subscribers.", systemImage: "exclamationmark.shield")
+        Section("All Contacts") {
+            LabeledContent("Contacts", value: model.allContactsTotal.formatted())
+            Label("The server freezes the complete list when you create the draft.", systemImage: "person.3.fill")
                 .font(.subheadline.weight(.semibold))
-            Text("After the draft is saved, current consent, opt-outs, DND, invalid numbers, internal identities and other suppression rules are checked individually.")
+            Text("This count is not permission to message everyone. Current consent, opt-outs, DND, invalid numbers, internal identities and other suppression rules are checked individually before delivery.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -1592,29 +1580,37 @@ struct CampaignEditorView: View {
             }
 
             Section {
-                ForEach(Array(model.audienceInputs.prefix(50)), id: \.self) { recipient in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(recipient.name.flatMap { $0.isEmpty ? nil : $0 }
-                                 ?? PhoneFormatter.pretty(recipient.phone))
-                            if recipient.name?.isEmpty == false {
-                                Text(PhoneFormatter.pretty(recipient.phone))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                if model.audienceMode == .allContacts {
+                    Label("Complete contact list selected", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(ViciTheme.success)
+                    Text("The final eligible total appears after the draft is saved and checked against live consent and suppression data.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(model.audienceInputs.prefix(50)), id: \.self) { recipient in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(recipient.name.flatMap { $0.isEmpty ? nil : $0 }
+                                     ?? PhoneFormatter.pretty(recipient.phone))
+                                if recipient.name?.isEmpty == false {
+                                    Text(PhoneFormatter.pretty(recipient.phone))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                        }
-                        Spacer()
-                        if model.audienceMode == .selectedContacts {
-                            Button(role: .destructive) {
-                                model.removeSelectedContact(phone: recipient.phone)
-                            } label: {
-                                Image(systemName: "minus.circle")
+                            Spacer()
+                            if model.audienceMode == .selectedContacts {
+                                Button(role: .destructive) {
+                                    model.removeSelectedContact(phone: recipient.phone)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .accessibilityLabel("Remove \(recipient.name ?? recipient.phone)")
                             }
-                            .accessibilityLabel("Remove \(recipient.name ?? recipient.phone)")
                         }
                     }
                 }
-                if model.audienceCount > 50 {
+                if model.audienceMode != .allContacts && model.audienceCount > 50 {
                     Text("Plus \((model.audienceCount - 50).formatted()) more recipients")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -1641,6 +1637,9 @@ struct CampaignEditorView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(model.messageCount > 1_600 ? ViciTheme.destructive : Color.secondary)
+                Text("Keep Vin from Vici at the start and end with: Reply STOP to opt out.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // Tapping inserts at the end rather than at the cursor. SwiftUI's
@@ -2593,15 +2592,17 @@ private struct CampaignPlannerSheet: View {
     }
 
     private func create(_ plan: CampaignPlan) async {
-        guard let audience = plan.audience, let ruleSet = audience.ruleSet, let message = chosenCopy else { return }
+        guard let audience = plan.audience, let message = chosenCopy else { return }
+        guard audience.kind == "all_contacts" || audience.ruleSet != nil else { return }
         isCreating = true
         errorMessage = nil
         defer { isCreating = false }
         do {
-            _ = try await APIClient.shared.acceptCampaignPlan(
+            try await APIClient.shared.acceptCampaignPlan(
                 title: title,
                 audienceDescription: audience.description,
-                ruleSet: ruleSet,
+                audienceKind: audience.kind,
+                ruleSet: audience.ruleSet,
                 message: message,
                 discountPercent: plan.discountPercent,
                 workflowCategory: plan.workflowCategory

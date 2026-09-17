@@ -242,6 +242,51 @@ test('several candidates are returned so a human chooses', async () => {
   }
 });
 
+test('rejected copy is retried with rule ids only and a compliant version wins', async () => {
+  const record = { calls: [], replies: [
+    ['Vin from Vici: We accept credit card payments. Reply STOP to opt out.'],
+    GOOD_DRAFTS
+  ] };
+  const result = await draftCandidates({
+    workflowType: 'manual', brief: 'Tell customers they can now pay by card'
+  }, {
+    env: ENABLED,
+    completion: async input => {
+      record.calls.push(input.messages[1].content);
+      return { content: JSON.stringify(record.replies[record.calls.length - 1]), model: 'test' };
+    }
+  });
+  assert.equal(record.calls.length, 2);
+  assert.ok(result.candidates.length > 0);
+  assert.match(record.calls[1], /no_banned_terms/);
+  assert.equal(record.calls[1].includes('We accept credit card payments'), false,
+    'rejected text must never be recycled into a prompt');
+});
+
+test('permanent transport errors are not retried and transient failures are bounded', async () => {
+  let permanentCalls = 0;
+  await assert.rejects(() => draftCandidates({ workflowType: 'manual' }, {
+    env: ENABLED,
+    completion: async () => {
+      permanentCalls += 1;
+      throw Object.assign(new Error('bad request (400)'), { status: 400 });
+    },
+    sleep: async () => {}
+  }), error => error.code === 'CAMPAIGN_AI_COPY_UNAVAILABLE');
+  assert.equal(permanentCalls, 1);
+
+  let transientCalls = 0;
+  await assert.rejects(() => draftCandidates({ workflowType: 'manual' }, {
+    env: ENABLED,
+    completion: async () => {
+      transientCalls += 1;
+      throw Object.assign(new Error('rate limited (429)'), { status: 429 });
+    },
+    sleep: async () => {}
+  }), error => error.code === 'CAMPAIGN_AI_COPY_UNAVAILABLE');
+  assert.equal(transientCalls, 3);
+});
+
 test('the requested candidate count is clamped to a sane range', async () => {
   for (const [asked, expected] of [[1, 2], [4, 4], [5, 5], [50, 5], [undefined, 4]]) {
     const record = {};

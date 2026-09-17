@@ -88,6 +88,11 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
         guard case .number(let value)? = audienceDefinition?.child("requested_count") else { return nil }
         return Int(value)
     }
+
+    var isAllContactsAudience: Bool {
+        guard case .string(let kind)? = audienceDefinition?.child("kind") else { return false }
+        return kind == "all_contacts"
+    }
 }
 
 struct CampaignPage: Codable, Hashable {
@@ -557,6 +562,7 @@ struct CampaignPlan: Codable, Hashable {
 }
 
 struct CampaignPlanAudience: Codable, Hashable {
+    let kind: String?
     let description: String
     let matchedCount: Int
     let consideredCount: Int
@@ -826,7 +832,7 @@ enum CampaignAudienceMode: String, CaseIterable, Identifiable {
         case .selectedContacts:
             return "Search the contact list and choose people explicitly."
         case .allContacts:
-            return "Use a bounded snapshot of all contacts. Eligibility is checked after the draft is saved and again before any future send."
+            return "Use every contact in a server-owned snapshot. Only people who pass current consent, STOP, DND and campaign checks can receive it."
         case .manualNumbers:
             return "Enter phone numbers directly, including contacts not yet saved in the app."
         }

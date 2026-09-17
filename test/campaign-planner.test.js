@@ -16,6 +16,8 @@ const {
   explicitDiscount,
   normaliseWarning,
   planCampaign,
+  requestsAllContacts,
+  PAYMENT_ANNOUNCEMENT_COPY,
   shapeOf
 } = require('../lib/campaigns/planner');
 
@@ -70,7 +72,41 @@ test('the brief is reshaped into what the copy writer will accept', () => {
   // the ask with it.
   assert.equal(briefForDrafter('clearance, 20% off'), 'clearance, 20 percent off');
   assert.match(briefForDrafter('clearance on RT @ 20% — now!'), /^[A-Za-z0-9][A-Za-z0-9 .,:;'?()/-]*$/);
-  assert.ok(briefForDrafter('x'.repeat(400)).length <= 200);
+  assert.equal(briefForDrafter('x'.repeat(400)).length, 400,
+    'a legitimate description must not be silently cut mid-sentence');
+  assert.equal(briefForDrafter('We now accept credit cards and Apple Pay'),
+    'We now accept card payments and Apple Pay');
+});
+
+test('all-contact intent is explicit and does not swallow qualified cohorts', () => {
+  assert.equal(requestsAllContacts('Tell all the contacts about Apple Pay'), true);
+  assert.equal(requestsAllContacts('Let everybody know Apple Pay is live'), true);
+  assert.equal(requestsAllContacts('Tell everyone who bought RT about Apple Pay'), false);
+});
+
+test('the payment announcement fallback is compliant and names Vin', () => {
+  const { validateCopy } = require('../lib/campaigns/copy-validator');
+  assert.equal(validateCopy(PAYMENT_ANNOUNCEMENT_COPY).ok, true);
+  assert.match(PAYMENT_ANNOUNCEMENT_COPY, /^Vin from Vici:/);
+});
+
+test('all-contact payment plan works without trying to invent universal segment rules', async () => {
+  const client = {
+    from(table) {
+      assert.equal(table, 'sms_contacts');
+      return { select: () => Promise.resolve({ count: 1128, error: null }) };
+    }
+  };
+  const segments = { draftRules: async () => { throw new Error('must not draft universal rules'); } };
+  const plan = await planCampaign({
+    client, segments,
+    brief: 'Tell all the contacts that we accept credit cards and Apple Pay',
+    drafter: async () => ({ candidates: [] })
+  });
+  assert.equal(plan.audience.kind, 'all_contacts');
+  assert.equal(plan.audience.matchedCount, 1128);
+  assert.equal(plan.copy[0].text, PAYMENT_ANNOUNCEMENT_COPY);
+  assert.equal(plan.ready, true);
 });
 
 test('a warning always has a readable message', () => {

@@ -307,7 +307,7 @@ test('the real service still refuses the statuses this fake refuses', () => {
 
   const submit = source.slice(source.indexOf('async function submitReview'));
   assert.match(
-    submit.slice(0, 900),
+    submit.slice(0, 1600),
     /\.in\('status', \['draft', 'rejected'\]\)/,
     'submitReview no longer gates on draft/rejected; update the fake'
   );

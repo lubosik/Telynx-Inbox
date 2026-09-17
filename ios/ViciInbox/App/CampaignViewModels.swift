@@ -522,8 +522,6 @@ final class CampaignAttributionListModel: ObservableObject {
 
 @MainActor
 final class CampaignEditorModel: ObservableObject {
-    static let maximumAllContactsAudience = 500
-
     @Published var step: CampaignWizardStep = .type
     @Published var title: String
     @Published var message: String {
@@ -537,6 +535,7 @@ final class CampaignEditorModel: ObservableObject {
     @Published var contactSearch = ""
     @Published private(set) var contactResults: [ConversationSummary] = []
     @Published private(set) var allContactsSnapshot: [ConversationSummary] = []
+    @Published private(set) var allContactsTotal = 0
     @Published private(set) var selectedContacts: [String: ConversationSummary] = [:]
     @Published private(set) var allContactsAvailable = false
     @Published private(set) var hasLoadedContactSnapshot = false
@@ -606,10 +605,11 @@ final class CampaignEditorModel: ObservableObject {
         // local also removes the possibility of the two drifting apart, which
         // is what `hasUnsavedDraftChanges` compares.
         let resolvedTitle = campaign?.title ?? ""
-        let resolvedMessage = campaign?.proposedMessage ?? ""
-        let resolvedAudienceMode: CampaignAudienceMode =
-            campaign == nil ? .selectedContacts : .manualNumbers
-        let resolvedRecipientsText = recipients
+        let resolvedMessage = campaign?.proposedMessage ?? "Vin from Vici: "
+        let resolvedAudienceMode: CampaignAudienceMode = campaign == nil
+            ? .selectedContacts
+            : (campaign?.isAllContactsAudience == true ? .allContacts : .manualNumbers)
+        let resolvedRecipientsText = (campaign?.isAllContactsAudience == true ? [] : recipients)
             .filter(\.selected)
             // Phone-only editing cannot be corrupted by a saved contact name
             // containing a comma. Matching metadata is restored below.
@@ -620,6 +620,9 @@ final class CampaignEditorModel: ObservableObject {
         title = resolvedTitle
         message = resolvedMessage
         audienceMode = resolvedAudienceMode
+        allContactsTotal = campaign?.isAllContactsAudience == true
+            ? (campaign?.requestedRecipientCount ?? 0) : 0
+        allContactsAvailable = campaign?.isAllContactsAudience == true
         existingRecipientMetadata = metadata
         recipientsText = resolvedRecipientsText
         initialTitle = resolvedTitle
@@ -760,8 +763,10 @@ final class CampaignEditorModel: ObservableObject {
         case .selectedContacts:
             return Self.inputs(from: Array(selectedContacts.values), source: "manual_contact_selection")
         case .allContacts:
-            guard allContactsAvailable else { return [] }
-            return Self.inputs(from: allContactsSnapshot, source: "all_contacts_snapshot")
+            // Resolved and frozen by the server when the draft is created.
+            // Sending thousands of phone numbers from a device is both stale
+            // and the source of the old arbitrary 500-contact ceiling.
+            return []
         case .manualNumbers:
             return Self.parseRecipients(recipientsText).map { input in
                 guard let existing = existingRecipientMetadata[Self.phoneKey(input.phone)] else {
@@ -776,7 +781,9 @@ final class CampaignEditorModel: ObservableObject {
             }
         }
     }
-    var audienceCount: Int { audienceInputs.count }
+    var audienceCount: Int {
+        audienceMode == .allContacts ? allContactsTotal : audienceInputs.count
+    }
     var selectedContactList: [ConversationSummary] {
         selectedContacts.values.sorted {
             let order = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
@@ -789,7 +796,7 @@ final class CampaignEditorModel: ObservableObject {
         case .selectedContacts:
             return "\(audienceCount.formatted()) explicitly selected contact\(audienceCount == 1 ? "" : "s")"
         case .allContacts:
-            return "\(audienceCount.formatted()) contacts in this bounded snapshot"
+            return "\(audienceCount.formatted()) contacts will be frozen by the server when the draft is created"
         case .manualNumbers:
             return "\(audienceCount.formatted()) manually entered recipient\(audienceCount == 1 ? "" : "s")"
         }
@@ -818,6 +825,11 @@ final class CampaignEditorModel: ObservableObject {
     }
 
     func chooseAudienceMode(_ mode: CampaignAudienceMode) {
+        if existingID != nil && (initialAudienceMode == .allContacts || mode == .allContacts)
+            && mode != initialAudienceMode {
+            errorMessage = "To change an existing campaign to or from All Contacts, create a new draft. This keeps the saved audience intact."
+            return
+        }
         audienceMode = mode
         errorMessage = nil
     }
@@ -836,12 +848,12 @@ final class CampaignEditorModel: ObservableObject {
         selectedContacts.removeValue(forKey: phone)
     }
 
-    /// Contact selection is bounded. `All Contacts` is offered only when the
-    /// first 501-row request proves the complete workspace fits below the 500
-    /// recipient ceiling. Larger workspaces can still use server-side search
-    /// and explicit selection without downloading an unbounded address book.
+    /// Contact selection stays paged and bounded on the device. The total is
+    /// metadata only; choosing `All Contacts` sends a server-owned selector,
+    /// never the partial page held here.
     func loadContacts(search: String? = nil) async {
         let query = (search ?? contactSearch).trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingID != nil && initialAudienceMode == .allContacts && query.isEmpty { return }
         let requestID = UUID()
         contactRequestID = requestID
         isLoadingContacts = true
@@ -849,18 +861,18 @@ final class CampaignEditorModel: ObservableObject {
             if contactRequestID == requestID { isLoadingContacts = false }
         }
         do {
-            let pageSize = query.isEmpty ? Self.maximumAllContactsAudience + 1 : 200
+            let pageSize = 200
             let page = try await APIClient.shared.fetchContacts(search: query,
                                                                 page: 1,
                                                                 pageSize: pageSize)
             guard contactRequestID == requestID else { return }
             if query.isEmpty {
-                let isComplete = !page.hasMore && page.contacts.count <= Self.maximumAllContactsAudience
                 hasLoadedContactSnapshot = true
-                allContactsAvailable = isComplete
-                allContactsSnapshot = Array(page.contacts.prefix(Self.maximumAllContactsAudience))
+                allContactsTotal = page.total ?? page.contacts.count
+                allContactsAvailable = allContactsTotal > 0
+                allContactsSnapshot = page.contacts
                 contactResults = allContactsSnapshot
-                contactResultsTruncated = !isComplete
+                contactResultsTruncated = page.hasMore
             } else {
                 contactResults = page.contacts
                 contactResultsTruncated = page.hasMore
@@ -881,8 +893,20 @@ final class CampaignEditorModel: ObservableObject {
         guard !cleanMessage.isEmpty else { errorMessage = "Enter a message."; return false }
         guard cleanMessage.count <= 1_600 else { errorMessage = "Keep the message to 1,600 characters or fewer."; return false }
 
+        do {
+            let verdict = try await APIClient.shared.checkCampaignCopy(message: cleanMessage)
+            if !verdict.ok {
+                errorMessage = verdict.failures.first?.reason
+                    ?? "The message needs revision before it can be reviewed."
+                return false
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+
         let recipients = audienceInputs
-        guard !recipients.isEmpty else { errorMessage = "Add at least one recipient."; return false }
+        guard audienceCount > 0 else { errorMessage = "Add at least one recipient."; return false }
 
         isSaving = true
         do {
@@ -892,13 +916,21 @@ final class CampaignEditorModel: ObservableObject {
                     id: existingID,
                     title: cleanTitle,
                     message: cleanMessage,
-                    recipients: recipients
+                    // A campaign detail fetch only loads page one. Editing
+                    // copy must never replace the frozen audience with that
+                    // partial page. Omit recipients unless the operator
+                    // explicitly changed them in this editor.
+                    recipients: audienceMode == .allContacts ||
+                        (audienceMode == initialAudienceMode &&
+                         recipientsText == initialRecipientsText &&
+                         selectedContacts.isEmpty) ? nil : recipients
                 )
             } else {
                 response = try await APIClient.shared.createCampaign(
                     title: cleanTitle,
                     message: cleanMessage,
-                    recipients: recipients
+                    recipients: recipients,
+                    allContacts: audienceMode == .allContacts
                 )
             }
             isSaving = false
@@ -949,9 +981,9 @@ final class CampaignEditorModel: ObservableObject {
             if cleanTitle.count > 160 { return "Keep the title to 160 characters or fewer." }
         case .audience, .audienceReview:
             if audienceMode == .allContacts && !allContactsAvailable {
-                return "All Contacts is available only when the complete workspace has 500 contacts or fewer. Select contacts or enter numbers instead."
+                return "All Contacts is unavailable until the contact total can be loaded."
             }
-            if audienceInputs.isEmpty { return "Add at least one recipient." }
+            if audienceCount == 0 { return "Add at least one recipient." }
         case .message:
             let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
             if cleanMessage.isEmpty { return "Enter a message." }

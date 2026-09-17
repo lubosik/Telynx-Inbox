@@ -165,7 +165,12 @@ struct MessagePreview: Codable, Hashable {
     }
 }
 
-struct ContactPage: Codable { let contacts: [ConversationSummary]; let page: Int; let hasMore: Bool }
+struct ContactPage: Codable {
+    let contacts: [ConversationSummary]
+    let page: Int
+    let total: Int?
+    let hasMore: Bool
+}
 
 struct ContactDetailResponse: Codable {
     let contact: ConversationSummary
