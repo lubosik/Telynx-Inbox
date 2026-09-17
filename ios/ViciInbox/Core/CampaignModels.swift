@@ -553,6 +553,7 @@ struct CampaignPlan: Codable, Hashable {
     let copy: [CampaignCopyCandidate]
     let copyError: CampaignPlanError?
     let warnings: [CampaignPlanWarning]
+    let nextSteps: [String]?
     let ready: Bool
 
     var offerLabel: String {
@@ -579,6 +580,7 @@ struct CampaignPlanSample: Codable, Hashable, Identifiable {
 struct CampaignPlanError: Codable, Hashable {
     let code: String?
     let message: String
+    let nextSteps: [String]?
 }
 
 struct CampaignPlanWarning: Codable, Hashable, Identifiable {

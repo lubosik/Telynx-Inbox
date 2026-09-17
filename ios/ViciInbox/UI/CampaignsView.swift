@@ -2483,7 +2483,11 @@ private struct CampaignPlannerSheet: View {
                 }
 
                 if let errorMessage {
-                    Section { Text(errorMessage).font(.footnote).foregroundStyle(ViciTheme.warning) }
+                    Section("What happened and what to do next") {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(ViciTheme.warning)
+                    }
                 }
             }
             .navigationTitle("Describe a campaign")
@@ -2548,6 +2552,16 @@ private struct CampaignPlannerSheet: View {
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
+                }
+            }
+        }
+
+        if !plan.ready, let steps = plan.nextSteps, !steps.isEmpty {
+            Section("How to make it work") {
+                ForEach(steps.indices, id: \.self) { index in
+                    Text("\(index + 1). \(steps[index])")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

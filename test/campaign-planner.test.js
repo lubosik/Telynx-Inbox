@@ -157,6 +157,7 @@ test('an audience below the floor is warned about and is not ready', async () =>
   assert.ok(floor, 'four people is not a campaign and the plan must say so');
   assert.match(floor.message, /below the 25/);
   assert.equal(plan.ready, false, 'the app must not offer a Create action that the builder will refuse');
+  assert.match(plan.nextSteps.join(' '), /at least 25/);
 });
 
 test('transient rule-writing and preview failures retry before returning a plan', async () => {
@@ -192,6 +193,30 @@ test('a genuine clarification request is returned without repeating the same mod
   assert.equal(calls, 1);
   assert.equal(plan.ready, false);
   assert.match(plan.audienceError.message, /Which people/);
+  assert.equal(plan.nextSteps.length, 2);
+  assert.match(plan.nextSteps[0], /missing audience detail/);
+});
+
+test('unsupported audiences explain the available data and how to proceed', async () => {
+  const plan = await planCampaign({
+    client: stubClient(), brief: 'Reach people based on a fact LUKO does not store',
+    drafter: stubDrafter(),
+    segments: { draftRules: async () => ({ status: 'unanswerable', because: 'raw model detail' }) }
+  });
+  assert.equal(plan.ready, false);
+  assert.equal(plan.audienceError.code, 'SEGMENT_UNSUPPORTED_AUDIENCE');
+  assert.equal(plan.audienceError.message.includes('raw model detail'), false);
+  assert.match(plan.nextSteps.join(' '), /orders, products, spend, timing/);
+});
+
+test('unexpected planning errors stay private but leave concrete recovery steps', async () => {
+  const plan = await planCampaign({
+    client: stubClient(), brief: 'Reach recent buyers', drafter: stubDrafter(),
+    segments: { draftRules: async () => { throw new Error('database table and secret detail'); } }
+  });
+  assert.equal(plan.audienceError.code, 'SEGMENT_PLAN_UNAVAILABLE');
+  assert.equal(plan.audienceError.message.includes('database table'), false);
+  assert.match(plan.nextSteps.join(' '), /Plan it again/);
 });
 
 test('an empty audience is not ready even with good copy', async () => {
@@ -202,6 +227,7 @@ test('an empty audience is not ready even with good copy', async () => {
     drafter: stubDrafter()
   });
   assert.equal(plan.ready, false);
+  assert.match(plan.nextSteps.join(' '), /Broaden/);
 });
 
 test('a failed audience still returns the copy, and the reverse', async () => {
@@ -238,6 +264,7 @@ test('every draft being rejected says so rather than looking empty', async () =>
   });
   assert.equal(plan.copyError.code, 'ALL_DRAFTS_REJECTED');
   assert.equal(plan.ready, false);
+  assert.match(plan.nextSteps.join(' '), /Write from scratch/);
 });
 
 test('an empty brief is refused before anything is called', async () => {

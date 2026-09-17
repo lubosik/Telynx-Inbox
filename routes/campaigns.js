@@ -138,6 +138,48 @@ function sendError(res, error, action = 'working on this campaign') {
   return res.status(status).json(body);
 }
 
+/** Safe actions for campaign-creation failures, never generated from SQL or model text. */
+function campaignCreationNextSteps(code) {
+  if (code === 'CAMPAIGN_NO_ELIGIBLE_AUDIENCE') return [
+    'Open Growth > Segments and check the new segment and its eligible-member count.',
+    'Widen the audience, or wait if those contacts were recently messaged, then create a new draft.'
+  ];
+  if (code === 'AUDIENCE_BELOW_MINIMUM') return [
+    'Widen the segment until enough eligible people qualify.',
+    'If the small group was intentional, use individual conversations instead of a campaign.'
+  ];
+  if (code === 'CAMPAIGN_AUDIENCE_LIMIT_EXCEEDED') return [
+    'Choose a narrower segment or selected contacts.',
+    'If the whole list is required, ask an administrator to review the workspace campaign limit.'
+  ];
+  if (code === 'SEGMENT_RULES_INVALID' || code === 'SEGMENT_NOT_RECOMPUTABLE') return [
+    'Plan the audience again using current products, order dates, spend, or an existing segment.',
+    'If it still fails, edit the rules manually under Growth > Segments.'
+  ];
+  if (code === 'CAMPAIGN_COPY_NOT_REVIEWABLE' || code === 'MESSAGE_REQUIRED') return [
+    'Edit the message so Vin from Vici is identified and it ends with Reply STOP to opt out.',
+    'Check the copy in the editor, then save the draft again.'
+  ];
+  if (code === 'CAMPAIGNS_NOT_READY') return [
+    'Ask an administrator to apply the required campaign database update.',
+    'Try creating the draft again only after that update is confirmed.'
+  ];
+  return [
+    'Check Growth > Campaigns before retrying; a draft may have been created even if the response failed.',
+    'If no draft appears, try once more. If it still fails, share the displayed code or reference with an administrator.'
+  ];
+}
+
+function sendCampaignCreationError(res, error) {
+  const { status, body } = presentError(error, { action: 'creating this campaign' });
+  const nextSteps = campaignCreationNextSteps(error?.code);
+  return res.status(status).json({
+    ...body,
+    error: `${body.error}\n\nWhat to do next:\n${nextSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`,
+    nextSteps
+  });
+}
+
 function createCampaignRouter({
   service,
   auditApprovalWriter,
@@ -294,7 +336,7 @@ function createCampaignRouter({
 
       if (!result.created?.length) {
         throw new CampaignRequestError(
-          `The segment was saved, but no campaign draft was created. ${result.note || 'No contacts are currently eligible.'} Edit that segment or describe a wider audience.`,
+          `The segment was saved, but no campaign draft was created. ${result.note || 'No contacts are currently eligible.'}`,
           'CAMPAIGN_NO_ELIGIBLE_AUDIENCE', 409
         );
       }
@@ -310,7 +352,7 @@ function createCampaignRouter({
         }
       });
       return res.status(201).json({ ...result, segment });
-    } catch (error) { return sendError(res, error, 'creating this campaign'); }
+    } catch (error) { return sendCampaignCreationError(res, error); }
   });
 
   /**
@@ -682,7 +724,7 @@ function createCampaignRouter({
         }
       });
       return res.status(201).json(result);
-    } catch (error) { return sendError(res, error, 'creating this campaign'); }
+    } catch (error) { return sendCampaignCreationError(res, error); }
   });
 
   router.get('/:id', async (req, res) => {

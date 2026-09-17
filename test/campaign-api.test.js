@@ -104,6 +104,21 @@ test('a described audience with no eligible recipients reports no draft', async 
   assert.equal(res.statusCode, 409);
   assert.equal(res.payload.code, 'CAMPAIGN_NO_ELIGIBLE_AUDIENCE');
   assert.match(res.payload.error, /no campaign draft was created/i);
+  assert.match(res.payload.error, /What to do next:/);
+  assert.match(res.payload.nextSteps.join(' '), /Growth > Segments/);
+});
+
+test('manual creation limits explain the audience fix, not only the error code', async () => {
+  const router = createCampaignRouter({ service: {
+    create: async () => { throw new CampaignRequestError(
+      'All Contacts exceeds the workspace limit.', 'CAMPAIGN_AUDIENCE_LIMIT_EXCEEDED', 409
+    ); }
+  } });
+  const res = response();
+  await handler(router, 'post', '/')({ body: {}, actor: { id: 9 }, params: {} }, res);
+  assert.equal(res.statusCode, 409);
+  assert.match(res.payload.error, /What to do next:/);
+  assert.match(res.payload.nextSteps.join(' '), /narrower segment/);
 });
 
 test('opportunity generation accepts control inputs only and defaults to dry-run', async () => {
