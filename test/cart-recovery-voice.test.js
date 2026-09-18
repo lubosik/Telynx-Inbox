@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { listAccountVoices } = require('../lib/assistant/voice');
+const { PREFERRED_US_VOICE_IDS, curatedRecoveryVoices } = require('../lib/cart-recovery/recovery-voices');
 const { attributionDecision, attributionPayload } = require('../lib/cart-recovery/attribution');
 const { createCartRecoveryService, normalizeEvent } = require('../lib/cart-recovery/service');
 const { createVoiceEventHandler, decodeClientState } = require('../lib/cart-recovery/voice-events');
@@ -168,10 +169,47 @@ test('settings readiness includes the separate production provider approval gate
   assert.ok(blocked.settings.voiceBlockers.includes('provider_approval_missing'));
 
   const approved = await createCartRecoveryService({
-    client: settingsClient(), env: { ...VOICE_ENV, LUKO_VOICE_PROVIDER_APPROVED: 'true' }
+    client: settingsClient(), env: { ...VOICE_ENV, LUKO_VOICE_PROVIDER_APPROVED: 'true',
+      VICI_VOICE_OPT_OUT_HANDLER_VERIFIED: 'true', CART_RECOVERY_VOICE_ENABLED: 'true', VOICE_DRY_RUN: 'false' }
   }).getSettings();
   assert.equal(approved.settings.voiceProductionReady, true);
   assert.doesNotMatch(approved.settings.voiceBlockers.join(','), /provider_approval_missing/);
+});
+
+test('voice choice saves without a toll-free number but production remains locked', async () => {
+  let saved;
+  const client = { from(table) {
+    assert.equal(table, 'luko_cart_recovery_settings');
+    return { upsert(patch) {
+      saved = patch;
+      return { select() { return { async single() { return { data: patch, error: null }; } }; } };
+    } };
+  } };
+  const id = PREFERRED_US_VOICE_IDS[0];
+  const service = createCartRecoveryService({ client, env: { ...VOICE_ENV,
+    VICI_VOICE_OPT_OUT_TOLL_FREE_NUMBER: '' },
+    listVoices: async () => [{ id, name: 'Mark', accent: 'american', category: 'professional',
+      gender: 'male', verified: true }] });
+  const result = await service.updateSettings({ input: {
+    voiceEnabled: true, voiceId: id, voiceHumanAnswerMode: 'DISABLED'
+  }, actor: { id: 1 } });
+  assert.equal(saved.voice_enabled, true);
+  assert.equal(saved.voice_id, id);
+  assert.equal(saved.voice_opt_out_toll_free_number, null);
+  assert.equal(result.settings.voiceProductionReady, false);
+  assert.ok(result.settings.voiceBlockers.includes('toll_free_opt_out_missing'));
+  assert.ok(result.settings.voiceBlockers.includes('toll_free_opt_out_handler_unverified'));
+  assert.ok(result.settings.voiceBlockers.includes('provider_approval_missing'));
+});
+
+test('the Vin picker is curated, American, and male-majority', () => {
+  const catalog = PREFERRED_US_VOICE_IDS.map((id, index) => ({ id, accent: 'american',
+    gender: index < 5 ? 'male' : 'female', verified: true }));
+  catalog.push({ id: 'british-voice', accent: 'british', gender: 'male', verified: true });
+  catalog.push({ id: 'unverified-voice', accent: 'american', gender: 'male', verified: false });
+  const shown = curatedRecoveryVoices(catalog);
+  assert.deepEqual(shown.map(voice => voice.id), PREFERRED_US_VOICE_IDS);
+  assert.ok(shown.filter(voice => voice.gender === 'male').length > shown.length / 2);
 });
 
 test('combined registration grants voice only with both explicit flags and the exact consent version', () => {
@@ -267,6 +305,9 @@ test('ElevenLabs recovery catalogue is account-scoped and retains verification e
         { voice_id: 'verified-1', name: 'Vin', category: 'cloned', preview_url: 'https://cdn.example/vin.mp3',
           labels: { accent: 'american' }, voice_verification: { is_verified: true } },
         { voice_id: 'premade-1', name: 'Daniel', category: 'premade' },
+        { voice_id: 'professional-1', name: 'Mark', category: 'professional',
+          labels: { accent: 'american', gender: 'male' }, sharing: { status: 'copied' },
+          voice_verification: { requires_verification: false, is_verified: false } },
         { voice_id: 'unverified-1', name: 'Draft', category: 'cloned', voice_verification: { is_verified: false } },
         { voice_id: '', name: 'Malformed' }
       ] });
@@ -275,7 +316,7 @@ test('ElevenLabs recovery catalogue is account-scoped and retains verification e
   assert.match(request.url, /\/v1\/voices$/);
   assert.equal(request.init.headers['xi-api-key'], 'XI_TEST');
   assert.deepEqual(voices.map(voice => [voice.id, voice.verified]), [
-    ['verified-1', true], ['premade-1', true], ['unverified-1', false]
+    ['verified-1', true], ['premade-1', true], ['professional-1', true], ['unverified-1', false]
   ]);
 });
 

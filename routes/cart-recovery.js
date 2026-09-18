@@ -115,6 +115,22 @@ function analytics(service, { env = process.env, audit = logAuditSafely } = {}) 
     } catch (error) { return sendError(res, error, 'previewing this Vin voice'); }
   });
 
+  router.post('/journeys/:id/voice-attempt/preview', async (req, res) => {
+    try {
+      noStore(res);
+      const journeyId = id(req.params.id);
+      const result = await service.previewRecoveryAttempt({ journeyId, branch: req.body?.branch });
+      await auditCartRecovery({
+        eventType: 'cart_recovery.voice_previewed', req, entityId: journeyId,
+        summary: 'Previewed the saved voice message script for a recovery journey',
+        metadata: { automation: 'abandoned_cart_recovery', attempt_id: result.attemptId, branch: result.branch }
+      }, audit);
+      res.set('Content-Type', result.contentType);
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.send(result.audio);
+    } catch (error) { return sendError(res, error, 'previewing this recovery message'); }
+  });
+
   router.put('/settings', async (req, res) => {
     try {
       noStore(res);

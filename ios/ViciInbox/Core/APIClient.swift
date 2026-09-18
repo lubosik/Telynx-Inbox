@@ -557,6 +557,16 @@ actor APIClient {
         return data
     }
 
+    /// Regenerates the saved script for a delivered recovery attempt. This is
+    /// a QC preview, not a recording of the customer call.
+    func previewCartRecoveryAttempt(journeyID: String, branch: String) async throws -> Data {
+        let path = "/api/cart-recovery/journeys/\(encodedPathSegment(journeyID))/voice-attempt/preview"
+        let (data, response) = try await post(path, body: ["branch": branch], timeout: 30)
+        try validate(data: data, response: response)
+        guard !data.isEmpty else { throw APIError.decoding }
+        return data
+    }
+
     @discardableResult
     func updateCartRecoverySettings(_ settings: CartRecoverySettings) async throws -> CartRecoverySettings {
         let (data, response) = try await put("/api/cart-recovery/settings", body: settings.requestBody)

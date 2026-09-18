@@ -530,6 +530,7 @@ private struct CartRecoveryJourneyRow: View {
 
 struct CartRecoveryJourneyDetailView: View {
     @StateObject private var model: CartRecoveryJourneyDetailModel
+    @StateObject private var attemptPreview = CartRecoveryVoicePreviewPlayer()
     @EnvironmentObject private var session: SessionModel
     @State private var editReply: CartRecoveryReply?
     @State private var approveReply: CartRecoveryReply?
@@ -584,6 +585,7 @@ struct CartRecoveryJourneyDetailView: View {
                            detail: "Pull to try again.")
             }
         }
+        .onDisappear { attemptPreview.stop() }
         .navigationTitle("Recovery Journey")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
@@ -734,6 +736,26 @@ struct CartRecoveryJourneyDetailView: View {
                 if attempt.voicemailPlayedAt != nil {
                     Label("Voicemail delivered after the greeting", systemImage: "voicemail.fill")
                         .foregroundStyle(ViciTheme.success)
+                    Button(attemptPreview.previewingVoiceID == "\(attempt.id):voicemail"
+                           ? "Stop voicemail preview" : "Listen to voicemail script") {
+                        attemptPreview.toggleAttempt(journeyID: journey.id,
+                                                     attemptID: attempt.id, branch: "voicemail")
+                    }
+                }
+                if attempt.humanMessagePlayedAt != nil {
+                    Button(attemptPreview.previewingVoiceID == "\(attempt.id):human"
+                           ? "Stop call-message preview" : "Listen to call-message script") {
+                        attemptPreview.toggleAttempt(journeyID: journey.id,
+                                                     attemptID: attempt.id, branch: "human")
+                    }
+                }
+                if attempt.voicemailPlayedAt != nil || attempt.humanMessagePlayedAt != nil {
+                    Text("This regenerates the saved words in Vin’s voice. It is not a recording of the customer call.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if attemptPreview.isLoading { ProgressView("Preparing message preview") }
+                if let error = attemptPreview.errorMessage {
+                    Text(error).font(.caption).foregroundStyle(ViciTheme.warning)
                 }
                 if attempt.transferConnectedAt != nil {
                     Label("Connected to the Vici team", systemImage: "phone.arrow.up.right.fill")
@@ -978,9 +1000,9 @@ struct CartRecoverySettingsView: View {
                                     draft?.voiceName = voice.name
                                 } label: {
                                     if draft?.voiceID == voice.id {
-                                        Label(voice.name, systemImage: "checkmark")
+                                        Label("\(voice.name) · \(voice.gender?.capitalized ?? "Voice")", systemImage: "checkmark")
                                     } else {
-                                        Text(voice.name)
+                                        Text("\(voice.name) · \(voice.gender?.capitalized ?? "Voice")")
                                     }
                                 }
                             }
@@ -1027,6 +1049,8 @@ struct CartRecoverySettingsView: View {
 
                     TextField("Toll-free call opt-out number", text: optionalStringBinding(\.voiceOptOutTollFreeNumber))
                         .keyboardType(.phonePad)
+                    Text("For voicemail, callers need a US toll-free number that automatically accepts requests to stop future calls. You can save a voice now, but customer calls stay locked until that line and the separate approvals are in place.")
+                        .font(.caption).foregroundStyle(.secondary)
                     TextField("Live team transfer number", text: optionalStringBinding(\.voiceTransferNumber))
                         .keyboardType(.phonePad)
                     HStack {
@@ -1039,7 +1063,7 @@ struct CartRecoverySettingsView: View {
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(draft?.voiceProductionReady == true ? ViciTheme.success : ViciTheme.warning)
                     if let blockers = draft?.voiceBlockers, !blockers.isEmpty {
-                        Text(blockers.map(cartRecoveryLabel).joined(separator: " · "))
+                        Text(blockers.map(cartRecoveryVoiceBlocker).joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 } header: {
@@ -1260,13 +1284,30 @@ private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, 
         start(voice)
     }
 
+    func toggleAttempt(journeyID: String, attemptID: String, branch: String) {
+        let playbackID = "\(attemptID):\(branch)"
+        if previewingVoiceID == playbackID || isLoading {
+            stop()
+            return
+        }
+        start(id: playbackID) {
+            try await APIClient.shared.previewCartRecoveryAttempt(journeyID: journeyID, branch: branch)
+        }
+    }
+
     private func start(_ voice: RecoveryVoiceOption) {
+        start(id: voice.id) {
+            try await APIClient.shared.previewCartRecoveryVoice(id: voice.id)
+        }
+    }
+
+    private func start(id: String, retrieve: @escaping () async throws -> Data) {
         stop()
         isLoading = true
         errorMessage = nil
         loadTask = Task { [weak self] in
             do {
-                let data = try await APIClient.shared.previewCartRecoveryVoice(id: voice.id)
+                let data = try await retrieve()
                 guard !Task.isCancelled, let self else { return }
 
                 let session = AVAudioSession.sharedInstance()
@@ -1280,7 +1321,7 @@ private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, 
                                   userInfo: [NSLocalizedDescriptionKey: "The preview audio could not start."])
                 }
                 self.player = player
-                self.previewingVoiceID = voice.id
+                self.previewingVoiceID = id
                 self.isLoading = false
             } catch {
                 guard !Task.isCancelled, let self else { return }
@@ -1352,6 +1393,29 @@ private func cartRecoveryLabel(_ raw: String) -> String {
     raw.replacingOccurrences(of: "_", with: " ")
         .replacingOccurrences(of: "-", with: " ")
         .lowercased().capitalized
+}
+
+private func cartRecoveryVoiceBlocker(_ code: String) -> String {
+    switch code {
+    case "toll_free_opt_out_missing":
+        return "Add a working US toll-free automated call opt-out line"
+    case "provider_approval_missing":
+        return "Confirm the Telnyx outbound voice use case before production calls"
+    case "toll_free_opt_out_handler_unverified":
+        return "Test and verify the automated toll-free opt-out line"
+    case "compliance_approval_missing":
+        return "Voice consent, script and opt-out compliance review is pending"
+    case "voice_worker_disabled":
+        return "The production voice worker is off"
+    case "voice_dry_run_enabled":
+        return "Voice is in preview mode"
+    case "vin_voice_missing":
+        return "Choose and save a Vin voice"
+    case "transfer_number_missing":
+        return "Add a team phone number for live transfers"
+    default:
+        return cartRecoveryLabel(code)
+    }
 }
 
 private func cartRecoveryMoney(_ amount: FlexibleDecimal, currency: String) -> String {
