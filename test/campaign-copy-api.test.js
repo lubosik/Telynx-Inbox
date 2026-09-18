@@ -91,6 +91,48 @@ test('the route exists and returns candidates for a human to choose from', async
   assert.deepEqual(touched, [], 'the drafting route must not call any campaign service method');
 });
 
+test('an attached coupon is resolved from WooCommerce before copy is suggested', async () => {
+  const drafted = [];
+  const verified = [];
+  const router = createCampaignRouter({
+    service: recordingService([]),
+    generationService: {},
+    copyDrafter: async input => { drafted.push(input); return DRAFT_RESULT; },
+    campaignCouponVerifier: async input => {
+      verified.push(input);
+      return { code: 'cc20', amount: '20', minimum_amount: '100.00' };
+    }
+  });
+  const res = response();
+  await handler(router, 'post', PATH)({
+    body: { workflowType: 'manual', couponCode: 'cc20' },
+    actor: { id: 9 }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(verified, [{ code: 'CC20', percent: null }]);
+  assert.equal(drafted.length, 1);
+  assert.equal(drafted[0].couponCode, 'CC20');
+  assert.equal(drafted[0].couponPercent, 20);
+  assert.equal(drafted[0].minimumSpend, 100);
+});
+
+test('the iOS manual editor offers a one-tap validated rewrite without replacing the draft', () => {
+  const root = path.join(__dirname, '..');
+  const view = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/CampaignsView.swift'), 'utf8');
+  const model = fs.readFileSync(path.join(root, 'ios/ViciInbox/App/CampaignViewModels.swift'), 'utf8');
+  const api = fs.readFileSync(path.join(root, 'ios/ViciInbox/Core/APIClient.swift'), 'utf8');
+
+  assert.match(view, /Label\("Suggest valid copy", systemImage: "wand\.and\.stars"\)/);
+  assert.match(view, /Every version shown here has passed the campaign copy checks/);
+  assert.match(model, /func suggestValidCopy\(\) async/);
+  assert.match(model, /instruction: nil, currentMessage: current/);
+  assert.match(model, /couponCode: attachedCoupon\?\.code/);
+  assert.match(api, /if let brief,[\s\S]*body\["brief"\] = brief/);
+  assert.doesNotMatch(view, /model\.message\s*=\s*model\.suggestions\.first/,
+    'suggesting must not silently overwrite the human draft');
+});
+
 test('the exact iPhone smart-apostrophe case is normalized and reported in plain English', async () => {
   const { router, touched } = routerWith(async () => DRAFT_RESULT);
   const res = response();

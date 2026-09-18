@@ -26,6 +26,7 @@ const { planCampaign } = require('../lib/campaigns/planner');
 const { loadHumanStyle } = require('../lib/campaigns/human-style');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
 const { createCampaignCoupon } = require('../lib/campaigns/coupon-builder');
+const { verifyExistingCoupon } = require('../lib/campaigns/existing-coupon');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -69,7 +70,11 @@ const COPY_SUGGESTION_BODY_KEYS = new Set([
   // customer evidence: it is a TEMPLATE, so where a customer's name will
   // eventually appear it currently reads {{first_name}}. copy-writer.js
   // re-checks it for real identifiers before it reaches a model.
-  'currentMessage'
+  'currentMessage',
+  // The code is safe campaign shape, not customer evidence. The route never
+  // trusts the phone's discount details: it looks this code up in
+  // WooCommerce and gives the drafter the live percentage and minimum.
+  'couponCode'
 ]);
 
 function generationRequest(body) {
@@ -227,7 +232,8 @@ function createCampaignRouter({
   campaignTestSender,
   campaignTestAuditWriter,
   campaignCouponCreator,
-  campaignCouponAuditWriter
+  campaignCouponAuditWriter,
+  campaignCouponVerifier
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -248,6 +254,7 @@ function createCampaignRouter({
   // handler. The instance is per-router so its cache is shared across requests.
   const portfolio = opportunityPortfolio || createOpportunityPortfolioService();
   const createCoupon = campaignCouponCreator || createCampaignCoupon;
+  const verifyCoupon = campaignCouponVerifier || verifyExistingCoupon;
   // Lazy for the same reason as the portfolio above: constructing this router
   // must not require database credentials, because the route tests build it
   // without any. Resolved on first use, inside a handler.
@@ -777,8 +784,24 @@ function createCampaignRouter({
     try {
       res.set('Cache-Control', 'no-store, private');
       const input = copySuggestionRequest(req.body);
+      let draftingInput = input;
+      if (input.couponCode) {
+        const code = String(input.couponCode).trim().toUpperCase();
+        // The app may identify the coupon it attached, but WooCommerce owns
+        // every commercial fact. This also prevents a stale or expired coupon
+        // from being written into otherwise valid suggested copy.
+        const coupon = await verifyCoupon({ code, percent: null });
+        draftingInput = {
+          ...input,
+          couponCode: code,
+          couponPercent: Number(coupon.amount),
+          minimumSpend: Number(coupon.minimum_amount || 0)
+        };
+      }
       const styleTraits = await styleFor(req.actor);
-      const result = await drafter(styleTraits.length ? { ...input, styleTraits } : input);
+      const result = await drafter(styleTraits.length
+        ? { ...draftingInput, styleTraits }
+        : draftingInput);
       // Rejected drafts leave this process as rule ids and reasons only. Their
       // text is never returned, so a reviewer cannot lift a draft that failed
       // validation out of a response body and paste it into a campaign.

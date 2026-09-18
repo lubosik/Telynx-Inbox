@@ -1000,14 +1000,22 @@ actor APIClient {
     /// Still campaign shape, not customer evidence: it is a template, so a
     /// customer's name appears in it as `{{first_name}}`.
     func suggestCampaignCopy(
-        brief: String, count: Int = 3, currentMessage: String? = nil
+        brief: String? = nil,
+        count: Int = 3,
+        currentMessage: String? = nil,
+        couponCode: String? = nil,
+        approvedLink: String? = nil
     ) async throws -> CampaignCopySuggestions {
         var body: [String: Any] = [
             "workflowType": "manual",
-            "brief": brief,
             "candidateCount": count
         ]
+        if let brief, !brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["brief"] = brief
+        }
         if let currentMessage, !currentMessage.isEmpty { body["currentMessage"] = currentMessage }
+        if let couponCode, !couponCode.isEmpty { body["couponCode"] = couponCode }
+        if let approvedLink, !approvedLink.isEmpty { body["linkUrl"] = approvedLink }
         let (data, response) = try await post("/api/campaigns/copy-suggestions", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignCopySuggestions.self, from: data) }

@@ -1722,14 +1722,34 @@ struct CampaignEditorView: View {
             }
 
             if model.aiCopyEnabled {
-                Section("Draft it with AI") {
+                Section("Suggested copy") {
+                    Button {
+                        Task { await model.suggestValidCopy() }
+                    } label: {
+                        if model.isDrafting {
+                            HStack { ProgressView(); Text("Writing valid copy") }
+                        } else {
+                            Label("Suggest valid copy", systemImage: "wand.and.stars")
+                        }
+                    }
+                    .disabled(!model.canSuggestValidCopy)
+                    .accessibilityHint("Rewrites the message above in your style and shows only versions that pass the campaign copy checks")
+
+                    Text("Already wrote the message? Tap once for three versions in your usual tone. Every version shown here has passed the campaign copy checks. Your draft is not replaced until you choose one.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    Text("Or describe what you want changed")
+                        .font(.subheadline.weight(.semibold))
                     TextEditor(text: $model.brief)
                         .frame(minHeight: 70)
                         .focused($focusedField, equals: .brief)
                         .accessibilityLabel("What the message should say")
                         .overlay(alignment: .topLeading) {
                             if model.brief.isEmpty {
-                                Text("Say what the message should do, in your own words. Tap the microphone on the keyboard to speak it.")
+                                Text("For example: make it shorter and lead with Apple Pay. Tap the microphone to speak it.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 8).padding(.leading, 5)

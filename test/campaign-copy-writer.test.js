@@ -355,7 +355,7 @@ test('validation is not skippable by injecting a permissive validator through th
   // draftCandidates takes its validator from a second, internal argument. The
   // route calls it with one argument, so a request body cannot reach it.
   const source = fs.readFileSync(path.join(__dirname, '..', 'routes/campaigns.js'), 'utf8');
-  assert.match(source, /await drafter\(styleTraits\.length \? \{ \.\.\.input, styleTraits \} : input\)/);
+  assert.match(source, /await drafter\(styleTraits\.length[\s\S]*?\.\.\.draftingInput, styleTraits[\s\S]*?: draftingInput\)/);
   assert.doesNotMatch(source, /await drafter\([^;]*validator:/,
     'the route must never accept or pass a client-supplied validator');
 });
@@ -615,6 +615,41 @@ test('merge fields in the current message are not mistaken for customer identity
     GOOD_DRAFTS, record
   );
   assert.ok(record.user.includes('{{first_name}}'));
+});
+
+test('an approved Vici link in manual copy can be rewritten but an arbitrary link cannot', async () => {
+  const current = `${BRAND}: Cards and Apple Pay work at https://vicipeptides.com. ${COPY_RULES.optOut.exactSuffix}`;
+  const record = {};
+  await draft({
+    workflowType: 'manual',
+    currentMessage: current,
+    linkUrl: 'https://vicipeptides.com'
+  }, GOOD_DRAFTS, record);
+  assert.ok(record.user.includes(current));
+  assert.match(record.user, /include it exactly once/);
+
+  await assert.rejects(
+    draft({ workflowType: 'manual', currentMessage: current }, GOOD_DRAFTS),
+    error => error.code === 'CAMPAIGN_AI_COPY_LINK_REJECTED'
+  );
+});
+
+test('a coupon rewrite surfaces only candidates that preserve every live offer term', async () => {
+  const missingMinimum = `${BRAND}: Get 20% off with {{code}} at https://vicipeptides.com. ${OPT_OUT}`;
+  const complete = `${BRAND}: Get 20% off orders of 100 dollars or more with {{code}} at https://vicipeptides.com. ${OPT_OUT}`;
+  const record = {};
+  const result = await draft({
+    workflowType: 'manual',
+    couponCode: 'CC20',
+    couponPercent: 20,
+    minimumSpend: 100,
+    linkUrl: 'https://vicipeptides.com'
+  }, [missingMinimum, complete], record);
+
+  assert.deepEqual(result.candidates.map(candidate => candidate.text), [complete]);
+  assert.match(record.user, /Verified WooCommerce discount: 20% off/);
+  assert.match(record.user, /orders of 100 dollars or more/);
+  assert.ok(result.rejected.some(item => item.failedChecks.includes('coupon_terms_preserved')));
 });
 
 test('a real name in the current message is still refused', async () => {

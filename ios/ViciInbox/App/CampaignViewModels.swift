@@ -700,13 +700,38 @@ final class CampaignEditorModel: ObservableObject {
         let text = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let current = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        await requestCopySuggestions(
+            instruction: text,
+            currentMessage: (refining && !current.isEmpty) ? current : nil,
+            refining: refining
+        )
+    }
+
+    /// One tap for somebody who has already written the message itself.
+    ///
+    /// This is deliberately different from `draftWithAI`: Dominic should not
+    /// have to explain the same campaign twice merely to get safe copy. The
+    /// current message is the brief. The server keeps its meaning, applies his
+    /// learned writing traits, verifies an attached coupon in WooCommerce and
+    /// returns only candidates that passed the deterministic copy checks.
+    func suggestValidCopy() async {
+        let current = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSuggestValidCopy else { return }
+        await requestCopySuggestions(instruction: nil, currentMessage: current, refining: true)
+    }
+
+    private func requestCopySuggestions(
+        instruction: String?, currentMessage: String?, refining: Bool
+    ) async {
         isDrafting = true
         copyError = nil
         defer { isDrafting = false }
         do {
             let result = try await APIClient.shared.suggestCampaignCopy(
-                brief: text,
-                currentMessage: (refining && !current.isEmpty) ? current : nil
+                brief: instruction,
+                currentMessage: currentMessage,
+                couponCode: attachedCoupon?.code,
+                approvedLink: Self.approvedLink(in: currentMessage)
             )
             let safeCandidates = result.candidates.filter { candidate in
                 guard let coupon = attachedCoupon else { return true }
@@ -785,6 +810,11 @@ final class CampaignEditorModel: ObservableObject {
 
     var titleCount: Int { title.count }
     var messageCount: Int { message.count }
+    var canSuggestValidCopy: Bool {
+        let current = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        return aiCopyEnabled && !isDrafting && !current.isEmpty
+            && current.caseInsensitiveCompare("Vin from Vici:") != .orderedSame
+    }
     var progress: Double { Double(step.number) / Double(CampaignWizardStep.allCases.count) }
     var canGoBack: Bool { step.rawValue > 0 && savedCampaign == nil }
     var isFinalStep: Bool { step == .saveAndReview }
@@ -834,6 +864,26 @@ final class CampaignEditorModel: ObservableObject {
 
     var canSubmitSavedDraft: Bool {
         savedCampaign?.status.isEditable == true && (dryRun?.eligible ?? 0) > 0 && !isSubmitting
+    }
+
+    private static func approvedLink(in message: String?) -> String? {
+        guard let message else { return nil }
+        let punctuation = CharacterSet(charactersIn: ".,!?;:")
+        return message.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: punctuation) }
+            .compactMap { value -> String? in
+                let bareHost = value.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if bareHost == "vicipeptides.com" || bareHost == "www.vicipeptides.com" {
+                    return "https://vicipeptides.com"
+                }
+                guard let url = URL(string: value), url.scheme?.lowercased() == "https" else {
+                    return nil
+                }
+                let host = url.host?.lowercased()
+                return host == "vicipeptides.com" || host == "www.vicipeptides.com"
+                    ? value : nil
+            }
+            .first
     }
 
     func advance() {
