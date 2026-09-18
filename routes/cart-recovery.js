@@ -100,6 +100,21 @@ function analytics(service, { env = process.env, audit = logAuditSafely } = {}) 
     } catch (error) { return sendError(res, error, 'loading authorized Vin voices'); }
   });
 
+  router.post('/voices/:voiceId/preview', async (req, res) => {
+    try {
+      noStore(res);
+      const result = await service.previewRecoveryVoice({ voiceID: req.params.voiceId });
+      await auditCartRecovery({
+        eventType: 'cart_recovery.voice_previewed', req,
+        summary: 'Previewed an authorized Vin recovery voice',
+        metadata: { automation: 'abandoned_cart_recovery', voice_id: result.voice.id }
+      }, audit);
+      res.set('Content-Type', result.contentType);
+      res.set('X-Content-Type-Options', 'nosniff');
+      return res.send(result.audio);
+    } catch (error) { return sendError(res, error, 'previewing this Vin voice'); }
+  });
+
   router.put('/settings', async (req, res) => {
     try {
       noStore(res);

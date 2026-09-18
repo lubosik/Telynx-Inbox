@@ -549,6 +549,14 @@ actor APIClient {
         try await decodedGET("/api/cart-recovery/voices")
     }
 
+    func previewCartRecoveryVoice(id: String) async throws -> Data {
+        let path = "/api/cart-recovery/voices/\(encodedPathSegment(id))/preview"
+        let (data, response) = try await post(path, body: [:], timeout: 30)
+        try validate(data: data, response: response)
+        guard !data.isEmpty else { throw APIError.decoding }
+        return data
+    }
+
     @discardableResult
     func updateCartRecoverySettings(_ settings: CartRecoverySettings) async throws -> CartRecoverySettings {
         let (data, response) = try await put("/api/cart-recovery/settings", body: settings.requestBody)

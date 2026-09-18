@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import AVFoundation
 
 struct ContactsView: View {
     @StateObject private var model = ContactsModel()
@@ -943,8 +944,7 @@ struct CartRecoverySettingsView: View {
     @State private var isEditingFirstSMS = false
     @State private var recoveryVoices: [RecoveryVoiceOption] = []
     @State private var voiceCatalogueError: String?
-    @State private var previewPlayer: AVPlayer?
-    @State private var previewingVoiceID: String?
+    @StateObject private var voicePreview = CartRecoveryVoicePreviewPlayer()
 
     var body: some View {
         Form {
@@ -964,16 +964,16 @@ struct CartRecoverySettingsView: View {
                             value: binding(\.voiceDelayMinutes, fallback: 180), in: 15...1_440, step: 15)
 
                     VStack(spacing: 14) {
-                        AssistantOrb(phase: previewingVoiceID == nil ? .idle : .speaking,
+                        AssistantOrb(phase: voicePreview.previewingVoiceID == nil ? .idle : .speaking,
                                      tint: .brand, size: .standard)
-                            .accessibilityLabel(previewingVoiceID == nil
+                            .accessibilityLabel(voicePreview.previewingVoiceID == nil
                                                 ? "Selected Vin voice"
                                                 : "Previewing the selected Vin voice")
 
                         Menu {
                             ForEach(recoveryVoices) { voice in
                                 Button {
-                                    stopVoicePreview()
+                                    voicePreview.stop()
                                     draft?.voiceID = voice.id
                                     draft?.voiceName = voice.name
                                 } label: {
@@ -999,17 +999,23 @@ struct CartRecoverySettingsView: View {
                         }
                         .disabled(recoveryVoices.isEmpty)
 
-                        Button(previewingVoiceID == nil ? "Preview voice" : "Stop preview") {
+                        Button(voicePreview.previewingVoiceID == nil
+                               ? (voicePreview.isLoading ? "Loading preview" : "Preview voice")
+                               : "Stop preview") {
                             toggleVoicePreview()
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(selectedRecoveryVoice?.previewUrl == nil)
+                        .disabled(selectedRecoveryVoice == nil)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
 
                     if let voiceCatalogueError {
                         Label(voiceCatalogueError, systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(ViciTheme.warning)
+                    }
+                    if let previewError = voicePreview.errorMessage {
+                        Label(previewError, systemImage: "speaker.slash.fill")
                             .font(.footnote).foregroundStyle(ViciTheme.warning)
                     }
 
@@ -1165,7 +1171,7 @@ struct CartRecoverySettingsView: View {
             }
         }
         .task { await load() }
-        .onDisappear { stopVoicePreview() }
+        .onDisappear { voicePreview.stop() }
         .alert("Recovery settings", isPresented: Binding(
             get: { model.errorMessage != nil || model.savedMessage != nil },
             set: { if !$0 { model.errorMessage = nil; model.savedMessage = nil } }
@@ -1201,19 +1207,8 @@ struct CartRecoverySettingsView: View {
     }
 
     private func toggleVoicePreview() {
-        if previewingVoiceID != nil { stopVoicePreview(); return }
-        guard let voice = selectedRecoveryVoice,
-              let raw = voice.previewUrl, let url = URL(string: raw) else { return }
-        let player = AVPlayer(url: url)
-        previewPlayer = player
-        previewingVoiceID = voice.id
-        player.play()
-    }
-
-    private func stopVoicePreview() {
-        previewPlayer?.pause()
-        previewPlayer = nil
-        previewingVoiceID = nil
+        guard let voice = selectedRecoveryVoice else { return }
+        voicePreview.toggle(voice)
     }
 
     private func optionalStringBinding(_ keyPath: WritableKeyPath<CartRecoverySettings, String?>) -> Binding<String> {
@@ -1245,6 +1240,90 @@ struct CartRecoverySettingsView: View {
             return "Include “Reply STOP to opt out”."
         }
         return nil
+    }
+}
+
+@MainActor
+private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published private(set) var previewingVoiceID: String?
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    private var player: AVAudioPlayer?
+    private var loadTask: Task<Void, Never>?
+
+    func toggle(_ voice: RecoveryVoiceOption) {
+        if previewingVoiceID == voice.id || isLoading {
+            stop()
+            return
+        }
+        start(voice)
+    }
+
+    private func start(_ voice: RecoveryVoiceOption) {
+        stop()
+        isLoading = true
+        errorMessage = nil
+        loadTask = Task { [weak self] in
+            do {
+                let data = try await APIClient.shared.previewCartRecoveryVoice(id: voice.id)
+                guard !Task.isCancelled, let self else { return }
+
+                let session = AVAudioSession.sharedInstance()
+                try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+                try session.setActive(true)
+
+                let player = try AVAudioPlayer(data: data)
+                player.delegate = self
+                guard player.prepareToPlay(), player.play() else {
+                    throw NSError(domain: "ViciVoicePreview", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "The preview audio could not start."])
+                }
+                self.player = player
+                self.previewingVoiceID = voice.id
+                self.isLoading = false
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.player = nil
+                self.previewingVoiceID = nil
+                self.isLoading = false
+                self.errorMessage = "That preview could not be played. Check your connection and try again."
+                self.deactivateSession()
+            }
+        }
+    }
+
+    func stop() {
+        loadTask?.cancel()
+        loadTask = nil
+        player?.stop()
+        player = nil
+        previewingVoiceID = nil
+        isLoading = false
+        errorMessage = nil
+        deactivateSession()
+    }
+
+    private func finishPlayback() {
+        player = nil
+        previewingVoiceID = nil
+        isLoading = false
+        deactivateSession()
+    }
+
+    private func deactivateSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in self.finishPlayback() }
+    }
+
+    nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        Task { @MainActor in
+            self.finishPlayback()
+            self.errorMessage = "That preview could not be played. Choose another voice or try again."
+        }
     }
 }
 
