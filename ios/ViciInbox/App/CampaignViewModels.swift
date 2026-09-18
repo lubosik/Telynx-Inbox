@@ -893,7 +893,7 @@ final class CampaignEditorModel: ObservableObject {
     func saveAndCheckEligibility() async -> Bool {
         guard !isSaving else { return false }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanMessage = Self.singleLineCampaignCopy(message)
+        var cleanMessage = Self.singleLineCampaignCopy(message)
         message = cleanMessage
         guard !cleanTitle.isEmpty else { errorMessage = "Enter a campaign title."; return false }
         guard cleanTitle.count <= 160 else { errorMessage = "Keep the title to 160 characters or fewer."; return false }
@@ -902,9 +902,24 @@ final class CampaignEditorModel: ObservableObject {
 
         do {
             let verdict = try await APIClient.shared.checkCampaignCopy(message: cleanMessage)
+            if let normalized = verdict.normalizedMessage,
+               !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // The server is authoritative about the exact text that will
+                // be saved. If it changed anything the phone did not already
+                // tidy, let the operator see and approve that wording first.
+                if normalized != cleanMessage {
+                    message = normalized
+                    step = .message
+                    errorMessage = "We tidied the punctuation in the Message. Check the updated wording, then continue to Save Draft again."
+                    return false
+                }
+                cleanMessage = normalized
+                message = normalized
+            }
             if !verdict.ok {
-                errorMessage = verdict.failures.first?.reason
-                    ?? "The message needs revision before it can be reviewed."
+                step = .message
+                errorMessage = "In the Message step: " + (verdict.failures.first?.reason
+                    ?? "Edit the message, then try Save Draft again.")
                 return false
             }
         } catch {
@@ -1045,7 +1060,17 @@ final class CampaignEditorModel: ObservableObject {
     /// one string and sending another. Here the cleaned copy is shown on the
     /// next review step before it can be saved.
     static func singleLineCampaignCopy(_ value: String) -> String {
-        value
+        let equivalents: [Character: String] = [
+            "\u{2018}": "'", "\u{2019}": "'", "\u{201A}": "'", "\u{201B}": "'",
+            "\u{201C}": "\"", "\u{201D}": "\"", "\u{201E}": "\"", "\u{201F}": "\"",
+            "\u{2012}": "-", "\u{2013}": "-", "\u{2014}": "-", "\u{2015}": "-",
+            "\u{2026}": "...", "\u{00A0}": " ", "\u{2007}": " ",
+            "\u{202F}": " ", "\u{2009}": " ", "\u{00B4}": "'", "`": "'"
+        ]
+        let plain = value.reduce(into: "") { result, character in
+            result += equivalents[character] ?? String(character)
+        }
+        return plain
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")

@@ -91,6 +91,37 @@ test('the route exists and returns candidates for a human to choose from', async
   assert.deepEqual(touched, [], 'the drafting route must not call any campaign service method');
 });
 
+test('the exact iPhone smart-apostrophe case is normalized and reported in plain English', async () => {
+  const { router, touched } = routerWith(async () => DRAFT_RESULT);
+  const res = response();
+  await handler(router, 'post', '/check-copy')({
+    body: { message: 'Vin from Vici: We’re accepting cards and Apple Pay now. Reply STOP to opt out.' },
+    actor: { id: 9 }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.normalizedMessage,
+    "Vin from Vici: We're accepting cards and Apple Pay now. Reply STOP to opt out.");
+  assert.deepEqual(res.payload.failures, []);
+  assert.deepEqual(touched, [], 'checking copy must not create or send a campaign');
+});
+
+test('unsupported copy points to the visible fix without carrier jargon', async () => {
+  const { router } = routerWith(async () => DRAFT_RESULT);
+  const res = response();
+  await handler(router, 'post', '/check-copy')({
+    body: { message: 'Vin from Vici: Cards are live ✅ Reply STOP to opt out.' },
+    actor: { id: 9 }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, false);
+  const failure = res.payload.failures.find(item => item.check === 'gsm7_character_set_only');
+  assert.match(failure.reason, /Replace or remove "✅" at position \d+/);
+  assert.doesNotMatch(failure.reason, /GSM|03\.38|UCS-2|U\+/i);
+});
+
 test('drafting writes nothing: no campaign, no review, no approval, no schedule, no send', async () => {
   const { router, touched } = routerWith(async () => DRAFT_RESULT);
   await handler(router, 'post', PATH)({ body: { workflowType: 'winback' }, actor: { id: 9 } }, response());

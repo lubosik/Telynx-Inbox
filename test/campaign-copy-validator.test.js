@@ -99,7 +99,9 @@ test('length is measured in GSM-7 septets, and 306 is the limit', () => {
   const oneOver = `${BRAND}: ${filler}a. ${OPT_OUT}`;
   assert.equal(septetLength(oneOver), 307);
   const verdict = assertRejectedFor('length_within_one_segment', oneOver);
-  assert.match(verdict.failures[0].reason, /307 GSM-7 septets/);
+  assert.match(verdict.failures[0].reason, /1 standard character over/);
+  assert.match(verdict.failures[0].reason, /Shorten it/);
+  assert.doesNotMatch(verdict.failures[0].reason, /GSM|septet|UCS-2/i);
 });
 
 test('extension-table characters cost two septets, not one', () => {
@@ -118,15 +120,16 @@ test('extension-table characters cost two septets, not one', () => {
 
 // ── 2. GSM-7 ───────────────────────────────────────────────────────────────
 
-test('an em dash is rejected and named, because it flips the whole message to UCS-2', () => {
+test('an unsupported dash is rejected with its exact visible location and no carrier jargon', () => {
   const verdict = assertRejectedFor('gsm7_character_set_only', `Vici — back in stock. ${OPT_OUT}`);
   const failure = verdict.failures.find(item => item.check === 'gsm7_character_set_only');
-  assert.match(failure.reason, /U\+2014/);
-  assert.match(failure.reason, /UCS-2/);
+  assert.match(failure.reason, /Replace or remove "—" at position 6/);
+  assert.doesNotMatch(failure.reason, /GSM|03\.38|UCS-2|U\+2014/i);
   assert.equal(failure.detail.character, '—');
+  assert.equal(failure.detail.position, 6);
 });
 
-test('every character that silently triples the cost is rejected and identified', () => {
+test('every unsupported character is identified visibly and with an exact position', () => {
   const offenders = [
     ['—', 'em dash'], ['–', 'en dash'], ['’', 'curly apostrophe'],
     ['“', 'curly open quote'], ['”', 'curly close quote'], ['…', 'ellipsis'],
@@ -136,7 +139,9 @@ test('every character that silently triples the cost is rejected and identified'
   for (const [character, name] of offenders) {
     const verdict = assertRejectedFor('gsm7_character_set_only', `${BRAND}: back ${character} in stock. ${OPT_OUT}`);
     const failure = verdict.failures.find(item => item.check === 'gsm7_character_set_only');
-    assert.ok(failure.reason.includes('U+'), `${name} failure must name the code point`);
+    assert.ok(failure.reason.includes(JSON.stringify(character)), `${name} failure must show the character`);
+    assert.match(failure.reason, /at position \d+/);
+    assert.doesNotMatch(failure.reason, /GSM|03\.38|UCS-2|U\+[0-9A-F]+/i);
     assert.equal(isGsm7(character), false, name);
   }
 });
@@ -153,7 +158,7 @@ test('control characters are rejected even though GSM-7 can encode them', () => 
     const verdict = assertRejectedFor('gsm7_character_set_only', `${BRAND}: back${control}in stock. ${OPT_OUT}`);
     assert.match(
       verdict.failures.find(item => item.check === 'gsm7_character_set_only').reason,
-      /Control character/
+      /Remove the hidden character at position \d+/
     );
   }
 });

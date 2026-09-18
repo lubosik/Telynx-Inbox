@@ -1651,7 +1651,7 @@ struct CampaignEditorView: View {
                 Text("Keep Vin from Vici at the start and end with: Reply STOP to opt out.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("Line breaks and extra spaces are tidied automatically before review.")
+                Text("Line breaks, extra spaces, and smart phone punctuation are tidied automatically before review. You will see the exact wording before saving.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

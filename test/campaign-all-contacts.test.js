@@ -90,6 +90,20 @@ test('All Contacts deduplicates normalized phones and records invalid rows', asy
   assert.equal(result.recipients[0].contact_id, 1);
 });
 
+test('manual campaign draft stores the exact phone-safe wording reviewed by the editor', async () => {
+  const client = contactsClient([{ id: 1, phone: '+15550000001', first_name: 'Sam' }]);
+  await createCampaignService({ client }).create({
+    title: 'Payment options',
+    message: 'Vin from Vici: We’re accepting cards and Apple Pay now. Reply STOP to opt out.',
+    audience: { kind: 'all_contacts' }
+  }, { id: 4 });
+
+  const request = client.calls.find(call => call.name === 'create_sms_campaign_draft').args;
+  assert.equal(request.p_message,
+    "Vin from Vici: We're accepting cards and Apple Pay now. Reply STOP to opt out.");
+  assert.doesNotThrow(() => assertReviewableCopy(request.p_message));
+});
+
 test('All Contacts refuses a workspace cap rather than silently saving a partial list', async () => {
   const rows = Array.from({ length: 501 }, (_, index) => ({
     id: index + 1, phone: `+1555${String(index).padStart(7, '0')}`
@@ -111,5 +125,11 @@ test('review gate accepts Vin opt-out copy and rejects unsafe manual copy', () =
     () => assertReviewableCopy('Credit cards accepted now!'),
     error => error instanceof CampaignRequestError
       && error.code === 'CAMPAIGN_COPY_NOT_REVIEWABLE'
+  );
+  assert.throws(
+    () => assertReviewableCopy('Vin from Vici: Cards are live ✅ Reply STOP to opt out.'),
+    error => error instanceof CampaignRequestError
+      && /Replace or remove "✅" at position \d+/.test(error.message)
+      && !/GSM|03\.38|UCS-2|U\+/i.test(error.message)
   );
 });

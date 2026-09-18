@@ -434,6 +434,9 @@ struct CampaignCopyVerdict: Codable, Hashable {
     let septets: Int
     let maxSeptets: Int
     let failures: [Failure]
+    /// The exact plain-punctuation, single-line copy the server reviewed.
+    /// Optional so builds remain compatible while Railway rolls forward.
+    let normalizedMessage: String?
 
     /// Over one segment. Two segments is two messages billed and a higher
     /// chance of the second arriving out of order.

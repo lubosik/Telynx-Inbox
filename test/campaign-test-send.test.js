@@ -61,6 +61,17 @@ test('campaign persistence normalises ordinary line breaks but not hidden contro
     'non-whitespace controls remain visible to the deterministic validator');
 });
 
+test('campaign persistence fixes phone punctuation before review instead of blocking the draft', () => {
+  assert.equal(
+    campaignCopyField('Vin from Vici: We’re live — cards, Apple Pay, and more… Reply STOP to opt out.'),
+    "Vin from Vici: We're live - cards, Apple Pay, and more... Reply STOP to opt out."
+  );
+  assert.equal(
+    campaignCopyField('Vin from Vici: “Any card” works. Reply STOP to opt out.'),
+    'Vin from Vici: "Any card" works. Reply STOP to opt out.'
+  );
+});
+
 test('one test renders once, sends once, audits a masked target and changes no campaign state', async () => {
   const serviceCalls = [];
   const renderCalls = [];
@@ -177,7 +188,7 @@ test('campaign test audit metadata retains useful proof without a raw phone or c
   });
 });
 
-test('the iPhone flow cleans line breaks before review and exposes an isolated test action', () => {
+test('the iPhone flow cleans line breaks and phone punctuation before review and exposes an isolated test action', () => {
   const root = path.join(__dirname, '..');
   const model = fs.readFileSync(path.join(root, 'ios/ViciInbox/App/CampaignViewModels.swift'), 'utf8');
   const view = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/CampaignsView.swift'), 'utf8');
@@ -185,6 +196,10 @@ test('the iPhone flow cleans line breaks before review and exposes an isolated t
 
   assert.match(model, /if step == \.message \{ message = Self\.singleLineCampaignCopy\(message\) \}/);
   assert.match(model, /components\(separatedBy: \.whitespacesAndNewlines\)[\s\S]*joined\(separator: " "\)/);
+  assert.match(model, /"\\u\{2019\}": "'"/,
+    'a normal iPhone apostrophe must be converted before the copy check');
+  assert.match(model, /verdict\.normalizedMessage[\s\S]*message = normalized/,
+    'the editor must show the exact server-reviewed wording before saving');
   assert.match(view, /CampaignTestSendSection\(campaignID: campaign\.id\)/,
     'the saved campaign review screen must offer the test before approval or scheduling');
   assert.match(view, /It does not approve, schedule or send the campaign to its audience/);

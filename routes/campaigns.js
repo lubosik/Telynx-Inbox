@@ -3,6 +3,7 @@
 const express = require('express');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { validateCopy, septetLength } = require('../lib/campaigns/copy-validator');
+const { campaignCopyFeedback } = require('../lib/campaigns/copy-feedback');
 const { RULES } = require('../lib/campaigns/copy-rules');
 const { logAudit, logAuditSafely } = require('../lib/audit/log');
 const { messageFingerprint } = require('../lib/audit/redact');
@@ -10,6 +11,7 @@ const { presentError } = require('../lib/user-facing-errors');
 const {
   CampaignNotReadyError,
   CampaignRequestError,
+  campaignCopyField,
   createCampaignService
 } = require('../lib/campaigns/service');
 const { createCampaignGenerationService } = require('../lib/campaigns/generation-service');
@@ -702,26 +704,28 @@ function createCampaignRouter({
   router.post('/check-copy', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      const text = typeof req.body?.message === 'string' ? req.body.message : '';
-      if (!text.trim()) {
+      const supplied = typeof req.body?.message === 'string' ? req.body.message : '';
+      if (!supplied.trim()) {
         return res.status(400).json({ error: 'A message is required.', code: 'MESSAGE_REQUIRED' });
       }
-      if (text.length > 1600) {
+      if (supplied.length > 1600) {
         return res.status(400).json({ error: 'That message is too long to check.', code: 'MESSAGE_TOO_LONG' });
       }
+      const text = campaignCopyField(supplied);
       const verdict = validateCopy(text, {
         brandName: RULES.brand.defaultName,
         approvedProductCodes: RULES.defaultApprovedProductCodes
       });
       return res.json({
         ok: verdict.ok === true,
+        normalizedMessage: text,
         septets: septetLength(text),
         maxSeptets: RULES.length.maxSeptets,
-        // The validator's own words, unparaphrased. A restatement here is how
-        // a rule quietly loosens.
+        // Keep the rule id for enforcement and turn its evidence into an
+        // actionable instruction in the campaign editor.
         failures: (verdict.failures || []).map(failure => ({
           check: failure.check,
-          reason: failure.reason,
+          reason: campaignCopyFeedback(failure),
           term: failure.detail?.term || null
         }))
       });
