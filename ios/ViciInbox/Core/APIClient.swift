@@ -803,6 +803,18 @@ actor APIClient {
         return try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/cancel", body: body)
     }
 
+    /// Sends exactly one real test SMS. The backend renders the saved revision
+    /// but creates no recipient, approval, schedule or campaign delivery row.
+    func sendCampaignTest(id: String, to phone: String) async throws -> CampaignTestSendResponse {
+        let (data, response) = try await post(
+            "/api/campaigns/\(encodedPathSegment(id))/test-send",
+            body: ["to": phone]
+        )
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignTestSendResponse.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// `POST /api/campaigns/plan`, `campaigns.read`.
     ///
     /// Writes nothing. Describe the campaign and it works out who, chooses the

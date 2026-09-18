@@ -808,6 +808,12 @@ final class CampaignEditorModel: ObservableObject {
 
     func advance() {
         guard savedCampaign == nil else { return }
+        // TextEditor uses Return for a perfectly ordinary visual paragraph,
+        // while carrier-safe campaign copy is intentionally one line. The old
+        // flow waited until Save, then showed the implementation detail
+        // `"\\n" (U+000A)` as an error. Tidy it BEFORE the preview so the
+        // reviewer sees the exact text that will be saved and sent.
+        if step == .message { message = Self.singleLineCampaignCopy(message) }
         if let validation = validationMessage(for: step) {
             errorMessage = validation
             return
@@ -887,7 +893,8 @@ final class CampaignEditorModel: ObservableObject {
     func saveAndCheckEligibility() async -> Bool {
         guard !isSaving else { return false }
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanMessage = Self.singleLineCampaignCopy(message)
+        message = cleanMessage
         guard !cleanTitle.isEmpty else { errorMessage = "Enter a campaign title."; return false }
         guard cleanTitle.count <= 160 else { errorMessage = "Keep the title to 160 characters or fewer."; return false }
         guard !cleanMessage.isEmpty else { errorMessage = "Enter a message."; return false }
@@ -1031,5 +1038,16 @@ final class CampaignEditorModel: ObservableObject {
 
     private static func phoneKey(_ phone: String) -> String {
         phone.filter(\.isNumber)
+    }
+
+    /// Campaign SMS is a single readable line. This runs in the editor, not
+    /// the validator, because silent server-side repair would mean approving
+    /// one string and sending another. Here the cleaned copy is shown on the
+    /// next review step before it can be saved.
+    static func singleLineCampaignCopy(_ value: String) -> String {
+        value
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }

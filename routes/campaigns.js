@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { validateCopy, septetLength } = require('../lib/campaigns/copy-validator');
 const { RULES } = require('../lib/campaigns/copy-rules');
 const { logAudit, logAuditSafely } = require('../lib/audit/log');
@@ -23,6 +24,32 @@ const { planCampaign } = require('../lib/campaigns/planner');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
+
+// A test send is intentionally separate from campaign delivery: one explicit
+// handset, one explicit tap, no audience row and no schedule. It is still a
+// real outbound SMS, so a stuck button or impatient tapping must not turn it
+// into a burst. The permission gate remains the primary control; this is the
+// smaller mechanical brake behind it.
+const campaignTestSendLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: req => {
+    const actor = req.actor?.id ? `actor:${req.actor.id}` : `ip:${ipKeyGenerator(req.ip || '')}`;
+    return `${actor}:campaign:${req.params?.id || 'unknown'}`;
+  },
+  message: {
+    error: 'Five test messages were already sent for this campaign in the last 10 minutes. Wait a few minutes before testing again.',
+    code: 'CAMPAIGN_TEST_SEND_RATE_LIMITED'
+  }
+});
+
+/** Strict E.164 for a deliberately entered test destination. */
+function campaignTestPhone(raw) {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  return /^\+[1-9]\d{7,14}$/.test(value) ? value : null;
+}
 
 /**
  * Body keys accepted by POST /copy-suggestions.
@@ -191,7 +218,10 @@ function createCampaignRouter({
   opportunityPortfolio,
   campaignClient,
   segmentPlanningService,
-  segmentCampaignBuilder = buildFromSegment
+  segmentCampaignBuilder = buildFromSegment,
+  campaignTestRenderer,
+  campaignTestSender,
+  campaignTestAuditWriter
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -218,6 +248,23 @@ function createCampaignRouter({
   // Lazy for the same reason: constructing it must not require credentials.
   let segments = null;
   const segmentService = () => (segments ||= segmentPlanningService || createSegmentService({ client: db() }));
+  const renderCampaignTest = campaignTestRenderer || (({ template, to }) => {
+    const { renderForRecipients } = require('../lib/campaigns/render-recipients');
+    // Never borrow a real customer's name, order or link for a test sent to an
+    // arbitrary handset. These bounded, clearly synthetic facts exercise every
+    // supported merge field without disclosing customer data or minting a
+    // coupon. The real per-recipient preview remains the approval gate.
+    return renderForRecipients({ template, recipients: [{ phone: to, facts: {
+      contactName: 'Test Customer', orderCount: 2,
+      lastProductName: 'RT', lastProductSku: 'P-RT10',
+      attemptedProductName: 'RT', attemptedProductSku: 'P-RT10',
+      lastProductLink: 'https://vicipeptides.com/shop/',
+      attemptedProductLink: 'https://vicipeptides.com/shop/',
+      lastOrderAt: '2026-08-15T12:00:00Z', couponCode: 'vin-TEST000000'
+    } }] });
+  });
+  const sendCampaignTest = campaignTestSender || ((to, text) =>
+    require('../telnyx').sendSMS(to, text));
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -1017,21 +1064,20 @@ function createCampaignRouter({
    *
    * It is a real send, so it is treated as one. `campaigns.approve`, because
    * anybody who can send a message to an arbitrary number can send a message
-   * to a customer. Audited. Rate-limited by the same limiter as the rest of
-   * the send routes.
+   * to a customer. Audited. A dedicated limiter allows five test messages per
+   * campaign every ten minutes.
    *
    * It mints NO coupon. The message carries a placeholder code of exactly the
    * length a real one has, so the layout is honest and no live discount is
    * created for a test. It also touches no recipient row, writes nothing to
    * the campaign, and does not consume anybody's frequency allowance.
    */
-  router.post('/:id/test-send', async (req, res) => {
+  router.post('/:id/test-send', campaignTestSendLimiter, async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      const { normalisePhone } = require('../lib/phone');
-      const to = normalisePhone(req.body?.to);
+      const to = campaignTestPhone(req.body?.to);
       if (!to) {
-        throw Object.assign(new Error('A phone number in full international form is required, like +447700900123.'), {
+        throw Object.assign(new Error('Enter one phone number in full international format, like +13055551234.'), {
           code: 'CAMPAIGN_TEST_SEND_NUMBER_INVALID', status: 400
         });
       }
@@ -1044,26 +1090,9 @@ function createCampaignRouter({
         });
       }
 
-      // Rendered against the FIRST real recipient's facts, so the test shows a
-      // real name, a real product and a real link rather than invented ones.
-      // A test that reads well with made-up values proves nothing about the
-      // send that follows it.
-      const { personaliseCampaign } = require('../lib/campaigns/personalise');
-      const page = await campaigns.recipients(req.params.id, { page: 1, pageSize: 1 });
-      const sample = (page.items || [])[0];
-      if (!sample) {
-        throw Object.assign(new Error('This campaign has no recipients to render a test from.'), {
-          code: 'CAMPAIGN_TEST_SEND_NO_RECIPIENTS', status: 409
-        });
-      }
-
-      const outcome = await personaliseCampaign({
-        client: db(),
-        campaignID: `test-${req.params.id}`,
+      const outcome = await renderCampaignTest({
         template,
-        phones: [sample.contact_phone],
-        percentOff: campaign?.campaign?.discount_percent ?? 15,
-        dryRun: true            // placeholder code, no coupon minted
+        to
       });
       const text = outcome.rendered[0]?.message;
       if (!text) {
@@ -1072,16 +1101,34 @@ function createCampaignRouter({
         });
       }
 
-      const { sendSMS } = require('../telnyx');
-      await sendSMS(to, text);
+      const provider = await sendCampaignTest(to, text);
 
       const { segmentsFor } = require('../lib/campaigns/cost');
-      await auditCampaign('campaign.test_sent', req, campaign?.campaign, {
-        summary: `Sent a test of ${campaignSummaryName(campaign?.campaign)} to ${to}`,
-        metadata: { to, segments: segmentsFor(text), characters: text.length }
-      });
+      const last4 = to.slice(-4);
+      const auditDetails = {
+        summary: `Sent a test of ${campaignSummaryName(campaign?.campaign)} to a number ending ${last4}`,
+        metadata: {
+          target_last4: last4,
+          segments: segmentsFor(text),
+          characters: text.length,
+          provider_status: provider?.status || null
+        }
+      };
+      if (campaignTestAuditWriter) {
+        await campaignTestAuditWriter({
+          eventType: 'campaign.test_sent', req, campaign: campaign?.campaign, details: auditDetails
+        });
+      } else {
+        await auditCampaign('campaign.test_sent', req, campaign?.campaign, auditDetails);
+      }
 
-      return res.json({ sent: true, to, message: text, segments: segmentsFor(text) });
+      return res.json({
+        sent: true,
+        to,
+        message: text,
+        segments: segmentsFor(text),
+        providerStatus: provider?.status || null
+      });
     } catch (error) { return sendError(res, error, 'sending a test message'); }
   });
 
@@ -1149,4 +1196,5 @@ function createCampaignRouter({
 }
 
 module.exports = createCampaignRouter;
+module.exports.campaignTestPhone = campaignTestPhone;
 module.exports.sendError = sendError;

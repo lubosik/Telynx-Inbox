@@ -597,6 +597,16 @@ struct CampaignActionResponse: Codable, Hashable {
     let recipientCount: Int?
 }
 
+/// One real SMS sent to the explicitly entered test handset. It is not a
+/// campaign recipient and does not change approval, audience or scheduling.
+struct CampaignTestSendResponse: Codable, Hashable {
+    let sent: Bool
+    let to: String
+    let message: String
+    let segments: Int
+    let providerStatus: String?
+}
+
 struct CampaignReviewCount: Codable, Hashable {
     let count: Int
 }

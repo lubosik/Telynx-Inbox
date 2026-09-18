@@ -614,6 +614,16 @@ struct CampaignDetailView: View {
                 }
             }
 
+            // The test lives on the same review screen as approval and
+            // scheduling, so checking a real handset is a normal step rather
+            // than a hidden endpoint. It remains available through scheduling
+            // and disappears once delivery is underway or the campaign ends.
+            if session.can(Permission.campaignsApprove),
+               campaign.status != .sending,
+               !campaign.status.isTerminal {
+                CampaignTestSendSection(campaignID: campaign.id)
+            }
+
             actionSection(campaign)
 
             // ── Three, not two hundred ──────────────────────────────────
@@ -1232,6 +1242,7 @@ private enum CampaignWizardField: Hashable {
 
 struct CampaignEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var session: SessionModel
     @StateObject private var model: CampaignEditorModel
     @FocusState private var focusedField: CampaignWizardField?
     let onSaved: () -> Void
@@ -1640,6 +1651,9 @@ struct CampaignEditorView: View {
                 Text("Keep Vin from Vici at the start and end with: Reply STOP to opt out.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("Line breaks and extra spaces are tidied automatically before review.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             // Tapping inserts at the end rather than at the cursor. SwiftUI's
@@ -1875,6 +1889,10 @@ struct CampaignEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            if session.can(Permission.campaignsApprove) {
+                CampaignTestSendSection(campaignID: saved.id)
+            }
         } else {
             Section("Final Review") {
                 LabeledContent("Type", value: "Manual Campaign")
@@ -1892,6 +1910,103 @@ struct CampaignEditorView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// A deliberately isolated one-message proving ground. It calls the test-send
+/// endpoint only: no approval, schedule, audience or delivery action is
+/// reachable from this view.
+private struct CampaignTestSendSection: View {
+    let campaignID: String
+
+    @State private var phone = ""
+    @State private var isSending = false
+    @State private var result: CampaignTestSendResponse?
+    @State private var errorMessage: String?
+    @State private var confirming = false
+
+    private var cleanPhone: String {
+        phone.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isValidE164: Bool {
+        cleanPhone.range(of: #"^\+[1-9][0-9]{7,14}$"#, options: .regularExpression) != nil
+    }
+
+    var body: some View {
+        Section {
+            TextField("+13055551234", text: $phone)
+                .keyboardType(.phonePad)
+                .textContentType(.telephoneNumber)
+                .accessibilityLabel("Test phone number")
+
+            if !cleanPhone.isEmpty && !isValidE164 {
+                Label("Use full international format, starting with + and country code.",
+                      systemImage: "exclamationmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(ViciTheme.warning)
+            }
+
+            Button {
+                confirming = true
+            } label: {
+                if isSending {
+                    HStack { ProgressView(); Text("Sending One Test") }
+                } else {
+                    Label("Send One Test Message", systemImage: "iphone.and.arrow.forward")
+                }
+            }
+            .disabled(!isValidE164 || isSending)
+
+            if let result {
+                Label("Test sent to \(PhoneFormatter.pretty(result.to))",
+                      systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(ViciTheme.success)
+                    .font(.subheadline.weight(.semibold))
+                Text(result.message)
+                    .font(.footnote)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(result.segments) SMS credit\(result.segments == 1 ? "" : "s"). The campaign and audience were not changed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Test on a Phone")
+        } footer: {
+            Text("This sends one real SMS to the number above. It does not approve, schedule or send the campaign to its audience.")
+        }
+        .confirmationDialog("Send one real test message?",
+                            isPresented: $confirming,
+                            titleVisibility: .visible) {
+            Button("Send Test to \(cleanPhone)") {
+                Task { await sendTest() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only this test number will receive it. The campaign audience and schedule stay untouched.")
+        }
+        .alert("Test message was not sent", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "Please try again.")
+        }
+    }
+
+    private func sendTest() async {
+        guard isValidE164, !isSending else { return }
+        isSending = true
+        result = nil
+        defer { isSending = false }
+        do {
+            result = try await APIClient.shared.sendCampaignTest(id: campaignID, to: cleanPhone)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
