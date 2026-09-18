@@ -536,6 +536,28 @@ struct CampaignCopyCandidate: Codable, Hashable, Identifiable {
     var isSingleSegment: Bool { septets <= 160 }
 }
 
+struct CampaignCoupon: Codable, Hashable, Identifiable {
+    let id: Int
+    let code: String
+    let name: String?
+    let percent: Int
+    let minimumAmount: Double
+    let maximumAmount: Double
+    let expiry: String?
+    let usageLimit: Int
+    let usageLimitPerUser: Int
+    let individualUse: Bool
+    let excludeSaleItems: Bool
+    let freeShipping: Bool
+    let status: String
+}
+
+struct CampaignCouponCreateResponse: Codable, Hashable {
+    let coupon: CampaignCoupon
+    let sent: Bool
+    let scheduled: Bool
+}
+
 /// A campaign proposed from one sentence.
 ///
 /// Everything needed for an arbitrary campaign already existed on three
@@ -548,6 +570,9 @@ struct CampaignPlan: Codable, Hashable {
     let shape: String
     let workflowCategory: String
     let discountPercent: Int?
+    let couponCode: String?
+    let couponError: CampaignPlanError?
+    let minimumSpend: Double?
     let audience: CampaignPlanAudience?
     let audienceError: CampaignPlanError?
     let copy: [CampaignCopyCandidate]
@@ -558,6 +583,10 @@ struct CampaignPlan: Codable, Hashable {
 
     var offerLabel: String {
         guard let percent = discountPercent else { return "No offer" }
+        if let couponCode {
+            let minimum = minimumSpend.map { $0 > 0 ? " on $\(Int($0))+ orders" : "" } ?? ""
+            return "\(percent)% with \(couponCode)\(minimum)"
+        }
         return "\(percent)% code"
     }
 }

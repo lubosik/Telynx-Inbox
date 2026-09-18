@@ -1245,6 +1245,7 @@ struct CampaignEditorView: View {
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model: CampaignEditorModel
     @FocusState private var focusedField: CampaignWizardField?
+    @State private var showingCouponBuilder = false
     let onSaved: () -> Void
 
     init(campaign: CampaignRecord? = nil,
@@ -1285,6 +1286,11 @@ struct CampaignEditorView: View {
             .navigationTitle(model.existingID == nil ? "New Campaign" : "Edit Campaign")
             .navigationBarTitleDisplayMode(.inline)
             .task { await model.loadCopyTools() }
+            .sheet(isPresented: $showingCouponBuilder) {
+                CampaignCouponBuilderSheet { coupon in
+                    model.attachCoupon(coupon)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(model.savedCampaign == nil ? "Cancel" : "Done") { dismiss() }
@@ -1685,6 +1691,33 @@ struct CampaignEditorView: View {
                     }
                     Text("These fill in per person when the campaign is approved. A variable this system cannot fill removes that one recipient rather than sending a gap.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            if model.existingID == nil && session.can(Permission.campaignsApprove) {
+                Section("Campaign Coupon") {
+                    if let coupon = model.attachedCoupon {
+                        Label("\(coupon.code) attached", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(ViciTheme.success)
+                        LabeledContent("Discount", value: "\(coupon.percent)%")
+                        LabeledContent("Minimum order", value: coupon.minimumAmount > 0
+                                       ? "$\(Int(coupon.minimumAmount))" : "None")
+                        LabeledContent("Total uses", value: coupon.usageLimit.formatted())
+                        LabeledContent("Per customer", value: coupon.usageLimitPerUser.formatted())
+                        if let expiry = coupon.expiry {
+                            LabeledContent("Expires", value: String(expiry.prefix(10)))
+                        }
+                        Text("The coupon is live in WooCommerce, but this campaign is still only a draft. Nothing has been sent or scheduled.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            showingCouponBuilder = true
+                        } label: {
+                            Label("Generate Coupon", systemImage: "ticket.fill")
+                        }
+                        Text("Create a WooCommerce coupon, configure its limits, and attach it to this draft. This never sends the campaign.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -2537,6 +2570,110 @@ private struct CampaignRecipeSheet: View {
     }
 }
 
+private struct CampaignCouponBuilderSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onCreated: (CampaignCoupon) -> Void
+
+    @State private var code = ""
+    @State private var name = ""
+    @State private var percent = 20
+    @State private var expiryDays = 30
+    @State private var minimumAmount = 100.0
+    @State private var maximumAmount = 0.0
+    @State private var usageLimit = 1_200
+    @State private var usageLimitPerUser = 1
+    @State private var individualUse = true
+    @State private var excludeSaleItems = false
+    @State private var freeShipping = false
+    @State private var isCreating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Coupon") {
+                    TextField("Code, for example CC20", text: $code)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    TextField("Internal name", text: $name)
+                    Stepper("Discount: \(percent)%", value: $percent, in: 1...99)
+                }
+                Section("When it can be used") {
+                    Stepper("Expires in \(expiryDays) days", value: $expiryDays, in: 1...365)
+                    TextField("Minimum order", value: $minimumAmount, format: .number)
+                        .keyboardType(.decimalPad)
+                    TextField("Maximum order, 0 means none", value: $maximumAmount, format: .number)
+                        .keyboardType(.decimalPad)
+                    Toggle("Exclude sale items", isOn: $excludeSaleItems)
+                    Toggle("Free shipping", isOn: $freeShipping)
+                }
+                Section("Limits") {
+                    TextField("Total uses", value: $usageLimit, format: .number)
+                        .keyboardType(.numberPad)
+                    Stepper("Uses per customer: \(usageLimitPerUser)",
+                            value: $usageLimitPerUser, in: 1...20)
+                    Toggle("Cannot be combined with other coupons", isOn: $individualUse)
+                }
+                Section {
+                    Label("Creating the coupon does not send, approve, or schedule this campaign.",
+                          systemImage: "lock.shield")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Button {
+                        Task { await create() }
+                    } label: {
+                        if isCreating {
+                            HStack { ProgressView(); Text("Creating in WooCommerce") }
+                        } else {
+                            Text("Create and Attach Coupon")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isCreating || code.trimmingCharacters(in: .whitespacesAndNewlines).count < 4
+                              || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if let errorMessage {
+                    Section("What happened") {
+                        Text(errorMessage).font(.footnote).foregroundStyle(ViciTheme.destructive)
+                    }
+                }
+            }
+            .navigationTitle("Generate Coupon")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(isCreating)
+                }
+            }
+            .interactiveDismissDisabled(isCreating)
+        }
+    }
+
+    private func create() async {
+        isCreating = true
+        errorMessage = nil
+        defer { isCreating = false }
+        do {
+            let response = try await APIClient.shared.createCampaignCoupon(
+                code: code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                percent: percent, expiryDays: expiryDays,
+                minimumAmount: minimumAmount, maximumAmount: maximumAmount,
+                usageLimit: usageLimit, usageLimitPerUser: usageLimitPerUser,
+                individualUse: individualUse, excludeSaleItems: excludeSaleItems,
+                freeShipping: freeShipping
+            )
+            guard !response.sent && !response.scheduled else {
+                errorMessage = "The server returned an unsafe coupon result. Nothing was attached."
+                return
+            }
+            onCreated(response.coupon)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
 /// Describe a campaign in a sentence and get one back to review.
 ///
 /// WHAT THIS REPLACED
@@ -2630,6 +2767,9 @@ private struct CampaignPlannerSheet: View {
                 Text(error.message).font(.footnote).foregroundStyle(ViciTheme.warning)
             }
             LabeledContent("Offer", value: plan.offerLabel)
+            if let couponError = plan.couponError {
+                Text(couponError.message).font(.footnote).foregroundStyle(ViciTheme.destructive)
+            }
         }
 
         // Shown above the copy, because a blocking warning makes the copy
@@ -2741,6 +2881,7 @@ private struct CampaignPlannerSheet: View {
                 ruleSet: audience.ruleSet,
                 message: message,
                 discountPercent: plan.discountPercent,
+                couponCode: plan.couponCode,
                 workflowCategory: plan.workflowCategory
             )
             onCreated()

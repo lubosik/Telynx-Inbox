@@ -23,7 +23,9 @@ const { recipeCatalogue } = require('../lib/campaigns/recipes');
 const { FIELDS: MERGE_FIELDS, FIELD_NAMES } = require('../lib/campaigns/merge-fields');
 const { buildFromRecipe, buildFromSegment } = require('../lib/campaigns/audience-builder');
 const { planCampaign } = require('../lib/campaigns/planner');
+const { loadHumanStyle } = require('../lib/campaigns/human-style');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
+const { createCampaignCoupon } = require('../lib/campaigns/coupon-builder');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -223,7 +225,9 @@ function createCampaignRouter({
   segmentCampaignBuilder = buildFromSegment,
   campaignTestRenderer,
   campaignTestSender,
-  campaignTestAuditWriter
+  campaignTestAuditWriter,
+  campaignCouponCreator,
+  campaignCouponAuditWriter
 } = {}) {
   const campaigns = service || createCampaignService();
   const generator = generationService || createCampaignGenerationService();
@@ -243,14 +247,21 @@ function createCampaignRouter({
   // database or WooCommerce credentials, and the first read happens inside the
   // handler. The instance is per-router so its cache is shared across requests.
   const portfolio = opportunityPortfolio || createOpportunityPortfolioService();
+  const createCoupon = campaignCouponCreator || createCampaignCoupon;
   // Lazy for the same reason as the portfolio above: constructing this router
   // must not require database credentials, because the route tests build it
   // without any. Resolved on first use, inside a handler.
   const db = () => (campaignClient || require('../db').supabase);
+  const styleFor = async actor => {
+    // Real authenticated actors carry displayName. A test or legacy caller
+    // without it gets no inferred style, and never triggers a DB connection.
+    if (!actor?.displayName) return [];
+    return loadHumanStyle({ client: db(), actor });
+  };
   // Lazy for the same reason: constructing it must not require credentials.
   let segments = null;
   const segmentService = () => (segments ||= segmentPlanningService || createSegmentService({ client: db() }));
-  const renderCampaignTest = campaignTestRenderer || (({ template, to }) => {
+  const renderCampaignTest = campaignTestRenderer || (({ template, to, couponCode }) => {
     const { renderForRecipients } = require('../lib/campaigns/render-recipients');
     // Never borrow a real customer's name, order or link for a test sent to an
     // arbitrary handset. These bounded, clearly synthetic facts exercise every
@@ -262,7 +273,7 @@ function createCampaignRouter({
       attemptedProductName: 'RT', attemptedProductSku: 'P-RT10',
       lastProductLink: 'https://vicipeptides.com/shop/',
       attemptedProductLink: 'https://vicipeptides.com/shop/',
-      lastOrderAt: '2026-08-15T12:00:00Z', couponCode: 'vin-TEST000000'
+      lastOrderAt: '2026-08-15T12:00:00Z', couponCode: couponCode || 'vin-TEST000000'
     } }] });
   });
   const sendCampaignTest = campaignTestSender || ((to, text) =>
@@ -300,7 +311,8 @@ function createCampaignRouter({
       return res.json(await planCampaign({
         client: db(),
         brief: req.body?.brief,
-        segments: segmentService()
+        segments: segmentService(),
+        styleTraits: await styleFor(req.actor)
       }));
     } catch (error) { return sendError(res, error, 'planning this campaign'); }
   });
@@ -326,6 +338,8 @@ function createCampaignRouter({
         const created = await campaigns.create({
           title,
           message: req.body?.message,
+          couponCode: req.body?.couponCode,
+          discountPercent: req.body?.discountPercent,
           workflowCategory: req.body?.workflowCategory || 'custom',
           audience: { kind: 'all_contacts' }
         }, req.actor);
@@ -378,6 +392,7 @@ function createCampaignRouter({
         title,
         message: req.body?.message,
         discountPercent: Number(req.body?.discountPercent) || null,
+        couponCode: req.body?.couponCode,
         dedupeDays: Number(req.body?.dedupeDays) || 30,
         workflowCategory: req.body?.workflowCategory || 'custom',
         actorID
@@ -541,6 +556,7 @@ function createCampaignRouter({
           title: req.body?.title,
           message: req.body?.message,
           discountPercent: Number(req.body?.discountPercent) || null,
+          couponCode: req.body?.couponCode,
           dedupeDays: Number(req.body?.dedupeDays) || 30,
           workflowCategory: req.body?.workflowCategory,
           actorID,
@@ -732,11 +748,37 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'checking the copy'); }
   });
 
+  /**
+   * Create one WooCommerce coupon for a campaign draft. This creates only the
+   * checkout mechanism. It does not create, approve, schedule or send a
+   * campaign, and the caller must explicitly attach the returned code.
+   */
+  router.post('/coupons', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const coupon = await createCoupon(req.body || {});
+      const auditInput = {
+        eventType: 'campaign.coupon_created', req, entityId: coupon.id,
+        summary: `${req.actor?.displayName || 'Team'} created campaign coupon ${coupon.code}: ${coupon.percent}% off, `
+          + `${coupon.usageLimit} total uses, ${coupon.usageLimitPerUser} per customer, expires ${coupon.expiry}`,
+        newState: {
+          code: coupon.code, percent: coupon.percent, minimum_amount: coupon.minimumAmount,
+          maximum_amount: coupon.maximumAmount, expiry: coupon.expiry,
+          usage_limit: coupon.usageLimit, usage_limit_per_user: coupon.usageLimitPerUser
+        }
+      };
+      if (campaignCouponAuditWriter) await campaignCouponAuditWriter(auditInput);
+      else await logAudit(auditInput);
+      return res.status(201).json({ coupon, sent: false, scheduled: false });
+    } catch (error) { return sendError(res, error, 'creating this coupon'); }
+  });
+
   router.post('/copy-suggestions', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       const input = copySuggestionRequest(req.body);
-      const result = await drafter(input);
+      const styleTraits = await styleFor(req.actor);
+      const result = await drafter(styleTraits.length ? { ...input, styleTraits } : input);
       // Rejected drafts leave this process as rule ids and reasons only. Their
       // text is never returned, so a reviewer cannot lift a draft that failed
       // validation out of a response body and paste it into a campaign.
@@ -1094,9 +1136,20 @@ function createCampaignRouter({
         });
       }
 
+      const couponCode = campaign?.campaign?.audience_definition?.coupon_code || null;
+      if (couponCode) {
+        const { verifyExistingCoupon } = require('../lib/campaigns/existing-coupon');
+        await verifyExistingCoupon({
+          code: couponCode,
+          percent: campaign?.campaign?.discount_percent
+            ?? campaign?.campaign?.audience_definition?.discount_percent,
+          message: template
+        });
+      }
       const outcome = await renderCampaignTest({
         template,
-        to
+        to,
+        ...(couponCode ? { couponCode } : {})
       });
       const text = outcome.rendered[0]?.message;
       if (!text) {

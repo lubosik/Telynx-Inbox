@@ -43,6 +43,8 @@ module.exports = (broadcastSSE) => {
           body: text,
           status: normaliseTelnyxStatus(providerStatus),
           ghl_contact_id: null,
+          sender_user_id: Number.isSafeInteger(Number(req.actor?.id)) && Number(req.actor?.id) > 0
+            ? Number(req.actor.id) : null,
           media_urls: mediaRecord,
           reply_to_message_id: replyTo
         });

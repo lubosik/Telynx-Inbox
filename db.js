@@ -22,7 +22,7 @@ async function verifyConnection() {
 // Insert into sms_messages, tolerating a not-yet-migrated schema: if the DB
 // doesn't have the MMS/reply columns yet (PGRST204 unknown column), retry
 // without them so plain text messages never break on deploy ordering.
-const MIGRATION_COLUMNS = ['media_urls', 'reply_to_message_id', 'reactions'];
+const MIGRATION_COLUMNS = ['media_urls', 'reply_to_message_id', 'reactions', 'sender_user_id'];
 
 async function insertSmsMessage(row) {
   let { data, error } = await supabase
@@ -33,8 +33,10 @@ async function insertSmsMessage(row) {
 
   if (error && error.code === 'PGRST204') {
     const fallback = { ...row };
-    for (const col of MIGRATION_COLUMNS) delete fallback[col];
-    console.warn('[DB] sms_messages missing MMS columns — run scripts/mms-reply-migration.sql. Inserting without them.');
+    const missing = String(error.message || '').match(/'([^']+)' column/i)?.[1];
+    if (missing && MIGRATION_COLUMNS.includes(missing)) delete fallback[missing];
+    else for (const col of MIGRATION_COLUMNS) delete fallback[col];
+    console.warn(`[DB] sms_messages missing optional column ${missing || 'unknown'}. Inserting without it; check MMS and human-sender migrations.`);
     ({ data, error } = await supabase
       .from('sms_messages')
       .insert(fallback)

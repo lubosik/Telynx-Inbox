@@ -570,6 +570,7 @@ final class CampaignEditorModel: ObservableObject {
     @Published private(set) var isPreviewing = false
     @Published private(set) var livePreview: CampaignPreview?
     @Published private(set) var copyError: String?
+    @Published private(set) var attachedCoupon: CampaignCoupon? = nil
     @Published var errorMessage: String?
 
     let existingID: String?
@@ -635,7 +636,7 @@ final class CampaignEditorModel: ObservableObject {
         guard savedCampaign == nil else { return false }
         return title != initialTitle || message != initialMessage ||
             recipientsText != initialRecipientsText || audienceMode != initialAudienceMode ||
-            !selectedContacts.isEmpty
+            !selectedContacts.isEmpty || attachedCoupon != nil
     }
 
     /// Load what the editor needs to write copy: the variables the renderer
@@ -665,6 +666,26 @@ final class CampaignEditorModel: ObservableObject {
         livePreview = nil
     }
 
+    func attachCoupon(_ coupon: CampaignCoupon) {
+        attachedCoupon = coupon
+        let condition = coupon.minimumAmount > 0
+            ? " on orders of \(Int(coupon.minimumAmount)) dollars or more" : ""
+        let offer = "Take \(coupon.percent)% off\(condition) with {{code}}."
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "Vin from Vici:" || trimmed.isEmpty {
+            message = "Vin from Vici: \(offer) Reply STOP to opt out."
+        } else if !trimmed.contains("{{code}}") {
+            let suffix = "Reply STOP to opt out."
+            if trimmed.hasSuffix(suffix) {
+                message = String(trimmed.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces)
+                    + " \(offer) \(suffix)"
+            } else {
+                message = trimmed + " \(offer)"
+            }
+        }
+        livePreview = nil
+    }
+
     /**
      * Ask the model for candidate copy.
      *
@@ -687,15 +708,23 @@ final class CampaignEditorModel: ObservableObject {
                 brief: text,
                 currentMessage: (refining && !current.isEmpty) ? current : nil
             )
-            suggestions = result.candidates
+            let safeCandidates = result.candidates.filter { candidate in
+                guard let coupon = attachedCoupon else { return true }
+                guard candidate.text.contains("{{code}}"),
+                      candidate.text.contains("\(coupon.percent)%") else { return false }
+                return coupon.minimumAmount <= 0 || candidate.text.contains(String(Int(coupon.minimumAmount)))
+            }
+            suggestions = safeCandidates
             chosenSuggestion = nil
             refinementCount = refining ? refinementCount + 1 : 0
-            if result.candidates.isEmpty {
+            if safeCandidates.isEmpty {
                 // The text of a rejected draft is deliberately never returned,
                 // so it cannot be shown. What CAN be shown is which rules they
                 // broke, and that is the difference between "it ignored me"
                 // and "it tried, and the compliance rules ate the results".
-                copyError = Self.rejectionMessage(result.rejected)
+                copyError = attachedCoupon == nil
+                    ? Self.rejectionMessage(result.rejected)
+                    : "No version kept every coupon term. The current message is unchanged. Try Change the message above, or edit it directly."
             }
         } catch {
             copyError = error.localizedDescription
@@ -749,6 +778,7 @@ final class CampaignEditorModel: ObservableObject {
         recipientsText = initialRecipientsText
         audienceMode = initialAudienceMode
         selectedContacts.removeAll()
+        attachedCoupon = nil
         contactSearch = ""
         step = .type
     }
@@ -952,7 +982,9 @@ final class CampaignEditorModel: ObservableObject {
                     title: cleanTitle,
                     message: cleanMessage,
                     recipients: recipients,
-                    allContacts: audienceMode == .allContacts
+                    allContacts: audienceMode == .allContacts,
+                    couponCode: attachedCoupon?.code,
+                    discountPercent: attachedCoupon?.percent
                 )
             }
             isSaving = false

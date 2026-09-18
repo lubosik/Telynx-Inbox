@@ -355,9 +355,9 @@ test('validation is not skippable by injecting a permissive validator through th
   // draftCandidates takes its validator from a second, internal argument. The
   // route calls it with one argument, so a request body cannot reach it.
   const source = fs.readFileSync(path.join(__dirname, '..', 'routes/campaigns.js'), 'utf8');
-  const call = source.match(/await drafter\(([^)]*)\)/);
-  assert.ok(call, 'the route must call the drafter');
-  assert.equal(call[1].trim(), 'input', 'the route must pass only the request input');
+  assert.match(source, /await drafter\(styleTraits\.length \? \{ \.\.\.input, styleTraits \} : input\)/);
+  assert.doesNotMatch(source, /await drafter\([^;]*validator:/,
+    'the route must never accept or pass a client-supplied validator');
 });
 
 // ── Model failure modes ────────────────────────────────────────────────────

@@ -142,6 +142,37 @@ test('an order carrying our code beside another still counts once', async () => 
   assert.equal(result.revenue, 200);
 });
 
+test('a public fixed code is not attributed before the message was sent', async () => {
+  const result = await campaignCouponRedemptions({
+    client: stubClient({
+      recipients: [recipient('CC20', { contact_phone: '+15550000001', sent_at: null, delivered_at: null })],
+      orders: [order(['cc20'])]
+    }), campaignID: 'camp-1'
+  });
+  assert.equal(result.redeemed, 0);
+  assert.equal(result.revenue, 0);
+});
+
+test('a public fixed code requires the exact recipient even for a one-person campaign', async () => {
+  const result = await campaignCouponRedemptions({
+    client: stubClient({
+      recipients: [recipient('CC20', { contact_phone: '+15550000001' })],
+      orders: [order(['cc20'], { contact_phone: '+15550000002' })]
+    }), campaignID: 'camp-1'
+  });
+  assert.equal(result.redeemed, 0);
+});
+
+test('a public fixed code used outside the three-day campaign window is not claimed', async () => {
+  const result = await campaignCouponRedemptions({
+    client: stubClient({
+      recipients: [recipient('CC20', { contact_phone: '+15550000001' })],
+      orders: [order(['cc20'], { created_at: '2026-09-07T12:00:00Z' })]
+    }), campaignID: 'camp-1'
+  });
+  assert.equal(result.redeemed, 0);
+});
+
 test('a campaign that issued no codes reports zero rather than dividing by it', async () => {
   const result = await campaignCouponRedemptions({
     client: stubClient({ recipients: [], orders: [] }), campaignID: 'camp-1'

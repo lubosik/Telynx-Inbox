@@ -742,7 +742,9 @@ actor APIClient {
     func createCampaign(title: String,
                         message: String,
                         recipients: [CampaignRecipientInput],
-                        allContacts: Bool = false) async throws -> CampaignActionResponse {
+                        allContacts: Bool = false,
+                        couponCode: String? = nil,
+                        discountPercent: Int? = nil) async throws -> CampaignActionResponse {
         var body: [String: Any] = [
             "title": title,
             "message": message,
@@ -750,7 +752,32 @@ actor APIClient {
             "recipients": recipients.map(\.requestBody)
         ]
         if allContacts { body["audience"] = ["kind": "all_contacts"] }
+        if let couponCode { body["couponCode"] = couponCode }
+        if let discountPercent { body["discountPercent"] = discountPercent }
         return try await campaignMutation("/api/campaigns", body: body)
+    }
+
+    func createCampaignCoupon(code: String,
+                              name: String,
+                              percent: Int,
+                              expiryDays: Int,
+                              minimumAmount: Double,
+                              maximumAmount: Double,
+                              usageLimit: Int,
+                              usageLimitPerUser: Int,
+                              individualUse: Bool,
+                              excludeSaleItems: Bool,
+                              freeShipping: Bool) async throws -> CampaignCouponCreateResponse {
+        let (data, response) = try await post("/api/campaigns/coupons", body: [
+            "code": code, "name": name, "percent": percent,
+            "expiryDays": expiryDays, "minimumAmount": minimumAmount,
+            "maximumAmount": maximumAmount, "usageLimit": usageLimit,
+            "usageLimitPerUser": usageLimitPerUser, "individualUse": individualUse,
+            "excludeSaleItems": excludeSaleItems, "freeShipping": freeShipping
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CampaignCouponCreateResponse.self, from: data) }
+        catch { throw APIError.decoding }
     }
 
     func editCampaign(id: String,
@@ -873,6 +900,7 @@ actor APIClient {
         ruleSet: JSONValue?,
         message: String,
         discountPercent: Int?,
+        couponCode: String?,
         workflowCategory: String
     ) async throws {
         var body: [String: Any] = [
@@ -884,6 +912,7 @@ actor APIClient {
         if let audienceKind { body["audienceKind"] = audienceKind }
         if let ruleSet { body["ruleSet"] = ruleSet.rawValue }
         if let discountPercent { body["discountPercent"] = discountPercent }
+        if let couponCode { body["couponCode"] = couponCode }
         let data: Data
         let response: HTTPURLResponse
         do {
