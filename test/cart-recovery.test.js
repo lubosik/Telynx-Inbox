@@ -598,6 +598,19 @@ test('cart migrations are pasteable, fail closed, service-role only, and reload 
   assert.match(attribution, /net_recovered_revenue=p_gross-p_refunded/);
 });
 
+test('cart connector pgcrypto hotfix qualifies only digest while preserving empty function search paths', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../scripts/cart-recovery-pgcrypto-search-path-hotfix.sql'), 'utf8');
+  assert.match(sql, /^BEGIN;$/m);
+  assert.match(sql, /^COMMIT;$/m);
+  assert.match(sql, /NOTIFY pgrst, 'reload schema'/);
+  assert.match(sql, /resolve_luko_cart_customer_identity\(text,text,text,text\)/);
+  assert.match(sql, /apply_luko_cart_event\(jsonb,text\)/);
+  assert.match(sql, /pg_get_functiondef/);
+  assert.match(sql, /quote_ident\(v_pgcrypto_schema\) \|\| '\.digest\('/);
+  assert.doesNotMatch(sql, /ALTER FUNCTION[\s\S]*SET search_path/i);
+  assert.doesNotMatch(sql, /^\s*(?:UPDATE|DELETE|INSERT|DROP)\s+/mi);
+});
+
 test('Telnyx events must pass Ed25519 verification before a durable claim is requested', async () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   const event = { data: { id: 'evt-1', event_type: 'message.delivered', occurred_at: NOW.toISOString(), payload: { id: 'msg-1' } } };
