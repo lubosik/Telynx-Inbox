@@ -19,6 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { RULES, renderPromptRules } = require('../lib/campaigns/copy-rules');
+const { validateCopy } = require('../lib/campaigns/copy-validator');
 
 // The sender's name is a BUSINESS DECISION and it has already changed once,
 // from "Vici" to "Vin from Vici". Fixtures that hardcode it turn every one of
@@ -649,7 +650,28 @@ test('a coupon rewrite surfaces only candidates that preserve every live offer t
   assert.deepEqual(result.candidates.map(candidate => candidate.text), [complete]);
   assert.match(record.user, /Verified WooCommerce discount: 20% off/);
   assert.match(record.user, /orders of 100 dollars or more/);
-  assert.ok(result.rejected.some(item => item.failedChecks.includes('coupon_terms_preserved')));
+  assert.ok(result.rejected.some(item => item.failedChecks.includes('coupon_minimum_required')));
+});
+
+test('verified coupon facts produce a reviewed valid fallback when the model drops them every time', async () => {
+  const missingTerms = `${BRAND}: Card checkout works now. Visit https://vicipeptides.com. ${OPT_OUT}`;
+  const result = await draft({
+    workflowType: 'manual',
+    currentMessage: 'Checkout is fixed. We accept all major cards and Apple Pay now.',
+    couponCode: 'CC20',
+    couponPercent: 20,
+    minimumSpend: 100,
+    linkUrl: 'https://vicipeptides.com',
+    styleTraits: ['direct', 'concise', 'warm', 'thanks', 'first_name']
+  }, [missingTerms]);
+
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.returned, 1);
+  assert.equal(validateCopy(result.candidates[0].text).ok, true);
+  assert.match(result.candidates[0].text, /^Hi \{\{first_name\}\}, Vin from Vici\./);
+  assert.match(result.candidates[0].text, /All major cards and Apple Pay now work at checkout\./);
+  assert.match(result.candidates[0].text, /20% off on orders of 100 dollars or more with \{\{code\}\}/);
+  assert.match(result.candidates[0].text, /https:\/\/vicipeptides\.com/);
 });
 
 test('a real name in the current message is still refused', async () => {
