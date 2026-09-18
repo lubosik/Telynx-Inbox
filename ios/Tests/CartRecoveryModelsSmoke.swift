@@ -49,7 +49,7 @@ struct CartRecoveryModelsSmoke {
 
         let detailJSON = Data(#"""
         {
-          "journey": {"id":"journey-1","status":"REPLIED"},
+          "journey": {"id":"journey-1","status":"REPLIED","voiceConsent":true,"voiceStatus":"VOICEMAIL_PLAYED","voiceAttemptCount":1},
           "timeline": [{"id":"event-1","event_type":"sms_delivered","title":"Delivered"}],
           "replies": [{
             "id":"reply-1",
@@ -59,12 +59,15 @@ struct CartRecoveryModelsSmoke {
             "draft":"Sorry about that. What error did you see?",
             "draftStatus":"DRAFT",
             "medicalEscalation":false
-          }]
+          }],
+          "voiceAttempt":{"id":"voice-1","state":"VOICEMAIL_PLAYED","attemptNumber":1,"dryRun":false,"provider":"telnyx","amdResult":"machine_end_beep","voicemailPlayedAt":"2026-09-15T12:35:00Z"}
         }
         """#.utf8)
         let detail = try JSONDecoder().decode(CartRecoveryJourneyDetail.self, from: detailJSON)
         require(detail.timeline.first?.type == "sms_delivered", "timeline type should decode")
         require(detail.replies.first?.draftStatus == "DRAFT", "human-review draft should decode")
+        require(detail.journey.voiceConsent, "separate voice consent should decode")
+        require(detail.voiceAttempt?.amdResult == "machine_end_beep", "voice attempt evidence should decode")
 
         let settingsJSON = Data(#"""
         {"settings": {
@@ -75,13 +78,24 @@ struct CartRecoveryModelsSmoke {
           "pushDelayHours":48,
           "discountPercent":15,
           "discountCode":"VICI15",
-          "automaticAiSending":true
+          "automaticAiSending":true,
+          "voiceEnabled":true,
+          "voiceDelayMinutes":180,
+          "voiceId":"vin-voice",
+          "voiceName":"Vin",
+          "voiceConfigurationReady":true,
+          "voiceProductionReady":false,
+          "voiceBlockers":["compliance_approval_missing"]
         }}
         """#.utf8)
         let settings = try JSONDecoder().decode(CartRecoverySettingsEnvelope.self,
                                                 from: settingsJSON).settings
         require(settings.discountCode == "VICI15", "customer-facing coupon code should decode exactly")
         require(settings.automaticAiSending, "client should accurately show an unsafe server state")
+        require(settings.voiceEnabled && settings.voiceDelayMinutes == 180,
+                "workspace recovery voice settings should decode separately")
+        require(settings.voiceProductionReady == false,
+                "configuration readiness must not imply production approval")
         require(settings.requestBody["automaticAiSending"] as? Bool == false,
                 "client must never request automatic AI sending")
 

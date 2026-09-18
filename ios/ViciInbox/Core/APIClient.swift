@@ -545,6 +545,10 @@ actor APIClient {
         return envelope.settings
     }
 
+    func fetchCartRecoveryVoices() async throws -> RecoveryVoiceCatalogue {
+        try await decodedGET("/api/cart-recovery/voices")
+    }
+
     @discardableResult
     func updateCartRecoverySettings(_ settings: CartRecoverySettings) async throws -> CartRecoverySettings {
         let (data, response) = try await put("/api/cart-recovery/settings", body: settings.requestBody)

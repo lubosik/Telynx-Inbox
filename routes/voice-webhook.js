@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const crypto = require('node:crypto');
 const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
@@ -6,6 +7,9 @@ const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/te
 const { finalCallStatus } = require('../lib/call-status');
 const { archiveCallRecording } = require('../lib/private-recordings');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
+const { decodeVerifiedTelnyxEvent } = require('../lib/telnyx-webhook-claim');
+const { createVoiceEventHandler } = require('../lib/cart-recovery/voice-events');
+const recoveryVoice = createVoiceEventHandler({ client: supabase, env: process.env });
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
 async function dbUpsert(values, options = {}) {
@@ -118,23 +122,47 @@ async function transferToOperator(cid) {
 }
 
 router.post('/', async (req, res) => {
-  res.sendStatus(200);
-  console.log('[VOICE] Webhook received');
+  let event;
+  let claim;
+  try {
+    event = decodeVerifiedTelnyxEvent(req.body, req.headers, process.env.TELNYX_PUBLIC_KEY,
+      { requirePayloadID: false });
+    const payloadDigest = crypto.createHash('sha256').update(req.body).digest('hex');
+    const { data, error } = await supabase.rpc('claim_telnyx_voice_event', { p_event: {
+      provider_event_id: String(event.id), event_type: String(event.event_type),
+      call_control_id: String(event.payload?.call_control_id || ''), payload_digest: payloadDigest,
+      occurred_at: event.occurred_at || new Date().toISOString()
+    } });
+    if (error) throw Object.assign(new Error('Voice webhook ledger unavailable.'), { code: error.code });
+    claim = data;
+    if (!claim?.claimed) return res.sendStatus(200);
+  } catch (error) {
+    console.error('[VOICE] Rejected webhook:', error.code || error.message);
+    return res.sendStatus(error.status || 503);
+  }
+
+  console.log('[VOICE] Verified webhook received');
 
   try {
-    const raw = req.body;
-    let body;
-    try {
-      body = Buffer.isBuffer(raw)
-        ? JSON.parse(raw.toString() || '{}')
-        : (typeof raw === 'object' ? raw : JSON.parse(String(raw) || '{}'));
-    } catch (e) {
-      console.error('[VOICE] Parse error:', e.message);
-      return;
+    const recovery = await recoveryVoice.handle(event);
+    if (recovery.handled) {
+      const { data: finished, error: finishError } = await supabase.rpc('finish_telnyx_voice_event', {
+        p_event_id: event.id, p_token: claim.claim_token, p_error: null
+      });
+      if (finishError || finished !== true) {
+        throw Object.assign(new Error('Voice webhook completion could not be persisted.'), {
+          code: finishError?.code || 'VOICE_WEBHOOK_FINISH_FAILED'
+        });
+      }
+      // Recovery events are acknowledged only after durable processing. A
+      // failure receives a non-2xx response so Telnyx can redeliver it and the
+      // FAILED ledger claim can be safely reclaimed.
+      return res.sendStatus(200);
     }
 
-    const event = body?.data;
-    if (!event) return;
+    // Preserve the existing fast acknowledgement for unrelated inbound-call
+    // events, whose legacy path may archive recordings after the response.
+    res.sendStatus(200);
 
     const { event_type, payload } = event;
     const cid = payload?.call_control_id;
@@ -279,8 +307,19 @@ router.post('/', async (req, res) => {
       }
     }
 
+    await supabase.rpc('finish_telnyx_voice_event', {
+      p_event_id: event.id, p_token: claim.claim_token, p_error: null
+    });
+
   } catch (err) {
     console.error('[VOICE] Unhandled error:', err.message, err.stack?.split('\n')[1]);
+    try {
+      await supabase.rpc('finish_telnyx_voice_event', {
+        p_event_id: event.id, p_token: claim.claim_token,
+        p_error: String(err.code || err.message || 'voice_processing_error').slice(0, 120)
+      });
+    } catch (_) {}
+    if (!res.headersSent) return res.sendStatus(503);
   }
 });
 

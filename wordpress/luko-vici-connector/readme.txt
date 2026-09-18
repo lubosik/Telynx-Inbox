@@ -1,12 +1,12 @@
 === LUKO Vici Connector ===
 Contributors: luko
-Tags: woocommerce, sms, abandoned-cart
+Tags: woocommerce, sms, voice, abandoned-cart
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.3.6
+Stable tag: 0.4.0
 License: Proprietary
 
-Connects authenticated Vici WooCommerce carts to LUKO abandoned-cart recovery while keeping phone availability, SMS consent and push permission independent.
+Connects authenticated Vici WooCommerce carts to LUKO abandoned-cart recovery while keeping phone availability, SMS consent, voice consent and push permission independent.
 
 == Installation ==
 
@@ -17,6 +17,12 @@ Configure the LUKO API base as https://web-production-2551e.up.railway.app and s
 Leave live provider delivery disabled until the LUKO dry-run trace passes and the Telnyx messaging profile is confirmed for this exact cart-reminder use case.
 
 == Changelog ==
+
+= 0.4.0 =
+* Adds one optional, unchecked combined SMS and AI-voice disclosure for new registrations while preserving separate, auditable consent fields.
+* Keeps every legacy SMS-only customer opted out of voice unless exact versioned voice consent exists.
+* Reports current voice eligibility to LUKO without changing the Essential Addons email OTP flow.
+* Adds HPOS-safe voice-assisted order attribution metadata.
 
 = 0.3.6 =
 * Shortens the SMS opt-in disclosure and removes the words “recurring” and “automated” while retaining the required brand, marketing use case, frequency, rates, STOP/HELP, purchase-choice and no-sharing disclosures.

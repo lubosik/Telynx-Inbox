@@ -14,7 +14,7 @@ enum AbandonedCartAnalyticsModelsSmoke {
         {
           "generatedAt":"2026-09-15T12:00:00.000Z",
           "range":{"period":"month","start":"2026-09-01T04:00:00.000Z","end":"2026-09-15T12:00:00.000Z","timeZone":"America/New_York","previous":null},
-          "metrics":{"recoveredRevenue":"238.00","recoveredOrders":2,"abandonedCarts":10,"recoveryRate":20,"recoveryRateNumerator":2,"recoveryRateDenominator":10,"smsSent":8,"smsDelivered":7,"recoveryLinkClicks":1,"pushSent":4,"pushClicks":1,"discountRecoveries":2,"averageRecoveredOrderValue":119,"currency":"USD","mixedCurrencies":false},
+          "metrics":{"recoveredRevenue":"238.00","recoveredOrders":2,"abandonedCarts":10,"recoveryRate":20,"recoveryRateNumerator":2,"recoveryRateDenominator":10,"smsSent":8,"smsDelivered":7,"recoveryLinkClicks":1,"pushSent":4,"pushClicks":1,"voiceEligible":4,"voiceCallsStarted":3,"voiceHumanDetected":1,"voiceMachineDetected":2,"voiceVoicemailsPlayed":2,"voiceTransfersConnected":1,"voiceOptOuts":0,"averageHumanFirstAudioMs":742.5,"discountRecoveries":2,"averageRecoveredOrderValue":119,"currency":"USD","mixedCurrencies":false},
           "funnel":[{"key":"abandoned","label":"Abandoned carts","count":10}],
           "revenueByMethod":[{"method":"sms_recovery_link","revenue":119,"orders":1,"currency":"USD"},{"method":"recovery_coupon","revenue":"119.00","orders":1,"currency":"USD"}],
           "orders":[{
@@ -29,6 +29,8 @@ enum AbandonedCartAnalyticsModelsSmoke {
         require(report.orders.count == 1, "recovered-order details should decode")
         require(report.orders[0].recoveryMethod == "sms_recovery_link", "primary method should decode")
         require(report.orders[0].secondarySignals.couponUsed == "VICI15", "coupon should remain secondary")
+        require(report.metrics.voiceCallsStarted == 3, "voice funnel metrics should decode")
+        require(report.metrics.averageHumanFirstAudioMs == 742.5, "voice timing evidence should decode")
         require(AnalyticsPeriod.quarter.title == "This Quarter", "quarter filter should be exposed")
         print("abandoned cart analytics model smoke passed")
     }

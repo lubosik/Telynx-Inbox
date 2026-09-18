@@ -504,6 +504,10 @@ function startCartRecovery() {
       if (!summary.disabled && summary.claimed > 0) {
         console.log(`[CART RECOVERY] claimed=${summary.claimed} dry_run=${summary.dryRun} sent=${summary.sent} deferred=${summary.deferred} uncertain=${summary.uncertain}`);
       }
+      const voice = await cartRecovery.runVoiceDue();
+      if (!voice.disabled && voice.claimed > 0) {
+        console.log(`[CART VOICE] claimed=${voice.claimed} dry_run=${voice.dryRun} initiated=${voice.initiated} deferred=${voice.deferred} blocked=${voice.blocked} uncertain=${voice.uncertain}`);
+      }
     } catch (error) {
       const missing = ['42P01', 'PGRST202', 'PGRST204', 'PGRST205'].includes(error.code);
       console.error(`[CART RECOVERY] ${missing ? 'Migration not ready' : 'Worker error'}:`, error.code || error.message);

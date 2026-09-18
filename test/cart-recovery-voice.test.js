@@ -1,0 +1,632 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const { listAccountVoices } = require('../lib/assistant/voice');
+const { attributionDecision, attributionPayload } = require('../lib/cart-recovery/attribution');
+const { createCartRecoveryService, normalizeEvent } = require('../lib/cart-recovery/service');
+const { createVoiceEventHandler, decodeClientState } = require('../lib/cart-recovery/voice-events');
+const {
+  amdBranch,
+  insideCallingWindow,
+  isSpokenOptOut,
+  productPhrase,
+  renderVoiceScripts,
+  voiceConfiguration
+} = require('../lib/cart-recovery/voice');
+const {
+  createOutboundCall,
+  speakPremiumOnCall,
+  startTranscription
+} = require('../lib/telnyx-api');
+const { decodeVerifiedTelnyxEvent } = require('../lib/telnyx-webhook-claim');
+
+const NOW = new Date('2026-09-15T14:00:00.000Z');
+const RECOVERY_ID = '11111111-1111-4111-8111-111111111111';
+const ATTEMPT_ID = '22222222-2222-4222-8222-222222222222';
+
+const VOICE_ENV = {
+  LUKO_WP_STORE_ID: 'vici',
+  LUKO_WP_URL: 'https://vicipeptides.com',
+  LUKO_WP_SIGNING_SECRET: 'voice-test-secret-that-is-long-enough-123456',
+  TELNYX_API_KEY: 'KEY_TEST',
+  TELNYX_PHONE_NUMBER: '+12125550100',
+  TELNYX_CONNECTION_ID: 'connection-1',
+  ELEVENLABS_VIN_VOICE_ID: 'vin-voice',
+  ELEVENLABS_MODEL: 'eleven_turbo_v2_5',
+  TELNYX_ELEVENLABS_API_KEY_REF: 'elevenlabs-key-ref',
+  VICI_LIVE_TRANSFER_NUMBER: '+12125550199',
+  VICI_VOICE_OPT_OUT_TOLL_FREE_NUMBER: '+18005550100'
+};
+
+function connectorEvent(consent = {}) {
+  return {
+    event_id: 'cart-event-voice-1',
+    event_type: 'cart.updated',
+    occurred_at: NOW.toISOString(),
+    store: 'vici',
+    customer: {
+      wordpress_user_id: 42,
+      first_name: 'Maya',
+      email: 'maya@example.com',
+      phone: '+12125550123'
+    },
+    consent: {
+      granted: true,
+      phone: '+12125550123',
+      disclosure: 'Combined SMS and AI voice disclosure.',
+      version: 'vici_marketing_sms_voice_v1',
+      source: 'vici_registration',
+      occurred_at: NOW.toISOString(),
+      privacy_url: 'https://vicipeptides.com/privacy-policy/',
+      terms_url: 'https://vicipeptides.com/terms/',
+      ...consent
+    },
+    cart: {
+      external_cart_id: 'cart-voice-12345',
+      version: 1,
+      currency: 'USD',
+      total: '120.00',
+      last_activity_at: NOW.toISOString(),
+      expires_at: '2026-09-22T14:00:00.000Z',
+      recovery_url: `https://vicipeptides.com/r/${'v'.repeat(43)}`,
+      items: [{ product_id: 9, quantity: 1, product_name: 'RT', product_url: 'https://vicipeptides.com/product/rt/' }]
+    }
+  };
+}
+
+function response(body = {}) {
+  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+}
+
+test('voice copy is safe, personalized, singular only for one item, and rejects unsafe template edits', () => {
+  assert.equal(productPhrase([{ product_name: 'RT_10MG', product_id: 9 }]), 'RT 10MG');
+  assert.equal(productPhrase([{ product_name: 'RT' }, { product_name: 'BPC-157' }]), 'the items');
+  assert.equal(productPhrase([{ product_name: 'Internal name', product_id: 9 }], { 9: 'RT' }), 'RT');
+
+  const scripts = renderVoiceScripts({
+    firstName: 'Maya Jones',
+    items: [{ product_name: 'RT' }],
+    tollFreeNumber: '+18005550100'
+  });
+  assert.match(scripts.human, /^Hi Maya, this is an automated message/);
+  assert.match(scripts.human, /say "stop" or press 9/i);
+  assert.match(scripts.human, /press #/);
+  assert.match(scripts.voicemail, /\+18005550100/);
+  assert.doesNotMatch(scripts.voicemail, /press 9/);
+
+  assert.throws(() => renderVoiceScripts({
+    firstName: 'Maya', items: [{ product_name: 'RT' }], tollFreeNumber: '+18005550100',
+    humanTemplate: 'Hi {{first_name}}, your cart is waiting.'
+  }), { code: 'INVALID_VOICE_HUMAN_TEMPLATE' });
+  assert.throws(() => renderVoiceScripts({
+    firstName: 'Maya', items: [{ product_name: 'RT' }], tollFreeNumber: '',
+  }), { code: 'VOICE_OPT_OUT_NUMBER_REQUIRED' });
+});
+
+test('spoken opt-out and AMD routing are deterministic and do not match ordinary conversation', () => {
+  for (const phrase of ['stop', 'please stop calling me', "don't call me", 'remove me', 'no more calls']) {
+    assert.equal(isSpokenOptOut(phrase), true, phrase);
+  }
+  assert.equal(isSpokenOptOut('I can stop by the shop tomorrow'), true,
+    'the required standalone STOP keyword remains a deterministic opt-out');
+  assert.equal(isSpokenOptOut('I am still interested'), false);
+  assert.equal(amdBranch('human_business'), 'human');
+  assert.equal(amdBranch('machine_end_beep'), 'machine');
+  assert.equal(amdBranch('fax_detected'), 'undeliverable');
+  assert.equal(amdBranch('not_a_sure_result'), 'unknown');
+});
+
+test('calling windows use the customer timezone, include the start, and exclude the end', () => {
+  assert.equal(insideCallingWindow({ now: new Date('2026-09-15T13:00:00Z'), timeZone: 'America/New_York', start: '09:00', end: '20:00' }), true);
+  assert.equal(insideCallingWindow({ now: new Date('2026-09-16T00:00:00Z'), timeZone: 'America/New_York', start: '09:00', end: '20:00' }), false);
+  assert.equal(insideCallingWindow({ now: NOW, timeZone: 'Not/A_Timezone' }), false);
+  assert.equal(insideCallingWindow({ now: NOW, timeZone: 'America/New_York', start: '20:00', end: '09:00' }), false,
+    'overnight windows fail closed rather than calling at an ambiguous time');
+});
+
+test('voice provider configuration fails closed and creates the Telnyx ElevenLabs voice identifier', () => {
+  const valid = voiceConfiguration(VOICE_ENV, {});
+  assert.equal(valid.valid, true);
+  assert.equal(valid.telnyxVoice, 'ElevenLabs.eleven_turbo_v2_5.vin-voice');
+
+  const invalid = voiceConfiguration({ ...VOICE_ENV, TELNYX_API_KEY: '', TELNYX_CONNECTION_ID: '',
+    VICI_LIVE_TRANSFER_NUMBER: VOICE_ENV.TELNYX_PHONE_NUMBER }, {});
+  assert.deepEqual(invalid.errors.sort(), ['telnyx_api_key_missing', 'telnyx_connection_missing', 'transfer_loop']);
+});
+
+test('settings readiness includes the separate production provider approval gate', async () => {
+  const settingsRow = {
+    voice_enabled: true,
+    voice_id: 'vin-voice',
+    voice_model_id: 'eleven_turbo_v2_5',
+    voice_human_answer_mode: 'DISABLED',
+    voice_compliance_approved: true,
+    voice_human_timing_approved: false
+  };
+  function settingsClient() {
+    return {
+      from(table) {
+        assert.equal(table, 'luko_cart_recovery_settings');
+        const query = {
+          select() { return query; },
+          eq() { return query; },
+          async maybeSingle() { return { data: settingsRow, error: null }; }
+        };
+        return query;
+      }
+    };
+  }
+
+  const blocked = await createCartRecoveryService({ client: settingsClient(), env: VOICE_ENV }).getSettings();
+  assert.equal(blocked.settings.voiceConfigurationReady, true);
+  assert.equal(blocked.settings.voiceProductionReady, false);
+  assert.ok(blocked.settings.voiceBlockers.includes('provider_approval_missing'));
+
+  const approved = await createCartRecoveryService({
+    client: settingsClient(), env: { ...VOICE_ENV, LUKO_VOICE_PROVIDER_APPROVED: 'true' }
+  }).getSettings();
+  assert.equal(approved.settings.voiceProductionReady, true);
+  assert.doesNotMatch(approved.settings.voiceBlockers.join(','), /provider_approval_missing/);
+});
+
+test('combined registration grants voice only with both explicit flags and the exact consent version', () => {
+  const explicit = normalizeEvent(connectorEvent({ voice_marketing_consent: true, ai_voice_consent: true }), VOICE_ENV, NOW);
+  assert.equal(explicit.consent.sms_consent, true);
+  assert.equal(explicit.consent.voice_marketing_consent, true);
+  assert.equal(explicit.consent.ai_voice_consent, true);
+
+  const smsOnly = normalizeEvent(connectorEvent({ voice_marketing_consent: false, ai_voice_consent: false }), VOICE_ENV, NOW);
+  assert.equal(smsOnly.consent.granted, true);
+  assert.equal(smsOnly.consent.voice_marketing_consent, false);
+  assert.equal(smsOnly.consent.ai_voice_consent, false);
+
+  const oldVersion = normalizeEvent(connectorEvent({
+    version: 'vici_sms_marketing_v1', voice_marketing_consent: true, ai_voice_consent: true
+  }), VOICE_ENV, NOW);
+  assert.equal(oldVersion.consent.sms_consent, true);
+  assert.equal(oldVersion.consent.voice_marketing_consent, false);
+  assert.equal(oldVersion.consent.ai_voice_consent, false);
+});
+
+test('voice worker blocks a claimed call when current durable voice consent is absent', async () => {
+  const calls = [];
+  const client = {
+    async rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'claim_luko_cart_voice_calls') return { data: [{
+        id: RECOVERY_ID, voice_claim_token: '33333333-3333-4333-8333-333333333333',
+        contact_phone: '+12125550123'
+      }], error: null };
+      return { data: true, error: null };
+    },
+    from(table) {
+      assert.equal(table, 'luko_voice_consent_events');
+      const query = {
+        select() { return query; }, eq() { return query; }, order() { return query; },
+        async limit() { return { data: [], error: null }; }
+      };
+      return query;
+    }
+  };
+  const service = createCartRecoveryService({
+    client,
+    env: { ...VOICE_ENV, CART_RECOVERY_VOICE_ENABLED: 'true' },
+    now: () => NOW,
+    loadSettings: async () => ({ voice_enabled: true })
+  });
+  const result = await service.runVoiceDue();
+  assert.equal(result.claimed, 1);
+  assert.equal(result.blocked, 1);
+  assert.ok(calls.some(call => call.name === 'defer_luko_cart_voice_call'
+    && call.args.p_status === 'BLOCKED_NO_CONSENT'
+    && call.args.p_reason === 'voice_consent_not_current'));
+  assert.equal(calls.some(call => call.name === 'begin_luko_cart_voice_call'), false);
+});
+
+test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbound-only transcription shapes', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return response({ data: { call_control_id: 'call-1' } });
+  };
+  const options = { env: VOICE_ENV, fetchImpl };
+  await createOutboundCall({
+    to: '+12125550123', from: '+12125550100', connectionId: 'connection-1',
+    webhookUrl: 'https://luko.example/webhooks/voice', amdMode: 'premium_ios_call_screening_detection',
+    clientState: 'opaque-state', commandId: 'command-1'
+  }, options);
+  await speakPremiumOnCall('call/control', 'Hello Maya', {
+    voice: 'ElevenLabs.eleven_turbo_v2_5.vin-voice', apiKeyRef: 'elevenlabs-key-ref', commandId: 'command-2'
+  }, options);
+  await startTranscription('call/control', 'command-3', options);
+
+  assert.equal(calls[0].url, 'https://api.telnyx.com/v2/calls');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer KEY_TEST');
+  assert.equal(calls[0].body.answering_machine_detection, 'premium_ios_call_screening_detection');
+  assert.equal(calls[0].body.client_state, 'opaque-state');
+  assert.equal(calls[1].url, 'https://api.telnyx.com/v2/calls/call%2Fcontrol/actions/speak');
+  assert.deepEqual(calls[1].body.voice_settings, { api_key_ref: 'elevenlabs-key-ref' });
+  assert.equal(calls[1].body.voice, 'ElevenLabs.eleven_turbo_v2_5.vin-voice');
+  assert.equal(calls[1].body.payload_type, 'text');
+  assert.equal(calls[2].body.transcription_tracks, 'inbound');
+  assert.equal(calls[2].body.transcription_engine, 'B');
+});
+
+test('ElevenLabs recovery catalogue is account-scoped and retains verification evidence', async () => {
+  let request;
+  const voices = await listAccountVoices({
+    env: { ELEVENLABS_API_KEY: 'XI_TEST' },
+    fetchImpl: async (url, init) => {
+      request = { url, init };
+      return response({ voices: [
+        { voice_id: 'verified-1', name: 'Vin', category: 'cloned', preview_url: 'https://cdn.example/vin.mp3',
+          labels: { accent: 'american' }, voice_verification: { is_verified: true } },
+        { voice_id: 'premade-1', name: 'Daniel', category: 'premade' },
+        { voice_id: 'unverified-1', name: 'Draft', category: 'cloned', voice_verification: { is_verified: false } },
+        { voice_id: '', name: 'Malformed' }
+      ] });
+    }
+  });
+  assert.match(request.url, /\/v1\/voices$/);
+  assert.equal(request.init.headers['xi-api-key'], 'XI_TEST');
+  assert.deepEqual(voices.map(voice => [voice.id, voice.verified]), [
+    ['verified-1', true], ['premade-1', true], ['unverified-1', false]
+  ]);
+});
+
+function memoryVoiceClient() {
+  const state = {
+    attempt: {
+      id: ATTEMPT_ID, recovery_id: RECOVERY_ID, state: 'ANSWERED', human_answer_mode: 'PRERECORDED',
+      rendered_human_text: 'Human message', rendered_voicemail_text: 'Voicemail message',
+      answered_at: '2026-09-15T13:59:59.000Z'
+    },
+    recovery: { id: RECOVERY_ID, contact_phone: '+12125550123', wordpress_user_id: '42', voice_status: 'ANSWERED' },
+    settings: { voice_id: 'vin-voice', voice_model_id: 'eleven_turbo_v2_5',
+      voice_transfer_number: '+12125550199', voice_opt_out_toll_free_number: '+18005550100' },
+    suppressions: [], rpcs: [], updates: []
+  };
+
+  function tableRow(table) {
+    if (table === 'luko_cart_voice_attempts') return state.attempt;
+    if (table === 'luko_cart_recoveries') return state.recovery;
+    if (table === 'luko_cart_recovery_settings') return state.settings;
+    return null;
+  }
+
+  const client = {
+    state,
+    async rpc(name, args) {
+      state.rpcs.push({ name, args });
+      return { data: true, error: null };
+    },
+    from(table) {
+      const query = {
+        values: null, expectedColumn: null, expectedValues: null,
+        select() { return query; },
+        update(values) { query.values = values; return query; },
+        eq() { return query; },
+        in(column, values) {
+          query.expectedColumn = column;
+          query.expectedValues = values;
+          return query;
+        },
+        async maybeSingle() {
+          const target = tableRow(table);
+          if (!query.values) return { data: target ? { ...target } : null, error: null };
+          if (query.expectedValues && !query.expectedValues.includes(target?.[query.expectedColumn])) {
+            return { data: null, error: null };
+          }
+          Object.assign(target, query.values);
+          state.updates.push({ table, values: query.values });
+          return { data: { id: target.id }, error: null };
+        },
+        async insert(values) { state.suppressions.push(values); return { data: values, error: null }; },
+        then(resolve, reject) {
+          try {
+            if (query.values) {
+              const target = tableRow(table);
+              Object.assign(target, query.values);
+              state.updates.push({ table, values: query.values });
+            }
+            return Promise.resolve(resolve({ data: null, error: null }));
+          } catch (error) { return Promise.resolve(reject(error)); }
+        }
+      };
+      return query;
+    }
+  };
+  return client;
+}
+
+function voiceEvent(eventType, payload = {}, id = `event-${eventType}`) {
+  return {
+    id,
+    event_type: eventType,
+    occurred_at: NOW.toISOString(),
+    payload: { call_control_id: 'call-control-1', ...payload }
+  };
+}
+
+test('voice event handler starts speech only after AMD decides human and never invokes recording', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  const handler = createVoiceEventHandler({
+    client, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async (...args) => {
+        assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING',
+          'the branch must be durable before Telnyx can emit speak webhooks');
+        assert.equal(client.state.recovery.voice_status, 'HUMAN_MESSAGE_PLAYING');
+        calls.push(['speak', ...args]);
+      },
+      transcribe: async (...args) => calls.push(['transcribe', ...args]),
+      hangup: async (...args) => calls.push(['hangup', ...args]),
+      stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
+      transfer: async (...args) => calls.push(['transfer', ...args])
+    }
+  });
+  const result = await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human' }));
+  assert.deepEqual(result, { handled: true });
+  assert.deepEqual(calls.map(call => call[0]), ['transcribe', 'speak']);
+  assert.equal(calls[1][2], 'Human message');
+  assert.equal(calls[1][3].voice, 'ElevenLabs.eleven_turbo_v2_5.vin-voice');
+  assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING');
+  assert.equal(client.state.rpcs.some(call => call.name === 'append_luko_cart_recovery_timeline'
+    && call.args.p_event_type === 'VOICE_HUMAN_DETECTED'), true);
+});
+
+test('voicemail speech waits for greeting end and spoken STOP suppresses without persisting transcript', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  const handler = createVoiceEventHandler({
+    client, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async (...args) => calls.push(['speak', ...args]),
+      transcribe: async (...args) => calls.push(['transcribe', ...args]),
+      hangup: async (...args) => calls.push(['hangup', ...args]),
+      stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
+      transfer: async (...args) => calls.push(['transfer', ...args])
+    }
+  });
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }));
+  assert.equal(calls.length, 0, 'machine classification alone must not speak over the greeting');
+  await handler.handle(voiceEvent('call.machine.greeting.ended', { result: 'greeting ended' }));
+  assert.equal(calls[0][0], 'speak');
+  assert.equal(calls[0][2], 'Voicemail message');
+
+  await handler.handle(voiceEvent('call.transcription', {
+    transcription_data: { is_final: true, transcript: 'Please stop calling me' }
+  }, 'event-spoken-stop'));
+  assert.equal(client.state.suppressions.length, 1);
+  assert.equal(client.state.suppressions[0].reason_code, 'spoken_stop');
+  const consent = client.state.rpcs.find(call => call.name === 'record_luko_voice_consent');
+  assert.equal(consent.args.p_event.voice_marketing_consent, false);
+  assert.equal(consent.args.p_event.ai_voice_consent, false);
+  assert.equal(JSON.stringify(client.state), JSON.stringify(client.state).replace(/Please stop calling me/g, ''),
+    'the raw transcription must not be persisted in state, timeline, or consent evidence');
+  assert.deepEqual(calls.slice(-2).map(call => call[0]), ['stopAudio', 'hangup']);
+});
+
+test('overlapping greeting and speak-ended events cannot replay or change the voicemail branch', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      hangup: async (...args) => calls.push(['hangup', ...args]), stopAudio: async () => {}, transfer: async () => {}
+    } });
+
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }, 'machine-1'));
+  await Promise.all([
+    handler.handle(voiceEvent('call.machine.greeting.ended', {}, 'greeting-1')),
+    handler.handle(voiceEvent('call.machine.greeting.ended', {}, 'greeting-2'))
+  ]);
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+  assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
+
+  await Promise.all([
+    handler.handle(voiceEvent('call.speak.ended', {}, 'speak-ended-1')),
+    handler.handle(voiceEvent('call.speak.ended', {}, 'speak-ended-2'))
+  ]);
+  assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYED');
+  assert.equal(calls.filter(call => call[0] === 'hangup').length, 1);
+  assert.equal(client.state.rpcs.filter(call => call.name === 'append_luko_cart_recovery_timeline'
+    && call.args.p_event_type === 'VOICE_VOICEMAIL_PLAYED').length, 1);
+});
+
+test('provider speech and transcription failures are persisted and fail closed', async () => {
+  const speakClient = memoryVoiceClient();
+  const speakCalls = [];
+  const speakHandler = createVoiceEventHandler({ client: speakClient, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async () => { throw new Error('provider unavailable'); }, transcribe: async () => {},
+      hangup: async (...args) => speakCalls.push(['hangup', ...args]), stopAudio: async () => {}, transfer: async () => {}
+    } });
+  await speakHandler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human' }, 'human-speak-fail'));
+  assert.equal(speakClient.state.attempt.state, 'FAILED');
+  assert.equal(speakClient.state.attempt.failure_code, 'voice_speak_failed');
+  assert.equal(speakClient.state.recovery.voice_status, 'FAILED');
+  assert.equal(speakCalls.filter(call => call[0] === 'hangup').length, 1);
+
+  const transcriptionClient = memoryVoiceClient();
+  let spoke = false;
+  const transcriptionHandler = createVoiceEventHandler({ client: transcriptionClient, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async () => { spoke = true; }, transcribe: async () => { throw new Error('transcription unavailable'); },
+      hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
+    } });
+  await transcriptionHandler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human' }, 'transcription-fail'));
+  assert.equal(spoke, false, 'prerecorded human speech must not start without the spoken opt-out listener');
+  assert.equal(transcriptionClient.state.attempt.state, 'FAILED');
+  assert.equal(transcriptionClient.state.attempt.failure_code, 'voice_transcription_failed');
+  assert.equal(transcriptionClient.state.recovery.voice_status, 'FAILED');
+});
+
+test('only final spoken opt-out transcripts suppress and raw transcript text is never retained', async () => {
+  const client = memoryVoiceClient();
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    api: { speak: async () => {}, transcribe: async () => {}, hangup: async () => {},
+      stopAudio: async () => {}, transfer: async () => {} } });
+  await handler.handle(voiceEvent('call.transcription', {
+    transcription_data: { is_final: false, transcript: 'stop' }
+  }, 'partial-stop'));
+  assert.equal(client.state.suppressions.length, 0);
+  assert.doesNotMatch(JSON.stringify(client.state), /partial-stop.*transcript|"transcript"/);
+});
+
+test('DTMF 9 creates a durable opt-out while # requests transfer to the configured team number', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  const handler = createVoiceEventHandler({
+    client, env: VOICE_ENV, now: () => NOW,
+    api: {
+      speak: async () => {}, transcribe: async () => {},
+      hangup: async (...args) => calls.push(['hangup', ...args]),
+      stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
+      transfer: async (...args) => calls.push(['transfer', ...args])
+    }
+  });
+  await handler.handle(voiceEvent('call.dtmf.received', { digit: '9' }, 'event-dtmf-9'));
+  assert.equal(client.state.suppressions[0].reason_code, 'dtmf_9');
+  assert.equal(client.state.attempt.state, 'VOICE_OPT_OUT_DTMF');
+
+  const transferClient = memoryVoiceClient();
+  const transferCalls = [];
+  const transferHandler = createVoiceEventHandler({ client: transferClient, env: VOICE_ENV, now: () => NOW,
+    api: { speak: async () => {}, transcribe: async () => {}, hangup: async () => {},
+      stopAudio: async (...args) => transferCalls.push(['stopAudio', ...args]),
+      transfer: async (...args) => transferCalls.push(['transfer', ...args]) } });
+  await transferHandler.handle(voiceEvent('call.dtmf.received', { digit: '#' }, 'event-dtmf-hash'));
+  assert.deepEqual(transferCalls.map(call => call[0]), ['stopAudio', 'transfer']);
+  assert.equal(transferCalls[1][2], '+12125550199');
+  assert.equal(transferClient.state.attempt.state, 'TRANSFER_INITIATED');
+});
+
+test('voice client state is opaque, validated, and rejects unrelated base64 payloads', () => {
+  const encoded = Buffer.from(JSON.stringify({ kind: 'cart_recovery_voice', attempt_id: ATTEMPT_ID })).toString('base64');
+  assert.equal(decodeClientState(encoded).attempt_id, ATTEMPT_ID);
+  assert.equal(decodeClientState(Buffer.from(JSON.stringify({ kind: 'other' })).toString('base64')), null);
+  assert.equal(decodeClientState('not-base64-json'), null);
+});
+
+test('recovery client state fails closed when its attempt cannot be resolved', async () => {
+  const encoded = Buffer.from(JSON.stringify({
+    kind: 'cart_recovery_voice', attempt_id: ATTEMPT_ID
+  })).toString('base64');
+  const client = {
+    async rpc() { return { data: true, error: null }; },
+    from() {
+      const query = {
+        select() { return query; }, eq() { return query; },
+        async maybeSingle() { return { data: null, error: null }; }
+      };
+      return query;
+    }
+  };
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW });
+  await assert.rejects(() => handler.handle(voiceEvent('call.speak.ended', {
+    client_state: encoded
+  }, 'orphaned-recovery-event')), { code: 'VOICE_RECOVERY_ATTEMPT_NOT_FOUND' });
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../lib/cart-recovery/voice-events.js'), 'utf8'),
+    /recordCall|record_start/);
+});
+
+test('voice webhooks require Ed25519 verification and a durable claim before recovery handling', () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const wire = { data: {
+    id: 'voice-event-1', event_type: 'call.answered', occurred_at: NOW.toISOString(),
+    payload: { call_control_id: 'call-control-1' }
+  } };
+  const raw = Buffer.from(JSON.stringify(wire));
+  const timestamp = String(Math.floor(NOW.getTime() / 1000));
+  const signature = crypto.sign(null, Buffer.concat([Buffer.from(`${timestamp}|`), raw]), privateKey).toString('base64');
+  const publicPEM = publicKey.export({ format: 'pem', type: 'spki' });
+  const event = decodeVerifiedTelnyxEvent(raw, {
+    'telnyx-timestamp': timestamp, 'telnyx-signature-ed25519': signature
+  }, publicPEM, { now: NOW.getTime(), requirePayloadID: false });
+  assert.equal(event.id, 'voice-event-1');
+  assert.throws(() => decodeVerifiedTelnyxEvent(Buffer.from(`${raw} `), {
+    'telnyx-timestamp': timestamp, 'telnyx-signature-ed25519': signature
+  }, publicPEM, { now: NOW.getTime(), requirePayloadID: false }), { status: 403 });
+
+  const route = fs.readFileSync(path.join(__dirname, '../routes/voice-webhook.js'), 'utf8');
+  const verifyAt = route.indexOf('decodeVerifiedTelnyxEvent');
+  const claimAt = route.indexOf("supabase.rpc('claim_telnyx_voice_event'", verifyAt);
+  const recoveryAt = route.indexOf('recoveryVoice.handle(event)', claimAt);
+  const legacySwitchAt = route.indexOf('switch (event_type)', recoveryAt);
+  assert.ok(verifyAt >= 0 && claimAt > verifyAt && recoveryAt > claimAt && legacySwitchAt > recoveryAt);
+  assert.match(route, /if \(!claim\?\.claimed\) return res\.sendStatus\(200\)/);
+  assert.match(route, /if \(recovery\.handled\)[\s\S]*finish_telnyx_voice_event[\s\S]*return res\.sendStatus\(200\)/);
+  assert.match(route, /if \(!res\.headersSent\) return res\.sendStatus\(503\)/,
+    'failed recovery events must remain redeliverable instead of being acknowledged early');
+});
+
+test('connected voice transfer is one STRONG recovered order and a voice touch alone is only secondary evidence', () => {
+  const baseCart = {
+    id: RECOVERY_ID,
+    workspace_id: 'vici',
+    external_cart_id: 'cart-voice-12345',
+    last_activity_at: '2026-09-15T12:00:00.000Z',
+    recovery_expires_at: '2026-09-22T12:00:00.000Z',
+    cart_total: 120,
+    voice_started_at: '2026-09-15T13:00:00.000Z',
+    voice_transfer_connected_at: '2026-09-15T13:30:00.000Z',
+    voice_call_control_id: 'call-control-1'
+  };
+  const order = {
+    order_id: '14821', status: 'processing', paid_at: '2026-09-15T14:00:00.000Z',
+    total: 118, discount_total: 2, refunded_amount: 0, currency: 'USD', attribution_valid: true
+  };
+  const direct = attributionDecision(baseCart, order);
+  assert.equal(direct.attribution_method, 'voice_transfer_assisted');
+  assert.equal(direct.attribution_strength, 'strong');
+  assert.equal(direct.recovery_channel, 'voice');
+  assert.equal(direct.voice_call_control_id, 'call-control-1');
+  assert.equal(direct.secondary_signals.voice_touch, true);
+  assert.equal(direct.secondary_signals.voice_transfer_connected, true);
+  const payload = attributionPayload(direct);
+  assert.equal(payload.originating_action_type, 'voice_transfer_assisted');
+  assert.equal(payload.confidence_level, 'strong');
+
+  assert.equal(attributionDecision({ ...baseCart, voice_transfer_connected_at: null }, order), null,
+    'a dial or voicemail by itself must not claim recovered revenue');
+});
+
+test('voice migration is additive, off by default, suppression-aware, idempotent, and service-role only', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../scripts/cart-recovery-voice-migration.sql'), 'utf8');
+  assert.match(sql, /voice_enabled boolean NOT NULL DEFAULT false/i);
+  assert.match(sql, /voice_marketing_consent boolean NOT NULL DEFAULT false/i);
+  assert.match(sql, /ai_voice_consent boolean NOT NULL DEFAULT false/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.luko_voice_consent_events/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.luko_voice_suppressions/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.luko_cart_voice_attempts/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.telnyx_voice_webhook_events/i);
+  assert.match(sql, /to_regclass\('public\.luko_cart_recovered_orders'\)/i,
+    'voice migration must refuse to run before revenue attribution exists');
+  assert.match(sql, /UNIQUE\(workspace_id,dedupe_key\)/i);
+  assert.match(sql, /voice_consent_dedupe_key_reused/i);
+  assert.match(sql, /ORDER BY occurred_at DESC,id DESC LIMIT 1/i,
+    'late or replayed consent evidence must not override the latest durable event');
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM public\.luko_voice_suppressions/i);
+  assert.match(sql, /voice_attempt_count<s\.voice_max_attempts/i);
+  assert.match(sql, /status='FAILED'[\s\S]*last_claimed_at<now\(\)-interval '5 minutes'/i,
+    'failed and abandoned webhook claims remain safely retryable');
+  assert.match(sql, /delivery_count<10/i, 'webhook retries must remain bounded');
+  assert.match(sql, /ADD CONSTRAINT luko_cart_recovered_orders_attribution_method_check[\s\S]*'voice_transfer_assisted'/i);
+  assert.match(sql, /ADD CONSTRAINT luko_cart_recovered_orders_recovery_channel_check[\s\S]*'voice'/i);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.persist_luko_cart_recovered_order\(p_decision jsonb\)/i);
+  assert.match(sql, /v_method='voice_transfer_assisted'[\s\S]*voice_transfer_connected_at IS NULL[\s\S]*voice_call_control_id/i);
+  assert.match(sql, /ON CONFLICT\(workspace_id,order_id\) DO UPDATE/i,
+    'the persisted order remains the idempotency boundary for revenue');
+  assert.match(sql, /SECURITY DEFINER SET search_path=''/i);
+  assert.match(sql, /REVOKE ALL ON public\.luko_voice_consent_events[\s\S]*FROM public,anon,authenticated/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.record_luko_voice_consent[\s\S]*TO service_role/i);
+  assert.doesNotMatch(sql, /recording_url|audio_url|transcript text/i,
+    'recovery calls must not persist recordings or raw transcripts');
+});

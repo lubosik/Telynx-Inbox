@@ -107,13 +107,15 @@ test('existing Woo identity reuses canonical LUKO consent without creating a con
       throw new Error(`Unexpected RPC ${name}`);
     },
     from: table => {
-      assert.equal(table, 'sms_consent_events');
       const chain = {
         select: () => chain, eq: () => chain, order: () => chain,
-        limit: async () => ({ data: [{ id: 91, event_type: 'opt_in', source: 'woocommerce_account_registration',
-          evidence_ref: 'WooCommerce customer #42', purpose: 'promotional_sms', brand_id: 'vici',
-          occurred_at: '2026-09-01T12:00:00.000Z' }], error: null })
+        limit: async () => ({ data: table === 'sms_consent_events'
+          ? [{ id: 91, event_type: 'opt_in', source: 'woocommerce_account_registration',
+            evidence_ref: 'WooCommerce customer #42', purpose: 'promotional_sms', brand_id: 'vici',
+            occurred_at: '2026-09-01T12:00:00.000Z' }]
+          : [], error: null })
       };
+      assert.ok(['sms_consent_events', 'luko_voice_consent_events'].includes(table));
       return chain;
     }
   };
@@ -622,13 +624,18 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /eael_custom_profile_field_phone_number/);
   assert.match(plugin, /name="luko_sms_consent" value="1"/);
   assert.doesNotMatch(plugin, /name="luko_sms_consent"[^>]*checked/);
-  assert.match(plugin, /Vici Peptides marketing texts about restocks, new products, exclusive offers, and cart reminders/);
+  assert.match(plugin, /recurring automated text messages and artificial or prerecorded voice calls/);
+  assert.match(plugin, /including AI-generated voice messages/);
+  assert.match(plugin, /Consent is not a condition of purchase/);
+  assert.match(plugin, /Reply STOP to opt out of texts/);
+  assert.match(plugin, /Automated calls and voicemails include instructions to opt out of future calls/);
   assert.doesNotMatch(plugin, /recurring automated marketing SMS/);
-  assert.match(plugin, /luko_vici_sms_disclosure_version', 'v4'/);
+  assert.match(plugin, /CONSENT_VERSION = 'vici_marketing_sms_voice_v1'/);
   assert.match(plugin, /Get Vici updates first/);
   assert.match(plugin, /Restock alerts/);
-  assert.match(plugin, /Consent is not required to purchase/);
-  assert.match(plugin, /We will not share your mobile number with third parties for marketing/);
+  assert.match(plugin, /Keep me updated with cart reminders, order help &amp; Vici offers/);
+  assert.match(plugin, /'voice_marketing_consent' => \$valid && \$checked/);
+  assert.match(plugin, /'ai_voice_consent' => \$valid && \$checked/);
   assert.match(plugin, /random_bytes\( 32 \)/);
   assert.match(plugin, /luko_recovery_outbox/);
   assert.match(plugin, /luko_recovery_context/);
@@ -637,7 +644,7 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /\^luko-go\//);
   assert.match(plugin, /'click_channel' => 'push'/);
   assert.match(plugin, /'applied_coupons' => array_values/);
-  assert.match(plugin, /Version: 0\.3\.6/);
+  assert.match(plugin, /Version: 0\.4\.0/);
   assert.match(plugin, /FeaturesUtil::declare_compatibility\( 'custom_order_tables'/);
   assert.match(plugin, /woocommerce_checkout_create_order/);
   assert.match(plugin, /woocommerce_store_api_checkout_update_order_meta/);
@@ -647,6 +654,7 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /_luko_attribution_strength/);
   assert.match(plugin, /_luko_attribution_method/);
   assert.match(plugin, /_luko_click_id/);
+  assert.match(plugin, /_luko_voice_call_id/);
   assert.match(plugin, /_luko_attribution_model_version/);
   assert.match(plugin, /RECOVERY_COUPON = 'VICI15'/);
   assert.match(plugin, /get_items\( 'coupon' \)/);

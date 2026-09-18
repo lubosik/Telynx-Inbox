@@ -333,6 +333,8 @@ struct CartRecoveryAutomationSnapshot: Decodable, Hashable {
     let smsDelayMinutes: Int
     let pushEnabled: Bool
     let pushDelayHours: Int
+    let voiceEnabled: Bool
+    let voiceDelayMinutes: Int
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
@@ -340,6 +342,8 @@ struct CartRecoveryAutomationSnapshot: Decodable, Hashable {
         smsDelayMinutes = values.first(Int.self, "smsDelayMinutes", "sms_delay_minutes") ?? 45
         pushEnabled = values.first(Bool.self, "pushEnabled", "push_enabled") ?? false
         pushDelayHours = values.first(Int.self, "pushDelayHours", "push_delay_hours") ?? 48
+        voiceEnabled = values.first(Bool.self, "voiceEnabled", "voice_enabled") ?? false
+        voiceDelayMinutes = values.first(Int.self, "voiceDelayMinutes", "voice_delay_minutes") ?? 180
     }
 }
 
@@ -357,6 +361,13 @@ struct CartRecoveryMetrics: Decodable, Hashable {
     let pushBlocked: Int
     let pushSent: Int
     let pushClicked: Int
+    let voiceEligible: Int
+    let voiceQueued: Int
+    let voiceInitiated: Int
+    let voiceHumanDetected: Int
+    let voiceVoicemailsPlayed: Int
+    let voiceTransfersConnected: Int
+    let voiceOptOuts: Int
     let converted: Int
     let recoveredOrders: Int
     let recoveredRevenue: FlexibleDecimal?
@@ -368,6 +379,10 @@ struct CartRecoveryMetrics: Decodable, Hashable {
                                            delivered: 0, clicked: 0, replied: 0, aiDrafts: 0,
                                            pushScheduled: 0, pushBlocked: 0,
                                            pushSent: 0, pushClicked: 0,
+                                           voiceEligible: 0, voiceQueued: 0,
+                                           voiceInitiated: 0, voiceHumanDetected: 0,
+                                           voiceVoicemailsPlayed: 0, voiceTransfersConnected: 0,
+                                           voiceOptOuts: 0,
                                            converted: 0, recoveredOrders: 0,
                                            recoveredRevenue: nil, currency: "USD",
                                            topReasons: [])
@@ -375,7 +390,11 @@ struct CartRecoveryMetrics: Decodable, Hashable {
     private init(abandonedCartsIdentified: Int, smsEligible: Int,
                  active: Int, queued: Int, sent: Int, delivered: Int, clicked: Int,
                  replied: Int, aiDrafts: Int, pushScheduled: Int, pushBlocked: Int,
-                 pushSent: Int, pushClicked: Int, converted: Int, recoveredOrders: Int,
+                 pushSent: Int, pushClicked: Int,
+                 voiceEligible: Int, voiceQueued: Int, voiceInitiated: Int,
+                 voiceHumanDetected: Int, voiceVoicemailsPlayed: Int,
+                 voiceTransfersConnected: Int, voiceOptOuts: Int,
+                 converted: Int, recoveredOrders: Int,
                  recoveredRevenue: FlexibleDecimal?, currency: String,
                  topReasons: [CartRecoveryReasonMetric]) {
         self.abandonedCartsIdentified = abandonedCartsIdentified
@@ -391,6 +410,13 @@ struct CartRecoveryMetrics: Decodable, Hashable {
         self.pushBlocked = pushBlocked
         self.pushSent = pushSent
         self.pushClicked = pushClicked
+        self.voiceEligible = voiceEligible
+        self.voiceQueued = voiceQueued
+        self.voiceInitiated = voiceInitiated
+        self.voiceHumanDetected = voiceHumanDetected
+        self.voiceVoicemailsPlayed = voiceVoicemailsPlayed
+        self.voiceTransfersConnected = voiceTransfersConnected
+        self.voiceOptOuts = voiceOptOuts
         self.converted = converted
         self.recoveredOrders = recoveredOrders
         self.recoveredRevenue = recoveredRevenue
@@ -413,6 +439,13 @@ struct CartRecoveryMetrics: Decodable, Hashable {
         pushBlocked = values.first(Int.self, "pushBlocked", "push_blocked") ?? 0
         pushSent = values.first(Int.self, "pushSent", "push_sent") ?? 0
         pushClicked = values.first(Int.self, "pushClicked", "push_clicked") ?? 0
+        voiceEligible = values.first(Int.self, "voiceEligible", "voice_eligible") ?? 0
+        voiceQueued = values.first(Int.self, "voiceQueued", "voice_queued") ?? 0
+        voiceInitiated = values.first(Int.self, "voiceInitiated", "voice_initiated") ?? 0
+        voiceHumanDetected = values.first(Int.self, "voiceHumanDetected", "voice_human_detected") ?? 0
+        voiceVoicemailsPlayed = values.first(Int.self, "voiceVoicemailsPlayed", "voice_voicemails_played") ?? 0
+        voiceTransfersConnected = values.first(Int.self, "voiceTransfersConnected", "voice_transfers_connected") ?? 0
+        voiceOptOuts = values.first(Int.self, "voiceOptOuts", "voice_opt_outs") ?? 0
         converted = values.first(Int.self, "converted", "conversions") ?? 0
         recoveredOrders = values.first(Int.self, "recoveredOrders", "recovered_orders") ?? converted
         recoveredRevenue = values.first(FlexibleDecimal.self, "recoveredRevenue", "recovered_revenue")
@@ -452,6 +485,7 @@ struct CartRecoveryJourneyDetail: Decodable, Hashable {
     let journey: CartRecoveryJourney
     let timeline: [CartRecoveryTimelineEvent]
     let replies: [CartRecoveryReply]
+    let voiceAttempt: CartRecoveryVoiceAttempt?
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
@@ -463,7 +497,34 @@ struct CartRecoveryJourneyDetail: Decodable, Hashable {
         self.journey = journey
         timeline = values.first([CartRecoveryTimelineEvent].self, "timeline", "events") ?? []
         replies = values.first([CartRecoveryReply].self, "replies") ?? []
+        voiceAttempt = values.first(CartRecoveryVoiceAttempt.self, "voiceAttempt", "voice_attempt")
     }
+}
+
+struct CartRecoveryVoiceAttempt: Decodable, Hashable, Identifiable {
+    let id: String
+    let state: String
+    let attemptNumber: Int
+    let dryRun: Bool
+    let provider: String?
+    let amdMode: String?
+    let amdResult: String?
+    let humanAnswerMode: String?
+    let voiceID: String?
+    let voiceModelID: String?
+    let answeredAt: String?
+    let firstAudioAt: String?
+    let humanAnswerDetectionLatencyMs: Int?
+    let humanAnswerFirstAudioLatencyMs: Int?
+    let voicemailPlayedAt: String?
+    let humanMessagePlayedAt: String?
+    let transferRequestedAt: String?
+    let transferConnectedAt: String?
+    let optOutAt: String?
+    let optOutMethod: String?
+    let failureCode: String?
+    let initiatedAt: String?
+    let completedAt: String?
 }
 
 struct CartRecoveryProduct: Decodable, Hashable, Identifiable {
@@ -510,6 +571,12 @@ struct CartRecoveryJourney: Decodable, Hashable, Identifiable {
     let pushDestination: String?
     let pushStatus: String?
     let pushBlockedReason: String?
+    let voiceConsent: Bool
+    let voiceQueuedAt: String?
+    let voiceStatus: String?
+    let voiceAttemptCount: Int
+    let voiceBlockedReason: String?
+    let voiceTransferConnectedAt: String?
     let replyStatus: String?
     let category: String
     let secondaryCategory: String?
@@ -551,6 +618,12 @@ struct CartRecoveryJourney: Decodable, Hashable, Identifiable {
         pushDestination = values.first(String.self, "pushDestination", "push_destination")
         pushStatus = values.first(String.self, "pushStatus", "push_status")
         pushBlockedReason = values.first(String.self, "pushBlockedReason", "push_blocked_reason")
+        voiceConsent = values.first(Bool.self, "voiceConsent", "voice_consent") ?? false
+        voiceQueuedAt = values.first(String.self, "voiceQueuedAt", "voice_queued_at", "voiceDueAt", "voice_due_at")
+        voiceStatus = values.first(String.self, "voiceStatus", "voice_status")
+        voiceAttemptCount = values.first(Int.self, "voiceAttemptCount", "voice_attempt_count") ?? 0
+        voiceBlockedReason = values.first(String.self, "voiceBlockedReason", "voice_blocked_reason")
+        voiceTransferConnectedAt = values.first(String.self, "voiceTransferConnectedAt", "voice_transfer_connected_at")
         replyStatus = values.first(String.self, "replyStatus", "reply_status")
         category = values.first(String.self, "category", "primaryCategory", "primary_category") ?? "UNKNOWN"
         secondaryCategory = values.first(String.self, "secondaryCategory", "secondary_category")
@@ -665,6 +738,30 @@ struct CartRecoverySettingsEnvelope: Decodable {
     let settings: CartRecoverySettings
 }
 
+struct RecoveryVoiceOption: Decodable, Hashable, Identifiable {
+    let id: String
+    let name: String
+    let accent: String?
+    let gender: String?
+    let age: String?
+    let descriptive: String?
+    let category: String?
+    let previewUrl: String?
+    let verified: Bool
+
+    var subtitle: String {
+        [accent, gender, descriptive].compactMap { value in
+            guard let value, !value.isEmpty else { return nil }
+            return value.capitalized
+        }.joined(separator: " · ")
+    }
+}
+
+struct RecoveryVoiceCatalogue: Decodable {
+    let voices: [RecoveryVoiceOption]
+    let authorizationBoundary: String?
+}
+
 struct CartRecoverySettings: Decodable, Hashable {
     var enabled: Bool
     var firstSmsDelayMinutes: Int
@@ -684,6 +781,25 @@ struct CartRecoverySettings: Decodable, Hashable {
     var aiClassificationEnabled: Bool
     var aiDraftRepliesEnabled: Bool
     let automaticAiSending: Bool
+    var voiceEnabled: Bool
+    var voiceDelayMinutes: Int
+    var voiceAmdMode: String
+    var voiceHumanAnswerMode: String
+    var voiceID: String?
+    var voiceName: String?
+    var voiceModelID: String
+    var voiceHumanTemplate: String
+    var voiceVoicemailTemplate: String
+    var voiceCallingWindowStart: String
+    var voiceCallingWindowEnd: String
+    var voiceDefaultTimezone: String
+    var voiceTransferNumber: String?
+    var voiceOptOutTollFreeNumber: String?
+    let voiceHumanTimingApproved: Bool
+    let voiceComplianceApproved: Bool
+    let voiceConfigurationReady: Bool
+    let voiceProductionReady: Bool
+    let voiceBlockers: [String]
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CartRecoveryWireKey.self)
@@ -705,6 +821,25 @@ struct CartRecoverySettings: Decodable, Hashable {
         aiClassificationEnabled = values.first(Bool.self, "aiClassificationEnabled", "ai_classification_enabled") ?? true
         aiDraftRepliesEnabled = values.first(Bool.self, "aiDraftRepliesEnabled", "ai_draft_replies_enabled") ?? true
         automaticAiSending = values.first(Bool.self, "automaticAiSending", "automatic_ai_sending") ?? false
+        voiceEnabled = values.first(Bool.self, "voiceEnabled", "voice_enabled") ?? false
+        voiceDelayMinutes = values.first(Int.self, "voiceDelayMinutes", "voice_delay_minutes") ?? 180
+        voiceAmdMode = values.first(String.self, "voiceAmdMode", "voice_amd_mode") ?? "premium_ios_call_screening_detection"
+        voiceHumanAnswerMode = values.first(String.self, "voiceHumanAnswerMode", "voice_human_answer_mode") ?? "DISABLED"
+        voiceID = values.first(String.self, "voiceId", "voiceID", "voice_id")
+        voiceName = values.first(String.self, "voiceName", "voice_name")
+        voiceModelID = values.first(String.self, "voiceModelId", "voiceModelID", "voice_model_id") ?? "eleven_turbo_v2_5"
+        voiceHumanTemplate = values.first(String.self, "voiceHumanTemplate", "voice_human_template") ?? ""
+        voiceVoicemailTemplate = values.first(String.self, "voiceVoicemailTemplate", "voice_voicemail_template") ?? ""
+        voiceCallingWindowStart = values.first(String.self, "voiceCallingWindowStart", "voice_calling_window_start") ?? "09:00"
+        voiceCallingWindowEnd = values.first(String.self, "voiceCallingWindowEnd", "voice_calling_window_end") ?? "20:00"
+        voiceDefaultTimezone = values.first(String.self, "voiceDefaultTimezone", "voice_default_timezone") ?? "America/New_York"
+        voiceTransferNumber = values.first(String.self, "voiceTransferNumber", "voice_transfer_number")
+        voiceOptOutTollFreeNumber = values.first(String.self, "voiceOptOutTollFreeNumber", "voice_opt_out_toll_free_number")
+        voiceHumanTimingApproved = values.first(Bool.self, "voiceHumanTimingApproved", "voice_human_timing_approved") ?? false
+        voiceComplianceApproved = values.first(Bool.self, "voiceComplianceApproved", "voice_compliance_approved") ?? false
+        voiceConfigurationReady = values.first(Bool.self, "voiceConfigurationReady", "voice_configuration_ready") ?? false
+        voiceProductionReady = values.first(Bool.self, "voiceProductionReady", "voice_production_ready") ?? false
+        voiceBlockers = values.first([String].self, "voiceBlockers", "voice_blockers") ?? []
     }
 
     var requestBody: [String: Any] {
@@ -726,6 +861,19 @@ struct CartRecoverySettings: Decodable, Hashable {
             "pushShopAttributionWindowHours": pushShopAttributionWindowHours,
             "aiClassificationEnabled": aiClassificationEnabled,
             "aiDraftRepliesEnabled": aiDraftRepliesEnabled,
+            "voiceEnabled": voiceEnabled,
+            "voiceDelayMinutes": voiceDelayMinutes,
+            "voiceAmdMode": voiceAmdMode,
+            "voiceHumanAnswerMode": voiceHumanAnswerMode,
+            "voiceId": voiceID ?? "",
+            "voiceModelId": voiceModelID,
+            "voiceHumanTemplate": voiceHumanTemplate,
+            "voiceVoicemailTemplate": voiceVoicemailTemplate,
+            "voiceCallingWindowStart": voiceCallingWindowStart,
+            "voiceCallingWindowEnd": voiceCallingWindowEnd,
+            "voiceDefaultTimezone": voiceDefaultTimezone,
+            "voiceTransferNumber": voiceTransferNumber ?? "",
+            "voiceOptOutTollFreeNumber": voiceOptOutTollFreeNumber ?? "",
             // Included explicitly so a future backend cannot mistake omission
             // for permission to enable autonomous AI messages.
             "automaticAiSending": false

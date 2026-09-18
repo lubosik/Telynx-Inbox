@@ -36,6 +36,14 @@ struct AbandonedCartAnalyticsMetrics: Codable, Hashable {
     let recoveryLinkClicks: Int
     let pushSent: Int
     let pushClicks: Int
+    let voiceEligible: Int?
+    let voiceCallsStarted: Int?
+    let voiceHumanDetected: Int?
+    let voiceMachineDetected: Int?
+    let voiceVoicemailsPlayed: Int?
+    let voiceTransfersConnected: Int?
+    let voiceOptOuts: Int?
+    let averageHumanFirstAudioMs: Double?
     let discountRecoveries: Int
     let averageRecoveredOrderValue: FlexibleDecimal?
     let currency: String
@@ -62,12 +70,16 @@ struct AbandonedCartSecondarySignals: Codable, Hashable {
     let conversationOccurred: Bool
     let pushClicked: Bool
     let smsRecoveryLinkClicked: Bool
+    let voiceTouch: Bool?
+    let voiceTransferConnected: Bool?
 
     enum CodingKeys: String, CodingKey {
         case couponUsed = "coupon_used"
         case conversationOccurred = "conversation_occurred"
         case pushClicked = "push_clicked"
         case smsRecoveryLinkClicked = "sms_recovery_link_clicked"
+        case voiceTouch = "voice_touch"
+        case voiceTransferConnected = "voice_transfer_connected"
     }
 }
 
@@ -82,6 +94,7 @@ struct AbandonedCartRecoveredOrder: Codable, Hashable, Identifiable {
     let channel: String
     let messageId: String?
     let pushId: String?
+    let voiceCallControlId: String?
     let coupon: String?
     let orderId: String
     let grossRecoveredRevenue: FlexibleDecimal

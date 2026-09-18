@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: LUKO Vici Connector
- * Description: WooCommerce abandoned-cart recovery, SMS consent bridge and LUKO event connector for Vici.
- * Version: 0.3.6
+ * Description: WooCommerce abandoned-cart recovery, combined SMS and AI voice consent bridge, and LUKO event connector for Vici.
+ * Version: 0.4.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,8 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.3.6';
+    const VERSION = '0.4.0';
+    const CONSENT_VERSION = 'vici_marketing_sms_voice_v1';
     const ATTRIBUTION_MODEL_VERSION = 'vici-cart-recovery-v2';
     const RECOVERY_COUPON = 'VICI15';
     private static $restoring = false;
@@ -125,10 +126,7 @@ final class LUKO_Vici_Connector {
     public static function maybe_upgrade() {
         if ( get_option( 'luko_vici_schema_version' ) !== self::VERSION ) {
             self::activate();
-            if ( '' === trim( (string) get_option( 'luko_vici_sms_disclosure', '' ) )
-                && in_array( (string) get_option( 'luko_vici_sms_disclosure_version', 'v1' ), [ 'v1', 'v2', 'v3' ], true ) ) {
-                update_option( 'luko_vici_sms_disclosure_version', 'v4', false );
-            }
+            update_option( 'luko_vici_sms_disclosure_version', self::CONSENT_VERSION, false );
         }
     }
 
@@ -165,9 +163,7 @@ final class LUKO_Vici_Connector {
     }
 
     private static function disclosure_text() {
-        $saved = trim( (string) get_option( 'luko_vici_sms_disclosure', '' ) );
-        if ( $saved ) return $saved;
-        return 'Yes, send me Vici Peptides marketing texts about restocks, new products, exclusive offers, and cart reminders. Message frequency may vary. Standard Message and Data Rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to purchase. We will not share your mobile number with third parties for marketing.';
+        return 'By checking this box, I agree to receive recurring automated text messages and artificial or prerecorded voice calls, including AI-generated voice messages, from Vici Peptides at the mobile number I provide, including cart reminders and promotional offers. Consent is not a condition of purchase. Message frequency varies. Message and data rates may apply. Reply STOP to opt out of texts. Automated calls and voicemails include instructions to opt out of future calls.';
     }
 
     public static function render_registration_consent() {
@@ -220,7 +216,7 @@ final class LUKO_Vici_Connector {
         echo '<div data-luko-sms-consent="1" class="eael-lr-form-group" style="margin:14px 0;font-size:12px;line-height:1.5">';
         echo '<span class="luko-sms-benefit-title">Get Vici updates first</span>';
         echo '<span class="luko-sms-benefits">Restock alerts &bull; New product drops &bull; Exclusive offers</span>';
-        echo '<label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="luko_sms_consent" value="1"><span>' . esc_html( self::disclosure_text() ) . '</span></label>';
+        echo '<label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" name="luko_sms_consent" value="1"><span><strong>Keep me updated with cart reminders, order help &amp; Vici offers</strong><br>' . esc_html( self::disclosure_text() ) . '</span></label>';
         echo '<div style="margin:8px 0 0 36px"><a target="_blank" rel="noopener" href="' . esc_url( $privacy ) . '">Privacy Policy</a> &middot; <a target="_blank" rel="noopener" href="' . esc_url( $terms ) . '">Terms</a></div>';
         echo '<input type="hidden" name="luko_sms_disclosure_fingerprint" value="' . esc_attr( self::disclosure_fingerprint() ) . '"></div>';
     }
@@ -237,7 +233,7 @@ final class LUKO_Vici_Connector {
     }
 
     private static function disclosure_fingerprint() {
-        return hash_hmac( 'sha256', self::disclosure_text() . '|' . get_option( 'luko_vici_sms_disclosure_version', 'v4' ) . '|' . self::privacy_url() . '|' . self::terms_url(), wp_salt( 'auth' ) );
+        return hash_hmac( 'sha256', self::disclosure_text() . '|' . self::CONSENT_VERSION . '|' . self::privacy_url() . '|' . self::terms_url(), wp_salt( 'auth' ) );
     }
 
     // EA 6.8.3 applies this AFTER validating its nonce and fields, BEFORE saving
@@ -251,7 +247,10 @@ final class LUKO_Vici_Connector {
         $evidence = [
             'granted' => $valid && $checked && '' !== $phone && '' !== self::privacy_url() && '' !== self::terms_url(),
             'disclosure' => self::disclosure_text(),
-            'version' => (string) get_option( 'luko_vici_sms_disclosure_version', 'v4' ),
+            'version' => self::CONSENT_VERSION,
+            'sms_consent' => $valid && $checked && '' !== $phone,
+            'voice_marketing_consent' => $valid && $checked && '' !== $phone,
+            'ai_voice_consent' => $valid && $checked && '' !== $phone,
             'occurred_at' => gmdate( 'c' ),
             'source' => 'vici_registration',
             'source_url' => isset( $_POST['page_id'] ) ? get_permalink( absint( $_POST['page_id'] ) ) : ( wp_get_referer() ?: home_url( '/login/' ) ),
@@ -324,8 +323,13 @@ final class LUKO_Vici_Connector {
         $evidence = get_user_meta( $user_id, '_luko_pending_consent_evidence', true );
         if ( ! is_array( $evidence ) || '1' === get_user_meta( $user_id, '_eael_otp_pending', true ) ) return;
         $evidence['granted'] = true === ( $evidence['granted'] ?? false ) && self::resolve_phone( $user_id ) === ( $evidence['phone'] ?? '' ) && '' !== ( $evidence['phone'] ?? '' );
+        $evidence['sms_consent'] = $evidence['granted'] && true === ( $evidence['sms_consent'] ?? false );
+        $evidence['voice_marketing_consent'] = $evidence['granted'] && true === ( $evidence['voice_marketing_consent'] ?? false );
+        $evidence['ai_voice_consent'] = $evidence['voice_marketing_consent'] && true === ( $evidence['ai_voice_consent'] ?? false );
         update_user_meta( $user_id, '_luko_consent_evidence', $evidence );
         update_user_meta( $user_id, 'luko_sms_consent', $evidence['granted'] ? 'yes' : 'no' );
+        update_user_meta( $user_id, 'luko_voice_marketing_consent', $evidence['voice_marketing_consent'] ? 'yes' : 'no' );
+        update_user_meta( $user_id, 'luko_ai_voice_consent', $evidence['ai_voice_consent'] ? 'yes' : 'no' );
         foreach ( [ 'timestamp' => 'occurred_at', 'source' => 'source', 'version' => 'version', 'text' => 'disclosure', 'phone' => 'phone' ] as $key => $source ) update_user_meta( $user_id, 'luko_sms_consent_' . $key, $evidence[$source] ?? '' );
         if ( self::emit( 'consent.updated', [ 'customer' => self::customer_payload( $user_id ), 'consent' => $evidence ] ) ) delete_user_meta( $user_id, '_luko_pending_consent_evidence' );
     }
@@ -333,6 +337,16 @@ final class LUKO_Vici_Connector {
     private static function has_consent( $user_id ) {
         $evidence = get_user_meta( $user_id, '_luko_consent_evidence', true );
         return $user_id > 0 && '1' !== get_user_meta( $user_id, '_eael_otp_pending', true ) && 'yes' === get_user_meta( $user_id, 'luko_sms_consent', true ) && is_array( $evidence ) && true === ( $evidence['granted'] ?? false ) && ! empty( $evidence['phone'] ) && self::resolve_phone( $user_id ) === $evidence['phone'];
+    }
+
+    private static function has_voice_consent( $user_id ) {
+        $evidence = get_user_meta( $user_id, '_luko_consent_evidence', true );
+        return self::has_consent( $user_id ) && is_array( $evidence )
+            && self::CONSENT_VERSION === ( $evidence['version'] ?? '' )
+            && true === ( $evidence['voice_marketing_consent'] ?? false )
+            && true === ( $evidence['ai_voice_consent'] ?? false )
+            && 'yes' === get_user_meta( $user_id, 'luko_voice_marketing_consent', true )
+            && 'yes' === get_user_meta( $user_id, 'luko_ai_voice_consent', true );
     }
 
     private static function customer_payload( $user_id ) {
@@ -344,6 +358,8 @@ final class LUKO_Vici_Connector {
             'phone' => self::resolve_phone( $user_id ),
             'phone_available' => '' !== self::resolve_phone( $user_id ),
             'sms_consent' => self::has_consent( $user_id ),
+            'voice_marketing_consent' => self::has_voice_consent( $user_id ),
+            'ai_voice_consent' => self::has_voice_consent( $user_id ),
             'push_permission' => false,
             'sms_consent_at' => $e['occurred_at'] ?? '', 'consent_version' => $e['version'] ?? '',
         ];
@@ -886,6 +902,7 @@ final class LUKO_Vici_Connector {
             'eligible' => (bool) $eligible,
             'phone_available' => $row ? '' !== self::resolve_phone( (int) $row->user_id ) : false,
             'current_consent' => $row ? self::has_consent( (int) $row->user_id ) : false,
+            'current_voice_consent' => $row ? self::has_voice_consent( (int) $row->user_id ) : false,
             'push_permission' => false,
             'version' => $row ? (int) $row->version : 0,
             'items' => $row && is_array( $payload['items'] ?? null ) ? $payload['items'] : [],
@@ -905,6 +922,7 @@ final class LUKO_Vici_Connector {
             'sms_recovery_link' => 'direct',
             'push' => 'direct',
             'conversation_assisted' => 'strong',
+            'voice_transfer_assisted' => 'strong',
             'recovery_coupon' => 'strong',
         ];
         if ( ! $order_id || ! self::is_uuid( $recovery_id ) || ! self::is_uuid( $external )
@@ -949,6 +967,7 @@ final class LUKO_Vici_Connector {
         $order->update_meta_data( '_luko_recovery_channel', $channel );
         $order->update_meta_data( '_luko_message_id', sanitize_text_field( (string) ( $data['message_id'] ?? '' ) ) );
         $order->update_meta_data( '_luko_push_id', sanitize_text_field( (string) ( $data['push_id'] ?? '' ) ) );
+        $order->update_meta_data( '_luko_voice_call_id', sanitize_text_field( (string) ( $data['voice_call_id'] ?? '' ) ) );
         $order->update_meta_data( '_luko_click_id', $click_id );
         $order->update_meta_data( '_luko_coupon_code', $coupon ? self::RECOVERY_COUPON : '' );
         $order->update_meta_data( '_luko_attributed_at', $attributed_at );
@@ -965,8 +984,6 @@ final class LUKO_Vici_Connector {
         register_setting( 'luko_vici', 'luko_vici_api_base', [ 'sanitize_callback' => 'esc_url_raw' ] );
         register_setting( 'luko_vici', 'luko_vici_signing_secret', [ 'sanitize_callback' => [ __CLASS__, 'sanitize_secret' ] ] );
         register_setting( 'luko_vici', 'luko_vici_phone_meta_key', [ 'sanitize_callback' => 'sanitize_key' ] );
-        register_setting( 'luko_vici', 'luko_vici_sms_disclosure', [ 'sanitize_callback' => 'sanitize_textarea_field' ] );
-        register_setting( 'luko_vici', 'luko_vici_sms_disclosure_version', [ 'sanitize_callback' => 'sanitize_key' ] );
         register_setting( 'luko_vici', 'luko_vici_terms_url', [ 'sanitize_callback' => 'esc_url_raw' ] );
         register_setting( 'luko_vici', 'luko_vici_recovery_ttl_days', [ 'sanitize_callback' => [ __CLASS__, 'sanitize_ttl' ] ] );
     }
@@ -981,8 +998,8 @@ final class LUKO_Vici_Connector {
         <tr><th>LUKO API Base URL</th><td><input class="regular-text" name="luko_vici_api_base" value="<?php echo esc_attr(get_option('luko_vici_api_base','')); ?>"></td></tr>
         <tr><th>Signing Secret</th><td><input class="regular-text" type="password" name="luko_vici_signing_secret" value="" autocomplete="new-password" placeholder="Leave blank to keep the current secret"><p>Prefer LUKO_WP_SIGNING_SECRET in wp-config.php.</p></td></tr>
         <tr><th>Phone meta key</th><td><input class="regular-text" name="luko_vici_phone_meta_key" value="<?php echo esc_attr(get_option('luko_vici_phone_meta_key','eael_custom_profile_field_phone_number')); ?>"><p>Confirmed from the live field and Essential Addons 6.8.3 mapping.</p></td></tr>
-        <tr><th>Disclosure version</th><td><input name="luko_vici_sms_disclosure_version" value="<?php echo esc_attr(get_option('luko_vici_sms_disclosure_version','v4')); ?>"></td></tr>
-        <tr><th>SMS disclosure</th><td><textarea class="large-text" rows="6" name="luko_vici_sms_disclosure"><?php echo esc_textarea(get_option('luko_vici_sms_disclosure','')); ?></textarea></td></tr>
+        <tr><th>Consent version</th><td><code><?php echo esc_html( self::CONSENT_VERSION ); ?></code><p>This evidence version is code-controlled so a settings edit cannot invalidate or broaden consent.</p></td></tr>
+        <tr><th>SMS and AI voice disclosure</th><td><textarea class="large-text" rows="6" readonly><?php echo esc_textarea( self::disclosure_text() ); ?></textarea><p>The benefits headline is shown separately. The legal disclosure is fixed, optional, and unchecked by default.</p></td></tr>
         <tr><th>Terms URL</th><td><input class="regular-text" name="luko_vici_terms_url" value="<?php echo esc_attr(get_option('luko_vici_terms_url','')); ?>"></td></tr>
         <tr><th>Recovery TTL days</th><td><input type="number" min="1" max="30" name="luko_vici_recovery_ttl_days" value="<?php echo esc_attr(get_option('luko_vici_recovery_ttl_days',7)); ?>"></td></tr>
         </table><?php submit_button(); ?></form></div><?php

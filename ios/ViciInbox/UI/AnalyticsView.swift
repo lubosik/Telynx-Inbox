@@ -301,6 +301,16 @@ private struct AbandonedCartAnalyticsView: View {
                 AnalyticsMetric(value: report.metrics.recoveryLinkClicks.formatted(), label: "Recovery link clicks")
                 AnalyticsMetric(value: report.metrics.pushSent.formatted(), label: "Push sent")
                 AnalyticsMetric(value: report.metrics.pushClicks.formatted(), label: "Push clicks")
+                AnalyticsMetric(value: (report.metrics.voiceEligible ?? 0).formatted(), label: "Voice eligible")
+                AnalyticsMetric(value: (report.metrics.voiceCallsStarted ?? 0).formatted(), label: "Voice calls started")
+                AnalyticsMetric(value: (report.metrics.voiceHumanDetected ?? 0).formatted(), label: "Human answers")
+                AnalyticsMetric(value: (report.metrics.voiceMachineDetected ?? 0).formatted(), label: "Machines detected")
+                AnalyticsMetric(value: (report.metrics.voiceVoicemailsPlayed ?? 0).formatted(), label: "Voicemails played")
+                AnalyticsMetric(value: (report.metrics.voiceTransfersConnected ?? 0).formatted(), label: "Team transfers")
+                AnalyticsMetric(value: (report.metrics.voiceOptOuts ?? 0).formatted(), label: "Voice opt-outs")
+                if let latency = report.metrics.averageHumanFirstAudioMs {
+                    AnalyticsMetric(value: "\(Int(latency.rounded())) ms", label: "Average first audio")
+                }
                 AnalyticsMetric(value: report.metrics.discountRecoveries.formatted(), label: "VICI15 recoveries")
                 AnalyticsMetric(
                     value: report.metrics.averageRecoveredOrderValue.map { AnalyticsFormatting.money($0, currency: report.metrics.currency) } ?? "Not available",

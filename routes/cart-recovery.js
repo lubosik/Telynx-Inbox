@@ -93,6 +93,13 @@ function analytics(service, { env = process.env, audit = logAuditSafely } = {}) 
     } catch (error) { return sendError(res, error, 'loading abandoned-cart automation settings'); }
   });
 
+  router.get('/voices', async (_req, res) => {
+    try {
+      noStore(res);
+      return res.json(await service.listRecoveryVoices());
+    } catch (error) { return sendError(res, error, 'loading authorized Vin voices'); }
+  });
+
   router.put('/settings', async (req, res) => {
     try {
       noStore(res);

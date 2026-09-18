@@ -329,7 +329,7 @@ struct AbandonedCartRecoverySection: View {
                                     .clipShape(Capsule())
                             }
                         }
-                        Text("A personal checkout-help text after 45 minutes, then a guarded app offer after 48 hours.")
+                        Text("A personal checkout-help text after 45 minutes, an eligible Vin voice follow-up after 3 hours, then a guarded app offer after 48 hours.")
                             .font(.footnote).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 0) {
@@ -431,6 +431,13 @@ struct CartRecoveryJourneyListView: View {
                         LabeledContent("Push sent", value: String(metrics.pushSent))
                         LabeledContent("Push clicked", value: String(metrics.pushClicked))
                         LabeledContent("Push blocked", value: String(metrics.pushBlocked))
+                        LabeledContent("Voice eligible", value: String(metrics.voiceEligible))
+                        LabeledContent("Voice queued", value: String(metrics.voiceQueued))
+                        LabeledContent("Voice calls started", value: String(metrics.voiceInitiated))
+                        LabeledContent("Human answers", value: String(metrics.voiceHumanDetected))
+                        LabeledContent("Voicemails played", value: String(metrics.voiceVoicemailsPlayed))
+                        LabeledContent("Team transfers", value: String(metrics.voiceTransfersConnected))
+                        LabeledContent("Voice opt-outs", value: String(metrics.voiceOptOuts))
                         LabeledContent("Recovered orders", value: String(metrics.recoveredOrders))
                     }
                 }
@@ -542,6 +549,7 @@ struct CartRecoveryJourneyDetailView: View {
                     journeySummary(detail.journey)
                     cartSection(detail.journey)
                     messageSection(detail.journey)
+                    voiceSection(detail.journey, attempt: detail.voiceAttempt)
                     pushSection(detail.journey)
 
                     if !detail.replies.isEmpty {
@@ -631,6 +639,7 @@ struct CartRecoveryJourneyDetailView: View {
             }
             LabeledContent("Phone available", value: journey.phoneAvailable ? "Yes" : "No")
             LabeledContent("SMS consent", value: journey.smsConsent ? "Valid" : "Not available")
+            LabeledContent("Voice consent", value: journey.voiceConsent ? "Valid" : "Not available")
             LabeledContent("Push permission", value: journey.pushPermission ? "Valid" : "Not available")
             if journey.identityResolutionAmbiguous {
                 Label("Identity match needs review. Automated SMS is blocked.", systemImage: "person.crop.circle.badge.exclamationmark")
@@ -698,6 +707,49 @@ struct CartRecoveryJourneyDetailView: View {
                 }
             }
             if let summary = journey.aiSummary { Text(summary).font(.footnote).foregroundStyle(.secondary) }
+        }
+    }
+
+    @ViewBuilder
+    private func voiceSection(_ journey: CartRecoveryJourney, attempt: CartRecoveryVoiceAttempt?) -> some View {
+        Section("Vin voice follow-up") {
+            LabeledContent("Status", value: cartRecoveryLabel(journey.voiceStatus ?? "not queued"))
+            if let queued = ServerDate.parse(journey.voiceQueuedAt) {
+                LabeledContent("Eligible at") {
+                    Text(queued.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+            LabeledContent("Attempts", value: "\(journey.voiceAttemptCount)")
+            if let attempt {
+                if let result = attempt.amdResult {
+                    LabeledContent("Answer detected", value: cartRecoveryLabel(result))
+                }
+                if let latency = attempt.humanAnswerDetectionLatencyMs {
+                    LabeledContent("Detection latency", value: "\(latency) ms")
+                }
+                if let firstAudio = attempt.humanAnswerFirstAudioLatencyMs {
+                    LabeledContent("First audio latency", value: "\(firstAudio) ms")
+                }
+                if attempt.voicemailPlayedAt != nil {
+                    Label("Voicemail delivered after the greeting", systemImage: "voicemail.fill")
+                        .foregroundStyle(ViciTheme.success)
+                }
+                if attempt.transferConnectedAt != nil {
+                    Label("Connected to the Vici team", systemImage: "phone.arrow.up.right.fill")
+                        .foregroundStyle(ViciTheme.success)
+                }
+                if let method = attempt.optOutMethod {
+                    Label("Voice opt-out: \(cartRecoveryLabel(method))", systemImage: "phone.down.fill")
+                        .foregroundStyle(ViciTheme.warning)
+                }
+                if let failure = attempt.failureCode {
+                    Label(cartRecoveryLabel(failure), systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(ViciTheme.warning)
+                }
+            } else if !journey.voiceConsent {
+                Text("Voice remains blocked because separate voice and AI-voice consent is unavailable.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -889,6 +941,10 @@ struct CartRecoverySettingsView: View {
     @StateObject private var model = CartRecoverySettingsModel()
     @State private var draft: CartRecoverySettings?
     @State private var isEditingFirstSMS = false
+    @State private var recoveryVoices: [RecoveryVoiceOption] = []
+    @State private var voiceCatalogueError: String?
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewingVoiceID: String?
 
     var body: some View {
         Form {
@@ -900,6 +956,90 @@ struct CartRecoverySettingsView: View {
                     LabeledContent("First SMS delay", value: "45 minutes")
                 } footer: {
                     Text("The default journey waits 45 minutes after the customer's last cart activity.")
+                }
+
+                Section {
+                    Toggle("Automated voice follow-up", isOn: binding(\.voiceEnabled, fallback: false))
+                    Stepper("Call after \(binding(\.voiceDelayMinutes, fallback: 180).wrappedValue) minutes",
+                            value: binding(\.voiceDelayMinutes, fallback: 180), in: 15...1_440, step: 15)
+
+                    VStack(spacing: 14) {
+                        AssistantOrb(phase: previewingVoiceID == nil ? .idle : .speaking,
+                                     tint: .brand, size: .standard)
+                            .accessibilityLabel(previewingVoiceID == nil
+                                                ? "Selected Vin voice"
+                                                : "Previewing the selected Vin voice")
+
+                        Menu {
+                            ForEach(recoveryVoices) { voice in
+                                Button {
+                                    stopVoicePreview()
+                                    draft?.voiceID = voice.id
+                                    draft?.voiceName = voice.name
+                                } label: {
+                                    if draft?.voiceID == voice.id {
+                                        Label(voice.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(voice.name)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Voice of Vin").font(.caption).foregroundStyle(.secondary)
+                                    Text(draft?.voiceName ?? "Choose an authorized voice")
+                                        .font(.body.weight(.semibold))
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                            }
+                            .padding(12)
+                            .background(ViciTheme.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .disabled(recoveryVoices.isEmpty)
+
+                        Button(previewingVoiceID == nil ? "Preview voice" : "Stop preview") {
+                            toggleVoicePreview()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedRecoveryVoice?.previewUrl == nil)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+
+                    if let voiceCatalogueError {
+                        Label(voiceCatalogueError, systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(ViciTheme.warning)
+                    }
+
+                    Picker("Human answers", selection: binding(\.voiceHumanAnswerMode, fallback: "DISABLED")) {
+                        Text("Off").tag("DISABLED")
+                        Text("Transfer only").tag("TRANSFER_ONLY")
+                        Text("Automated message").tag("PRERECORDED")
+                    }
+
+                    TextField("Toll-free call opt-out number", text: optionalStringBinding(\.voiceOptOutTollFreeNumber))
+                        .keyboardType(.phonePad)
+                    TextField("Live team transfer number", text: optionalStringBinding(\.voiceTransferNumber))
+                        .keyboardType(.phonePad)
+                    HStack {
+                        TextField("Start", text: binding(\.voiceCallingWindowStart, fallback: "09:00"))
+                        TextField("End", text: binding(\.voiceCallingWindowEnd, fallback: "20:00"))
+                    }
+
+                    Label(draft?.voiceProductionReady == true ? "Production gates passed" : "Production calling remains locked",
+                          systemImage: draft?.voiceProductionReady == true ? "checkmark.shield.fill" : "lock.shield.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(draft?.voiceProductionReady == true ? ViciTheme.success : ViciTheme.warning)
+                    if let blockers = draft?.voiceBlockers, !blockers.isEmpty {
+                        Text(blockers.map(cartRecoveryLabel).joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Vin voice recovery")
+                } footer: {
+                    Text("The selected workspace voice is used for the three-hour cart follow-up. Calls require separate voice and AI-voice consent, suppression checks, local calling hours, and production approval. Previewing never calls a customer.")
                 }
 
                 Section {
@@ -1025,6 +1165,7 @@ struct CartRecoverySettingsView: View {
             }
         }
         .task { await load() }
+        .onDisappear { stopVoicePreview() }
         .alert("Recovery settings", isPresented: Binding(
             get: { model.errorMessage != nil || model.savedMessage != nil },
             set: { if !$0 { model.errorMessage = nil; model.savedMessage = nil } }
@@ -1034,8 +1175,52 @@ struct CartRecoverySettingsView: View {
     }
 
     private func load() async {
-        await model.load()
+        async let settingsLoad: Void = model.load()
+        async let voicesLoad: Void = loadRecoveryVoices()
+        _ = await (settingsLoad, voicesLoad)
         draft = model.settings
+    }
+
+    private var selectedRecoveryVoice: RecoveryVoiceOption? {
+        guard let id = draft?.voiceID else { return nil }
+        return recoveryVoices.first { $0.id == id }
+    }
+
+    private func loadRecoveryVoices() async {
+        do {
+            let catalogue = try await APIClient.shared.fetchCartRecoveryVoices()
+            await MainActor.run {
+                recoveryVoices = catalogue.voices
+                voiceCatalogueError = nil
+            }
+        } catch {
+            await MainActor.run {
+                voiceCatalogueError = "Authorized voices could not be loaded. Your saved choice is unchanged."
+            }
+        }
+    }
+
+    private func toggleVoicePreview() {
+        if previewingVoiceID != nil { stopVoicePreview(); return }
+        guard let voice = selectedRecoveryVoice,
+              let raw = voice.previewUrl, let url = URL(string: raw) else { return }
+        let player = AVPlayer(url: url)
+        previewPlayer = player
+        previewingVoiceID = voice.id
+        player.play()
+    }
+
+    private func stopVoicePreview() {
+        previewPlayer?.pause()
+        previewPlayer = nil
+        previewingVoiceID = nil
+    }
+
+    private func optionalStringBinding(_ keyPath: WritableKeyPath<CartRecoverySettings, String?>) -> Binding<String> {
+        Binding(
+            get: { draft?[keyPath: keyPath] ?? "" },
+            set: { value in draft?[keyPath: keyPath] = value.isEmpty ? nil : value }
+        )
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<CartRecoverySettings, Value>,
