@@ -178,6 +178,55 @@ test('default test rendering uses synthetic facts and never reads a customer rec
   }]);
 });
 
+test('a fixed campaign coupon is the exact code rendered into a real test', async () => {
+  const sends = [];
+  const router = createCampaignRouter({
+    service: { detail: async () => ({ campaign: {
+      id: 'campaign-cc20',
+      proposed_message: 'Vin from Vici: {{code}} gets you 20% off $100+. Reply STOP to opt out.',
+      discount_percent: 20,
+      audience_definition: { coupon_code: 'CC20', discount_percent: 20 }
+    } }) },
+    campaignClient: {},
+    campaignCouponVerifier: async () => ({ code: 'CC20' }),
+    campaignTestRenderer: async input => {
+      assert.equal(input.couponCode, 'CC20');
+      return { rendered: [{ message: input.template.replace('{{code}}', input.couponCode) }] };
+    },
+    campaignTestSender: async (to, message) => { sends.push({ to, message }); return { status: 'queued' }; },
+    campaignTestAuditWriter: async () => ({ recorded: true })
+  });
+  const res = response();
+  await handler(router, 'post', '/:id/test-send')({
+    params: { id: 'campaign-cc20' }, body: { to: '+13055551234' }, actor: { id: 9 }
+  }, res);
+  assert.equal(res.statusCode, 200);
+  assert.match(sends[0].message, /CC20 gets you 20% off/);
+  assert.doesNotMatch(sends[0].message, /TEST|000000/);
+});
+
+test('a real test refuses a fake placeholder when no coupon is attached', async () => {
+  let sent = false;
+  const router = createCampaignRouter({
+    service: { detail: async () => ({ campaign: {
+      id: 'campaign-unknown-code',
+      proposed_message: 'Vin from Vici: {{code}} gets you 20% off. Reply STOP to opt out.',
+      discount_percent: 20,
+      audience_definition: { discount_percent: 20 }
+    } }) },
+    campaignClient: {},
+    campaignTestSender: async () => { sent = true; }
+  });
+  const res = response();
+  await handler(router, 'post', '/:id/test-send')({
+    params: { id: 'campaign-unknown-code' }, body: { to: '+13055551234' }, actor: { id: 9 }
+  }, res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.payload.code, 'CAMPAIGN_TEST_SEND_COUPON_MISSING');
+  assert.match(res.payload.error, /no real coupon is attached/i);
+  assert.equal(sent, false);
+});
+
 test('campaign test audit metadata retains useful proof without a raw phone or copy', () => {
   const redacted = redactMetadata('campaign.test_sent', {
     target_last4: '1234', segments: 1, characters: 58, provider_status: 'queued',
@@ -200,9 +249,11 @@ test('the iPhone flow cleans line breaks and phone punctuation before review and
     'a normal iPhone apostrophe must be converted before the copy check');
   assert.match(model, /verdict\.normalizedMessage[\s\S]*message = normalized/,
     'the editor must show the exact server-reviewed wording before saving');
-  assert.match(view, /CampaignTestSendSection\(campaignID: campaign\.id\)/,
+  assert.match(view, /CampaignTestSendSection\(campaignID: campaign\.id, offerLabel: campaign\.offerLabel\)/,
     'the saved campaign review screen must offer the test before approval or scheduling');
   assert.match(view, /It does not approve, schedule or send the campaign to its audience/);
+  assert.ok(view.includes('This test will use \\(offerLabel).'));
+  assert.match(view, /coupon not attached/);
   assert.match(api, /func sendCampaignTest\(id: String, to phone: String\)/);
   assert.match(api, /\/test-send/);
 });

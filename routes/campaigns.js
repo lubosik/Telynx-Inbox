@@ -280,7 +280,7 @@ function createCampaignRouter({
       attemptedProductName: 'RT', attemptedProductSku: 'P-RT10',
       lastProductLink: 'https://vicipeptides.com/shop/',
       attemptedProductLink: 'https://vicipeptides.com/shop/',
-      lastOrderAt: '2026-08-15T12:00:00Z', couponCode: couponCode || 'vin-TEST000000'
+      lastOrderAt: '2026-08-15T12:00:00Z', couponCode
     } }] });
   });
   const sendCampaignTest = campaignTestSender || ((to, text) =>
@@ -1136,10 +1136,11 @@ function createCampaignRouter({
    * to a customer. Audited. A dedicated limiter allows five test messages per
    * campaign every ten minutes.
    *
-   * It mints NO coupon. The message carries a placeholder code of exactly the
-   * length a real one has, so the layout is honest and no live discount is
-   * created for a test. It also touches no recipient row, writes nothing to
-   * the campaign, and does not consume anybody's frequency allowance.
+   * It mints NO coupon. A campaign that promises a code must already have a
+   * verified WooCommerce coupon attached, and the test carries that exact
+   * code. It never substitutes a fake code that could make the reviewer think
+   * a different offer will be sent. It also touches no recipient row, writes
+   * nothing to the campaign, and consumes no frequency allowance.
    */
   router.post('/:id/test-send', campaignTestSendLimiter, async (req, res) => {
     try {
@@ -1160,9 +1161,13 @@ function createCampaignRouter({
       }
 
       const couponCode = campaign?.campaign?.audience_definition?.coupon_code || null;
+      if (template.includes('{{code}}') && !couponCode) {
+        throw Object.assign(new Error(
+          'This draft promises a coupon but no real coupon is attached. Open Edit Campaign, generate or attach the coupon, then save before sending a test.'
+        ), { code: 'CAMPAIGN_TEST_SEND_COUPON_MISSING', status: 409 });
+      }
       if (couponCode) {
-        const { verifyExistingCoupon } = require('../lib/campaigns/existing-coupon');
-        await verifyExistingCoupon({
+        await verifyCoupon({
           code: couponCode,
           percent: campaign?.campaign?.discount_percent
             ?? campaign?.campaign?.audience_definition?.discount_percent,

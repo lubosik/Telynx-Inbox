@@ -574,6 +574,8 @@ final class CampaignEditorModel: ObservableObject {
     @Published var errorMessage: String?
 
     let existingID: String?
+    let existingCouponCode: String?
+    let existingDiscountPercent: Int?
     private var contactRequestID = UUID()
     private let existingRecipientMetadata: [String: CampaignRecipientInput]
     private let initialTitle: String
@@ -618,6 +620,8 @@ final class CampaignEditorModel: ObservableObject {
             .joined(separator: "\n")
 
         existingID = campaign?.id
+        existingCouponCode = campaign?.couponCode
+        existingDiscountPercent = campaign?.effectiveDiscountPercent
         title = resolvedTitle
         message = resolvedMessage
         audienceMode = resolvedAudienceMode
@@ -1025,7 +1029,9 @@ final class CampaignEditorModel: ObservableObject {
                     recipients: audienceMode == .allContacts ||
                         (audienceMode == initialAudienceMode &&
                          recipientsText == initialRecipientsText &&
-                         selectedContacts.isEmpty) ? nil : recipients
+                         selectedContacts.isEmpty) ? nil : recipients,
+                    couponCode: attachedCoupon?.code,
+                    discountPercent: attachedCoupon?.percent
                 )
             } else {
                 response = try await APIClient.shared.createCampaign(

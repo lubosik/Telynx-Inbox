@@ -801,12 +801,16 @@ actor APIClient {
     func editCampaign(id: String,
                       title: String,
                       message: String,
-                      recipients: [CampaignRecipientInput]?) async throws -> CampaignActionResponse {
+                      recipients: [CampaignRecipientInput]?,
+                      couponCode: String? = nil,
+                      discountPercent: Int? = nil) async throws -> CampaignActionResponse {
         var body: [String: Any] = [
             "title": title,
             "message": message
         ]
         if let recipients { body["recipients"] = recipients.map(\.requestBody) }
+        if let couponCode { body["couponCode"] = couponCode }
+        if let discountPercent { body["discountPercent"] = discountPercent }
         let (data, response) = try await patch("/api/campaigns/\(encodedPathSegment(id))", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignActionResponse.self, from: data) }

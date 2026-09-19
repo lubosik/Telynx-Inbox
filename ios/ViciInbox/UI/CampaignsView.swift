@@ -621,7 +621,7 @@ struct CampaignDetailView: View {
             if session.can(Permission.campaignsApprove),
                campaign.status != .sending,
                !campaign.status.isTerminal {
-                CampaignTestSendSection(campaignID: campaign.id)
+                CampaignTestSendSection(campaignID: campaign.id, offerLabel: campaign.offerLabel)
             }
 
             actionSection(campaign)
@@ -1694,7 +1694,7 @@ struct CampaignEditorView: View {
                 }
             }
 
-            if model.existingID == nil && session.can(Permission.campaignsApprove) {
+            if session.can(Permission.campaignsApprove) {
                 Section("Campaign Coupon") {
                     if let coupon = model.attachedCoupon {
                         Label("\(coupon.code) attached", systemImage: "checkmark.seal.fill")
@@ -1708,6 +1708,13 @@ struct CampaignEditorView: View {
                             LabeledContent("Expires", value: String(expiry.prefix(10)))
                         }
                         Text("The coupon is live in WooCommerce, but this campaign is still only a draft. Nothing has been sent or scheduled.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let code = model.existingCouponCode,
+                              let percent = model.existingDiscountPercent {
+                        Label("\(code) attached", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(ViciTheme.success)
+                        LabeledContent("Discount", value: "\(percent)%")
+                        Text("Previews and test messages use this exact WooCommerce coupon.")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         Button {
@@ -1944,7 +1951,7 @@ struct CampaignEditorView: View {
             }
 
             if session.can(Permission.campaignsApprove) {
-                CampaignTestSendSection(campaignID: saved.id)
+                CampaignTestSendSection(campaignID: saved.id, offerLabel: saved.offerLabel)
             }
         } else {
             Section("Final Review") {
@@ -1972,6 +1979,7 @@ struct CampaignEditorView: View {
 /// reachable from this view.
 private struct CampaignTestSendSection: View {
     let campaignID: String
+    let offerLabel: String?
 
     @State private var phone = ""
     @State private var isSending = false
@@ -1993,6 +2001,18 @@ private struct CampaignTestSendSection: View {
                 .keyboardType(.phonePad)
                 .textContentType(.telephoneNumber)
                 .accessibilityLabel("Test phone number")
+
+            if cleanPhone.isEmpty {
+                Text("Enter the phone that should receive the test in full international format. The button will then become available.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let offerLabel {
+                Label("This test will use \(offerLabel).", systemImage: "ticket.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(offerLabel.contains("not attached") ? ViciTheme.warning : ViciTheme.success)
+            }
 
             if !cleanPhone.isEmpty && !isValidE164 {
                 Label("Use full international format, starting with + and country code.",
@@ -2028,7 +2048,7 @@ private struct CampaignTestSendSection: View {
         } header: {
             Text("Test on a Phone")
         } footer: {
-            Text("This sends one real SMS to the number above. It does not approve, schedule or send the campaign to its audience.")
+            Text("This sends one real SMS to the number above with the exact attached coupon. It does not approve, schedule or send the campaign to its audience.")
         }
         .confirmationDialog("Send one real test message?",
                             isPresented: $confirming,
@@ -2230,9 +2250,10 @@ private struct CampaignPreviewSection: View {
                     .foregroundStyle(preview.rendersForEveryone || isFinished ? ViciTheme.success : ViciTheme.warning)
                 Spacer()
                 if let percent = preview.discountPercent {
-                    Text("\(percent)% code")
+                    Text(preview.couponCode.map { "\($0) · \(percent)% off" }
+                         ?? "\(percent)% · coupon not attached")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(preview.couponCode == nil ? ViciTheme.warning : Color.secondary)
                 }
             }
 

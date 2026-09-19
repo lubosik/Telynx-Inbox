@@ -47,6 +47,7 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
     let title: String
     let status: CampaignStatus
     let audienceDefinition: JSONValue?
+    let discountPercent: Int?
     let proposedMessage: String
     let finalMessage: String?
     let revision: Int
@@ -66,6 +67,7 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
         case campaignType = "campaign_type"
         case workflowCategory = "workflow_category"
         case audienceDefinition = "audience_definition"
+        case discountPercent = "discount_percent"
         case proposedMessage = "proposed_message"
         case finalMessage = "final_message"
         case submittedForReviewAt = "submitted_for_review_at"
@@ -92,6 +94,26 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
     var isAllContactsAudience: Bool {
         guard case .string(let kind)? = audienceDefinition?.child("kind") else { return false }
         return kind == "all_contacts"
+    }
+
+    var couponCode: String? {
+        guard case .string(let code)? = audienceDefinition?.child("coupon_code") else { return nil }
+        let clean = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return clean.isEmpty ? nil : clean
+    }
+
+    var effectiveDiscountPercent: Int? {
+        if let discountPercent, discountPercent > 0 { return discountPercent }
+        guard case .number(let value)? = audienceDefinition?.child("discount_percent"), value > 0 else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    var offerLabel: String? {
+        guard let percent = effectiveDiscountPercent else { return nil }
+        if let couponCode { return "\(couponCode) · \(percent)% off" }
+        return "\(percent)% · coupon not attached"
     }
 }
 
@@ -311,6 +333,7 @@ struct CampaignPreview: Codable, Hashable {
     let template: String
     let fields: [String]?
     let discountPercent: Int?
+    let couponCode: String?
     let audienceCount: Int
     let renderedCount: Int
     let excludedCount: Int

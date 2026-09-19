@@ -37,6 +37,14 @@ function contactsClient(rows, { limit = 10000 } = {}) {
         };
         return query;
       }
+      if (table === 'sms_campaigns') {
+        const query = {
+          update(values) { calls.push({ table, values }); return query; },
+          eq() { return query; },
+          then(resolve) { resolve({ data: null, error: null }); }
+        };
+        return query;
+      }
       throw new Error(`Unexpected table ${table}`);
     },
     async rpc(name, args) {
@@ -102,6 +110,32 @@ test('manual campaign draft stores the exact phone-safe wording reviewed by the 
   assert.equal(request.p_message,
     "Vin from Vici: We're accepting cards and Apple Pay now. Reply STOP to opt out.");
   assert.doesNotThrow(() => assertReviewableCopy(request.p_message));
+});
+
+test('a generated coupon offer keeps its promised percentage instead of silently becoming 15%', async () => {
+  const client = contactsClient([{ id: 1, phone: '+15550000001', first_name: 'Sam' }]);
+  await createCampaignService({ client }).create({
+    title: 'Payment options',
+    message: 'Vin from Vici: {{code}} gets you 20% off. Reply STOP to opt out.',
+    discountPercent: 20,
+    audience: { kind: 'all_contacts' }
+  }, { id: 4 });
+
+  const request = client.calls.find(call => call.name === 'create_sms_campaign_draft').args;
+  assert.equal(request.p_audience_definition.discount_percent, 20);
+  assert.equal(request.p_audience_definition.coupon_code, undefined);
+  assert.deepEqual(client.calls.find(call => call.table === 'sms_campaigns').values,
+    { discount_percent: 20 });
+});
+
+test('a code placeholder without coupon terms is rejected before a draft is saved', async () => {
+  const client = contactsClient([{ id: 1, phone: '+15550000001', first_name: 'Sam' }]);
+  await assert.rejects(() => createCampaignService({ client }).create({
+    title: 'Unknown offer',
+    message: 'Vin from Vici: Use {{code}} at checkout. Reply STOP to opt out.',
+    audience: { kind: 'all_contacts' }
+  }, { id: 4 }), error => error.code === 'CAMPAIGN_COUPON_DETAILS_MISSING');
+  assert.equal(client.calls.some(call => call.name === 'create_sms_campaign_draft'), false);
 });
 
 test('All Contacts refuses a workspace cap rather than silently saving a partial list', async () => {
