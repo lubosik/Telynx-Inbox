@@ -24,10 +24,12 @@ const assert = require('node:assert/strict');
 
 const {
   SegmentRuleDraftError,
+  VICI_PERMANENT_AUDIENCE_DEFINITIONS,
   assertDescription,
   cleanQuestions,
   draftRulesFromDescription,
   parseModelReply,
+  permanentAudienceDefinition,
   promptCatalogue
 } = require('../lib/campaigns/segment-rule-writer');
 const { RULE_SCHEMA_VERSION } = require('../lib/campaigns/segment-rule-schema');
@@ -195,6 +197,69 @@ test('the catalogue reaching the prompt is names only, with no counts, ids or st
     { productID: 41, variationID: 0, name: 'BPC-157', available: true, buyers: 92, price: 59.99 }
   ]);
   assert.deepEqual(names, ['BPC-157']);
+});
+
+test('Best Repeat Customers is permanently defined as 3 paid orders and 500 lifetime spend', () => {
+  const definition = VICI_PERMANENT_AUDIENCE_DEFINITIONS.best_repeat_customers;
+  assert.deepEqual(definition.rules, {
+    match: 'all',
+    conditions: [
+      { dimension: 'order_count', operator: 'at_least', value: 3 },
+      { dimension: 'lifetime_spend', operator: 'at_least', value: 500 }
+    ]
+  });
+});
+
+test('Dominic\'s likely voice requests resolve to the permanent definition without a model call', async () => {
+  const requests = [
+    'our best and most repeat customers',
+    'I want to do a segment with our best and most repeat customers',
+    'Please create a segment for our best repeat customers',
+    'Show me our best repeat customers'
+  ];
+  for (const description of requests) {
+    const completion = neverCalled();
+    const result = await draftRulesFromDescription(
+      { description, products: PRODUCTS, segments: SEGMENTS, now: new Date('2026-08-23T10:00:00Z') },
+      { env: ON, completion }
+    );
+    assert.equal(result.status, 'drafted', description);
+    assert.equal(result.model, null, description);
+    assert.equal(result.permanentDefinition, 'best_repeat_customers', description);
+    assert.deepEqual(result.ruleSet.conditions.map(({ dimension, operator, value }) => ({ dimension, operator, value })), [
+      { dimension: 'order_count', operator: 'at_least', value: 3 },
+      { dimension: 'lifetime_spend', operator: 'at_least', value: 500 }
+    ], description);
+    assert.match(result.plainEnglish.sentence, /at least 3 orders/);
+    assert.match(result.plainEnglish.sentence, /at least \$500/);
+    assert.equal(completion.calls.length, 0, description);
+  }
+});
+
+test('a Best Repeat Customers request with extra conditions still uses the translator', async () => {
+  const description = 'best repeat customers who bought BPC-157';
+  assert.equal(permanentAudienceDefinition(description), null,
+    'the permanent shortcut must not erase the product condition');
+  const { result, completion } = await draft(description, {
+    status: 'rules',
+    match: 'all',
+    conditions: [
+      { dimension: 'order_count', operator: 'at_least', value: 3 },
+      { dimension: 'lifetime_spend', operator: 'at_least', value: 500 },
+      { dimension: 'product_purchased', operator: 'any_of', value: ['BPC-157'] }
+    ]
+  });
+  assert.equal(completion.calls.length, 1);
+  assert.equal(result.status, 'drafted');
+  assert.equal(result.ruleSet.conditions.length, 3);
+});
+
+test('the model prompt preserves the permanent definition when a request adds more conditions', () => {
+  const prompt = require('../lib/campaigns/segment-rule-writer').buildSystemPrompt();
+  assert.match(prompt, /best repeat customers/i);
+  assert.match(prompt, /order_count[\s\S]*at_least 3/);
+  assert.match(prompt, /lifetime_spend[\s\S]*at_least 500/);
+  assert.match(prompt, /not ambiguous/i);
 });
 
 // ── The happy path ─────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ struct SegmentRuleBuilderView: View {
 
                 switch model.stage {
                 case .empty:
+                    viciDefinitionsSection
                     howItWorksSection
                 case .rules:
                     rulesSection
@@ -141,6 +142,25 @@ struct SegmentRuleBuilderView: View {
             Text("How this works")
         } footer: {
             Text("Nothing is saved until you press Save. Your sentence and the product names are all that is sent for the drafting step; no customer is.")
+        }
+    }
+
+    private var viciDefinitionsSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 5) {
+                Label("Best Repeat Customers", systemImage: "star.circle.fill")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(ViciTheme.tint)
+                Text("3 or more paid orders and $500 or more in lifetime spend")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 2)
+        } header: {
+            Text("Vici definitions")
+        } footer: {
+            Text("Say “our best and most repeat customers” and these two rules are used every time. Membership updates as paid orders are recorded.")
         }
     }
 

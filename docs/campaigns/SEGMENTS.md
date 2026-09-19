@@ -438,6 +438,24 @@ an invisible flag.
 `ruleVersion` is stored on the row, so an old member row is always readable as
 "this is what the rules said at the time".
 
+## Permanent Vici audience vocabulary
+
+`Best Repeat Customers` has one permanent business meaning:
+
+- at least 3 paid orders; and
+- at least $500 in lifetime paid-order spend.
+
+The phrases “best repeat customers”, “best and most repeat customers”, and the
+equivalent voice-command framing resolve to those two rules deterministically.
+The model is not asked to guess what “best” means. A request that adds another
+condition, such as a named product, still passes through the constrained rule
+translator so the extra condition is retained.
+
+This is a definition of membership, not permission to contact. The operator
+must still inspect the plain-English rules and live preview before saving, and
+every campaign send still passes the independent consent, suppression, DND,
+provider, quiet-hours and cadence gates.
+
 ## Overrides, and the rule that matters
 
 **A manual exclusion survives recompute.** It is the rule an operator relies on
