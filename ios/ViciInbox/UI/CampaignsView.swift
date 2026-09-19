@@ -388,6 +388,7 @@ struct CampaignDetailView: View {
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model: CampaignDetailModel
     @State private var showingEditor = false
+    @State private var showingMessageEditor = false
     @State private var editorRecipients: [CampaignRecipient] = []
     @State private var preparingEditor = false
     @State private var confirmingApproval = false
@@ -395,6 +396,7 @@ struct CampaignDetailView: View {
     @State private var showingSchedule = false
     @State private var showingCancellation = false
     @State private var showingAllRecipients = false
+    @State private var confirmingRemoveAllExcluded = false
 
     /// How many recipients to show before the reviewer asks for more.
     private let recipientSampleSize = 3
@@ -431,6 +433,13 @@ struct CampaignDetailView: View {
                 Task {
                     await model.load(canDryRun: session.can(Permission.campaignsManage),
                                      canFinancial: session.can(Permission.analyticsRead))
+                }
+            }
+        }
+        .sheet(isPresented: $showingMessageEditor) {
+            if let campaign = model.campaign {
+                CampaignMessageEditSheet(message: campaign.message) { message in
+                    await model.saveMessage(message)
                 }
             }
         }
@@ -482,6 +491,16 @@ struct CampaignDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Approval records the exact message and selected audience. It does not grant carrier or provider permission to send.")
+        }
+        .confirmationDialog("Remove every blocked recipient?",
+                            isPresented: $confirmingRemoveAllExcluded,
+                            titleVisibility: .visible) {
+            Button("Remove all \(model.preview?.excludedCount ?? 0)", role: .destructive) {
+                Task { await model.removeAllExcludedRecipients() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deselects the exact people the current message cannot personalise. It does not delete their contact records, approve the campaign or send anything.")
         }
         .alert("Campaign error", isPresented: Binding(
             get: { model.errorMessage != nil },
@@ -547,7 +566,7 @@ struct CampaignDetailView: View {
                 LabeledContent("Type", value: campaign.workflowCategory.replacingOccurrences(of: "_", with: " ").capitalized)
             }
 
-            Section("Campaign Template") {
+            Section {
                 Text(campaign.message)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -559,13 +578,29 @@ struct CampaignDetailView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                HStack {
+                    Text("Campaign Template")
+                    Spacer()
+                    if campaign.status.isEditable && session.can(Permission.campaignsManage) {
+                        Button { showingMessageEditor = true } label: {
+                            Image(systemName: "pencil.circle.fill")
+                        }
+                        .accessibilityLabel("Edit customer message")
+                    }
+                }
             }
 
             if let preview = model.preview {
                 CampaignPreviewSection(
                     preview: preview,
                     removing: model.removingRecipients,
+                    isRemovingAll: model.isRemovingExcludedRecipients,
                     onRemove: { id in Task { await model.removeRecipient(id) } },
+                    onRemoveAll: campaign.status.isEditable && session.can(Permission.campaignsManage)
+                        ? { confirmingRemoveAllExcluded = true } : nil,
+                    onEditMessage: campaign.status.isEditable && session.can(Permission.campaignsManage)
+                        ? { showingMessageEditor = true } : nil,
                     status: campaign.status
                 )
             }
@@ -591,16 +626,9 @@ struct CampaignDetailView: View {
                 CampaignTestSendSection(campaignID: campaign.id, offerLabel: campaign.offerLabel)
             }
 
-            if let dryRun = model.dryRun {
-                CampaignEligibilitySection(dryRun: dryRun)
-            } else if session.can(Permission.campaignsManage) {
-                Section {
-                    Button("Run Eligibility Check") { Task { await model.refreshDryRun() } }
-                        .disabled(model.isActing)
-                } footer: {
-                    Text("This preview checks current consent and suppression state. Every recipient is checked again before any future send.")
-                }
-            }
+            // Approval and scheduling are immediate next steps after reading
+            // the exact message and proving it on one phone.
+            actionSection(campaign)
 
             if let performance = model.performance {
                 CampaignPerformanceSection(performance: performance)
@@ -618,8 +646,6 @@ struct CampaignDetailView: View {
                financial.orders.attributed > 0 || financial.orders.influenced > 0 {
                 CampaignFinancialSection(campaignID: campaign.id, financial: financial)
             }
-
-            actionSection(campaign)
 
             // ── Three, not two hundred ──────────────────────────────────
             //
@@ -676,6 +702,19 @@ struct CampaignDetailView: View {
                     }
                 }
             }
+
+            if let dryRun = model.dryRun {
+                CampaignEligibilitySection(dryRun: dryRun)
+            } else if session.can(Permission.campaignsManage) {
+                Section {
+                    Button("Run Eligibility Check") { Task { await model.refreshDryRun() } }
+                        .disabled(model.isActing)
+                } footer: {
+                    Text("This preview checks current consent and suppression state. Every recipient is checked again before any future send.")
+                }
+            }
+
+            fullEditorSection(campaign)
         }
         .listStyle(.insetGrouped)
     }
@@ -690,17 +729,6 @@ struct CampaignDetailView: View {
         if canManage || canApprove || canLaunch || canCancel {
             Section {
                 if campaign.status.isEditable && canManage {
-                    Button {
-                        prepareEditor()
-                    } label: {
-                        if preparingEditor {
-                            Label("Preparing Draft", systemImage: "hourglass")
-                        } else {
-                            Label("Edit Draft", systemImage: "pencil")
-                        }
-                    }
-                    .disabled(preparingEditor || model.isActing)
-
                     Button("Submit for Review") {
                         Task { await model.submitForReview() }
                     }
@@ -768,6 +796,28 @@ struct CampaignDetailView: View {
                 Text("Actions")
             } footer: {
                 Text("Team approval and provider permission are separate. Approval never sends a campaign.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fullEditorSection(_ campaign: CampaignRecord) -> some View {
+        if campaign.status.isEditable && session.can(Permission.campaignsManage) {
+            Section {
+                Button {
+                    prepareEditor()
+                } label: {
+                    if preparingEditor {
+                        Label("Preparing Full Editor", systemImage: "hourglass")
+                    } else {
+                        Label("Edit Full Campaign", systemImage: "slider.horizontal.3")
+                    }
+                }
+                .disabled(preparingEditor || model.isActing)
+            } header: {
+                Text("Campaign Settings")
+            } footer: {
+                Text("Change the title, offer or audience here. Use the pencil beside the message for quick copy edits.")
             }
         }
     }
@@ -2207,7 +2257,10 @@ private struct CampaignPreviewSection: View {
     let preview: CampaignPreview
     /// Ids currently being removed, so a second tap cannot fire the same call.
     let removing: Set<String>
+    let isRemovingAll: Bool
     let onRemove: (String) -> Void
+    let onRemoveAll: (() -> Void)?
+    let onEditMessage: (() -> Void)?
     /// Whether the messages have already gone out. The section shows the same
     /// numbers either way and means different things by them, so it needs to
     /// know which question it is answering.
@@ -2242,8 +2295,17 @@ private struct CampaignPreviewSection: View {
         let sampleLimit = 3
 
         Section {
-            Label("What each person receives", systemImage: "message.fill")
-                .font(.subheadline.weight(.semibold))
+            HStack {
+                Label("What each person receives", systemImage: "message.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if let onEditMessage {
+                    Button(action: onEditMessage) {
+                        Image(systemName: "pencil.circle.fill")
+                    }
+                    .accessibilityLabel("Edit customer message")
+                }
+            }
             Text("These are the exact customer-facing messages after names and the verified coupon are filled in.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -2276,6 +2338,18 @@ private struct CampaignPreviewSection: View {
                 Text("\(preview.excludedCount) cannot be personalised and must be removed from the audience before this can be approved.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                if let onRemoveAll {
+                    Button(role: .destructive, action: onRemoveAll) {
+                        if isRemovingAll {
+                            HStack { ProgressView(); Text("Removing blocked recipients") }
+                        } else {
+                            Label("Remove all \(preview.excludedCount)", systemImage: "person.2.badge.minus")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ViciTheme.destructive)
+                    .disabled(isRemovingAll)
+                }
                 ForEach(preview.excluded) { row in
                     VStack(alignment: .leading, spacing: 6) {
                         LabeledContent(row.name ?? row.phone.suffix(4).description,
@@ -2374,6 +2448,80 @@ private struct CampaignPreviewSection: View {
         } header: {
             Text("Customer Message Preview")
         }
+    }
+}
+
+private struct CampaignMessageEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let initialMessage: String
+    @State private var message: String
+    @State private var errorMessage: String?
+    @State private var isSaving = false
+    @FocusState private var messageFocused: Bool
+    let onSave: (String) async -> CampaignMessageSaveOutcome
+
+    init(message: String, onSave: @escaping (String) async -> CampaignMessageSaveOutcome) {
+        initialMessage = message
+        _message = State(initialValue: message)
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $message)
+                        .frame(minHeight: 180)
+                        .focused($messageFocused)
+                    Text("\(message.count) characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Customer Message")
+                } footer: {
+                    Text("Save updates the campaign revision, customer preview and eligibility estimate. It does not change the audience, approve, schedule or send the campaign.")
+                }
+
+                if let errorMessage {
+                    Section {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(ViciTheme.warning)
+                    }
+                }
+            }
+            .navigationTitle("Edit Message")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    KeyboardDoneButton { messageFocused = false }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(isSaving || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .interactiveDismissDisabled(isSaving)
+        }
+        .assistantDraftOwner(
+            source: .campaign,
+            isDirty: message != initialMessage,
+            onDiscard: { dismiss() }
+        )
+    }
+
+    private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        defer { isSaving = false }
+        let outcome = await onSave(message)
+        if let normalized = outcome.normalizedMessage { message = normalized }
+        errorMessage = outcome.errorMessage
+        if outcome.saved { dismiss() }
     }
 }
 

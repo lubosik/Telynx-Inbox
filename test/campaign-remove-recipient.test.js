@@ -48,9 +48,25 @@ test('removing somebody is audited', () => {
   const policy = read('lib', 'route-policy.js');
   assert.match(policy,
     /path: '\/api\/campaigns\/:id\/recipients\/:recipientId\/deselect', permission: 'campaigns\.manage', audit: true/);
+  assert.match(policy,
+    /path: '\/api\/campaigns\/:id\/recipients\/deselect-excluded', permission: 'campaigns\.manage', audit: true/);
 
   const { eventDefinition } = require('../lib/audit/event-types');
   assert.equal(eventDefinition('campaign.recipient_removed').category, 'campaigns');
+});
+
+test('remove all recomputes the exact blocked set on the server and deselects it in one bounded update', () => {
+  const service = read('lib', 'campaigns', 'service.js');
+  const fn = service.slice(service.indexOf('async function deselectExcludedRecipients'));
+  const body = fn.slice(0, fn.indexOf('async function performance'));
+
+  assert.match(body, /await preview\(id, \{ limit: 100 \}\)/,
+    'the phone must not submit a partial preview page as if it were everyone');
+  assert.match(body, /rendered\.excludedCount > 100/,
+    'the server refuses an audience too large for the bounded action');
+  assert.match(body, /\.in\('id', recipientIDs\)/);
+  assert.match(body, /update\(\{ selected: false/);
+  assert.doesNotMatch(body, /\.delete\(\)/);
 });
 
 test('the excluded row carries what it needs to be acted on', () => {
@@ -75,4 +91,29 @@ test('the app offers the button beside the problem', () => {
   const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
   assert.match(model, /await load\(canDryRun: allowsDryRun, canFinancial: allowsFinancial\)/,
     'and the screen reloads, because removing somebody changes the count and the cost');
+});
+
+test('the app can remove the complete blocked set with one confirmed action', () => {
+  const view = read('ios', 'ViciInbox', 'UI', 'CampaignsView.swift');
+  const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
+  const api = read('ios', 'ViciInbox', 'Core', 'APIClient.swift');
+
+  assert.ok(view.includes('Label("Remove all \\(preview.excludedCount)",'),
+    'the bulk button states exactly how many recipients it will remove');
+  assert.match(view, /confirmationDialog\("Remove every blocked recipient\?"/);
+  assert.match(model, /func removeAllExcludedRecipients\(\) async/);
+  assert.match(api, /\/recipients\/deselect-excluded/);
+});
+
+test('quick message editing sits beside the copy and refreshes preview plus eligibility after save', () => {
+  const view = read('ios', 'ViciInbox', 'UI', 'CampaignsView.swift');
+  const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
+
+  assert.match(view, /accessibilityLabel\("Edit customer message"\)/);
+  assert.match(view, /CampaignMessageEditSheet\(message: campaign\.message\)/);
+  assert.match(model, /func saveMessage\(_ draft: String\) async -> CampaignMessageSaveOutcome/);
+  assert.match(model, /recipients: nil/,
+    'a quick copy edit must preserve the frozen audience');
+  assert.match(model, /async let previewDone: Void = refreshPreview\(\)/);
+  assert.match(model, /async let eligibilityDone: Void = dryRunIfWanted\(allowsDryRun\)/);
 });

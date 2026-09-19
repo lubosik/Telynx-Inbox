@@ -150,7 +150,7 @@ test('a sent campaign stops giving advice about approving it', () => {
   // swiftc -parse accepted it because that only checks syntax, and the real
   // build failed on name resolution. A local parse is not a compile.
   assert.match(view, /let isFinished = status == \.completed \|\| status == \.sending/);
-  assert.match(view, /CampaignPreviewSection\([\s\S]{0,200}status: campaign\.status/,
+  assert.match(view, /CampaignPreviewSection\([\s\S]{0,800}status: campaign\.status/,
     'and the caller supplies it from a campaign it actually has');
   assert.match(view, /if !preview\.rendersForEveryone && !isFinished \{/,
     'the instruction is only shown while it is still actionable');
@@ -185,18 +185,22 @@ test('the preview distinguishes a generated placeholder from an exact fixed coup
   assert.match(section.slice(0, 1400), /let couponCode = preview\.couponCode[\s\S]*?exact verified WooCommerce coupon/);
 });
 
-test('campaign review puts the exact preview and phone test before eligibility and results', () => {
+test('campaign review prioritises copy, phone proof and actions; results and eligibility follow', () => {
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
   const screen = view.slice(view.indexOf('private func campaignList('),
     view.indexOf('private func actionSection('));
-  const template = screen.indexOf('Section("Campaign Template")');
+  const template = screen.indexOf('Text("Campaign Template")');
   const preview = screen.indexOf('CampaignPreviewSection(');
   const testPhone = screen.indexOf('CampaignTestSendSection(');
+  const actions = screen.indexOf('actionSection(campaign)');
   const eligibility = screen.indexOf('CampaignEligibilitySection(');
   const results = screen.indexOf('CampaignPerformanceSection(');
-  assert.ok(template < preview && preview < testPhone && testPhone < eligibility && eligibility < results,
-    'the review flow must read template, exact preview, phone test, eligibility, then results');
+  const recipients = screen.indexOf('Text("Recipients")');
+  const fullEditor = screen.indexOf('fullEditorSection(campaign)');
+  assert.ok(template < preview && preview < testPhone && testPhone < actions &&
+    actions < results && results < recipients && recipients < eligibility && eligibility < fullEditor,
+  'the review flow must put urgent copy and proof first, and the full editor last');
   assert.match(screen, /Previous Revision History/,
     'an old rejection must not look like the current draft decision');
 });

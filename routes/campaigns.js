@@ -920,6 +920,22 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'removing this person from the audience'); }
   });
 
+  router.post('/:id/recipients/deselect-excluded', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const result = await campaigns.deselectExcludedRecipients(req.params.id, req.actor);
+      await auditCampaign('campaign.recipient_removed', req, result.campaign, {
+        summary: `Removed ${result.removed} blocked recipients from ${campaignSummaryName(result.campaign)}`,
+        metadata: {
+          recipient_count: result.removed,
+          remaining: result.remaining,
+          reasons: result.reasons
+        }
+      });
+      return res.json({ removed: result.removed, remaining: result.remaining });
+    } catch (error) { return sendError(res, error, 'removing the blocked recipients from the audience'); }
+  });
+
   router.post('/:id/submit-review', async (req, res) => {
     try {
       const result = await campaigns.submitReview(req.params.id, req.actor);

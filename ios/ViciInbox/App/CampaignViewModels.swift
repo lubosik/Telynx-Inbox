@@ -165,6 +165,12 @@ final class CampaignListModel: ObservableObject {
     }
 }
 
+struct CampaignMessageSaveOutcome {
+    let saved: Bool
+    let normalizedMessage: String?
+    let errorMessage: String?
+}
+
 @MainActor
 final class CampaignDetailModel: ObservableObject {
     @Published private(set) var detail: CampaignDetailResponse?
@@ -175,6 +181,8 @@ final class CampaignDetailModel: ObservableObject {
     /// Recipients whose removal is in flight, so a second tap cannot fire the
     /// same call twice and a row can show it is working.
     @Published private(set) var removingRecipients: Set<String> = []
+    @Published private(set) var isRemovingExcludedRecipients = false
+    @Published private(set) var isSavingMessage = false
     @Published private(set) var performance: CampaignPerformance?
     @Published private(set) var financial: CampaignFinancialOverview?
     @Published private(set) var financialUnavailableMessage: String?
@@ -318,6 +326,84 @@ final class CampaignDetailModel: ObservableObject {
             await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func removeAllExcludedRecipients() async {
+        guard !isRemovingExcludedRecipients else { return }
+        isRemovingExcludedRecipients = true
+        defer { isRemovingExcludedRecipients = false }
+        do {
+            try await APIClient.shared.removeAllExcludedCampaignRecipients(campaignID: campaignID)
+            confirmationMessage = "Blocked recipients removed from the audience."
+            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Save only the customer-facing message from the detail screen. Audience,
+    /// title and offer metadata are preserved; preview and cost eligibility are
+    /// then recomputed from the saved revision before the sheet dismisses.
+    func saveMessage(_ draft: String) async -> CampaignMessageSaveOutcome {
+        guard !isSavingMessage, let campaign else {
+            return CampaignMessageSaveOutcome(saved: false, normalizedMessage: nil,
+                                              errorMessage: "The campaign is still updating. Try again.")
+        }
+        let clean = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else {
+            return CampaignMessageSaveOutcome(saved: false, normalizedMessage: nil,
+                                              errorMessage: "Enter the message customers should receive.")
+        }
+        guard clean.count <= 1_600 else {
+            return CampaignMessageSaveOutcome(saved: false, normalizedMessage: nil,
+                                              errorMessage: "Keep the message to 1,600 characters or fewer.")
+        }
+
+        isSavingMessage = true
+        defer { isSavingMessage = false }
+        do {
+            let verdict = try await APIClient.shared.checkCampaignCopy(
+                message: clean,
+                couponCode: campaign.couponCode
+            )
+            let normalized = verdict.normalizedMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let normalized, !normalized.isEmpty, normalized != clean {
+                return CampaignMessageSaveOutcome(
+                    saved: false,
+                    normalizedMessage: normalized,
+                    errorMessage: "We tidied the punctuation. Check the updated message, then tap Save again."
+                )
+            }
+            guard verdict.ok else {
+                return CampaignMessageSaveOutcome(
+                    saved: false,
+                    normalizedMessage: nil,
+                    errorMessage: verdict.failures.first?.reason ?? "Edit the message, then try again."
+                )
+            }
+
+            let response = try await APIClient.shared.editCampaign(
+                id: campaignID,
+                title: campaign.title,
+                message: normalized ?? clean,
+                recipients: nil,
+                couponCode: campaign.couponCode,
+                discountPercent: campaign.effectiveDiscountPercent
+            )
+            detail = CampaignDetailResponse(campaign: response.campaign,
+                                            latestApproval: detail?.latestApproval)
+            preview = nil
+            dryRun = nil
+            async let previewDone: Void = refreshPreview()
+            async let eligibilityDone: Void = dryRunIfWanted(allowsDryRun)
+            _ = await (previewDone, eligibilityDone)
+            confirmationMessage = "Message saved and preview updated."
+            errorMessage = nil
+            return CampaignMessageSaveOutcome(saved: true, normalizedMessage: nil, errorMessage: nil)
+        } catch {
+            return CampaignMessageSaveOutcome(saved: false, normalizedMessage: nil,
+                                              errorMessage: error.localizedDescription)
         }
     }
 

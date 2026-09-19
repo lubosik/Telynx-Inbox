@@ -137,5 +137,5 @@ test('the check is actually looking at something', () => {
   assert.ok(structs.size >= 10, `expected many view structs, found ${structs.size}`);
   assert.ok(structs.has('CampaignPreviewSection'), 'including the one that broke twice');
   assert.deepEqual(structs.get('CampaignPreviewSection'),
-    ['preview', 'removing', 'onRemove', 'status']);
+    ['preview', 'removing', 'isRemovingAll', 'onRemove', 'onRemoveAll', 'onEditMessage', 'status']);
 });

@@ -837,6 +837,16 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    /// Recomputes the campaign's current rendered-message exclusions on the
+    /// server and deselects that exact set in one audited action. The client
+    /// never submits a partial page of ids as if it were the whole set.
+    func removeAllExcludedCampaignRecipients(campaignID: String) async throws {
+        let path = "/api/campaigns/\(encodedPathSegment(campaignID))"
+            + "/recipients/deselect-excluded"
+        let (data, response) = try await post(path, body: [:])
+        try validate(data: data, response: response)
+    }
+
     func approveCampaign(id: String) async throws -> CampaignActionResponse {
         try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/approve")
     }
