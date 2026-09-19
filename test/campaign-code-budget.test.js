@@ -19,6 +19,10 @@ const {
   filterEligibleForCode,
   mayIssueCode
 } = require('../lib/campaigns/code-budget');
+const {
+  campaignRequiresCodeBudget,
+  codeBudgetMessage
+} = require('../lib/campaigns/service');
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = new Date('2026-09-01T12:00:00Z');
@@ -283,6 +287,32 @@ test('both minting paths consult the gate', () => {
     'the reply handler must check eligibility before minting');
   assert.match(read('service.js'), /filterEligibleForCode\(/,
     'campaign approval must check the budget before minting');
+});
+
+test('an explicitly attached shared campaign coupon uses its verified WooCommerce terms', () => {
+  assert.equal(campaignRequiresCodeBudget({
+    audience_definition: { coupon_code: 'CC20', discount_percent: 20, minimum_spend: 100 }
+  }), false, 'CC20 is a named shared offer, not a newly generated per-person incentive');
+  assert.equal(campaignRequiresCodeBudget({ audience_definition: {} }), true,
+    'automatic campaign incentives retain the one-code budget');
+
+  const service = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib', 'campaigns', 'service.js'), 'utf8'
+  );
+  assert.match(service,
+    /fieldsUsed\(campaign\.final_message\)\.includes\('code'\) && campaignRequiresCodeBudget\(campaign\)/,
+    'the approval path must make the distinction before applying the budget');
+});
+
+test('automatic-offer budget failures are explained in plain English', () => {
+  const message = codeBudgetMessage(378, 1090, {
+    already_had_a_code: 243,
+    regular_customer: 135
+  });
+  assert.match(message, /243 received another automatic discount code in the last 180 days/);
+  assert.match(message, /135 already have at least three paid orders/);
+  assert.doesNotMatch(message, /already_had_a_code|regular_customer|\{|\}/,
+    'database reason keys must never be shown to an operator');
 });
 
 test('AI-suggested copy is validated before it can be sent', () => {
