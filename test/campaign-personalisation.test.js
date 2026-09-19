@@ -24,10 +24,22 @@ const { RULES } = require('../lib/campaigns/copy-rules');
 const { validateCopy } = require('../lib/campaigns/copy-validator');
 const merge = require('../lib/campaigns/merge-fields');
 const { renderForRecipients, factsFor } = require('../lib/campaigns/render-recipients');
+const { campaignPreviewTemplate } = require('../lib/campaigns/service');
 
 const BRAND = RULES.brand.defaultName;
 const OPT_OUT = RULES.optOut.exactSuffix;
 const OPTIONS = { brandName: BRAND, approvedProductCodes: RULES.defaultApprovedProductCodes };
+
+test('draft preview uses the edited proposal instead of a stale previously reviewed message', () => {
+  const campaign = {
+    proposed_message: 'new edited copy',
+    final_message: 'old reviewed copy'
+  };
+  assert.equal(campaignPreviewTemplate({ ...campaign, status: 'draft' }), 'new edited copy');
+  assert.equal(campaignPreviewTemplate({ ...campaign, status: 'rejected' }), 'new edited copy');
+  assert.equal(campaignPreviewTemplate({ ...campaign, status: 'review_required' }), 'old reviewed copy');
+  assert.equal(campaignPreviewTemplate({ ...campaign, status: 'approved' }), 'old reviewed copy');
+});
 
 // ── What the loosening bought ──────────────────────────────────────────────
 
