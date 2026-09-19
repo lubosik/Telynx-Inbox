@@ -175,13 +175,30 @@ test('every campaign shows three messages, not three hundred', () => {
     'and says it is showing a sample rather than hiding the rest silently');
 });
 
-test('the placeholder-code note disappears once the codes are real', () => {
+test('the preview distinguishes a generated placeholder from an exact fixed coupon', () => {
   // "Codes shown here are placeholders" is true before approval and a lie
   // afterwards: those are the codes that went to customers.
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
   const section = view.slice(view.indexOf('if preview.samples.count > sampleLimit'));
-  assert.match(section.slice(0, 900), /if !isFinished \{[\s\S]*?Codes shown here are placeholders/);
+  assert.match(section.slice(0, 1400), /if !isFinished, preview\.couponCode == nil \{[\s\S]*?Codes shown here are placeholders/);
+  assert.match(section.slice(0, 1400), /let couponCode = preview\.couponCode[\s\S]*?exact verified WooCommerce coupon/);
+});
+
+test('campaign review puts the exact preview and phone test before eligibility and results', () => {
+  const view = fs.readFileSync(
+    path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
+  const screen = view.slice(view.indexOf('private func campaignList('),
+    view.indexOf('private func actionSection('));
+  const template = screen.indexOf('Section("Campaign Template")');
+  const preview = screen.indexOf('CampaignPreviewSection(');
+  const testPhone = screen.indexOf('CampaignTestSendSection(');
+  const eligibility = screen.indexOf('CampaignEligibilitySection(');
+  const results = screen.indexOf('CampaignPerformanceSection(');
+  assert.ok(template < preview && preview < testPhone && testPhone < eligibility && eligibility < results,
+    'the review flow must read template, exact preview, phone test, eligibility, then results');
+  assert.match(screen, /Previous Revision History/,
+    'an old rejection must not look like the current draft decision');
 });
 
 test('a finished campaign reads as Live, not Sent or Completed', () => {

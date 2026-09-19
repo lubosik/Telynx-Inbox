@@ -547,10 +547,13 @@ struct CampaignDetailView: View {
                 LabeledContent("Type", value: campaign.workflowCategory.replacingOccurrences(of: "_", with: " ").capitalized)
             }
 
-            Section("Message") {
+            Section("Campaign Template") {
                 Text(campaign.message)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                Text("This is the reusable template. Customer names and coupon fields are filled below in Customer Message Preview.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 if campaign.finalMessage != nil && !campaign.status.isEditable {
                     Label("This is the message frozen for this revision.", systemImage: "lock.fill")
                         .font(.footnote)
@@ -558,7 +561,7 @@ struct CampaignDetailView: View {
                 }
             }
 
-            if let preview = model.preview, preview.personalised {
+            if let preview = model.preview {
                 CampaignPreviewSection(
                     preview: preview,
                     removing: model.removingRecipients,
@@ -567,40 +570,25 @@ struct CampaignDetailView: View {
                 )
             }
 
-            if let rejection = campaign.rejectionReason, !rejection.isEmpty {
+            // A rejection belongs to the revision it decided. Once that copy
+            // is edited the campaign is a new draft; showing the old reason as
+            // if it described the current revision makes a fixed campaign look
+            // rejected forever.
+            if campaign.status == .rejected,
+               let rejection = campaign.rejectionReason, !rejection.isEmpty {
                 Section("Reason for changes") { Text(rejection) }
             }
             if let cancellation = campaign.cancellationReason, !cancellation.isEmpty {
                 Section("Cancellation reason") { Text(cancellation) }
             }
 
-            if let performance = model.performance {
-                CampaignPerformanceSection(performance: performance)
-                if let coupons = performance.coupons, coupons.hasCodes {
-                    CampaignCouponRevenueSection(coupons: coupons)
-                }
-            }
-
-            // ── ONE REVENUE SECTION, NOT TWO ─────────────────────────────
-            //
-            // "Revenue from the codes" and "Revenue Attribution" answered the
-            // same question and disagreed: $626.10 against $0.00, for the same
-            // campaign, with the empty one owning the bigger font and the
-            // evidence link.
-            //
-            // It was not a display bug. NOTHING has ever written to
-            // sms_campaign_attributions, so the tiered section could only show
-            // zero, for every campaign, for ever. The section above is
-            // measured from real coupon redemptions on real paid orders.
-            //
-            // Kept only for a campaign that genuinely HAS tiered attribution
-            // data, so if that pipeline is ever built this comes back on its
-            // own rather than being rediscovered.
-            if session.can(Permission.analyticsRead),
-               let financial = model.financial,
-               financial.availability.revenueAttribution,
-               financial.orders.attributed > 0 || financial.orders.influenced > 0 {
-                CampaignFinancialSection(campaignID: campaign.id, financial: financial)
+            // Put the one-handset proof directly below the exact rendered
+            // customer messages. It is part of reviewing the message, not an
+            // unrelated action buried beneath results and eligibility.
+            if session.can(Permission.campaignsApprove),
+               campaign.status != .sending,
+               !campaign.status.isTerminal {
+                CampaignTestSendSection(campaignID: campaign.id, offerLabel: campaign.offerLabel)
             }
 
             if let dryRun = model.dryRun {
@@ -614,14 +602,21 @@ struct CampaignDetailView: View {
                 }
             }
 
-            // The test lives on the same review screen as approval and
-            // scheduling, so checking a real handset is a normal step rather
-            // than a hidden endpoint. It remains available through scheduling
-            // and disappears once delivery is underway or the campaign ends.
-            if session.can(Permission.campaignsApprove),
-               campaign.status != .sending,
-               !campaign.status.isTerminal {
-                CampaignTestSendSection(campaignID: campaign.id, offerLabel: campaign.offerLabel)
+            if let performance = model.performance {
+                CampaignPerformanceSection(performance: performance)
+                if let coupons = performance.coupons, coupons.hasCodes {
+                    CampaignCouponRevenueSection(coupons: coupons)
+                }
+            }
+
+            // Kept only for a campaign that genuinely has tiered attribution
+            // data. The measured campaign results above remain the primary
+            // results section and this never displays an empty headline.
+            if session.can(Permission.analyticsRead),
+               let financial = model.financial,
+               financial.availability.revenueAttribution,
+               financial.orders.attributed > 0 || financial.orders.influenced > 0 {
+                CampaignFinancialSection(campaignID: campaign.id, financial: financial)
             }
 
             actionSection(campaign)
@@ -665,12 +660,19 @@ struct CampaignDetailView: View {
             }
 
             if let approval = model.detail?.latestApproval {
-                Section("Latest decision") {
+                Section(approval.revision == campaign.revision
+                        ? "Current Revision Decision"
+                        : "Previous Revision History") {
                     LabeledContent("Decision", value: approval.decision.capitalized)
                     LabeledContent("Revision", value: approval.revision.formatted())
                     LabeledContent("Recipients", value: approval.recipientCount.formatted())
                     if let date = ServerDate.parse(approval.decidedAt) {
                         LabeledContent("Recorded", value: date.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if approval.revision != campaign.revision {
+                        Text("That decision applied to revision \(approval.revision). Revision \(campaign.revision) is currently \(campaign.status.title) and has not inherited it.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -2239,7 +2241,13 @@ private struct CampaignPreviewSection: View {
         // well as three hundred.
         let sampleLimit = 3
 
-        Section("What each person receives") {
+        Section {
+            Label("What each person receives", systemImage: "message.fill")
+                .font(.subheadline.weight(.semibold))
+            Text("These are the exact customer-facing messages after names and the verified coupon are filled in.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             HStack {
                 Label(isFinished
                         ? "\(preview.renderedCount) of \(preview.audienceCount) personalised"
@@ -2354,11 +2362,17 @@ private struct CampaignPreviewSection: View {
             // Only true before approval. Afterwards the codes in these messages
             // are the real ones that went out, and calling them placeholders
             // would be a lie about a message somebody has already received.
-            if !isFinished {
+            if !isFinished, preview.couponCode == nil {
                 Text("Codes shown here are placeholders. The real single-use codes are created when you approve, not now.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if !isFinished, let couponCode = preview.couponCode {
+                Text("\(couponCode) is the exact verified WooCommerce coupon used by previews, phone tests and the final campaign.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("Customer Message Preview")
         }
     }
 }
