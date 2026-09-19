@@ -268,13 +268,15 @@ function createCampaignRouter({
   // Lazy for the same reason: constructing it must not require credentials.
   let segments = null;
   const segmentService = () => (segments ||= segmentPlanningService || createSegmentService({ client: db() }));
-  const renderCampaignTest = campaignTestRenderer || (({ template, to, couponCode }) => {
+  const renderCampaignTest = campaignTestRenderer || (({
+    template, to, couponCode, approvedMinimumSpend = null
+  }) => {
     const { renderForRecipients } = require('../lib/campaigns/render-recipients');
     // Never borrow a real customer's name, order or link for a test sent to an
     // arbitrary handset. These bounded, clearly synthetic facts exercise every
     // supported merge field without disclosing customer data or minting a
     // coupon. The real per-recipient preview remains the approval gate.
-    return renderForRecipients({ template, recipients: [{ phone: to, facts: {
+    return renderForRecipients({ template, approvedMinimumSpend, recipients: [{ phone: to, facts: {
       contactName: 'Test Customer', orderCount: 2,
       lastProductName: 'RT', lastProductSku: 'P-RT10',
       attemptedProductName: 'RT', attemptedProductSku: 'P-RT10',
@@ -735,9 +737,15 @@ function createCampaignRouter({
         return res.status(400).json({ error: 'That message is too long to check.', code: 'MESSAGE_TOO_LONG' });
       }
       const text = campaignCopyField(supplied);
+      const couponCode = typeof req.body?.couponCode === 'string'
+        ? req.body.couponCode.trim().toUpperCase() : null;
+      const verifiedCoupon = couponCode
+        ? await verifyCoupon({ code: couponCode, message: text })
+        : null;
       const verdict = validateCopy(text, {
         brandName: RULES.brand.defaultName,
-        approvedProductCodes: RULES.defaultApprovedProductCodes
+        approvedProductCodes: RULES.defaultApprovedProductCodes,
+        approvedMinimumSpend: Number(verifiedCoupon?.minimum_amount || 0) || null
       });
       return res.json({
         ok: verdict.ok === true,
@@ -1166,8 +1174,9 @@ function createCampaignRouter({
           'This draft promises a coupon but no real coupon is attached. Open Edit Campaign, generate or attach the coupon, then save before sending a test.'
         ), { code: 'CAMPAIGN_TEST_SEND_COUPON_MISSING', status: 409 });
       }
+      let verifiedCoupon = null;
       if (couponCode) {
-        await verifyCoupon({
+        verifiedCoupon = await verifyCoupon({
           code: couponCode,
           percent: campaign?.campaign?.discount_percent
             ?? campaign?.campaign?.audience_definition?.discount_percent,
@@ -1177,7 +1186,8 @@ function createCampaignRouter({
       const outcome = await renderCampaignTest({
         template,
         to,
-        ...(couponCode ? { couponCode } : {})
+        ...(couponCode ? { couponCode } : {}),
+        approvedMinimumSpend: Number(verifiedCoupon?.minimum_amount || 0) || null
       });
       const text = outcome.rendered[0]?.message;
       if (!text) {

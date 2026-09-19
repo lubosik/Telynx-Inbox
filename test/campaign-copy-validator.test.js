@@ -587,6 +587,20 @@ test('invented inventory counts, prices, discounts and deadlines are rejected', 
     `${BRAND}: 15 dollars off, now $15. ${OPT_OUT}`);
 });
 
+test('a WooCommerce-verified coupon minimum is allowed only in the exact minimum-order phrase', () => {
+  const message = `${BRAND}: Use code {{code}} for 20% off on orders $100 or more: https://vicipeptides.com/shop/ ${OPT_OUT}`;
+
+  assertRejectedFor('no_unsupported_quantity_price_or_deadline', message);
+  assert.equal(validateCopy(message, { approvedMinimumSpend: 100 }).ok, true);
+  assertRejectedFor('no_unsupported_quantity_price_or_deadline', message, {
+    approvedMinimumSpend: 50
+  });
+  assertRejectedFor('no_unsupported_quantity_price_or_deadline',
+    `${message.replace(OPT_OUT, '')} Buy $500 more. ${OPT_OUT}`, {
+      approvedMinimumSpend: 100
+    });
+});
+
 // ── Reporting behaviour ────────────────────────────────────────────────────
 
 test('the validator reports every reason, not the first one', () => {

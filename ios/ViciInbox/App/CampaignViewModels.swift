@@ -985,7 +985,10 @@ final class CampaignEditorModel: ObservableObject {
         guard cleanMessage.count <= 1_600 else { errorMessage = "Keep the message to 1,600 characters or fewer."; return false }
 
         do {
-            let verdict = try await APIClient.shared.checkCampaignCopy(message: cleanMessage)
+            let verdict = try await APIClient.shared.checkCampaignCopy(
+                message: cleanMessage,
+                couponCode: attachedCoupon?.code ?? existingCouponCode
+            )
             if let normalized = verdict.normalizedMessage,
                !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 // The server is authoritative about the exact text that will

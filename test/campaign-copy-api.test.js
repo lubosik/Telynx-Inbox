@@ -149,6 +149,29 @@ test('the exact iPhone smart-apostrophe case is normalized and reported in plain
   assert.deepEqual(touched, [], 'checking copy must not create or send a campaign');
 });
 
+test('copy checking accepts the exact minimum spend only after verifying the attached coupon', async () => {
+  const verified = [];
+  const router = createCampaignRouter({
+    service: recordingService([]),
+    generationService: {},
+    copyDrafter: async () => DRAFT_RESULT,
+    campaignCouponVerifier: async input => {
+      verified.push(input);
+      return { code: 'CC20', amount: '20', minimum_amount: '100.00' };
+    }
+  });
+  const res = response();
+  const message = `${BRAND}: Use code {{code}} for 20% off on orders $100 or more: https://vicipeptides.com/shop/ ${OPT_OUT}`;
+  await handler(router, 'post', '/check-copy')({
+    body: { message, couponCode: 'cc20' }, actor: { id: 9 }
+  }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.deepEqual(res.payload.failures, []);
+  assert.deepEqual(verified, [{ code: 'CC20', message }]);
+});
+
 test('unsupported copy points to the visible fix without carrier jargon', async () => {
   const { router } = routerWith(async () => DRAFT_RESULT);
   const res = response();

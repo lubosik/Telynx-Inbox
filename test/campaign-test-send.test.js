@@ -119,7 +119,8 @@ test('one test renders once, sends once, audits a masked target and changes no c
   assert.equal(renderCalls.length, 1);
   assert.deepEqual(renderCalls[0], {
     template: 'Vin from Vici: Hello. Reply STOP to opt out.',
-    to: '+13055551234'
+    to: '+13055551234',
+    approvedMinimumSpend: null
   });
   assert.deepEqual(sends, [{
     to: '+13055551234',
@@ -183,14 +184,15 @@ test('a fixed campaign coupon is the exact code rendered into a real test', asyn
   const router = createCampaignRouter({
     service: { detail: async () => ({ campaign: {
       id: 'campaign-cc20',
-      proposed_message: 'Vin from Vici: {{code}} gets you 20% off $100+. Reply STOP to opt out.',
+      proposed_message: 'Vin from Vici: Use code {{code}} for 20% off on orders $100 or more: https://vicipeptides.com/shop/ Reply STOP to opt out.',
       discount_percent: 20,
       audience_definition: { coupon_code: 'CC20', discount_percent: 20 }
     } }) },
     campaignClient: {},
-    campaignCouponVerifier: async () => ({ code: 'CC20' }),
+    campaignCouponVerifier: async () => ({ code: 'CC20', minimum_amount: '100.00' }),
     campaignTestRenderer: async input => {
       assert.equal(input.couponCode, 'CC20');
+      assert.equal(input.approvedMinimumSpend, 100);
       return { rendered: [{ message: input.template.replace('{{code}}', input.couponCode) }] };
     },
     campaignTestSender: async (to, message) => { sends.push({ to, message }); return { status: 'queued' }; },
@@ -201,7 +203,7 @@ test('a fixed campaign coupon is the exact code rendered into a real test', asyn
     params: { id: 'campaign-cc20' }, body: { to: '+13055551234' }, actor: { id: 9 }
   }, res);
   assert.equal(res.statusCode, 200);
-  assert.match(sends[0].message, /CC20 gets you 20% off/);
+  assert.match(sends[0].message, /Use code CC20 for 20% off on orders \$100 or more/);
   assert.doesNotMatch(sends[0].message, /TEST|000000/);
 });
 

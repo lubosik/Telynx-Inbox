@@ -705,9 +705,11 @@ actor APIClient {
     /// It REPORTS, it does not refuse: the edit screen shows what a change
     /// breaks and lets the operator decide. Before this existed nothing checked
     /// an edited message at all.
-    func checkCampaignCopy(message: String) async throws -> CampaignCopyVerdict {
-        let (data, response) = try await post("/api/campaigns/check-copy",
-                                              body: ["message": message])
+    func checkCampaignCopy(message: String,
+                           couponCode: String? = nil) async throws -> CampaignCopyVerdict {
+        var body: [String: Any] = ["message": message]
+        if let couponCode, !couponCode.isEmpty { body["couponCode"] = couponCode }
+        let (data, response) = try await post("/api/campaigns/check-copy", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignCopyVerdict.self, from: data) }
         catch { throw APIError.decoding }
