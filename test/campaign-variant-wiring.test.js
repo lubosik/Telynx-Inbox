@@ -158,21 +158,16 @@ test('a sent campaign stops giving advice about approving it', () => {
     'and is replaced by a statement of what happened');
 });
 
-test('every campaign shows three messages, not three hundred', () => {
-  // First capped only after sending, on the reasoning that a reviewer
-  // deciding whether wording works should see the whole spread. The owner's
-  // answer, having actually done that review: three is what he needs, and a
-  // dozen means scrolling past a dozen to reach the approve button.
-  //
-  // The number that decides an approval is how many people DROP OUT, stated
-  // above in one line. The samples exist to show the merge fields substitute
-  // at all, which three demonstrate as well as three hundred.
+test('every campaign shows one successful message and one representative exclusion', () => {
+  // Repeating the same rendered wording ten times hid the controls below it.
+  // One successful substitution proves the variables work; one failed
+  // substitution explains the blocked group. The totals still cover everyone.
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
-  assert.match(view, /let sampleLimit = 3/);
-  assert.match(view, /ForEach\(preview\.samples\.prefix\(sampleLimit\)\)/);
-  assert.match(view, /Showing 3 of \\\(preview\.samples\.count\) messages/,
-    'and says it is showing a sample rather than hiding the rest silently');
+  assert.match(view, /ForEach\(preview\.samples\.prefix\(1\)\)/);
+  assert.match(view, /ForEach\(preview\.excluded\.prefix\(1\)\)/);
+  assert.match(view, /Remove all applies to all \\\(preview\.excludedCount\) blocked contacts/,
+    'and makes clear the bulk action still covers the complete excluded set');
 });
 
 test('the preview distinguishes a generated placeholder from an exact fixed coupon', () => {
@@ -180,7 +175,7 @@ test('the preview distinguishes a generated placeholder from an exact fixed coup
   // afterwards: those are the codes that went to customers.
   const view = fs.readFileSync(
     path.join(__dirname, '..', 'ios', 'ViciInbox', 'UI', 'CampaignsView.swift'), 'utf8');
-  const section = view.slice(view.indexOf('if preview.samples.count > sampleLimit'));
+  const section = view.slice(view.indexOf('if !isFinished, preview.couponCode == nil'));
   assert.match(section.slice(0, 1400), /if !isFinished, preview\.couponCode == nil \{[\s\S]*?Codes shown here are placeholders/);
   assert.match(section.slice(0, 1400), /let couponCode = preview\.couponCode[\s\S]*?exact verified WooCommerce coupon/);
 });

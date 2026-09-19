@@ -178,6 +178,8 @@ final class CampaignDetailModel: ObservableObject {
     @Published private(set) var recipientTotal = 0
     @Published private(set) var dryRun: CampaignDryRun?
     @Published private(set) var preview: CampaignPreview?
+    @Published private(set) var isLoadingPreview = false
+    @Published private(set) var previewErrorMessage: String?
     /// Recipients whose removal is in flight, so a second tap cannot fire the
     /// same call twice and a row can show it is working.
     @Published private(set) var removingRecipients: Set<String> = []
@@ -198,6 +200,7 @@ final class CampaignDetailModel: ObservableObject {
     private var nextRecipientPage = 1
     private var allowsDryRun = false
     private var allowsFinancial = false
+    private var previewRequestID = UUID()
 
     init(campaignID: String) {
         self.campaignID = campaignID
@@ -206,7 +209,12 @@ final class CampaignDetailModel: ObservableObject {
     var campaign: CampaignRecord? { detail?.campaign }
     var hasMoreRecipients: Bool { recipients.count < recipientTotal }
     var canSubmitForReview: Bool {
-        campaign?.status.isEditable == true && (dryRun?.eligible ?? 0) > 0 && !isActing
+        campaign?.status.isEditable == true
+            && (dryRun?.eligible ?? 0) > 0
+            && preview != nil
+            && preview?.excludedCount == 0
+            && !isLoadingPreview
+            && !isActing
     }
 
     /**
@@ -323,7 +331,7 @@ final class CampaignDetailModel: ObservableObject {
             try await APIClient.shared.removeCampaignRecipient(
                 campaignID: campaignID, recipientID: recipientID
             )
-            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+            await refreshAudienceState()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -335,8 +343,8 @@ final class CampaignDetailModel: ObservableObject {
         defer { isRemovingExcludedRecipients = false }
         do {
             try await APIClient.shared.removeAllExcludedCampaignRecipients(campaignID: campaignID)
+            await refreshAudienceState()
             confirmationMessage = "Blocked recipients removed from the audience."
-            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -412,6 +420,26 @@ final class CampaignDetailModel: ObservableObject {
         await refreshDryRun()
     }
 
+    /// Reload the three pieces changed by an audience edit without waiting for
+    /// unrelated performance or financial requests that may still be running.
+    /// A fast tap on Remove all can otherwise update the server while the
+    /// screen keeps showing the old blocked count until it is reopened.
+    private func refreshAudienceState() async {
+        async let recipientsValue = APIClient.shared.fetchCampaignRecipients(id: campaignID)
+        async let previewDone: Void = refreshPreview()
+        async let eligibilityDone: Void = dryRunIfWanted(allowsDryRun)
+
+        do {
+            let page = try await recipientsValue
+            recipients = page.items
+            recipientTotal = page.total
+            nextRecipientPage = 2
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        _ = await (previewDone, eligibilityDone)
+    }
+
     /// Performance was added after campaign detail. Keep detail usable during
     /// an additive rollout where this endpoint may not have reached every
     /// environment yet — hence the swallow rather than a thrown error.
@@ -479,7 +507,28 @@ final class CampaignDetailModel: ObservableObject {
     /// A nil preview renders as "not available", never as "renders for
     /// everybody", because the second would be a reassuring lie.
     func refreshPreview() async {
-        preview = try? await APIClient.shared.previewCampaign(id: campaignID)
+        // A copy edit may finish while the previous revision's preview is
+        // still in flight. Give every request an identity so the older result
+        // cannot arrive last and put stale wording back on screen.
+        let requestID = UUID()
+        previewRequestID = requestID
+        isLoadingPreview = true
+        previewErrorMessage = nil
+        defer {
+            if previewRequestID == requestID { isLoadingPreview = false }
+        }
+        do {
+            // The limit applies independently to successful and excluded
+            // examples, so one returns exactly the useful pair while the
+            // server still computes the complete counts for both groups.
+            let result = try await APIClient.shared.previewCampaign(id: campaignID, limit: 1)
+            guard previewRequestID == requestID else { return }
+            preview = result
+        } catch {
+            guard previewRequestID == requestID else { return }
+            preview = nil
+            previewErrorMessage = error.localizedDescription
+        }
     }
 
     func refreshDryRun() async {

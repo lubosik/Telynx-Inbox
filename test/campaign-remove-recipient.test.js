@@ -89,8 +89,12 @@ test('the app offers the button beside the problem', () => {
     'so a second tap cannot fire the same call');
 
   const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
-  assert.match(model, /await load\(canDryRun: allowsDryRun, canFinancial: allowsFinancial\)/,
-    'and the screen reloads, because removing somebody changes the count and the cost');
+  assert.match(model, /await refreshAudienceState\(\)/,
+    'and the audience-specific state reloads immediately after removal');
+  assert.match(model, /async let previewDone: Void = refreshPreview\(\)/,
+    'because removing somebody changes the preview count');
+  assert.match(model, /async let eligibilityDone: Void = dryRunIfWanted\(allowsDryRun\)/,
+    'and the eligibility and cost estimate');
 });
 
 test('the app can remove the complete blocked set with one confirmed action', () => {
@@ -116,4 +120,25 @@ test('quick message editing sits beside the copy and refreshes preview plus elig
     'a quick copy edit must preserve the frozen audience');
   assert.match(model, /async let previewDone: Void = refreshPreview\(\)/);
   assert.match(model, /async let eligibilityDone: Void = dryRunIfWanted\(allowsDryRun\)/);
+});
+
+test('the preview has a visible loading home and review waits for it', () => {
+  const view = read('ios', 'ViciInbox', 'UI', 'CampaignsView.swift');
+  const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
+
+  assert.match(view, /CampaignPreviewLoadingSection\(/,
+    'the section must exist before preview data arrives');
+  assert.match(view, /Text\("Loading customer messages"\)/);
+  assert.match(view, /Text\("Customer Message Preview"\)/);
+  assert.match(model, /&& preview != nil/,
+    'review submission must wait for a completed preview');
+  assert.match(model, /&& preview\?\.excludedCount == 0/,
+    'and every unrenderable recipient must be resolved first');
+});
+
+test('a newer copy preview wins over an older request still in flight', () => {
+  const model = read('ios', 'ViciInbox', 'App', 'CampaignViewModels.swift');
+  assert.match(model, /private var previewRequestID = UUID\(\)/);
+  assert.match(model, /guard previewRequestID == requestID else \{ return \}/,
+    'an old revision must never overwrite a newly saved message preview');
 });

@@ -603,6 +603,12 @@ struct CampaignDetailView: View {
                         ? { showingMessageEditor = true } : nil,
                     status: campaign.status
                 )
+            } else {
+                CampaignPreviewLoadingSection(
+                    isLoading: model.isLoadingPreview || model.previewErrorMessage == nil,
+                    errorMessage: model.previewErrorMessage,
+                    onRetry: { Task { await model.refreshPreview() } }
+                )
             }
 
             // A rejection belongs to the revision it decided. Once that copy
@@ -735,10 +741,10 @@ struct CampaignDetailView: View {
                     .disabled(!model.canSubmitForReview)
                     .accessibilityHint(model.canSubmitForReview
                                        ? "Submits the current draft for internal review."
-                                       : "Run a successful eligibility check with at least one eligible recipient first.")
+                                       : reviewSubmissionHint)
 
-                    if model.dryRun == nil || model.dryRun?.eligible == 0 {
-                        Text("A successful eligibility check with at least one eligible recipient is required before review submission.")
+                    if !model.canSubmitForReview {
+                        Text(reviewSubmissionHint)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -798,6 +804,19 @@ struct CampaignDetailView: View {
                 Text("Team approval and provider permission are separate. Approval never sends a campaign.")
             }
         }
+    }
+
+    private var reviewSubmissionHint: String {
+        if model.isLoadingPreview || model.preview == nil {
+            return "Wait for Customer Message Preview to finish loading before submitting."
+        }
+        if let excluded = model.preview?.excludedCount, excluded > 0 {
+            return "Remove all \(excluded) contacts whose messages cannot be personalised before submitting."
+        }
+        if model.dryRun == nil || model.dryRun?.eligible == 0 {
+            return "Run a successful eligibility check with at least one eligible recipient before submitting."
+        }
+        return "The campaign is ready to submit for internal review."
     }
 
     @ViewBuilder
@@ -2280,20 +2299,6 @@ private struct CampaignPreviewSection: View {
         // one of 375 messages, so reading the campaign meant scrolling past
         // all of them.
         let isFinished = status == .completed || status == .sending
-        // ── THREE, ALWAYS ────────────────────────────────────────────────
-        //
-        // This showed all of them before approval, on the reasoning that a
-        // reviewer deciding whether wording works should see the spread. The
-        // owner's answer, having actually done that review: he needs three,
-        // and a dozen means scrolling past a dozen to reach the approve
-        // button.
-        //
-        // The number that decides an approval is how many people DROP OUT,
-        // and that is stated above in one line. The samples are there to show
-        // that the merge fields substitute at all, which three demonstrate as
-        // well as three hundred.
-        let sampleLimit = 3
-
         Section {
             HStack {
                 Label("What each person receives", systemImage: "message.fill")
@@ -2350,7 +2355,10 @@ private struct CampaignPreviewSection: View {
                     .tint(ViciTheme.destructive)
                     .disabled(isRemovingAll)
                 }
-                ForEach(preview.excluded) { row in
+                // One representative failure is enough to explain the issue.
+                // The complete count remains above and Remove all acts on the
+                // complete server-computed set, not merely this example.
+                ForEach(preview.excluded.prefix(1)) { row in
                     VStack(alignment: .leading, spacing: 6) {
                         LabeledContent(row.name ?? row.phone.suffix(4).description,
                                        value: row.readableReason)
@@ -2388,13 +2396,20 @@ private struct CampaignPreviewSection: View {
                     }
                     .padding(.vertical, 4)
                 }
+                if preview.excludedCount > 1 {
+                    Text("Showing 1 example. Remove all applies to all \(preview.excludedCount) blocked contacts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else if isFinished && preview.excludedCount > 0 {
                 Text("\(preview.excludedCount) could not be personalised and were left out of the send.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(preview.samples.prefix(sampleLimit)) { sample in
+            // One successful message plus the representative failure above
+            // are the only two examples needed to understand this campaign.
+            ForEach(preview.samples.prefix(1)) { sample in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(sample.message)
                         .font(.footnote)
@@ -2427,12 +2442,6 @@ private struct CampaignPreviewSection: View {
                 .padding(.vertical, 2)
             }
 
-            if preview.samples.count > sampleLimit {
-                Text("Showing 3 of \(preview.samples.count) messages.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
             // Only true before approval. Afterwards the codes in these messages
             // are the real ones that went out, and calling them placeholders
             // would be a lie about a message somebody has already received.
@@ -2447,6 +2456,49 @@ private struct CampaignPreviewSection: View {
             }
         } header: {
             Text("Customer Message Preview")
+        }
+    }
+}
+
+/// The preview has a permanent home even before its network request returns.
+/// Without this, the whole section appeared out of nowhere several seconds
+/// after opening a campaign, so a new operator had no reason to wait for it.
+private struct CampaignPreviewLoadingSection: View {
+    let isLoading: Bool
+    let errorMessage: String?
+    let onRetry: () -> Void
+
+    var body: some View {
+        Section {
+            if isLoading {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Loading customer messages")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Checking names, coupon details and the exact message each person would receive.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Customer message preview is loading")
+            } else {
+                Label("The customer message preview could not load.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ViciTheme.warning)
+                if let errorMessage, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Try Loading Preview Again", action: onRetry)
+            }
+        } header: {
+            Text("Customer Message Preview")
+        } footer: {
+            Text("Submit for Review stays unavailable until this preview finishes and every message can be personalised.")
         }
     }
 }
