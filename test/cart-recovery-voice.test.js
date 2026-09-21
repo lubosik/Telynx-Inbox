@@ -138,6 +138,23 @@ test('voice provider configuration fails closed and creates the Telnyx ElevenLab
   const invalid = voiceConfiguration({ ...VOICE_ENV, TELNYX_API_KEY: '', TELNYX_CONNECTION_ID: '',
     VICI_LIVE_TRANSFER_NUMBER: VOICE_ENV.TELNYX_PHONE_NUMBER }, {});
   assert.deepEqual(invalid.errors.sort(), ['telnyx_api_key_missing', 'telnyx_connection_missing', 'transfer_loop']);
+
+  const inboxTransfer = voiceConfiguration({
+    ...VOICE_ENV,
+    VICI_LIVE_TRANSFER_NUMBER: '',
+    TELNYX_IOS_SIP_USERNAME: 'vici-ios-agent',
+    TELNYX_IOS_SIP_PASSWORD: 'test-password'
+  }, { voice_human_answer_mode: 'PRERECORDED' });
+  assert.equal(inboxTransfer.valid, true);
+  assert.equal(inboxTransfer.transferNumber, 'sip:vici-ios-agent@sip.telnyx.com');
+
+  const noTransfer = voiceConfiguration({
+    ...VOICE_ENV,
+    VICI_LIVE_TRANSFER_NUMBER: '',
+    TELNYX_IOS_SIP_USERNAME: '', TELNYX_IOS_SIP_PASSWORD: '',
+    TELNYX_SIP_USERNAME: '', TELNYX_SIP_PASSWORD: ''
+  }, { voice_human_answer_mode: 'PRERECORDED' });
+  assert.ok(noTransfer.errors.includes('transfer_number_missing'));
 });
 
 test('settings readiness includes the separate production provider approval gate', async () => {
