@@ -509,7 +509,7 @@ test('voicemail speech waits for greeting end and spoken STOP suppresses without
   });
   await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }));
   assert.equal(calls.length, 0, 'machine classification alone must not speak over the greeting');
-  await handler.handle(voiceEvent('call.machine.greeting.ended', { result: 'greeting ended' }));
+  await handler.handle(voiceEvent('call.machine.premium.greeting.ended', { result: 'greeting ended' }));
   assert.equal(calls[0][0], 'speak');
   assert.equal(calls[0][2], 'Voicemail message');
 
