@@ -9,7 +9,9 @@ const { archiveCallRecording } = require('../lib/private-recordings');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { decodeVerifiedTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 const { createVoiceEventHandler } = require('../lib/cart-recovery/voice-events');
+const { createVoiceOptOutHandler } = require('../lib/voice-opt-out-handler');
 const recoveryVoice = createVoiceEventHandler({ client: supabase, env: process.env });
+const voiceOptOut = createVoiceOptOutHandler({ client: supabase, env: process.env });
 
 // ─── Supabase v2 helpers — query builder is NOT a native Promise, no .catch() ──
 async function dbUpsert(values, options = {}) {
@@ -157,6 +159,23 @@ router.post('/', async (req, res) => {
       // Recovery events are acknowledged only after durable processing. A
       // failure receives a non-2xx response so Telnyx can redeliver it and the
       // FAILED ledger claim can be safely reclaimed.
+      return res.sendStatus(200);
+    }
+
+    // Calls to the dedicated toll-free number never enter the normal Vici
+    // support-call transfer path. Persist opt-outs before acknowledging the
+    // webhook so a database failure is retried instead of silently losing a
+    // consumer's request.
+    const optOut = await voiceOptOut.handle(event);
+    if (optOut.handled) {
+      const { data: finished, error: finishError } = await supabase.rpc('finish_telnyx_voice_event', {
+        p_event_id: event.id, p_token: claim.claim_token, p_error: null
+      });
+      if (finishError || finished !== true) {
+        throw Object.assign(new Error('Voice opt-out webhook completion could not be persisted.'), {
+          code: finishError?.code || 'VOICE_OPTOUT_WEBHOOK_FINISH_FAILED'
+        });
+      }
       return res.sendStatus(200);
     }
 
