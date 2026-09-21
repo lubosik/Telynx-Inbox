@@ -13,6 +13,7 @@ const { createCartRecoveryService, normalizeEvent } = require('../lib/cart-recov
 const { createVoiceEventHandler, decodeClientState } = require('../lib/cart-recovery/voice-events');
 const {
   amdBranch,
+  applyCurrentVoiceConsent,
   insideCallingWindow,
   isSpokenOptOut,
   productPhrase,
@@ -128,6 +129,19 @@ test('calling windows use the customer timezone, include the start, and exclude 
   assert.equal(insideCallingWindow({ now: NOW, timeZone: 'Not/A_Timezone' }), false);
   assert.equal(insideCallingWindow({ now: NOW, timeZone: 'America/New_York', start: '20:00', end: '09:00' }), false,
     'overnight windows fail closed rather than calling at an ambiguous time');
+});
+
+test('current combined voice consent resolves only an unknown GHL observation', () => {
+  assert.deepEqual(applyCurrentVoiceConsent({ eligible: false, phone: '+12125550123', reason: 'dnd_unknown' }), {
+    eligible: true, phone: '+12125550123', reason: 'eligible_with_current_voice_consent'
+  });
+  for (const reason of [
+    'dnd', 'opted_out', 'authoritative_suppression', 'internal_or_test_identity',
+    'eligibility_check_failed', 'consent_not_recorded'
+  ]) {
+    assert.equal(applyCurrentVoiceConsent({ eligible: false, reason }).eligible, false, reason);
+  }
+  assert.equal(applyCurrentVoiceConsent({ eligible: true, reason: 'eligible' }).eligible, true);
 });
 
 test('voice provider configuration fails closed and creates the Telnyx ElevenLabs voice identifier', () => {
