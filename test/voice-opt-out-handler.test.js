@@ -8,7 +8,7 @@ const {
   createVoiceOptOutHandler, decodeState, encodeState, enteredUSPhone,
   isOptOutDestination, SUCCESS_PROMPT
 } = require('../lib/voice-opt-out-handler');
-const { gatherUsingSpeak } = require('../lib/telnyx-api');
+const { answerCall, gatherUsingSpeak } = require('../lib/telnyx-api');
 
 const TF = '+18666450593';
 
@@ -36,7 +36,7 @@ function harness({ insertError = null, consentError = null } = {}) {
     async rpc(name, args) { rpcs.push({ name, args }); return { error: consentError }; }
   };
   const commands = {
-    answer: async cid => actions.push({ kind: 'answer', cid }),
+    answer: async (cid, options) => actions.push({ kind: 'answer', cid, options }),
     gather: async (cid, text, options) => actions.push({ kind: 'gather', cid, text, options }),
     speak: async (cid, text, options) => actions.push({ kind: 'speak', cid, text, options }),
     hangup: async cid => actions.push({ kind: 'hangup', cid })
@@ -62,9 +62,27 @@ test('an inbound toll-free call is answered and receives the DTMF menu', async (
   assert.deepEqual(await h.handler.handle(event('call.initiated')), { handled: true });
   await h.handler.handle(event('call.answered'));
   assert.equal(h.actions[0].kind, 'answer');
+  assert.equal(decodeState(h.actions[0].options.clientState).phase, 'answer');
+  assert.match(h.actions[0].options.commandId, /^[a-f0-9]{32}$/);
   assert.equal(h.actions[1].kind, 'gather');
   assert.equal(h.actions[1].options.validDigits, '29');
   assert.equal(decodeState(h.actions[1].options.clientState).phase, 'menu');
+});
+
+test('the Telnyx answer command carries opt-out state into subsequent webhooks', async () => {
+  let request;
+  await answerCall('call/with/slashes', {
+    clientState: encodeState('answer'), commandId: 'answer-command-1'
+  }, {
+    env: { TELNYX_API_KEY: 'test-key' },
+    fetchImpl: async (url, init) => {
+      request = { url, init, body: JSON.parse(init.body) };
+      return { ok: true, json: async () => ({ data: { result: 'ok' } }) };
+    }
+  });
+  assert.match(request.url, /calls\/call%2Fwith%2Fslashes\/actions\/answer$/);
+  assert.equal(request.body.command_id, 'answer-command-1');
+  assert.equal(decodeState(request.body.client_state).phase, 'answer');
 });
 
 test('pressing 9 durably suppresses the caller before confirming success', async () => {
