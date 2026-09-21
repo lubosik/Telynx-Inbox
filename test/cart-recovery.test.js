@@ -405,6 +405,28 @@ test('dry-run schedules a proposal and never crosses the Telnyx boundary', async
   assert.equal(calls.find(call => call.name === 'begin_luko_cart_recovery').args.p_dry_run, true);
 });
 
+test('SMS recovery still blocks when the GHL observation is unknown', async () => {
+  const calls = [];
+  const client = { rpc: async (name, args) => {
+    calls.push({ name, args });
+    if (name === 'claim_luko_cart_recoveries') return { data: [{
+      id: '8b93f02e-6246-4ca7-b4bd-175963f47bb1', claim_token: 'c1',
+      contact_phone: '+15551234567'
+    }], error: null };
+    return { data: true, error: null };
+  } };
+  const service = createCartRecoveryService({
+    client, env: ENV, now: () => NOW,
+    loadSettings: async () => ({ enabled: true }),
+    evaluateRecipient: async () => ({ eligible: false, reason: 'dnd_unknown' })
+  });
+  const result = await service.runDue();
+  assert.equal(result.deferred, 1);
+  assert.ok(calls.some(call => call.name === 'defer_luko_cart_recovery'
+    && call.args.p_reason === 'dnd_unknown'));
+  assert.equal(calls.some(call => call.name === 'begin_luko_cart_recovery'), false);
+});
+
 test('live delivery requires the provider gate and performs a second WordPress preflight', async () => {
   const env = {
     ...ENV, SMS_DRY_RUN: 'false', LUKO_CART_PROVIDER_APPROVED: 'true',

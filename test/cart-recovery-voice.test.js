@@ -297,6 +297,47 @@ test('voice worker blocks a claimed call when current durable voice consent is a
   assert.equal(calls.some(call => call.name === 'begin_luko_cart_voice_call'), false);
 });
 
+test('voice worker accepts an unknown GHL observation only after current combined voice consent', async () => {
+  const calls = [];
+  const claim = '33333333-3333-4333-8333-333333333333';
+  const client = {
+    async rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'claim_luko_cart_voice_calls') return { data: [{
+        id: RECOVERY_ID, voice_claim_token: claim, contact_phone: '+12125550123',
+        external_cart_id: 'cart-voice-12345', event_version: 1
+      }], error: null };
+      return { data: true, error: null };
+    },
+    from(table) {
+      const query = {
+        select() { return query; }, eq() { return query; }, order() { return query; }, gte() { return query; },
+        async limit() { return { data: table === 'luko_voice_consent_events' ? [{
+          id: 9, event_type: 'opt_in', voice_marketing_consent: true,
+          ai_voice_consent: true, consent_version: 'vici_marketing_sms_voice_v1',
+          occurred_at: NOW.toISOString()
+        }] : [], error: null }; }
+      };
+      return query;
+    }
+  };
+  const service = createCartRecoveryService({
+    client,
+    env: { ...VOICE_ENV, CART_RECOVERY_VOICE_ENABLED: 'true' },
+    now: () => NOW,
+    loadSettings: async () => ({ voice_enabled: true }),
+    evaluateRecipient: async () => ({ eligible: false, phone: '+12125550123', reason: 'dnd_unknown' }),
+    fetch: async () => ({ ok: false })
+  });
+  const result = await service.runVoiceDue();
+  assert.equal(result.blocked, 0);
+  assert.equal(result.deferred, 1);
+  assert.equal(calls.some(call => call.name === 'defer_luko_cart_voice_call'
+    && call.args.p_status === 'BLOCKED_SUPPRESSED'), false);
+  assert.ok(calls.some(call => call.name === 'defer_luko_cart_voice_call'
+    && call.args.p_status === 'CANCELLED_CART_CHANGED'));
+});
+
 test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbound-only transcription shapes', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
