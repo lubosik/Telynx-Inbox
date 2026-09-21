@@ -9,6 +9,7 @@ const {
   isOptOutDestination, SUCCESS_PROMPT
 } = require('../lib/voice-opt-out-handler');
 const { answerCall, gatherUsingSpeak } = require('../lib/telnyx-api');
+const { digestTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 
 const TF = '+18666450593';
 
@@ -146,6 +147,33 @@ test('the goodbye completion hangs up and unrelated calls remain untouched', asy
   assert.equal(h.actions[0].kind, 'hangup');
   const ordinary = event('call.initiated', { payload: { to: '+13055550184' } });
   assert.deepEqual(await h.handler.handle(ordinary), { handled: false });
+});
+
+test('a goodbye/hangup race is idempotent but other provider failures remain retryable', async () => {
+  const ended = harness();
+  ended.handler = createVoiceOptOutHandler({
+    client: { from: () => ({ insert: async () => ({ error: null }) }), rpc: async () => ({ error: null }) },
+    env: { VICI_VOICE_OPT_OUT_TOLL_FREE_NUMBER: TF },
+    commands: { hangup: async () => { throw new Error('Telnyx returned 422: code 90018, Call has already ended'); } }
+  });
+  await assert.doesNotReject(ended.handler.handle(event('call.speak.ended', {
+    payload: { client_state: encodeState('goodbye') }
+  })));
+
+  const failed = createVoiceOptOutHandler({
+    client: {}, env: { VICI_VOICE_OPT_OUT_TOLL_FREE_NUMBER: TF },
+    commands: { hangup: async () => { throw new Error('Telnyx unavailable'); } }
+  });
+  await assert.rejects(failed.handle(event('call.speak.ended', {
+    payload: { client_state: encodeState('goodbye') }
+  })), /Telnyx unavailable/);
+});
+
+test('voice retry digests ignore transport metadata and object key order', () => {
+  const first = { id: 'evt-1', event_type: 'call.answered', payload: { to: TF, from: '+13055550123' } };
+  const reordered = { payload: { from: '+13055550123', to: TF }, event_type: 'call.answered', id: 'evt-1' };
+  assert.equal(digestTelnyxEvent(first), digestTelnyxEvent(reordered));
+  assert.notEqual(digestTelnyxEvent(first), digestTelnyxEvent({ ...first, event_type: 'call.hangup' }));
 });
 
 test('the Telnyx gather command uses the documented DTMF contract and carries state', async () => {

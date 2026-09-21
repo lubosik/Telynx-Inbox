@@ -1,5 +1,4 @@
 const router = require('express').Router();
-const crypto = require('node:crypto');
 const { supabase } = require('../db');
 const { broadcast } = require('../lib/broadcaster');
 const { normalisePhone } = require('../lib/phone');
@@ -7,7 +6,7 @@ const { answerCall, speakOnCall, transferCall, recordCall } = require('../lib/te
 const { finalCallStatus } = require('../lib/call-status');
 const { archiveCallRecording } = require('../lib/private-recordings');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
-const { decodeVerifiedTelnyxEvent } = require('../lib/telnyx-webhook-claim');
+const { decodeVerifiedTelnyxEvent, digestTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 const { createVoiceEventHandler } = require('../lib/cart-recovery/voice-events');
 const { createVoiceOptOutHandler } = require('../lib/voice-opt-out-handler');
 const recoveryVoice = createVoiceEventHandler({ client: supabase, env: process.env });
@@ -129,7 +128,7 @@ router.post('/', async (req, res) => {
   try {
     event = decodeVerifiedTelnyxEvent(req.body, req.headers, process.env.TELNYX_PUBLIC_KEY,
       { requirePayloadID: false });
-    const payloadDigest = crypto.createHash('sha256').update(req.body).digest('hex');
+    const payloadDigest = digestTelnyxEvent(event);
     const { data, error } = await supabase.rpc('claim_telnyx_voice_event', { p_event: {
       provider_event_id: String(event.id), event_type: String(event.event_type),
       call_control_id: String(event.payload?.call_control_id || ''), payload_digest: payloadDigest,
