@@ -360,7 +360,7 @@ test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbo
     voice: 'ElevenLabs.eleven_turbo_v2_5.vin-voice', apiKeyRef: 'elevenlabs-key-ref', commandId: 'command-2'
   }, options);
   await playAudioOnCall('call/control', 'https://audio.example/human.mp3', {
-    loop: '1', commandId: 'command-play'
+    loop: 1, commandId: 'command-play'
   }, options);
   await startTranscription('call/control', 'command-3', options);
 
@@ -374,6 +374,7 @@ test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbo
   assert.equal(calls[1].body.payload_type, 'text');
   assert.equal(calls[2].url, 'https://api.telnyx.com/v2/calls/call%2Fcontrol/actions/playback_start');
   assert.equal(calls[2].body.audio_url, 'https://audio.example/human.mp3');
+  assert.equal(calls[2].body.loop, 1);
   assert.equal(calls[2].body.command_id, 'command-play');
   assert.equal(calls[3].body.transcription_tracks, 'inbound');
   assert.equal(calls[3].body.transcription_engine, 'B');
