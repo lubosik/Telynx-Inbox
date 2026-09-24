@@ -548,8 +548,9 @@ test('machine detection uses a single durable fallback when a carrier omits gree
   const client = memoryVoiceClient();
   const calls = [];
   let fallback;
+  let fallbackDelay;
   const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
-    schedule: callback => { fallback = callback; },
+    schedule: (callback, delay) => { fallback = callback; fallbackDelay = delay; },
     api: {
       speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
       hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
@@ -559,6 +560,7 @@ test('machine detection uses a single durable fallback when a carrier omits gree
   assert.equal(client.state.attempt.state, 'MACHINE_DETECTED');
   assert.equal(calls.length, 0);
   assert.equal(typeof fallback, 'function');
+  assert.equal(fallbackDelay, 30000, 'the fallback must not talk over a long carrier greeting');
   await fallback();
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
   assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
