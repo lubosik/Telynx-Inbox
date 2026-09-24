@@ -2,39 +2,93 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
+private enum InboxAudience: String, CaseIterable, Identifiable {
+    case all
+    case vip
+
+    var id: String { rawValue }
+    var label: String { self == .all ? "All Customers" : "VIP" }
+}
+
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @State private var search = ""
+    @State private var audience: InboxAudience = .all
     @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    private var audienceConversations: [ConversationSummary] {
+        switch audience {
+        case .all: return model.conversations
+        case .vip: return model.conversations.filter(\.isVIP)
+        }
+    }
+
     private var filtered: [ConversationSummary] {
-        guard !search.isEmpty else { return model.conversations }
+        guard !search.isEmpty else { return audienceConversations }
         let query = search.lowercased()
-        return model.conversations.filter {
+        return audienceConversations.filter {
             $0.displayName.lowercased().contains(query) ||
             $0.phone.lowercased().contains(query) ||
             ($0.email?.lowercased().contains(query) ?? false)
         }
     }
 
+    private var vipCount: Int { model.conversations.filter(\.isVIP).count }
+    private var vipNeedsAttentionCount: Int {
+        model.conversations.filter { $0.isVIP && $0.vipNeedsAttention }.count
+    }
+
     var body: some View {
         NavigationStack(path: $router.inboxPath) {
-            Group {
-                if model.isLoading && model.conversations.isEmpty {
-                    ProgressView("Loading inbox…")
-                } else if filtered.isEmpty {
-                    EmptyState(icon: "message", title: "No conversations",
-                               detail: search.isEmpty ? "Messages will appear here." : "Try another search.")
-                } else {
-                    List(filtered) { conversation in
-                        NavigationLink(value: AppRoute.conversation(phone: conversation.phone)) {
-                            ConversationRow(conversation: conversation)
-                        }
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Customer view", selection: $audience) {
+                        Text("All Customers").tag(InboxAudience.all)
+                        Text("VIP \(vipCount)").tag(InboxAudience.vip)
                     }
-                    .listStyle(.plain)
-                    .refreshable { await model.load() }
+                    .pickerStyle(.segmented)
+
+                    if audience == .vip, vipCount > 0 {
+                        HStack(spacing: 12) {
+                            Label("\(vipCount) VIP customers", systemImage: "crown.fill")
+                            if vipNeedsAttentionCount > 0 {
+                                Label("\(vipNeedsAttentionCount) need attention", systemImage: "sparkles")
+                            }
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                Group {
+                    if model.isLoading && model.conversations.isEmpty {
+                        ProgressView("Loading inbox…")
+                    } else if filtered.isEmpty {
+                        EmptyState(
+                            icon: audience == .vip ? "crown" : "message",
+                            title: audience == .vip ? "No VIP customers" : "No conversations",
+                            detail: emptyDetail
+                        )
+                    } else {
+                        List(filtered) { conversation in
+                            NavigationLink(value: AppRoute.conversation(phone: conversation.phone)) {
+                                ConversationRow(conversation: conversation)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                vipActions(for: conversation)
+                            }
+                            .contextMenu { vipActions(for: conversation) }
+                        }
+                        .listStyle(.plain)
+                        .refreshable { await model.load() }
+                    }
                 }
             }
             .navigationTitle("Inbox")
@@ -71,6 +125,37 @@ struct InboxView: View {
             .onChange(of: scenePhase) { phase in
                 guard phase == .active else { return }
                 Task { await model.load() }
+            }
+        }
+    }
+
+    private var emptyDetail: String {
+        if !search.isEmpty { return "Try another search." }
+        if audience == .vip {
+            return "Customers with 3+ paid orders and $500+ lifetime spend appear here automatically."
+        }
+        return "Messages will appear here."
+    }
+
+    @ViewBuilder
+    private func vipActions(for conversation: ConversationSummary) -> some View {
+        if session.can(Permission.campaignsManage),
+           let segmentID = conversation.vipSegmentID, !segmentID.isEmpty {
+            if !conversation.isVIP {
+                Button {
+                    Task { await model.addToVIP(conversation) }
+                } label: {
+                    Label("Add to VIP", systemImage: "crown.fill")
+                }
+                .tint(ViciTheme.tealFill)
+                .disabled(model.vipUpdates.contains(conversation.phone))
+            } else if conversation.isManualOnlyVIP {
+                Button(role: .destructive) {
+                    Task { await model.removeManualVIP(conversation) }
+                } label: {
+                    Label("Remove manual VIP", systemImage: "crown")
+                }
+                .disabled(model.vipUpdates.contains(conversation.phone))
             }
         }
     }
@@ -117,6 +202,9 @@ private struct ConversationRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(conversation.displayName).fontWeight((conversation.unreadCount ?? 0) > 0 ? .semibold : .regular)
+                    if conversation.isVIP {
+                        CustomerTag(text: "VIP", systemImage: "crown.fill", color: .orange)
+                    }
                     Spacer()
                     if let date = ServerDate.parse(conversation.lastMessage?.createdAt ?? conversation.lastSeen) {
                         Text(date, style: .relative).font(.caption2).foregroundStyle(.secondary)
@@ -134,6 +222,15 @@ private struct ConversationRow: View {
                             .padding(.horizontal, 7).padding(.vertical, 3).background(ViciTheme.tealFill).clipShape(Capsule())
                     }
                 }
+                if conversation.isVIP, let state = conversation.vipStateLabel {
+                    CustomerTag(
+                        text: state,
+                        systemImage: conversation.vipNeedsAttention ? "sparkles" : "clock",
+                        color: conversation.vipNeedsAttention ? .orange : ViciTheme.tealFill
+                    )
+                } else if let progress = conversation.vipProgressLabel {
+                    CustomerTag(text: progress, systemImage: "arrow.up.right", color: ViciTheme.tealFill)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -143,6 +240,22 @@ private struct ConversationRow: View {
         if let body = conversation.lastMessage?.body, !body.isEmpty { return body }
         if !(conversation.lastMessage?.mediaURLs ?? []).isEmpty { return "Photo" }
         return conversation.latestOrderStatus.map { "Order: \($0.replacingOccurrences(of: "-", with: " "))" } ?? conversation.phone
+    }
+}
+
+private struct CustomerTag: View {
+    let text: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.1), in: Capsule())
     }
 }
 
@@ -259,6 +372,36 @@ struct MessageThreadView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if session.can(Permission.campaignsManage),
+                   let segmentID = conversation.vipSegmentID, !segmentID.isEmpty {
+                    Menu {
+                        if conversation.isVIP {
+                            Label(
+                                conversation.isAutomaticVIP ? "VIP from paid-order history" : "Manually added to VIP",
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            if conversation.isManualOnlyVIP {
+                                Button(role: .destructive) {
+                                    Task { await model.removeManualVIP(conversation) }
+                                } label: {
+                                    Label("Remove manual VIP", systemImage: "crown")
+                                }
+                            }
+                        } else {
+                            Button {
+                                Task { await model.addToVIP(conversation) }
+                            } label: {
+                                Label("Add to VIP", systemImage: "crown.fill")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: conversation.isVIP ? "crown.fill" : "crown")
+                    }
+                    .disabled(model.vipUpdates.contains(conversation.phone))
+                    .accessibilityLabel(conversation.isVIP ? "VIP customer options" : "Add customer to VIP")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if session.currentUser?.isSharedTeamLogin == false,
                    session.can(Permission.referralCreate) {

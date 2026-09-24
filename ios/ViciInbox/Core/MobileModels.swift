@@ -119,6 +119,20 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
     let latestOrderStatus: String?
     let latestOrderDate: String?
     let latestOrderID: FlexibleID?
+    /// Commercial tiering is deliberately separate from messaging consent.
+    /// The server derives this from paid-order history plus an auditable manual
+    /// include; neither value grants permission to contact the customer.
+    let customerTier: String?
+    let vipState: String?
+    let vipSource: String?
+    let vipAutomatic: Bool?
+    let vipManualOverride: Bool?
+    let vipProgress: String?
+    let vipSegmentID: String?
+    let paidOrderCount: Int?
+    let lifetimeSpendCents: Int?
+    let daysSinceLastOrder: Double?
+    let typicalOrderGapDays: Double?
 
     var id: String { phone }
     var displayName: String {
@@ -132,6 +146,27 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
     var initials: String {
         let pieces = displayName.split(separator: " ")
         return String(pieces.prefix(2).compactMap(\.first)).uppercased()
+    }
+    var isVIP: Bool { customerTier == "vip" }
+    var isAutomaticVIP: Bool { vipAutomatic == true }
+    var isManualVIP: Bool { vipManualOverride == true }
+    var isManualOnlyVIP: Bool { isVIP && isManualVIP && !isAutomaticVIP }
+    var vipNeedsAttention: Bool { vipState == "needs_attention" }
+    var vipStateLabel: String? {
+        switch vipState {
+        case "active": return "Active"
+        case "due_soon": return "Due soon"
+        case "needs_attention": return "Needs attention"
+        default: return nil
+        }
+    }
+    var vipProgressLabel: String? {
+        switch vipProgress {
+        case "one_order_away": return "One order from VIP"
+        case "high_value_first_order": return "High-value first order"
+        case "frequent_building_value": return "Building VIP value"
+        default: return nil
+        }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -149,6 +184,17 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
         case latestOrderStatus = "latest_order_status"
         case latestOrderDate = "latest_order_date"
         case latestOrderID = "latest_order_id"
+        case customerTier = "customer_tier"
+        case vipState = "vip_state"
+        case vipSource = "vip_source"
+        case vipAutomatic = "vip_automatic"
+        case vipManualOverride = "vip_manual_override"
+        case vipProgress = "vip_progress"
+        case vipSegmentID = "vip_segment_id"
+        case paidOrderCount = "paid_order_count"
+        case lifetimeSpendCents = "lifetime_spend_cents"
+        case daysSinceLastOrder = "days_since_last_order"
+        case typicalOrderGapDays = "typical_order_gap_days"
     }
 }
 

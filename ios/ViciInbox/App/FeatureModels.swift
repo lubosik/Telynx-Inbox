@@ -7,6 +7,7 @@ final class InboxModel: ObservableObject {
     @Published private(set) var messages: [String: [MessageRecord]] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isSending = false
+    @Published private(set) var vipUpdates: Set<String> = []
     @Published var errorMessage: String?
     private var refreshInProgress = false
     private var threadRefreshes: Set<String> = []
@@ -92,6 +93,51 @@ final class InboxModel: ObservableObject {
         do {
             try await APIClient.shared.react(to: id, type: type)
             await loadThread(phone: phone)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Pin somebody into the canonical Best Repeat Customers segment. This is
+    /// an auditable include override on the existing contact, not a duplicate
+    /// VIP contact and not permission to message them.
+    func addToVIP(_ conversation: ConversationSummary) async {
+        guard let segmentID = conversation.vipSegmentID, !segmentID.isEmpty,
+              !vipUpdates.contains(conversation.phone) else { return }
+        vipUpdates.insert(conversation.phone)
+        defer { vipUpdates.remove(conversation.phone) }
+        do {
+            _ = try await APIClient.shared.setSegmentOverride(
+                id: segmentID,
+                phone: conversation.phone,
+                overrideType: .include,
+                reason: "Added from the VIP inbox",
+                name: conversation.hasSavedName ? conversation.displayName : nil,
+                contactID: conversation.recordID?.rawValue
+            )
+            await load()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Only a manual include can be removed here. Customers who qualify from
+    /// their paid-order history stay VIP until the automatic rule says otherwise.
+    func removeManualVIP(_ conversation: ConversationSummary) async {
+        guard conversation.isManualOnlyVIP,
+              let segmentID = conversation.vipSegmentID, !segmentID.isEmpty,
+              !vipUpdates.contains(conversation.phone) else { return }
+        vipUpdates.insert(conversation.phone)
+        defer { vipUpdates.remove(conversation.phone) }
+        do {
+            _ = try await APIClient.shared.revokeSegmentOverride(
+                id: segmentID,
+                phone: conversation.phone,
+                reason: "Removed from the VIP inbox"
+            )
+            await load()
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
