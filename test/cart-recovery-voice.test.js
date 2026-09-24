@@ -686,7 +686,8 @@ test('machine detection uses a single durable fallback when a carrier omits gree
   assert.equal(client.state.attempt.state, 'MACHINE_DETECTED');
   assert.equal(calls.length, 0);
   assert.equal(typeof fallback, 'function');
-  assert.equal(fallbackDelay, 30000, 'the fallback must not talk over a long carrier greeting');
+  assert.equal(fallbackDelay, 8000,
+    'the fallback must play before short carrier mailboxes disconnect when greeting-ended is omitted');
   await fallback();
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
   assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
