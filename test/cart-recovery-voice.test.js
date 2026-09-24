@@ -473,7 +473,7 @@ function attachVoiceAudioStorage(client) {
   const removed = [];
   client.storage = {
     from(bucket) {
-      assert.equal(bucket, 'mms-media');
+      assert.equal(bucket, 'call-recordings');
       return {
         async createSignedUrl(file) {
           return { data: { signedUrl: `https://audio.example/${file}` }, error: null };
@@ -498,7 +498,7 @@ test('pre-generated voice audio is stored privately, signed briefly, and cleaned
   const uploaded = [];
   const removed = [];
   const client = { storage: { from(bucket) {
-    assert.equal(bucket, 'mms-media');
+    assert.equal(bucket, 'call-recordings');
     return {
       async upload(file, audio, options) {
         uploaded.push({ file, audio: audio.toString(), options });
