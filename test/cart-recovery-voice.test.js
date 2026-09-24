@@ -526,6 +526,46 @@ test('voicemail speech waits for greeting end and spoken STOP suppresses without
   assert.deepEqual(calls.slice(-2).map(call => call[0]), ['stopAudio', 'hangup']);
 });
 
+test('premium greeting-ended may arrive before machine detection without losing the voicemail', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    schedule: () => {},
+    api: {
+      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
+    } });
+
+  await handler.handle(voiceEvent('call.machine.premium.greeting.ended', {}, 'greeting-first'));
+  assert.equal(client.state.attempt.state, 'GREETING_END_DETECTED');
+  assert.equal(calls.length, 0, 'classification still controls the branch');
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }, 'machine-second'));
+  assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+});
+
+test('machine detection uses a single durable fallback when a carrier omits greeting-ended', async () => {
+  const client = memoryVoiceClient();
+  const calls = [];
+  let fallback;
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    schedule: callback => { fallback = callback; },
+    api: {
+      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
+    } });
+
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }, 'machine-no-greeting'));
+  assert.equal(client.state.attempt.state, 'MACHINE_DETECTED');
+  assert.equal(calls.length, 0);
+  assert.equal(typeof fallback, 'function');
+  await fallback();
+  assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+  await fallback();
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 1, 'the state transition prevents replay');
+});
+
 test('overlapping greeting and speak-ended events cannot replay or change the voicemail branch', async () => {
   const client = memoryVoiceClient();
   const calls = [];
