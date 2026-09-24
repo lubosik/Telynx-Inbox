@@ -11,6 +11,7 @@ const { PREFERRED_US_VOICE_IDS, curatedRecoveryVoices } = require('../lib/cart-r
 const { attributionDecision, attributionPayload } = require('../lib/cart-recovery/attribution');
 const { createCartRecoveryService, normalizeEvent } = require('../lib/cart-recovery/service');
 const { createVoiceEventHandler, decodeClientState } = require('../lib/cart-recovery/voice-events');
+const { cleanupVoiceAudio, prepareVoiceAudio, signedVoiceAudioURL, storagePath } = require('../lib/cart-recovery/voice-audio-cache');
 const {
   amdBranch,
   applyCurrentVoiceConsent,
@@ -22,6 +23,7 @@ const {
 } = require('../lib/cart-recovery/voice');
 const {
   createOutboundCall,
+  playAudioOnCall,
   speakPremiumOnCall,
   startTranscription
 } = require('../lib/telnyx-api');
@@ -96,8 +98,12 @@ test('voice copy is safe, personalized, singular only for one item, and rejects 
     tollFreeNumber: '+18005550100'
   });
   assert.match(scripts.human, /^Hi Maya, this is an automated message/);
+  assert.match(scripts.human, /You left RT in your cart/);
+  assert.match(scripts.human, /sent you a text earlier/i);
   assert.match(scripts.human, /say "stop" or press 9/i);
-  assert.match(scripts.human, /press #/);
+  assert.match(scripts.human, /customer care team, press 1/i);
+  assert.ok(scripts.human.indexOf('still interested') < scripts.human.indexOf('press 1'),
+    'transfer and opt-out controls belong after the recovery message');
   assert.match(scripts.voicemail, /\+18005550100/);
   assert.doesNotMatch(scripts.voicemail, /press 9/);
 
@@ -353,6 +359,9 @@ test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbo
   await speakPremiumOnCall('call/control', 'Hello Maya', {
     voice: 'ElevenLabs.eleven_turbo_v2_5.vin-voice', apiKeyRef: 'elevenlabs-key-ref', commandId: 'command-2'
   }, options);
+  await playAudioOnCall('call/control', 'https://audio.example/human.mp3', {
+    loop: '1', commandId: 'command-play'
+  }, options);
   await startTranscription('call/control', 'command-3', options);
 
   assert.equal(calls[0].url, 'https://api.telnyx.com/v2/calls');
@@ -363,8 +372,11 @@ test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbo
   assert.deepEqual(calls[1].body.voice_settings, { api_key_ref: 'elevenlabs-key-ref' });
   assert.equal(calls[1].body.voice, 'ElevenLabs.eleven_turbo_v2_5.vin-voice');
   assert.equal(calls[1].body.payload_type, 'text');
-  assert.equal(calls[2].body.transcription_tracks, 'inbound');
-  assert.equal(calls[2].body.transcription_engine, 'B');
+  assert.equal(calls[2].url, 'https://api.telnyx.com/v2/calls/call%2Fcontrol/actions/playback_start');
+  assert.equal(calls[2].body.audio_url, 'https://audio.example/human.mp3');
+  assert.equal(calls[2].body.command_id, 'command-play');
+  assert.equal(calls[3].body.transcription_tracks, 'inbound');
+  assert.equal(calls[3].body.transcription_engine, 'B');
 });
 
 test('ElevenLabs recovery catalogue is account-scoped and retains verification evidence', async () => {
@@ -457,6 +469,22 @@ function memoryVoiceClient() {
   return client;
 }
 
+function attachVoiceAudioStorage(client) {
+  const removed = [];
+  client.storage = {
+    from(bucket) {
+      assert.equal(bucket, 'mms-media');
+      return {
+        async createSignedUrl(file) {
+          return { data: { signedUrl: `https://audio.example/${file}` }, error: null };
+        },
+        async remove(files) { removed.push(...files); return { data: files, error: null }; }
+      };
+    }
+  };
+  return removed;
+}
+
 function voiceEvent(eventType, payload = {}, id = `event-${eventType}`) {
   return {
     id,
@@ -465,6 +493,103 @@ function voiceEvent(eventType, payload = {}, id = `event-${eventType}`) {
     payload: { call_control_id: 'call-control-1', ...payload }
   };
 }
+
+test('pre-generated voice audio is stored privately, signed briefly, and cleaned up', async () => {
+  const uploaded = [];
+  const removed = [];
+  const client = { storage: { from(bucket) {
+    assert.equal(bucket, 'mms-media');
+    return {
+      async upload(file, audio, options) {
+        uploaded.push({ file, audio: audio.toString(), options });
+        return { data: { path: file }, error: null };
+      },
+      async createSignedUrl(file, seconds) {
+        assert.equal(seconds, 300);
+        return { data: { signedUrl: `https://signed.example/${file}` }, error: null };
+      },
+      async remove(files) { removed.push(...files); return { data: files, error: null }; }
+    };
+  } } };
+  const synthesize = async ({ text }) => ({ audio: Buffer.from(text), contentType: 'audio/mpeg' });
+  const result = await prepareVoiceAudio({ client, attemptID: ATTEMPT_ID,
+    scripts: { human: 'Human audio', voicemail: 'Voicemail audio' },
+    voiceID: 'vin', modelID: 'eleven_turbo_v2_5', synthesize });
+  assert.deepEqual(result, { ready: true });
+  assert.deepEqual(uploaded.map(entry => entry.file), [
+    storagePath(ATTEMPT_ID, 'human'), storagePath(ATTEMPT_ID, 'voicemail')
+  ]);
+  assert.match(await signedVoiceAudioURL({ client, attemptID: ATTEMPT_ID, branch: 'human' }),
+    /human\.mp3$/);
+  assert.equal(await cleanupVoiceAudio({ client, attemptID: ATTEMPT_ID }), true);
+  assert.deepEqual(removed, [storagePath(ATTEMPT_ID, 'human'), storagePath(ATTEMPT_ID, 'voicemail')]);
+  assert.throws(() => storagePath('../unsafe', 'human'));
+});
+
+test('answered humans hear cached audio immediately without waiting for AMD or synthesis', async () => {
+  const client = memoryVoiceClient();
+  client.state.attempt.state = 'INITIATED';
+  client.state.attempt.answered_at = null;
+  client.state.recovery.voice_status = 'INITIATED';
+  attachVoiceAudioStorage(client);
+  const calls = [];
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    api: {
+      play: async (...args) => calls.push(['play', ...args]),
+      speak: async (...args) => calls.push(['speak', ...args]),
+      transcribe: async (...args) => calls.push(['transcribe', ...args]),
+      hangup: async (...args) => calls.push(['hangup', ...args]),
+      stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
+      transfer: async (...args) => calls.push(['transfer', ...args])
+    } });
+
+  await handler.handle(voiceEvent('call.answered', {}, 'answered-fast'));
+  assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING');
+  assert.deepEqual(calls.map(call => call[0]).sort(), ['play', 'transcribe']);
+  assert.match(calls.find(call => call[0] === 'play')[2], /human\.mp3/);
+
+  const started = voiceEvent('call.playback.started', {}, 'playback-fast');
+  started.occurred_at = new Date(NOW.getTime() + 400).toISOString();
+  await handler.handle(started);
+  assert.equal(client.state.attempt.human_answer_first_audio_latency_ms, 400);
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human_business' }, 'human-fast'));
+  assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING');
+  assert.equal(client.state.attempt.amd_result, 'human_business');
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1, 'AMD must not restart cached audio');
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 0);
+  await handler.handle(voiceEvent('call.playback.ended', {}, 'playback-ended-fast'));
+  assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYED');
+});
+
+test('a machine answer stops provisional audio and plays the full voicemail only after its greeting', async () => {
+  const client = memoryVoiceClient();
+  client.state.attempt.state = 'INITIATED';
+  client.state.attempt.answered_at = null;
+  client.state.recovery.voice_status = 'INITIATED';
+  attachVoiceAudioStorage(client);
+  const calls = [];
+  const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
+    schedule: () => {},
+    api: {
+      play: async (...args) => calls.push(['play', ...args]),
+      speak: async (...args) => calls.push(['speak', ...args]),
+      transcribe: async (...args) => calls.push(['transcribe', ...args]),
+      hangup: async (...args) => calls.push(['hangup', ...args]),
+      stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
+      transfer: async (...args) => calls.push(['transfer', ...args])
+    } });
+
+  await handler.handle(voiceEvent('call.answered', {}, 'machine-answer'));
+  await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }, 'machine-detected'));
+  assert.equal(client.state.attempt.state, 'MACHINE_DETECTED');
+  assert.equal(calls.filter(call => call[0] === 'stopAudio').length, 1);
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1);
+  await handler.handle(voiceEvent('call.machine.premium.greeting.ended', {}, 'machine-greeting'));
+  assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
+  const plays = calls.filter(call => call[0] === 'play');
+  assert.equal(plays.length, 2);
+  assert.match(plays[1][2], /voicemail\.mp3/);
+});
 
 test('voice event handler starts speech only after AMD decides human and never invokes recording', async () => {
   const client = memoryVoiceClient();
@@ -635,7 +760,7 @@ test('only final spoken opt-out transcripts suppress and raw transcript text is 
   assert.doesNotMatch(JSON.stringify(client.state), /partial-stop.*transcript|"transcript"/);
 });
 
-test('DTMF 9 creates a durable opt-out while # requests transfer to the configured team number', async () => {
+test('DTMF 9 creates a durable opt-out while 1 requests transfer to customer care', async () => {
   const client = memoryVoiceClient();
   const calls = [];
   const handler = createVoiceEventHandler({
@@ -657,7 +782,7 @@ test('DTMF 9 creates a durable opt-out while # requests transfer to the configur
     api: { speak: async () => {}, transcribe: async () => {}, hangup: async () => {},
       stopAudio: async (...args) => transferCalls.push(['stopAudio', ...args]),
       transfer: async (...args) => transferCalls.push(['transfer', ...args]) } });
-  await transferHandler.handle(voiceEvent('call.dtmf.received', { digit: '#' }, 'event-dtmf-hash'));
+  await transferHandler.handle(voiceEvent('call.dtmf.received', { digit: '1' }, 'event-dtmf-one'));
   assert.deepEqual(transferCalls.map(call => call[0]), ['stopAudio', 'transfer']);
   assert.equal(transferCalls[1][2], '+12125550199');
   assert.equal(transferClient.state.attempt.state, 'TRANSFER_INITIATED');
