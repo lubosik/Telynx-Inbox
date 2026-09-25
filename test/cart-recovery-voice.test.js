@@ -226,7 +226,7 @@ test('voice choice saves without a toll-free number but production remains locke
   const service = createCartRecoveryService({ client, env: { ...VOICE_ENV,
     VICI_VOICE_OPT_OUT_TOLL_FREE_NUMBER: '' },
     listVoices: async () => [{ id, name: 'Mark', accent: 'american', category: 'professional',
-      gender: 'male', verified: true }] });
+      gender: 'male', language: 'en', professionalClone: true, verified: true }] });
   const result = await service.updateSettings({ input: {
     voiceEnabled: true, voiceId: id, voiceHumanAnswerMode: 'DISABLED'
   }, actor: { id: 1 } });
@@ -239,14 +239,33 @@ test('voice choice saves without a toll-free number but production remains locke
   assert.ok(result.settings.voiceBlockers.includes('provider_approval_missing'));
 });
 
-test('the Vin picker is curated, American, and male-majority', () => {
+test('the Vin picker contains only copied professional American voice clones and stays male-majority', () => {
   const catalog = PREFERRED_US_VOICE_IDS.map((id, index) => ({ id, accent: 'american',
-    gender: index < 5 ? 'male' : 'female', verified: true }));
-  catalog.push({ id: 'british-voice', accent: 'british', gender: 'male', verified: true });
-  catalog.push({ id: 'unverified-voice', accent: 'american', gender: 'male', verified: false });
+    gender: index < 5 ? 'male' : 'female', language: 'en', professionalClone: true, verified: true,
+    category: 'professional', sharingStatus: 'copied' }));
+  catalog.push({ id: 'british-voice', accent: 'british', gender: 'male', verified: true,
+    category: 'professional', sharingStatus: 'copied' });
+  catalog.push({ id: 'generated-voice', accent: 'american', gender: 'female', verified: true,
+    category: 'generated', sharingStatus: null });
+  catalog.push({ id: 'private-clone', accent: 'american', gender: 'female', verified: true,
+    category: 'cloned', sharingStatus: null });
+  catalog.push({ id: 'unverified-voice', accent: 'american', gender: 'male', verified: false,
+    category: 'professional', sharingStatus: 'copied' });
   const shown = curatedRecoveryVoices(catalog);
   assert.deepEqual(shown.map(voice => voice.id), PREFERRED_US_VOICE_IDS);
   assert.ok(shown.filter(voice => voice.gender === 'male').length > shown.length / 2);
+
+  for (const rejected of [
+    { category: 'premade', sharingStatus: null },
+    { category: 'generated', sharingStatus: null },
+    { category: 'cloned', sharingStatus: null },
+    { category: 'professional', professionalClone: false },
+    { category: 'professional', language: 'es' }
+  ]) {
+    const changed = catalog.map(voice => voice.id === PREFERRED_US_VOICE_IDS[0]
+      ? { ...voice, ...rejected } : voice);
+    assert.equal(curatedRecoveryVoices(changed).some(voice => voice.id === PREFERRED_US_VOICE_IDS[0]), false);
+  }
 });
 
 test('combined registration grants voice only with both explicit flags and the exact consent version', () => {
@@ -344,6 +363,97 @@ test('voice worker accepts an unknown GHL observation only after current combine
     && call.args.p_status === 'CANCELLED_CART_CHANGED'));
 });
 
+test('voice worker never dials when immutable audio cannot be staged', async () => {
+  const calls = [];
+  let attemptPatch;
+  let dials = 0;
+  const claim = '33333333-3333-4333-8333-333333333333';
+  const cart = {
+    id: RECOVERY_ID,
+    voice_claim_token: claim,
+    contact_phone: '+12125550123',
+    customer_first_name: 'Maya',
+    customer_timezone: 'America/New_York',
+    external_cart_id: 'cart-voice-12345',
+    event_version: 1,
+    cart_items: [{ product_id: 1, product_name: 'GHK', quantity: 1 }]
+  };
+  const client = {
+    storage: { from() { return { async remove() { return { error: null }; } }; } },
+    async rpc(name, args) {
+      calls.push({ name, args });
+      if (name === 'claim_luko_cart_voice_calls') return { data: [cart], error: null };
+      if (name === 'begin_luko_cart_voice_call') {
+        return { data: { allowed: true, dry_run: false, attempt_id: ATTEMPT_ID }, error: null };
+      }
+      return { data: true, error: null };
+    },
+    from(table) {
+      if (table === 'luko_voice_consent_events') {
+        const query = { select() { return query; }, eq() { return query; }, order() { return query; },
+          async limit() { return { data: [{ id: 9, event_type: 'opt_in',
+            voice_marketing_consent: true, ai_voice_consent: true,
+            consent_version: 'vici_marketing_sms_voice_v1', occurred_at: NOW.toISOString() }], error: null }; } };
+        return query;
+      }
+      if (table === 'luko_cart_recovery_replies') {
+        const query = { select() { return query; }, eq() { return query; }, gte() { return query; },
+          async limit() { return { data: [], error: null }; } };
+        return query;
+      }
+      if (table === 'luko_cart_voice_attempts') {
+        return { update(values) { attemptPatch = values; return {
+          async eq() { return { data: null, error: null }; }
+        }; } };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    }
+  };
+  const env = {
+    ...VOICE_ENV,
+    APP_URL: 'https://luko.example',
+    CART_RECOVERY_VOICE_ENABLED: 'true',
+    VOICE_DRY_RUN: 'false',
+    LUKO_VOICE_PROVIDER_APPROVED: 'true',
+    VICI_VOICE_OPT_OUT_HANDLER_VERIFIED: 'true'
+  };
+  const settings = {
+    voice_enabled: true,
+    voice_id: 'vin-voice',
+    voice_model_id: 'eleven_turbo_v2_5',
+    voice_human_answer_mode: 'DISABLED',
+    voice_compliance_approved: true,
+    voice_calling_window_start: '09:00',
+    voice_calling_window_end: '20:00',
+    voice_default_timezone: 'America/New_York'
+  };
+  const service = createCartRecoveryService({
+    client,
+    env,
+    now: () => NOW,
+    loadSettings: async () => settings,
+    evaluateRecipient: async () => ({ eligible: true, phone: cart.contact_phone }),
+    fetch: async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return response({ request_id: request.request_id, eligible: true,
+        current_voice_consent: true, external_cart_id: cart.external_cart_id,
+        version: cart.event_version, order_id: null, items: [{ product_id: 1 }] });
+    },
+    stageVoiceAudio: async () => { throw Object.assign(new Error('provider unavailable'), { code: 'VOICE_FAILED' }); },
+    dial: async () => { dials += 1; return { data: { call_control_id: 'must-not-dial' } }; }
+  });
+
+  const result = await service.runVoiceDue();
+  assert.equal(dials, 0);
+  assert.equal(result.initiated, 0);
+  assert.equal(result.uncertain, 1);
+  assert.equal(attemptPatch.state, 'FAILED');
+  assert.equal(attemptPatch.failure_code, 'voice_audio_staging_failed');
+  assert.ok(calls.some(call => call.name === 'defer_luko_cart_voice_call'
+    && call.args.p_status === 'FAILED'
+    && call.args.p_reason === 'voice_audio_staging_failed'));
+});
+
 test('Telnyx voice commands send premium AMD, native ElevenLabs speech, and inbound-only transcription shapes', async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -387,13 +497,17 @@ test('ElevenLabs recovery catalogue is account-scoped and retains verification e
     fetchImpl: async (url, init) => {
       request = { url, init };
       return response({ voices: [
-        { voice_id: 'verified-1', name: 'Vin', category: 'cloned', preview_url: 'https://cdn.example/vin.mp3',
-          labels: { accent: 'american' }, voice_verification: { is_verified: true } },
+        { voice_id: 'verified-1', name: 'Vin', category: 'professional', preview_url: 'https://cdn.example/vin.mp3',
+          labels: { accent: 'american', language: 'en' }, voice_verification: { is_verified: true } },
         { voice_id: 'premade-1', name: 'Daniel', category: 'premade' },
         { voice_id: 'professional-1', name: 'Mark', category: 'professional',
-          labels: { accent: 'american', gender: 'male' }, sharing: { status: 'copied' },
+          labels: { accent: 'american', gender: 'male', language: 'en' },
+          sharing: { status: 'copied', original_voice_id: 'professional-1', public_owner_id: 'owner-1' },
           voice_verification: { requires_verification: false, is_verified: false } },
         { voice_id: 'unverified-1', name: 'Draft', category: 'cloned', voice_verification: { is_verified: false } },
+        { voice_id: 'bad-copy-1', name: 'Bad copy', category: 'professional',
+          sharing: { status: 'copied', original_voice_id: 'different', public_owner_id: 'owner-2' },
+          voice_verification: { requires_verification: false, is_verified: false } },
         { voice_id: '', name: 'Malformed' }
       ] });
     }
@@ -401,8 +515,12 @@ test('ElevenLabs recovery catalogue is account-scoped and retains verification e
   assert.match(request.url, /\/v1\/voices$/);
   assert.equal(request.init.headers['xi-api-key'], 'XI_TEST');
   assert.deepEqual(voices.map(voice => [voice.id, voice.verified]), [
-    ['verified-1', true], ['premade-1', true], ['professional-1', true], ['unverified-1', false]
+    ['verified-1', true], ['premade-1', false], ['professional-1', true],
+    ['unverified-1', false], ['bad-copy-1', false]
   ]);
+  assert.equal(voices.find(voice => voice.id === 'professional-1').sharingStatus, 'copied');
+  assert.equal(voices.find(voice => voice.id === 'professional-1').professionalClone, true);
+  assert.equal(voices.find(voice => voice.id === 'bad-copy-1').professionalClone, false);
 });
 
 function memoryVoiceClient() {

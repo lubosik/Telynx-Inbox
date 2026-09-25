@@ -1000,9 +1000,9 @@ struct CartRecoverySettingsView: View {
                                     draft?.voiceName = voice.name
                                 } label: {
                                     if draft?.voiceID == voice.id {
-                                        Label("\(voice.name) · \(voice.gender?.capitalized ?? "Voice")", systemImage: "checkmark")
+                                        Label("\(voice.name) · Professional clone", systemImage: "checkmark")
                                     } else {
-                                        Text("\(voice.name) · \(voice.gender?.capitalized ?? "Voice")")
+                                        Text("\(voice.name) · Professional clone")
                                     }
                                 }
                             }

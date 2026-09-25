@@ -792,11 +792,12 @@ struct RecoveryVoiceOption: Decodable, Hashable, Identifiable {
     let age: String?
     let descriptive: String?
     let category: String?
+    let professionalClone: Bool?
     let previewUrl: String?
     let verified: Bool
 
     var subtitle: String {
-        [accent, gender, descriptive].compactMap { value in
+        [professionalClone == true ? "Professional clone" : nil, accent, gender, descriptive].compactMap { value in
             guard let value, !value.isEmpty else { return nil }
             return value.capitalized
         }.joined(separator: " · ")

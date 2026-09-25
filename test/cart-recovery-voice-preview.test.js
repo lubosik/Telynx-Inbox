@@ -30,7 +30,8 @@ test('recovery voice preview authorizes the voice and synthesizes the fixed safe
   let request;
   const service = previewService({
     voices: [
-      { id: VIN_ID, name: 'Mark', accent: 'american', verified: true },
+      { id: VIN_ID, name: 'Mark', accent: 'american', verified: true,
+        category: 'professional', language: 'en', professionalClone: true, sharingStatus: 'copied' },
       { id: 'voice-unverified-1', name: 'Draft', accent: 'american', verified: false }
     ],
     synthesizeSpeech: async input => {
@@ -52,7 +53,8 @@ test('recovery voice preview rejects malformed and unauthorized voices before sy
   let syntheses = 0;
   const service = previewService({
     voices: [
-      { id: VIN_ID, name: 'Mark', accent: 'american', verified: true },
+      { id: VIN_ID, name: 'Mark', accent: 'american', verified: true,
+        category: 'professional', language: 'en', professionalClone: true, sharingStatus: 'copied' },
       { id: 'voice-unverified-1', name: 'Draft', accent: 'american', verified: false }
     ],
     synthesizeSpeech: async () => {
@@ -70,7 +72,8 @@ test('recovery voice preview rejects malformed and unauthorized voices before sy
 
 test('empty preview audio fails clearly instead of returning a silent success', async () => {
   const service = previewService({
-    voices: [{ id: VIN_ID, name: 'Mark', accent: 'american', verified: true }],
+    voices: [{ id: VIN_ID, name: 'Mark', accent: 'american', verified: true,
+      category: 'professional', language: 'en', professionalClone: true, sharingStatus: 'copied' }],
     synthesizeSpeech: async () => ({ audio: Buffer.alloc(0), contentType: 'audio/mpeg' })
   });
   await assert.rejects(service.previewRecoveryVoice({ voiceID: VIN_ID }),
@@ -91,7 +94,8 @@ test('delivered voicemail can be replayed from its saved script without recordin
   } };
   let synthesis;
   const service = createCartRecoveryService({ client, env: { ELEVENLABS_API_KEY: 'XI_TEST' },
-    listVoices: async () => [{ id: VIN_ID, accent: 'american', gender: 'male', verified: true }],
+    listVoices: async () => [{ id: VIN_ID, accent: 'american', gender: 'male', verified: true,
+      category: 'professional', language: 'en', professionalClone: true, sharingStatus: 'copied' }],
     synthesizeSpeech: async input => {
       synthesis = input;
       return { audio: Buffer.from('ID3-voicemail-preview'), contentType: 'audio/mpeg' };
