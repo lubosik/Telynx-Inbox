@@ -39,6 +39,46 @@ private enum VIPFocus: String, CaseIterable, Identifiable {
         case .noTiming: return "No pattern"
         }
     }
+
+    var campaignTitle: String {
+        switch self {
+        case .all: return "VIP customer update"
+        case .pastTiming: return "VIP personal check-in"
+        case .atTiming: return "VIP first-access invitation"
+        case .withinTiming: return "VIP loyalty thank-you"
+        case .noTiming: return "VIP customer feedback"
+        }
+    }
+
+    var campaignMessage: String {
+        switch self {
+        case .all:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Want first access to new arrivals and offers? Reply STOP to opt out."
+        case .pastTiming:
+            return "Vin from Vici: Hi {{first_name}}, I wanted to check in personally. Is there anything we could improve for you? Reply STOP to opt out."
+        case .atTiming:
+            return "Vin from Vici: Hi {{first_name}}, I wanted to give you first access to our next new arrival. Reply if you want details. Reply STOP to opt out."
+        case .withinTiming:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. I can give you first access to our next release. Reply STOP to opt out."
+        case .noTiming:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. What would you like to see from Vici next? Reply STOP to opt out."
+        }
+    }
+
+    var campaignBrief: String {
+        switch self {
+        case .all:
+            return "Thank all VIP customers and invite them to ask for first access to verified new arrivals or a real VIP offer."
+        case .pastTiming:
+            return "Write a warm personal check-in from Vin. Ask how Vici can improve. Never mention tracking, cadence, being overdue or running low."
+        case .atTiming:
+            return "Invite VIP customers to request first access to a verified new arrival. Never mention reorder timing or monitoring."
+        case .withinTiming:
+            return "Thank current VIP customers and offer first access to the next verified release. Keep it conversational."
+        case .noTiming:
+            return "Thank VIP customers and ask what they would like to see from Vici next. Do not invent a timing or product recommendation."
+        }
+    }
 }
 
 struct InboxView: View {
@@ -46,7 +86,7 @@ struct InboxView: View {
     @State private var search = ""
     @State private var audience: InboxAudience = .all
     @State private var vipFocus: VIPFocus = .all
-    @State private var showingVIPCampaign = false
+    @State private var vipCampaignFocus: VIPFocus?
     @State private var showingVIPPlaybook = false
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var session: SessionModel
@@ -116,7 +156,7 @@ struct InboxView: View {
                             canManage: session.can(Permission.campaignsManage),
                             canOpenAudience: session.can(Permission.campaignsRead) && vipSegmentID != nil,
                             workPriority: { vipFocus = .pastTiming },
-                            draftCampaign: { showingVIPCampaign = true },
+                            draftCampaign: { vipCampaignFocus = vipFocus },
                             showOffers: { showingVIPPlaybook = true },
                             openAudience: {
                                 guard let vipSegmentID else { return }
@@ -165,8 +205,13 @@ struct InboxView: View {
                 }
             }
             .searchable(text: $search, prompt: "Name or phone")
-            .sheet(isPresented: $showingVIPCampaign) {
-                CampaignEditorView(initialContacts: vipConversations) {
+            .sheet(item: $vipCampaignFocus) { focus in
+                CampaignEditorView(
+                    initialContacts: vipConversations.filter(focus.includes),
+                    initialTitle: focus.campaignTitle,
+                    initialMessage: focus.campaignMessage,
+                    initialBrief: focus.campaignBrief
+                ) {
                     Task { await model.load() }
                 }
             }
@@ -425,7 +470,7 @@ private struct VIPWorkspaceCard: View {
                 HStack(spacing: 10) {
                     if canManage {
                         Button(action: draftCampaign) {
-                            Label("Draft VIP campaign", systemImage: "square.and.pencil")
+                            Label(focus == .all ? "Draft all VIPs" : "Draft this group", systemImage: "square.and.pencil")
                         }
                         .buttonStyle(.bordered)
                     }

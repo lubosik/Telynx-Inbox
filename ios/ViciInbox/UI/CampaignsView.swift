@@ -1322,10 +1322,16 @@ struct CampaignEditorView: View {
     init(campaign: CampaignRecord? = nil,
          recipients: [CampaignRecipient] = [],
          initialContacts: [ConversationSummary] = [],
+         initialTitle: String = "",
+         initialMessage: String = "Vin from Vici: ",
+         initialBrief: String = "",
          onSaved: @escaping () -> Void) {
         _model = StateObject(wrappedValue: CampaignEditorModel(campaign: campaign,
                                                                recipients: recipients,
-                                                               initialContacts: initialContacts))
+                                                               initialContacts: initialContacts,
+                                                               seedTitle: initialTitle,
+                                                               seedMessage: initialMessage,
+                                                               seedBrief: initialBrief))
         self.onSaved = onSaved
     }
 

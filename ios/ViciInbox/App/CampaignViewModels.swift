@@ -721,7 +721,10 @@ final class CampaignEditorModel: ObservableObject {
 
     init(campaign: CampaignRecord? = nil,
          recipients: [CampaignRecipient] = [],
-         initialContacts: [ConversationSummary] = []) {
+         initialContacts: [ConversationSummary] = [],
+         seedTitle: String = "",
+         seedMessage: String = "Vin from Vici: ",
+         seedBrief: String = "") {
         var metadata: [String: CampaignRecipientInput] = [:]
         for recipient in recipients where recipient.selected {
             let key = Self.phoneKey(recipient.contactPhone)
@@ -745,8 +748,8 @@ final class CampaignEditorModel: ObservableObject {
         // Assigning both the published property and its baseline from the same
         // local also removes the possibility of the two drifting apart, which
         // is what `hasUnsavedDraftChanges` compares.
-        let resolvedTitle = campaign?.title ?? ""
-        let resolvedMessage = campaign?.proposedMessage ?? "Vin from Vici: "
+        let resolvedTitle = campaign?.title ?? seedTitle
+        let resolvedMessage = campaign?.proposedMessage ?? seedMessage
         let resolvedAudienceMode: CampaignAudienceMode = campaign == nil
             ? .selectedContacts
             : (campaign?.isAllContactsAudience == true ? .allContacts : .manualNumbers)
@@ -779,6 +782,7 @@ final class CampaignEditorModel: ObservableObject {
         initialAudienceMode = resolvedAudienceMode
         selectedContacts = resolvedSelectedContacts
         initialSelectedContacts = resolvedSelectedContacts
+        brief = campaign == nil ? seedBrief : ""
     }
 
     var hasUnsavedDraftChanges: Bool {

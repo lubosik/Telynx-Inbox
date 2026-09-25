@@ -48,8 +48,22 @@ test('VIP status is plain English, actionable, and the VIP campaign path is a dr
   assert.match(models, /days beyond their usual/);
   assert.doesNotMatch(models, /case "needs_attention": return "Needs attention"/);
   assert.match(view, /Work priority list/);
-  assert.match(view, /Draft VIP campaign/);
+  assert.match(view, /Draft all VIPs/);
   assert.match(view, /VIP offers/);
-  assert.match(view, /CampaignEditorView\(initialContacts: vipConversations/);
+  assert.match(view, /CampaignEditorView\(\s*initialContacts: vipConversations/);
   assert.match(view, /No message is sent from this VIP screen/);
+});
+
+test('each live VIP timing group can seed a personalized campaign draft', () => {
+  for (const group of ['pastTiming', 'atTiming', 'withinTiming', 'noTiming']) {
+    assert.ok(view.includes(`case .${group}:`), `missing VIP group ${group}`);
+  }
+  assert.match(view, /vipConversations\.filter\(focus\.includes\)/);
+  assert.match(view, /initialTitle: focus\.campaignTitle/);
+  assert.match(view, /initialMessage: focus\.campaignMessage/);
+  assert.match(view, /initialBrief: focus\.campaignBrief/);
+  assert.match(view, /\{\{first_name\}\}/);
+  assert.match(view, /Reply STOP to opt out\./);
+  assert.match(view, /Never mention tracking, cadence, being overdue or running low/);
+  assert.match(view, /Draft this group/);
 });
