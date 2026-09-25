@@ -1321,9 +1321,11 @@ struct CampaignEditorView: View {
 
     init(campaign: CampaignRecord? = nil,
          recipients: [CampaignRecipient] = [],
+         initialContacts: [ConversationSummary] = [],
          onSaved: @escaping () -> Void) {
         _model = StateObject(wrappedValue: CampaignEditorModel(campaign: campaign,
-                                                               recipients: recipients))
+                                                               recipients: recipients,
+                                                               initialContacts: initialContacts))
         self.onSaved = onSaved
     }
 

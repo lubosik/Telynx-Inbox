@@ -10,10 +10,44 @@ private enum InboxAudience: String, CaseIterable, Identifiable {
     var label: String { self == .all ? "All Customers" : "VIP" }
 }
 
+private enum VIPFocus: String, CaseIterable, Identifiable {
+    case all
+    case pastTiming
+    case atTiming
+    case withinTiming
+    case noTiming
+
+    var id: String { rawValue }
+
+    func includes(_ conversation: ConversationSummary) -> Bool {
+        switch self {
+        case .all: return true
+        case .pastTiming: return conversation.vipState == "needs_attention"
+        case .atTiming: return conversation.vipState == "due_soon"
+        case .withinTiming:
+            return conversation.vipState == "active" && conversation.typicalOrderGapDays != nil
+        case .noTiming: return conversation.typicalOrderGapDays == nil
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .all: return "All VIPs"
+        case .pastTiming: return "Past timing"
+        case .atTiming: return "At timing"
+        case .withinTiming: return "Within timing"
+        case .noTiming: return "No pattern"
+        }
+    }
+}
+
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @State private var search = ""
     @State private var audience: InboxAudience = .all
+    @State private var vipFocus: VIPFocus = .all
+    @State private var showingVIPCampaign = false
+    @State private var showingVIPPlaybook = false
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
@@ -22,8 +56,12 @@ struct InboxView: View {
     private var audienceConversations: [ConversationSummary] {
         switch audience {
         case .all: return model.conversations
-        case .vip: return model.conversations.filter(\.isVIP)
+        case .vip: return model.conversations.filter(\.isVIP).filter(vipFocus.includes)
         }
+    }
+
+    private var vipConversations: [ConversationSummary] {
+        model.conversations.filter(\.isVIP)
     }
 
     private var filtered: [ConversationSummary] {
@@ -40,6 +78,21 @@ struct InboxView: View {
     private var vipNeedsAttentionCount: Int {
         model.conversations.filter { $0.isVIP && $0.vipNeedsAttention }.count
     }
+    private var vipAtTimingCount: Int {
+        vipConversations.filter { $0.vipState == "due_soon" }.count
+    }
+    private var vipWithinTimingCount: Int {
+        vipConversations.filter { $0.vipState == "active" && $0.typicalOrderGapDays != nil }.count
+    }
+    private var vipNoTimingCount: Int {
+        vipConversations.filter { $0.typicalOrderGapDays == nil }.count
+    }
+    private var vipLifetimeSpend: Double {
+        Double(vipConversations.reduce(0) { $0 + ($1.lifetimeSpendCents ?? 0) }) / 100
+    }
+    private var vipSegmentID: String? {
+        vipConversations.compactMap(\.vipSegmentID).first { !$0.isEmpty }
+    }
 
     var body: some View {
         NavigationStack(path: $router.inboxPath) {
@@ -52,14 +105,24 @@ struct InboxView: View {
                     .pickerStyle(.segmented)
 
                     if audience == .vip, vipCount > 0 {
-                        HStack(spacing: 12) {
-                            Label("\(vipCount) VIP customers", systemImage: "crown.fill")
-                            if vipNeedsAttentionCount > 0 {
-                                Label("\(vipNeedsAttentionCount) need attention", systemImage: "sparkles")
+                        VIPWorkspaceCard(
+                            total: vipCount,
+                            lifetimeSpend: vipLifetimeSpend,
+                            pastTiming: vipNeedsAttentionCount,
+                            atTiming: vipAtTimingCount,
+                            withinTiming: vipWithinTimingCount,
+                            noTiming: vipNoTimingCount,
+                            focus: $vipFocus,
+                            canManage: session.can(Permission.campaignsManage),
+                            canOpenAudience: session.can(Permission.campaignsRead) && vipSegmentID != nil,
+                            workPriority: { vipFocus = .pastTiming },
+                            draftCampaign: { showingVIPCampaign = true },
+                            showOffers: { showingVIPPlaybook = true },
+                            openAudience: {
+                                guard let vipSegmentID else { return }
+                                router.open(.segment(id: vipSegmentID, name: "Best Repeat Customers"))
                             }
-                        }
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        )
                     }
                 }
                 .padding(.horizontal)
@@ -102,6 +165,14 @@ struct InboxView: View {
                 }
             }
             .searchable(text: $search, prompt: "Name or phone")
+            .sheet(isPresented: $showingVIPCampaign) {
+                CampaignEditorView(initialContacts: vipConversations) {
+                    Task { await model.load() }
+                }
+            }
+            .sheet(isPresented: $showingVIPPlaybook) {
+                VIPPlaybookSheet()
+            }
             // Settings, Team, Activity and Sign out all live behind the account
             // button now, which is on every tab rather than only on the two
             // that happened to have a gear icon. Inbox previously carried a
@@ -132,6 +203,9 @@ struct InboxView: View {
     private var emptyDetail: String {
         if !search.isEmpty { return "Try another search." }
         if audience == .vip {
+            if vipCount > 0 && vipFocus != .all {
+                return "No VIP customers are currently in this timing group."
+            }
             return "Customers with 3+ paid orders and $500+ lifetime spend appear here automatically."
         }
         return "Messages will appear here."
@@ -223,23 +297,232 @@ private struct ConversationRow: View {
                     }
                 }
                 if conversation.isVIP, let state = conversation.vipStateLabel {
-                    CustomerTag(
-                        text: state,
-                        systemImage: conversation.vipNeedsAttention ? "sparkles" : "clock",
-                        color: conversation.vipNeedsAttention ? .orange : ViciTheme.tealFill
-                    )
+                    VStack(alignment: .leading, spacing: 3) {
+                        CustomerTag(
+                            text: state,
+                            systemImage: conversation.vipNeedsAttention ? "exclamationmark.circle.fill" : "clock",
+                            color: conversation.vipNeedsAttention ? .orange : ViciTheme.tealFill
+                        )
+                        if let value = conversation.vipValueSummary {
+                            Text(value)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        if let detail = conversation.vipTimingDetail {
+                            Text(detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
                 } else if let progress = conversation.vipProgressLabel {
                     CustomerTag(text: progress, systemImage: "arrow.up.right", color: ViciTheme.tealFill)
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, conversation.isVIP ? 8 : 0)
+        .padding(.vertical, conversation.isVIP ? 8 : 4)
+        .background {
+            if conversation.isVIP {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.yellow.opacity(0.055))
+            }
+        }
+        .overlay {
+            if conversation.isVIP {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(red: 0.78, green: 0.58, blue: 0.16).opacity(0.72), lineWidth: 1)
+            }
+        }
     }
 
     private var preview: String {
         if let body = conversation.lastMessage?.body, !body.isEmpty { return body }
         if !(conversation.lastMessage?.mediaURLs ?? []).isEmpty { return "Photo" }
         return conversation.latestOrderStatus.map { "Order: \($0.replacingOccurrences(of: "-", with: " "))" } ?? conversation.phone
+    }
+}
+
+private struct VIPWorkspaceCard: View {
+    let total: Int
+    let lifetimeSpend: Double
+    let pastTiming: Int
+    let atTiming: Int
+    let withinTiming: Int
+    let noTiming: Int
+    @Binding var focus: VIPFocus
+    let canManage: Bool
+    let canOpenAudience: Bool
+    let workPriority: () -> Void
+    let draftCampaign: () -> Void
+    let showOffers: () -> Void
+    let openAudience: () -> Void
+
+    private func count(for candidate: VIPFocus) -> Int {
+        switch candidate {
+        case .all: return total
+        case .pastTiming: return pastTiming
+        case .atTiming: return atTiming
+        case .withinTiming: return withinTiming
+        case .noTiming: return noTiming
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("VIP customers", systemImage: "crown.fill")
+                    .font(.headline)
+                    .foregroundStyle(Color(red: 0.64, green: 0.45, blue: 0.08))
+                Spacer()
+                Text(lifetimeSpend.formatted(.currency(code: "USD")))
+                    .font(.subheadline.weight(.bold))
+            }
+            Text("Automatic rule: 3+ paid orders and $500+ lifetime spend. Approved manual additions appear here too. The combined lifetime spend is shown above.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(VIPFocus.allCases) { candidate in
+                        Button {
+                            focus = candidate
+                        } label: {
+                            Text("\(candidate.label) \(count(for: candidate))")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(focus == candidate ? Color.yellow.opacity(0.28) : Color.gray.opacity(0.09), in: Capsule())
+                                .overlay(Capsule().stroke(focus == candidate ? Color.orange.opacity(0.65) : Color.clear))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if pastTiming > 0 {
+                Text("Past timing means more than 1.5 times a customer's reliable personal order gap. It is a priority list, not an unread message or an unresolved support task.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: workPriority) {
+                    Label("Work priority list", systemImage: "list.bullet.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.68, green: 0.48, blue: 0.09))
+
+                Button(action: showOffers) {
+                    Label("VIP offers", systemImage: "gift.fill")
+                }
+                .buttonStyle(.bordered)
+            }
+            .font(.caption.weight(.semibold))
+
+            if canManage || canOpenAudience {
+                HStack(spacing: 10) {
+                    if canManage {
+                        Button(action: draftCampaign) {
+                            Label("Draft VIP campaign", systemImage: "square.and.pencil")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if canOpenAudience {
+                        Button(action: openAudience) {
+                            Label("Open VIP audience", systemImage: "person.3")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .font(.caption.weight(.semibold))
+            }
+
+            Text("No message is sent from this VIP screen. Open one customer for a personal conversation, or create a draft that still goes through preview, eligibility, review and scheduling.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(
+            LinearGradient(colors: [Color.yellow.opacity(0.13), Color.orange.opacity(0.045)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(red: 0.75, green: 0.55, blue: 0.13).opacity(0.75), lineWidth: 1)
+        )
+    }
+}
+
+private struct VIPPlaybookSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Label("The spreadsheet showed repeat customers generated 55.7% of revenue and were worth 2.77 times a one-time buyer on average.", systemImage: "chart.line.uptrend.xyaxis")
+                    Text("Those figures describe the WooCommerce history through September 22, 2026. They are context for prioritising relationships, not a promise of campaign revenue.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Why VIP matters")
+                }
+
+                Section {
+                    VIPPlaybookRow(icon: "list.bullet.circle.fill",
+                                   title: "Personal priority",
+                                   detail: "Open Past timing and work customer by customer. Dominic can ask how Vici can serve them better, then decide whether a personal thank-you is appropriate.")
+                    VIPPlaybookRow(icon: "sparkles",
+                                   title: "Early access",
+                                   detail: "Give VIPs the first look at verified new arrivals, restocks or a real perk. Confirm stock and the exact benefit before drafting copy.")
+                    VIPPlaybookRow(icon: "square.stack.3d.up.fill",
+                                   title: "Thoughtful cross-sell",
+                                   detail: "Use purchase history to introduce one relevant new category. Keep every message about products and availability, with no outcome or dosing claims.")
+                    VIPPlaybookRow(icon: "person.2.fill",
+                                   title: "Concierge coaching",
+                                   detail: "A complimentary session about a non-product tool, such as helping a VIP get started with Meta Muse, can be a loyalty benefit if Dominic is genuinely offering it.")
+                } header: {
+                    Text("Offer playbook")
+                }
+
+                Section {
+                    Text("These are ideas, not live offers. Verify the benefit, inventory, coupon terms, fulfilment and audience first. A VIP label never replaces SMS consent, STOP, DND, quiet-hour or campaign-review checks.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Before anything sends")
+                }
+            }
+            .navigationTitle("VIP offers")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private struct VIPPlaybookRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(Color(red: 0.68, green: 0.48, blue: 0.09))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }
 

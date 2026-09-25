@@ -717,8 +717,11 @@ final class CampaignEditorModel: ObservableObject {
     private let initialMessage: String
     private let initialRecipientsText: String
     private let initialAudienceMode: CampaignAudienceMode
+    private let initialSelectedContacts: [String: ConversationSummary]
 
-    init(campaign: CampaignRecord? = nil, recipients: [CampaignRecipient] = []) {
+    init(campaign: CampaignRecord? = nil,
+         recipients: [CampaignRecipient] = [],
+         initialContacts: [ConversationSummary] = []) {
         var metadata: [String: CampaignRecipientInput] = [:]
         for recipient in recipients where recipient.selected {
             let key = Self.phoneKey(recipient.contactPhone)
@@ -753,6 +756,11 @@ final class CampaignEditorModel: ObservableObject {
             // containing a comma. Matching metadata is restored below.
             .map(\.contactPhone)
             .joined(separator: "\n")
+        let resolvedSelectedContacts: [String: ConversationSummary] = campaign == nil
+            ? initialContacts.reduce(into: [:]) { contacts, contact in
+                contacts[contact.phone] = contact
+            }
+            : [:]
 
         existingID = campaign?.id
         existingCouponCode = campaign?.couponCode
@@ -769,6 +777,8 @@ final class CampaignEditorModel: ObservableObject {
         initialMessage = resolvedMessage
         initialRecipientsText = resolvedRecipientsText
         initialAudienceMode = resolvedAudienceMode
+        selectedContacts = resolvedSelectedContacts
+        initialSelectedContacts = resolvedSelectedContacts
     }
 
     var hasUnsavedDraftChanges: Bool {
@@ -941,7 +951,7 @@ final class CampaignEditorModel: ObservableObject {
         message = initialMessage
         recipientsText = initialRecipientsText
         audienceMode = initialAudienceMode
-        selectedContacts.removeAll()
+        selectedContacts = initialSelectedContacts
         attachedCoupon = nil
         contactSearch = ""
         step = .type

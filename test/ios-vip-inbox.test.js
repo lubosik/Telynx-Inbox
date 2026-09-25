@@ -42,3 +42,14 @@ test('the repeatable seed fixes the permanent rule and cannot send or alter cons
   assert.match(migration, /ON CONFLICT \(workspace_id, segment_key\) DO NOTHING/);
   assert.doesNotMatch(migration, /sms_messages|send_message|sms_consent|commercial_eligibility/);
 });
+
+test('VIP status is plain English, actionable, and the VIP campaign path is a draft', () => {
+  assert.match(models, /Past usual reorder timing/);
+  assert.match(models, /days beyond their usual/);
+  assert.doesNotMatch(models, /case "needs_attention": return "Needs attention"/);
+  assert.match(view, /Work priority list/);
+  assert.match(view, /Draft VIP campaign/);
+  assert.match(view, /VIP offers/);
+  assert.match(view, /CampaignEditorView\(initialContacts: vipConversations/);
+  assert.match(view, /No message is sent from this VIP screen/);
+});

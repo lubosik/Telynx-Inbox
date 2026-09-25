@@ -240,9 +240,9 @@ test('voice choice saves without a toll-free number but production remains locke
   assert.ok(result.settings.voiceBlockers.includes('provider_approval_missing'));
 });
 
-test('the Vin picker contains only copied professional American voice clones and stays male-majority', () => {
+test('the Vin picker contains only the owner-approved Gracie Social professional clone', () => {
   const catalog = PREFERRED_US_VOICE_IDS.map((id, index) => ({ id, accent: 'american',
-    gender: index < 5 ? 'male' : 'female', language: 'en', professionalClone: true, verified: true,
+    gender: 'female', language: 'en', professionalClone: true, verified: true,
     category: 'professional', sharingStatus: 'copied' }));
   catalog.push({ id: 'british-voice', accent: 'british', gender: 'male', verified: true,
     category: 'professional', sharingStatus: 'copied' });
@@ -254,7 +254,7 @@ test('the Vin picker contains only copied professional American voice clones and
     category: 'professional', sharingStatus: 'copied' });
   const shown = curatedRecoveryVoices(catalog);
   assert.deepEqual(shown.map(voice => voice.id), PREFERRED_US_VOICE_IDS);
-  assert.ok(shown.filter(voice => voice.gender === 'male').length > shown.length / 2);
+  assert.deepEqual(PREFERRED_US_VOICE_IDS, ['T7eLpgAAhoXHlrNajG8v']);
 
   for (const rejected of [
     { category: 'premade', sharingStatus: null },

@@ -9,6 +9,17 @@ existing ElevenLabs Professional Voice Clones available during the blind quality
 comparison. The application must never treat a model name as a voice or use an
 arbitrary internet recording as cloning material.
 
+## Review outcome, 2026-09-25
+
+The six designed voices were reviewed in the production app and were not
+natural enough for customer-facing recovery calls. They are no longer exposed
+by the live voice catalogue. The backend retains provider-aware playback only
+so immutable historical Qwen attempts remain auditable. The catalogue can be
+re-enabled for a future owner-reviewed pilot only with
+`QWEN_VOICE_CATALOGUE_ENABLED=true`; production leaves it off. Gracie Social,
+an authorized American ElevenLabs Professional Voice Clone, is the only voice
+currently curated for selection.
+
 The pilot uses `qwen3-tts-vd-2026-01-26` for both design and synthesis. The
 backend accepts only English, account-scoped voices with the `vici_` operations
 prefix. It derives the Singapore workspace hostname from

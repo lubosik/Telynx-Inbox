@@ -153,12 +153,38 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
     var isManualOnlyVIP: Bool { isVIP && isManualVIP && !isAutomaticVIP }
     var vipNeedsAttention: Bool { vipState == "needs_attention" }
     var vipStateLabel: String? {
+        if isVIP && typicalOrderGapDays == nil { return "No reliable timing yet" }
         switch vipState {
-        case "active": return "Active"
-        case "due_soon": return "Due soon"
-        case "needs_attention": return "Needs attention"
+        case "active": return "Within usual timing"
+        case "due_soon": return "At usual reorder timing"
+        case "needs_attention": return "Past usual reorder timing"
         default: return nil
         }
+    }
+    var vipTimingDetail: String? {
+        guard isVIP else { return nil }
+        guard let days = daysSinceLastOrder,
+              let usual = typicalOrderGapDays, usual > 0 else {
+            return "Not enough repeat-order timing to estimate a next action."
+        }
+        let wholeDays = max(0, Int(days.rounded(.down)))
+        let wholeUsual = max(1, Int(usual.rounded()))
+        switch vipState {
+        case "needs_attention":
+            return "\(max(1, wholeDays - wholeUsual)) days beyond their usual \(wholeUsual)-day order gap."
+        case "due_soon":
+            return "Their usual \(wholeUsual)-day order gap has arrived."
+        case "active":
+            return "Day \(wholeDays) of their usual \(wholeUsual)-day order gap."
+        default:
+            return nil
+        }
+    }
+    var vipValueSummary: String? {
+        guard isVIP else { return nil }
+        let orders = paidOrderCount ?? 0
+        let spend = Double(lifetimeSpendCents ?? 0) / 100
+        return "\(orders) paid order\(orders == 1 ? "" : "s") · \(spend.formatted(.currency(code: "USD"))) lifetime"
     }
     var vipProgressLabel: String? {
         switch vipProgress {

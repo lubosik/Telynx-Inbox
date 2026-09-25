@@ -13,7 +13,8 @@ const { createCartRecoveryService, RECOVERY_VOICE_PREVIEW_TEXT } = require('../l
 const { PROFILES } = require('../scripts/design-qwen-recovery-voices');
 
 const ROOT = path.join(__dirname, '..');
-const ENV = { DASHSCOPE_API_KEY: 'test-key-never-log', DASHSCOPE_WORKSPACE_ID: 'ws-test123' };
+const ENV = { DASHSCOPE_API_KEY: 'test-key-never-log', DASHSCOPE_WORKSPACE_ID: 'ws-test123',
+  QWEN_VOICE_CATALOGUE_ENABLED: 'true' };
 
 test('Qwen configuration derives the fixed Singapore workspace host and fails closed', () => {
   assert.equal(configuration(ENV).origin, 'https://ws-test123.ap-southeast-1.maas.aliyuncs.com');
@@ -148,4 +149,16 @@ test('the Qwen pilot is fixed, gated, non-customer-facing, and migration/UI are 
   assert.match(models, /var voiceProvider: String/);
   assert.match(models, /let syntheticDesign: Bool\?/);
   assert.match(view, /Designed voice/);
+});
+
+test('Qwen designed voices stay out of the production picker unless explicitly re-enabled', async () => {
+  const service = createCartRecoveryService({
+    client: {},
+    env: { DASHSCOPE_API_KEY: 'configured', DASHSCOPE_WORKSPACE_ID: 'ws-test123' },
+    listVoices: async () => [],
+    listQwenVoices: async () => { throw new Error('Qwen catalogue should not be called'); }
+  });
+  const catalogue = await service.listRecoveryVoices();
+  assert.deepEqual(catalogue.voices, []);
+  assert.deepEqual(catalogue.providerWarnings, []);
 });
