@@ -3,6 +3,7 @@ import Charts
 
 struct AnalyticsView: View {
     let isSelected: Bool
+    @ObservedObject var inboxModel: InboxModel
     @EnvironmentObject private var router: AppRouter
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model = AnalyticsViewModel()
@@ -19,6 +20,10 @@ struct AnalyticsView: View {
                             model.period = period
                             Task { await model.load() }
                         }
+                    }
+
+                    if !vipConversations.isEmpty {
+                        VIPCustomerAnalyticsCard(conversations: vipConversations)
                     }
 
                     content
@@ -44,9 +49,13 @@ struct AnalyticsView: View {
                 }
             }
             .accountToolbar()
-            .refreshable { await model.load(force: true) }
+            .refreshable {
+                await model.load(force: true)
+                await inboxModel.load()
+            }
             .task(id: isSelected) {
                 guard isSelected else { return }
+                await inboxModel.load()
                 await model.load()
                 await model.listenForChanges()
             }
@@ -59,6 +68,10 @@ struct AnalyticsView: View {
                 }
             }
         }
+    }
+
+    private var vipConversations: [ConversationSummary] {
+        inboxModel.conversations.filter(\.isVIP)
     }
 
     @ViewBuilder
@@ -190,6 +203,43 @@ struct AnalyticsView: View {
                            detail: "Activity will appear here once verified data is available for this period.")
                     .frame(maxWidth: .infinity)
             }
+        }
+    }
+}
+
+private struct VIPCustomerAnalyticsCard: View {
+    let conversations: [ConversationSummary]
+
+    private var lifetimeSpend: Double {
+        Double(conversations.reduce(0) { $0 + ($1.lifetimeSpendCents ?? 0) }) / 100
+    }
+
+    private var averageValue: Double {
+        conversations.isEmpty ? 0 : lifetimeSpend / Double(conversations.count)
+    }
+
+    var body: some View {
+        AnalyticsCard {
+            HStack {
+                AnalyticsSectionHeader(title: "VIP Customers", symbol: "crown.fill")
+                Text("Live lifetime view")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 16) {
+                AnalyticsMetric(value: conversations.count.formatted(), label: "VIP customers")
+                AnalyticsMetric(
+                    value: lifetimeSpend.formatted(.currency(code: "USD")),
+                    label: "Lifetime spend"
+                )
+            }
+            AnalyticsMetric(
+                value: averageValue.formatted(.currency(code: "USD")),
+                label: "Average lifetime value"
+            )
+            Text("VIP means 3 or more paid orders and at least $500 in lifetime spend, plus approved manual additions. These lifetime figures do not change with the date filter above.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

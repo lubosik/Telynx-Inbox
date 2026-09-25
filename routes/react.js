@@ -13,6 +13,7 @@
 
 const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS } = require('../telnyx');
+const { senderNumberFor } = require('../lib/vip-inbox-messaging');
 const { isOptedOut } = require('../flows/utils');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 
@@ -55,7 +56,9 @@ module.exports = (broadcastSSE) => {
         ? `${verb} “${target.body.trim()}”`
         : `${verb} an image`;
 
-      const { messageId: telnyxId, status: providerStatus } = await sendSMS(target.contact_phone, text);
+      const from = await senderNumberFor({ client: supabase, phone: target.contact_phone });
+      const { messageId: telnyxId, status: providerStatus } = await sendSMS(
+        target.contact_phone, text, null, { from });
 
       const reactions = removing
         ? existing.filter(r => !(r.type === type && r.source === 'operator'))

@@ -1,11 +1,95 @@
 import SwiftUI
 
+private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
+    case all
+    case pastTiming
+    case atTiming
+    case withinTiming
+    case noTiming
+
+    var id: String { rawValue }
+
+    func includes(_ conversation: ConversationSummary) -> Bool {
+        switch self {
+        case .all: return true
+        case .pastTiming: return conversation.vipState == "needs_attention"
+        case .atTiming: return conversation.vipState == "due_soon"
+        case .withinTiming:
+            return conversation.vipState == "active" && conversation.typicalOrderGapDays != nil
+        case .noTiming: return conversation.typicalOrderGapDays == nil
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .all: return "All VIPs"
+        case .pastTiming: return "Past usual timing"
+        case .atTiming: return "At usual timing"
+        case .withinTiming: return "Within usual timing"
+        case .noTiming: return "No reliable timing"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .all: return "Every current VIP customer"
+        case .pastTiming: return "Personal check-ins for customers beyond their usual pattern"
+        case .atTiming: return "Customers currently around their usual reorder pattern"
+        case .withinTiming: return "Active customers still within their usual pattern"
+        case .noTiming: return "VIPs without enough history for a reliable pattern"
+        }
+    }
+
+    var campaignTitle: String {
+        switch self {
+        case .all: return "VIP customer update"
+        case .pastTiming: return "VIP personal check-in"
+        case .atTiming: return "VIP first-access invitation"
+        case .withinTiming: return "VIP loyalty thank-you"
+        case .noTiming: return "VIP customer feedback"
+        }
+    }
+
+    var campaignMessage: String {
+        switch self {
+        case .all:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Want first access to new arrivals and offers? Reply STOP to opt out."
+        case .pastTiming:
+            return "Vin from Vici: Hi {{first_name}}, I wanted to check in personally. Is there anything we could improve for you? Reply STOP to opt out."
+        case .atTiming:
+            return "Vin from Vici: Hi {{first_name}}, I wanted to give you first access to our next new arrival. Reply if you want details. Reply STOP to opt out."
+        case .withinTiming:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. I can give you first access to our next release. Reply STOP to opt out."
+        case .noTiming:
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. What would you like to see from Vici next? Reply STOP to opt out."
+        }
+    }
+
+    var campaignBrief: String {
+        switch self {
+        case .all:
+            return "Thank all VIP customers and invite them to ask for first access to verified new arrivals or a real VIP offer."
+        case .pastTiming:
+            return "Write a warm personal check-in from Vin. Ask how Vici can improve. Never mention tracking, cadence, being overdue or running low."
+        case .atTiming:
+            return "Invite VIP customers to request first access to a verified new arrival. Never mention reorder timing or monitoring."
+        case .withinTiming:
+            return "Thank current VIP customers and offer first access to the next verified release. Keep it conversational."
+        case .noTiming:
+            return "Thank VIP customers and ask what they would like to see from Vici next. Do not invent a timing or product recommendation."
+        }
+    }
+}
+
 struct CampaignsView: View {
+    @ObservedObject var inboxModel: InboxModel
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var router: AppRouter
     @StateObject private var model = CampaignListModel()
     @State private var showingNewCampaign = false
     @State private var showingPlanner = false
+    @State private var showingVIPCampaigns = false
+    @State private var showingVIPPlaybook = false
 
     /// The campaign a confirmation is currently being asked about, and which
     /// question is being asked. One piece of state rather than two booleans and
@@ -84,13 +168,23 @@ struct CampaignsView: View {
                 Task { await model.load(reset: true) }
             }
         }
+        .sheet(isPresented: $showingVIPCampaigns) {
+            VIPCampaignHubView(conversations: vipConversations) {
+                Task { await model.load(reset: true) }
+            }
+        }
+        .sheet(isPresented: $showingVIPPlaybook) {
+            VIPPlaybookSheet()
+        }
         .refreshable {
             guard session.can(Permission.campaignsRead) else { return }
             await model.load(reset: true)
+            await inboxModel.load()
         }
         .task(id: session.can(Permission.campaignsRead)) {
             guard session.can(Permission.campaignsRead) else { return }
             await model.load()
+            await inboxModel.load()
         }
         // Reloads from page one when archived items are shown or hidden. Paging
         // state cannot survive a change to what the pages contain.
@@ -164,9 +258,37 @@ struct CampaignsView: View {
         }
     }
 
+    private var vipConversations: [ConversationSummary] {
+        inboxModel.conversations.filter(\.isVIP)
+    }
+
+    private var vipSegmentID: String? {
+        vipConversations.compactMap(\.vipSegmentID).first { !$0.isEmpty }
+    }
+
     private var campaignList: some View {
         List {
             Section { CampaignSafetyNotice() }
+
+            if !vipConversations.isEmpty {
+                Section("VIP customers") {
+                    if session.can(Permission.campaignsManage) {
+                        Button { showingVIPCampaigns = true } label: {
+                            Label("Create a VIP campaign", systemImage: "crown")
+                        }
+                    }
+                    if let vipSegmentID {
+                        Button {
+                            router.open(.segment(id: vipSegmentID, name: "Best Repeat Customers"))
+                        } label: {
+                            Label("Open VIP audience", systemImage: "person.3")
+                        }
+                    }
+                    Button { showingVIPPlaybook = true } label: {
+                        Label("VIP offer ideas", systemImage: "gift")
+                    }
+                }
+            }
 
             // Reachable whether or not there are campaigns yet. Drafts live on
             // a different screen from campaigns, which is the distinction that
@@ -284,6 +406,11 @@ struct CampaignsView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(ViciTheme.tint)
 
+                    if !vipConversations.isEmpty {
+                        Button("Create a VIP Campaign") { showingVIPCampaigns = true }
+                            .buttonStyle(.bordered)
+                    }
+
                     // THE TWO SCREENS NOBODY COULD REACH.
                     //
                     // Campaign drafts and Opportunities had no tap path at all:
@@ -312,6 +439,84 @@ struct CampaignsView: View {
                 }
             }
             .padding(24)
+        }
+    }
+}
+
+private struct VIPCampaignHubView: View {
+    let conversations: [ConversationSummary]
+    let onSaved: () -> Void
+    @State private var selectedFocus: VIPCampaignFocus?
+    @Environment(\.dismiss) private var dismiss
+
+    private func customers(for focus: VIPCampaignFocus) -> [ConversationSummary] {
+        conversations.filter(focus.includes)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Choose who you want to speak to. The app selects that group and starts with editable, personalized copy. Nothing sends from this screen.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Choose a VIP group") {
+                    ForEach(VIPCampaignFocus.allCases) { focus in
+                        let count = customers(for: focus).count
+                        Button {
+                            selectedFocus = focus
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: focus == .all ? "crown.fill" : "person.2")
+                                    .foregroundStyle(focus == .all ? Color.orange : ViciTheme.tint)
+                                    .frame(width: 24)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(focus.label).foregroundStyle(.primary)
+                                    Text(focus.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 8)
+                                Text(count.formatted())
+                                    .font(.subheadline.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(count == 0)
+                        .accessibilityLabel("Draft for \(focus.label), \(count) customers")
+                    }
+                }
+
+                Section {
+                    Text("Timing groups are planning tools. Customer copy never says that somebody is overdue, being monitored, or expected to reorder.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("VIP Campaign")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .sheet(item: $selectedFocus) { focus in
+                CampaignEditorView(
+                    initialContacts: customers(for: focus),
+                    initialTitle: focus.campaignTitle,
+                    initialMessage: focus.campaignMessage,
+                    initialBrief: focus.campaignBrief,
+                    onSaved: onSaved
+                )
+            }
         }
     }
 }
@@ -1808,26 +2013,24 @@ struct CampaignEditorView: View {
             }
 
             if model.aiCopyEnabled {
-                Section("Suggested copy") {
+                Section("Copy assistant") {
                     Button {
                         Task { await model.suggestValidCopy() }
                     } label: {
                         if model.isDrafting {
-                            HStack { ProgressView(); Text("Writing valid copy") }
+                            HStack { ProgressView(); Text("Writing three versions") }
                         } else {
-                            Label("Suggest valid copy", systemImage: "wand.and.stars")
+                            Label("Improve this message", systemImage: "wand.and.stars")
                         }
                     }
                     .disabled(!model.canSuggestValidCopy)
                     .accessibilityHint("Rewrites the message above in your style and shows only versions that pass the campaign copy checks")
 
-                    Text("Already wrote the message? Tap once for three versions in your usual tone. Every version shown here has passed the campaign copy checks. Your draft is not replaced until you choose one.")
+                    Text("Get three ready-to-use versions in your usual tone. Your message changes only after you choose one.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Divider()
-
-                    Text("Or describe what you want changed")
+                    Text("Describe a different message or change")
                         .font(.subheadline.weight(.semibold))
                     TextEditor(text: $model.brief)
                         .frame(minHeight: 70)
@@ -1852,7 +2055,7 @@ struct CampaignEditorView: View {
                         if model.isDrafting {
                             HStack { ProgressView(); Text("Writing") }
                         } else {
-                            Label("Write three versions", systemImage: "sparkles")
+                            Label("Create three versions", systemImage: "sparkles")
                         }
                     }
                     .disabled(model.brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isDrafting)
@@ -1861,7 +2064,7 @@ struct CampaignEditorView: View {
                         Button {
                             Task { await model.draftWithAI(refining: true) }
                         } label: {
-                            Label(model.refinementCount > 0 ? "Change it again" : "Change the message above",
+                            Label(model.refinementCount > 0 ? "Apply another change" : "Apply this to the message",
                                   systemImage: "arrow.triangle.2.circlepath")
                         }
                         .disabled(model.brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isDrafting)

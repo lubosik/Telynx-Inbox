@@ -391,6 +391,33 @@ test('a message push still carries both the badge and the phone', async () => {
   assert.equal(captured[0].extraHeaders['apns-collapse-id'], undefined);
 });
 
+test('a VIP inbox message is unmistakable without relying on a custom notification colour', async () => {
+  const captured = [];
+  activeDB = makeSupabase({ tables: { call_logs: [] }, counts: { call_logs: 0 } });
+  const client = makeSupabase({
+    tables: {
+      ios_push_devices: [{ id: 1, device_token: 'a'.repeat(64), environment: 'production' }],
+      sms_contacts: [{ unread_count: 1 }]
+    }
+  });
+
+  const { value } = await withConsole(() => sendNativeMessagePush(
+    {
+      title: '👑 VIP · Jane',
+      body: 'Can somebody help?',
+      phone: '+15555550100',
+      isVIP: true
+    },
+    { client, connect: makeConnector([]), send: makeSender({ status: 200 }, captured) }
+  ));
+
+  assert.equal(value.sent, 1);
+  assert.equal(captured[0].payload.aps.alert.title, '👑 VIP · Jane');
+  assert.equal(captured[0].payload.aps.category, 'VIP_MESSAGE');
+  assert.equal(captured[0].payload.aps['thread-id'], 'vip-+15555550100');
+  assert.equal(captured[0].payload.vip, true);
+});
+
 test('collapse ids stay inside the 64-byte APNs limit', () => {
   assert.equal(collapseIdentifier(undefined, 21), 'vici-release-21');
   assert.equal(collapseIdentifier(undefined, null), 'vici-release-note');

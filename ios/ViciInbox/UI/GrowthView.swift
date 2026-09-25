@@ -12,6 +12,7 @@ import SwiftUI
 /// `/api/audit`, reached from the account menu and from the history button in
 /// this tab's toolbar.
 struct GrowthView: View {
+    @ObservedObject var inboxModel: InboxModel
     /// An enum rather than an integer tag, for the same reason `AppTab`
     /// is one: a raw index is a magic number that survives being wrong.
     ///
@@ -60,7 +61,7 @@ struct GrowthView: View {
 
                 switch router.growthSection {
                 case .automations: AutomationQueueView()
-                case .campaigns:   CampaignsView()
+                case .campaigns:   CampaignsView(inboxModel: inboxModel)
                 case .audiences:   SegmentsView()
                 }
             }

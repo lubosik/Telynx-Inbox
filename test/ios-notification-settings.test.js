@@ -142,6 +142,8 @@ test('the hidden previews placeholder is set on the client, where it has to be',
   // It is a property of a UNNotificationCategory and has no payload
   // equivalent, so a server-side attempt at it would silently do nothing.
   assert.match(MANAGER, /hiddenPreviewsBodyPlaceholder: "Daily summary"/);
+  assert.match(MANAGER, /vipMessageCategory = "VIP_MESSAGE"/);
+  assert.match(MANAGER, /hiddenPreviewsBodyPlaceholder: "VIP customer message"/);
 });
 
 test('the digest carries Review and Later, and never Approve or Reject', () => {

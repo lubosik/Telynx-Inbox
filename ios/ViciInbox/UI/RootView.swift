@@ -524,7 +524,7 @@ struct MainTabView: View {
                 .tabItem { Label("Contacts", systemImage: "person.2.fill") }
                 .tag(AppTab.contacts)
 
-            GrowthView()
+            GrowthView(inboxModel: inboxModel)
                 .tabItem { Label("Growth", systemImage: "bolt.fill") }
                 .badge(campaignReviewCount.count)
                 .tag(AppTab.growth)
@@ -535,7 +535,8 @@ struct MainTabView: View {
                 .tag(AppTab.calls)
 
             if showsAnalytics {
-                AnalyticsView(isSelected: router.selectedTab == .analytics)
+                AnalyticsView(isSelected: router.selectedTab == .analytics,
+                              inboxModel: inboxModel)
                     .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
                     .tag(AppTab.analytics)
             }

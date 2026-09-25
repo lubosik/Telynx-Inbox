@@ -8,6 +8,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const models = fs.readFileSync(path.join(root, 'ios/ViciInbox/Core/MobileModels.swift'), 'utf8');
 const view = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/InboxViews.swift'), 'utf8');
+const campaigns = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/CampaignsView.swift'), 'utf8');
+const analytics = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/AnalyticsView.swift'), 'utf8');
 const featureModel = fs.readFileSync(path.join(root, 'ios/ViciInbox/App/FeatureModels.swift'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'scripts/vip-customer-segment-migration.sql'), 'utf8');
 
@@ -43,27 +45,48 @@ test('the repeatable seed fixes the permanent rule and cannot send or alter cons
   assert.doesNotMatch(migration, /sms_messages|send_message|sms_consent|commercial_eligibility/);
 });
 
-test('VIP status is plain English, actionable, and the VIP campaign path is a draft', () => {
+test('the inbox stays focused on conversations without counts, workspaces or gold row boxes', () => {
   assert.match(models, /Past usual reorder timing/);
   assert.match(models, /days beyond their usual/);
   assert.doesNotMatch(models, /case "needs_attention": return "Needs attention"/);
-  assert.match(view, /Work priority list/);
-  assert.match(view, /Draft all VIPs/);
-  assert.match(view, /VIP offers/);
-  assert.match(view, /CampaignEditorView\(\s*initialContacts: vipConversations/);
-  assert.match(view, /No message is sent from this VIP screen/);
+  assert.match(view, /Text\("VIP"\)\.tag\(InboxAudience\.vip\)/);
+  assert.ok(!view.includes('Text("VIP \\(vipCount)")'));
+  assert.doesNotMatch(view, /VIPWorkspaceCard/);
+  assert.doesNotMatch(view, /Color\.yellow\.opacity\(0\.055\)/);
+  assert.doesNotMatch(view, /vipTimingDetail/);
 });
 
-test('each live VIP timing group can seed a personalized campaign draft', () => {
+test('Growth owns each VIP timing group and seeds a personalized campaign draft', () => {
   for (const group of ['pastTiming', 'atTiming', 'withinTiming', 'noTiming']) {
-    assert.ok(view.includes(`case .${group}:`), `missing VIP group ${group}`);
+    assert.ok(campaigns.includes(`case .${group}:`), `missing VIP group ${group}`);
   }
-  assert.match(view, /vipConversations\.filter\(focus\.includes\)/);
-  assert.match(view, /initialTitle: focus\.campaignTitle/);
-  assert.match(view, /initialMessage: focus\.campaignMessage/);
-  assert.match(view, /initialBrief: focus\.campaignBrief/);
-  assert.match(view, /\{\{first_name\}\}/);
-  assert.match(view, /Reply STOP to opt out\./);
-  assert.match(view, /Never mention tracking, cadence, being overdue or running low/);
-  assert.match(view, /Draft this group/);
+  assert.match(campaigns, /Section\("VIP customers"\)/);
+  assert.match(campaigns, /if session\.can\(Permission\.campaignsManage\)[\s\S]*Create a VIP campaign/);
+  assert.match(campaigns, /Create a VIP campaign/);
+  assert.match(campaigns, /Open VIP audience/);
+  assert.match(campaigns, /VIP offer ideas/);
+  assert.match(campaigns, /conversations\.filter\(focus\.includes\)/);
+  assert.match(campaigns, /initialTitle: focus\.campaignTitle/);
+  assert.match(campaigns, /initialMessage: focus\.campaignMessage/);
+  assert.match(campaigns, /initialBrief: focus\.campaignBrief/);
+  assert.match(campaigns, /\{\{first_name\}\}/);
+  assert.match(campaigns, /Reply STOP to opt out\./);
+  assert.match(campaigns, /Never mention tracking, cadence, being overdue or running low/);
+});
+
+test('VIP totals live in Analytics and are explicitly lifetime figures', () => {
+  assert.match(analytics, /VIPCustomerAnalyticsCard/);
+  assert.match(analytics, /Lifetime spend/);
+  assert.match(analytics, /Average lifetime value/);
+  assert.match(analytics, /These lifetime figures do not change with the date filter above/);
+});
+
+test('campaign copy assistance uses compact list rows without a divider spacer', () => {
+  const section = campaigns.slice(
+    campaigns.indexOf('Section("Copy assistant")'),
+    campaigns.indexOf('ForEach(model.suggestions)')
+  );
+  assert.match(section, /Improve this message/);
+  assert.match(section, /Describe a different message or change/);
+  assert.doesNotMatch(section, /Divider\(\)/);
 });

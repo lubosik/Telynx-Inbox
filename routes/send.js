@@ -1,6 +1,7 @@
 const { supabase, insertSmsMessage } = require('../db');
 const ghl = require('../ghl');
 const { sendSMS } = require('../telnyx');
+const { senderNumberFor } = require('../lib/vip-inbox-messaging');
 const { formatPhone, isOptedOut } = require('../flows/utils');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 
@@ -24,7 +25,13 @@ module.exports = (broadcastSSE) => {
         return res.status(403).json({ error: 'This contact opted out of messages' });
       }
 
-      const { messageId, status: providerStatus } = await sendSMS(normalisedTo, text, media.length ? media : null);
+      const from = await senderNumberFor({ client: supabase, phone: normalisedTo });
+      const { messageId, status: providerStatus } = await sendSMS(
+        normalisedTo,
+        text,
+        media.length ? media : null,
+        { from }
+      );
 
       const mediaRecord = media.length ? media.map(u => ({ url: u })) : null;
       const replyTo = Number.isFinite(Number(replyToMessageId)) && replyToMessageId !== null && replyToMessageId !== undefined

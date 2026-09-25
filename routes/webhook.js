@@ -20,6 +20,7 @@ const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
 const { recordCampaignReplyEvents } = require('../lib/campaigns/reply-events');
 const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 const { sendSMS } = require('../telnyx');
+const { isVIPInboxNumber } = require('../lib/vip-inbox-messaging');
 const { decodeVerifiedTelnyxEvent, claimTelnyxEvent, finishTelnyxEvent, failTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
@@ -142,6 +143,9 @@ module.exports = (broadcastSSE) => {
 
       const messageId = payload?.id;
       const fromPhone = payload?.from?.phone_number;
+      const inboundToEntry = Array.isArray(payload?.to) ? payload.to[0] : payload?.to;
+      const inboundToPhone = inboundToEntry?.phone_number || inboundToEntry || null;
+      const isVIPMessage = isVIPInboxNumber(inboundToPhone);
       const text = payload?.text || '';
       const inboundMedia = Array.isArray(payload?.media) ? payload.media : [];
 
@@ -263,16 +267,17 @@ module.exports = (broadcastSSE) => {
             const { data: reactor } = await supabase
               .from('sms_contacts').select('name').eq('phone', fromPhone).maybeSingle();
             sendPushToAll({
-              title: reactor?.name || fromPhone,
+              title: isVIPMessage ? `👑 VIP · ${reactor?.name || fromPhone}` : (reactor?.name || fromPhone),
               body: text,
               url: `/?thread=${encodeURIComponent(fromPhone)}`,
               icon: '/icons/icon-192.png',
               tag: `sms-${fromPhone}`
             }).catch(() => {});
             sendNativeMessagePush({
-              title: reactor?.name || fromPhone,
+              title: isVIPMessage ? `👑 VIP · ${reactor?.name || fromPhone}` : (reactor?.name || fromPhone),
               body: text,
-              phone: fromPhone
+              phone: fromPhone,
+              isVIP: isVIPMessage
             }).catch(err => console.error('APNs tapback error:', err.message));
 
             console.log(`[TAPBACK] ${tapback.action} ${tapback.type} on msg ${target.id} from ...${fromPhone.slice(-4)}`);
@@ -459,17 +464,21 @@ module.exports = (broadcastSSE) => {
       const pushBody = text
         ? (text.length > 100 ? text.slice(0, 97) + '…' : text)
         : `📷 Picture${mediaRecord && mediaRecord.length > 1 ? ` (${mediaRecord.length})` : ''}`;
+      const notificationTitle = isVIPMessage
+        ? `👑 VIP · ${senderName}`
+        : `New message from ${senderName}`;
       sendPushToAll({
-        title: `New message from ${senderName}`,
+        title: notificationTitle,
         body: pushBody,
         url: `/?thread=${encodeURIComponent(fromPhone)}`,
         icon: '/icons/icon-192.png',
         tag: `sms-${fromPhone}`
       }).catch(err => console.error('Push notify error:', err.message));
       sendNativeMessagePush({
-        title: `New message from ${senderName}`,
+        title: notificationTitle,
         body: pushBody,
-        phone: fromPhone
+        phone: fromPhone,
+        isVIP: isVIPMessage
       }).catch(err => console.error('APNs notify error:', err.message));
 
       setTimeout(() => analyseConversation(fromPhone).catch(console.error), 5000);

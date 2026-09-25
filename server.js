@@ -402,12 +402,13 @@ function startDeliveryCheck() {
 // feature is switched back off.
 function startCampaignDelivery() {
   let deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses,
-      sendPaceFrom, sweepUnattributedReplies, sendSMS;
+      sendPaceFrom, sweepUnattributedReplies, sendSMS, senderNumberFor;
   try {
     ({ deliverBatch, liveSendEnabled, recoverExpiredClaims, reconcileCampaignStatuses,
        sendPaceFrom } = require('./lib/campaigns/delivery-worker'));
     ({ sweepUnattributedReplies } = require('./lib/campaigns/reply-events'));
     ({ sendSMS } = require('./telnyx'));
+    ({ senderNumberFor } = require('./lib/vip-inbox-messaging'));
   } catch (err) {
     // A campaign feature that is off for this workspace must never be able to
     // stop the inbox, the dialler or order SMS from starting.
@@ -477,7 +478,12 @@ function startCampaignDelivery() {
       lastSendAt = Date.now();
 
       const summary = await deliverBatch({
-        client: supabase, send: sendSMS, limit: pace.batchSize
+        client: supabase,
+        send: async (phone, text) => {
+          const from = await senderNumberFor({ client: supabase, phone });
+          return sendSMS(phone, text, null, { from });
+        },
+        limit: pace.batchSize
       });
       if (summary.claimed > 0) {
         console.log(

@@ -2,9 +2,9 @@ const crypto = require('crypto');
 
 // mediaUrls: optional array of publicly-accessible HTTPS URLs — presence makes
 // this an MMS. Telnyx caps media_urls at 10; carrier-safe total size is ~600KB.
-async function sendSMS(to, message, mediaUrls = null) {
+async function sendSMS(to, message, mediaUrls = null, options = {}) {
   const body = {
-    from: process.env.TELNYX_PHONE_NUMBER,
+    from: options.from || process.env.TELNYX_PHONE_NUMBER,
     to,
     text: message || '',
     messaging_profile_id: process.env.TELNYX_MESSAGING_PROFILE_ID

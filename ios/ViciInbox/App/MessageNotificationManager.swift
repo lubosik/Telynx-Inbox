@@ -118,11 +118,19 @@ final class MessageNotificationManager: NSObject, ObservableObject {
             hiddenPreviewsBodyPlaceholder: "Conversation referral",
             options: []
         )
-        UNUserNotificationCenter.current().setNotificationCategories([digest, referral])
+        let vipMessage = UNNotificationCategory(
+            identifier: Self.vipMessageCategory,
+            actions: [],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: "VIP customer message",
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([digest, referral, vipMessage])
     }
 
     static let digestCategory = "SEGMENT_DIGEST"
     static let referralCategory = "REFERRAL"
+    static let vipMessageCategory = "VIP_MESSAGE"
     static let digestReviewAction = "SEGMENT_DIGEST_REVIEW"
     static let digestSnoozeAction = "SEGMENT_DIGEST_SNOOZE"
 
