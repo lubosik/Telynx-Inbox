@@ -123,8 +123,8 @@ test('the iOS manual editor offers a one-tap validated rewrite without replacing
   const model = fs.readFileSync(path.join(root, 'ios/ViciInbox/App/CampaignViewModels.swift'), 'utf8');
   const api = fs.readFileSync(path.join(root, 'ios/ViciInbox/Core/APIClient.swift'), 'utf8');
 
-  assert.match(view, /Label\("Suggest valid copy", systemImage: "wand\.and\.stars"\)/);
-  assert.match(view, /Every version shown here has passed the campaign copy checks/);
+  assert.match(view, /Label\("Improve this message", systemImage: "wand\.and\.stars"\)/);
+  assert.match(view, /Get three ready-to-use versions in your usual tone/);
   assert.match(model, /func suggestValidCopy\(\) async/);
   assert.match(model, /instruction: nil, currentMessage: current/);
   assert.match(model, /couponCode: attachedCoupon\?\.code/);
