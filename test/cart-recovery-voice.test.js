@@ -40,6 +40,7 @@ const VOICE_ENV = {
   TELNYX_API_KEY: 'KEY_TEST',
   TELNYX_PHONE_NUMBER: '+12125550100',
   TELNYX_CONNECTION_ID: 'connection-1',
+  ELEVENLABS_API_KEY: 'XI_TEST',
   ELEVENLABS_VIN_VOICE_ID: 'vin-voice',
   ELEVENLABS_MODEL: 'eleven_turbo_v2_5',
   TELNYX_ELEVENLABS_API_KEY_REF: 'elevenlabs-key-ref',
@@ -710,17 +711,18 @@ test('a machine answer stops provisional audio and plays the full voicemail only
   assert.match(plays[1][2], /voicemail\.mp3/);
 });
 
-test('voice event handler starts speech only after AMD decides human and never invokes recording', async () => {
+test('voice event handler starts staged audio only after AMD decides human and never invokes recording', async () => {
   const client = memoryVoiceClient();
+  attachVoiceAudioStorage(client);
   const calls = [];
   const handler = createVoiceEventHandler({
     client, env: VOICE_ENV, now: () => NOW,
     api: {
-      speak: async (...args) => {
+      play: async (...args) => {
         assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING',
-          'the branch must be durable before Telnyx can emit speak webhooks');
+          'the branch must be durable before Telnyx can emit playback webhooks');
         assert.equal(client.state.recovery.voice_status, 'HUMAN_MESSAGE_PLAYING');
-        calls.push(['speak', ...args]);
+        calls.push(['play', ...args]);
       },
       transcribe: async (...args) => calls.push(['transcribe', ...args]),
       hangup: async (...args) => calls.push(['hangup', ...args]),
@@ -730,21 +732,21 @@ test('voice event handler starts speech only after AMD decides human and never i
   });
   const result = await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human' }));
   assert.deepEqual(result, { handled: true });
-  assert.deepEqual(calls.map(call => call[0]), ['transcribe', 'speak']);
-  assert.equal(calls[1][2], 'Human message');
-  assert.equal(calls[1][3].voice, 'ElevenLabs.eleven_turbo_v2_5.vin-voice');
+  assert.deepEqual(calls.map(call => call[0]), ['transcribe', 'play']);
+  assert.match(calls[1][2], /human\.mp3/);
   assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING');
   assert.equal(client.state.rpcs.some(call => call.name === 'append_luko_cart_recovery_timeline'
     && call.args.p_event_type === 'VOICE_HUMAN_DETECTED'), true);
 });
 
-test('voicemail speech waits for greeting end and spoken STOP suppresses without persisting transcript', async () => {
+test('voicemail playback waits for greeting end and spoken STOP suppresses without persisting transcript', async () => {
   const client = memoryVoiceClient();
+  attachVoiceAudioStorage(client);
   const calls = [];
   const handler = createVoiceEventHandler({
     client, env: VOICE_ENV, now: () => NOW,
     api: {
-      speak: async (...args) => calls.push(['speak', ...args]),
+      play: async (...args) => calls.push(['play', ...args]),
       transcribe: async (...args) => calls.push(['transcribe', ...args]),
       hangup: async (...args) => calls.push(['hangup', ...args]),
       stopAudio: async (...args) => calls.push(['stopAudio', ...args]),
@@ -754,8 +756,8 @@ test('voicemail speech waits for greeting end and spoken STOP suppresses without
   await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }));
   assert.equal(calls.length, 0, 'machine classification alone must not speak over the greeting');
   await handler.handle(voiceEvent('call.machine.premium.greeting.ended', { result: 'greeting ended' }));
-  assert.equal(calls[0][0], 'speak');
-  assert.equal(calls[0][2], 'Voicemail message');
+  assert.equal(calls[0][0], 'play');
+  assert.match(calls[0][2], /voicemail\.mp3/);
 
   await handler.handle(voiceEvent('call.transcription', {
     transcription_data: { is_final: true, transcript: 'Please stop calling me' }
@@ -772,11 +774,12 @@ test('voicemail speech waits for greeting end and spoken STOP suppresses without
 
 test('premium greeting-ended may arrive before machine detection without losing the voicemail', async () => {
   const client = memoryVoiceClient();
+  attachVoiceAudioStorage(client);
   const calls = [];
   const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
     schedule: () => {},
     api: {
-      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      play: async (...args) => calls.push(['play', ...args]), transcribe: async () => {},
       hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
     } });
 
@@ -785,18 +788,19 @@ test('premium greeting-ended may arrive before machine detection without losing 
   assert.equal(calls.length, 0, 'classification still controls the branch');
   await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'machine' }, 'machine-second'));
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
-  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1);
 });
 
 test('machine detection uses a single durable fallback when a carrier omits greeting-ended', async () => {
   const client = memoryVoiceClient();
+  attachVoiceAudioStorage(client);
   const calls = [];
   let fallback;
   let fallbackDelay;
   const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
     schedule: (callback, delay) => { fallback = callback; fallbackDelay = delay; },
     api: {
-      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      play: async (...args) => calls.push(['play', ...args]), transcribe: async () => {},
       hangup: async () => {}, stopAudio: async () => {}, transfer: async () => {}
     } });
 
@@ -808,17 +812,18 @@ test('machine detection uses a single durable fallback when a carrier omits gree
     'the fallback must play before short carrier mailboxes disconnect when greeting-ended is omitted');
   await fallback();
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
-  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1);
   await fallback();
-  assert.equal(calls.filter(call => call[0] === 'speak').length, 1, 'the state transition prevents replay');
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1, 'the state transition prevents replay');
 });
 
-test('overlapping greeting and speak-ended events cannot replay or change the voicemail branch', async () => {
+test('overlapping greeting and playback-ended events cannot replay or change the voicemail branch', async () => {
   const client = memoryVoiceClient();
+  attachVoiceAudioStorage(client);
   const calls = [];
   const handler = createVoiceEventHandler({ client, env: VOICE_ENV, now: () => NOW,
     api: {
-      speak: async (...args) => calls.push(['speak', ...args]), transcribe: async () => {},
+      play: async (...args) => calls.push(['play', ...args]), transcribe: async () => {},
       hangup: async (...args) => calls.push(['hangup', ...args]), stopAudio: async () => {}, transfer: async () => {}
     } });
 
@@ -827,12 +832,12 @@ test('overlapping greeting and speak-ended events cannot replay or change the vo
     handler.handle(voiceEvent('call.machine.greeting.ended', {}, 'greeting-1')),
     handler.handle(voiceEvent('call.machine.greeting.ended', {}, 'greeting-2'))
   ]);
-  assert.equal(calls.filter(call => call[0] === 'speak').length, 1);
+  assert.equal(calls.filter(call => call[0] === 'play').length, 1);
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYING');
 
   await Promise.all([
-    handler.handle(voiceEvent('call.speak.ended', {}, 'speak-ended-1')),
-    handler.handle(voiceEvent('call.speak.ended', {}, 'speak-ended-2'))
+    handler.handle(voiceEvent('call.playback.ended', {}, 'playback-ended-1')),
+    handler.handle(voiceEvent('call.playback.ended', {}, 'playback-ended-2'))
   ]);
   assert.equal(client.state.attempt.state, 'VOICEMAIL_PLAYED');
   assert.equal(calls.filter(call => call[0] === 'hangup').length, 1);

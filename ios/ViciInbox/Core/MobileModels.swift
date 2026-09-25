@@ -792,12 +792,17 @@ struct RecoveryVoiceOption: Decodable, Hashable, Identifiable {
     let age: String?
     let descriptive: String?
     let category: String?
+    let provider: String?
+    let providerLabel: String?
+    let modelId: String?
     let professionalClone: Bool?
+    let syntheticDesign: Bool?
     let previewUrl: String?
     let verified: Bool
 
     var subtitle: String {
-        [professionalClone == true ? "Professional clone" : nil, accent, gender, descriptive].compactMap { value in
+        [syntheticDesign == true ? "Designed voice" : (professionalClone == true ? "Professional clone" : nil),
+         providerLabel, accent, gender, descriptive].compactMap { value in
             guard let value, !value.isEmpty else { return nil }
             return value.capitalized
         }.joined(separator: " · ")
@@ -807,6 +812,7 @@ struct RecoveryVoiceOption: Decodable, Hashable, Identifiable {
 struct RecoveryVoiceCatalogue: Decodable {
     let voices: [RecoveryVoiceOption]
     let authorizationBoundary: String?
+    let providerWarnings: [String]?
 }
 
 struct CartRecoverySettings: Decodable, Hashable {
@@ -832,6 +838,7 @@ struct CartRecoverySettings: Decodable, Hashable {
     var voiceDelayMinutes: Int
     var voiceAmdMode: String
     var voiceHumanAnswerMode: String
+    var voiceProvider: String
     var voiceID: String?
     var voiceName: String?
     var voiceModelID: String
@@ -872,6 +879,7 @@ struct CartRecoverySettings: Decodable, Hashable {
         voiceDelayMinutes = values.first(Int.self, "voiceDelayMinutes", "voice_delay_minutes") ?? 180
         voiceAmdMode = values.first(String.self, "voiceAmdMode", "voice_amd_mode") ?? "premium_ios_call_screening_detection"
         voiceHumanAnswerMode = values.first(String.self, "voiceHumanAnswerMode", "voice_human_answer_mode") ?? "DISABLED"
+        voiceProvider = values.first(String.self, "voiceProvider", "voice_provider") ?? "elevenlabs"
         voiceID = values.first(String.self, "voiceId", "voiceID", "voice_id")
         voiceName = values.first(String.self, "voiceName", "voice_name")
         voiceModelID = values.first(String.self, "voiceModelId", "voiceModelID", "voice_model_id") ?? "eleven_turbo_v2_5"
@@ -912,6 +920,7 @@ struct CartRecoverySettings: Decodable, Hashable {
             "voiceDelayMinutes": voiceDelayMinutes,
             "voiceAmdMode": voiceAmdMode,
             "voiceHumanAnswerMode": voiceHumanAnswerMode,
+            "voiceProvider": voiceProvider,
             "voiceId": voiceID ?? "",
             "voiceModelId": voiceModelID,
             "voiceHumanTemplate": voiceHumanTemplate,

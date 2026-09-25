@@ -107,7 +107,8 @@ function analytics(service, { env = process.env, audit = logAuditSafely } = {}) 
       await auditCartRecovery({
         eventType: 'cart_recovery.voice_previewed', req,
         summary: 'Previewed an authorized Vin recovery voice',
-        metadata: { automation: 'abandoned_cart_recovery', voice_id: result.voice.id }
+        metadata: { automation: 'abandoned_cart_recovery', voice_id: result.voice.id,
+          voice_provider: result.voice.provider }
       }, audit);
       res.set('Content-Type', result.contentType);
       res.set('X-Content-Type-Options', 'nosniff');

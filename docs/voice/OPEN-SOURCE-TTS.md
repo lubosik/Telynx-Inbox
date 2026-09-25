@@ -2,16 +2,23 @@
 
 ## Decision
 
-Keep ElevenLabs Professional Voice Clones as the production recovery provider
-until a separate GPU inference service and a commercially authorized Vici voice
-profile exist. The application must never treat a model name as a voice or use
-an arbitrary internet recording as cloning material.
+Pilot Qwen3-TTS VoiceDesign through Alibaba Cloud Model Studio in the Singapore
+region. VoiceDesign creates wholly synthetic voice assets from an objective
+description, so it does not require or imitate a person's recording. Keep the
+existing ElevenLabs Professional Voice Clones available during the blind quality
+comparison. The application must never treat a model name as a voice or use an
+arbitrary internet recording as cloning material.
+
+The pilot uses `qwen3-tts-vd-2026-01-26` for both design and synthesis. The
+backend accepts only English, account-scoped voices with the `vici_` operations
+prefix. It derives the Singapore workspace hostname from
+`DASHSCOPE_WORKSPACE_ID`; no client-supplied provider URL is accepted.
 
 The first two candidates for a controlled pilot are:
 
-1. Qwen3-TTS 0.6B Base. Apache-2.0, zero-shot voice cloning, English support,
-   and streaming. Use VoiceDesign only to create a wholly synthetic Vici voice,
-   then retain the authorized reference for the smaller Base model.
+1. Qwen3-TTS. Apache-2.0 open weights, English support, and VoiceDesign. The
+   hosted VoiceDesign pilot is the fastest safe route because it needs no voice
+   recording or Railway GPU. A later self-hosted Base pilot remains possible.
    - https://github.com/QwenLM/Qwen3-TTS
    - https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-Base
 2. Chatterbox Turbo. MIT licensed, zero-shot cloning, and built-in PerTh
@@ -38,10 +45,11 @@ is visible.
 
 ## Required production architecture
 
-Railway does not provide GPU instances. Run the selected model in a separate,
-authenticated GPU inference service. The Vici backend remains the only caller
-and must persist an immutable provider, model, and authorized voice-profile ID
-on every attempt.
+Railway does not provide GPU instances. The initial pilot therefore uses the
+authenticated Model Studio service; a future self-hosted model would require a
+separate GPU inference service. The Vici backend remains the only caller and
+persists an immutable provider, model, and authorized voice-profile ID on every
+attempt.
 
 Before dialing:
 

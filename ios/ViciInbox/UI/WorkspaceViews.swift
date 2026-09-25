@@ -998,11 +998,13 @@ struct CartRecoverySettingsView: View {
                                     voicePreview.stop()
                                     draft?.voiceID = voice.id
                                     draft?.voiceName = voice.name
+                                    draft?.voiceProvider = voice.provider ?? "elevenlabs"
+                                    if let model = voice.modelId { draft?.voiceModelID = model }
                                 } label: {
                                     if draft?.voiceID == voice.id {
-                                        Label("\(voice.name) · Professional clone", systemImage: "checkmark")
+                                        Label("\(voice.name) · \(voice.syntheticDesign == true ? "Designed voice" : "Professional clone")", systemImage: "checkmark")
                                     } else {
-                                        Text("\(voice.name) · Professional clone")
+                                        Text("\(voice.name) · \(voice.syntheticDesign == true ? "Designed voice" : "Professional clone")")
                                     }
                                 }
                             }
@@ -1221,7 +1223,7 @@ struct CartRecoverySettingsView: View {
             let catalogue = try await APIClient.shared.fetchCartRecoveryVoices()
             await MainActor.run {
                 recoveryVoices = catalogue.voices
-                voiceCatalogueError = nil
+                voiceCatalogueError = catalogue.providerWarnings?.first
             }
         } catch {
             await MainActor.run {
@@ -1411,6 +1413,14 @@ private func cartRecoveryVoiceBlocker(_ code: String) -> String {
         return "Voice is in preview mode"
     case "vin_voice_missing":
         return "Choose and save a Vin voice"
+    case "elevenlabs_api_key_missing":
+        return "Reconnect the ElevenLabs voice provider"
+    case "qwen_api_key_missing":
+        return "Connect the Qwen voice provider"
+    case "qwen_workspace_missing":
+        return "Add the Qwen Singapore workspace ID"
+    case "invalid_voice_provider":
+        return "Choose an available Vin voice again"
     case "transfer_number_missing":
         return "Add a team phone number for live transfers"
     default:

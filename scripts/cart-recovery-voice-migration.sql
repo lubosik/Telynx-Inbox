@@ -27,6 +27,7 @@ ALTER TABLE public.luko_cart_recovery_settings
   ADD COLUMN IF NOT EXISTS voice_delay_minutes integer NOT NULL DEFAULT 180,
   ADD COLUMN IF NOT EXISTS voice_amd_mode text NOT NULL DEFAULT 'premium_ios_call_screening_detection',
   ADD COLUMN IF NOT EXISTS voice_human_answer_mode text NOT NULL DEFAULT 'DISABLED',
+  ADD COLUMN IF NOT EXISTS voice_provider text NOT NULL DEFAULT 'elevenlabs',
   ADD COLUMN IF NOT EXISTS voice_id text,
   ADD COLUMN IF NOT EXISTS voice_name text,
   ADD COLUMN IF NOT EXISTS voice_model_id text NOT NULL DEFAULT 'eleven_turbo_v2_5',
@@ -59,6 +60,11 @@ BEGIN
       AND conrelid='public.luko_cart_recovery_settings'::regclass) THEN
     ALTER TABLE public.luko_cart_recovery_settings ADD CONSTRAINT luko_voice_human_mode_check
       CHECK (voice_human_answer_mode IN ('DISABLED','TRANSFER_ONLY','PRERECORDED'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='luko_cart_recovery_settings_voice_provider_check'
+      AND conrelid='public.luko_cart_recovery_settings'::regclass) THEN
+    ALTER TABLE public.luko_cart_recovery_settings ADD CONSTRAINT luko_cart_recovery_settings_voice_provider_check
+      CHECK (voice_provider IN ('elevenlabs','qwen'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='luko_voice_attempt_limit_check'
       AND conrelid='public.luko_cart_recovery_settings'::regclass) THEN
@@ -177,6 +183,7 @@ CREATE TABLE IF NOT EXISTS public.luko_cart_voice_attempts (
   provider text NOT NULL DEFAULT 'telnyx',
   amd_mode text NOT NULL,
   human_answer_mode text NOT NULL,
+  voice_provider text NOT NULL DEFAULT 'elevenlabs' CHECK (voice_provider IN ('elevenlabs','qwen')),
   voice_id text NOT NULL,
   voice_model_id text NOT NULL,
   human_template_version text NOT NULL,
@@ -210,6 +217,19 @@ CREATE TABLE IF NOT EXISTS public.luko_cart_voice_attempts (
   UNIQUE(workspace_id,provider_command_id),
   UNIQUE(workspace_id,call_control_id)
 );
+ALTER TABLE public.luko_cart_voice_attempts
+  ADD COLUMN IF NOT EXISTS voice_provider text NOT NULL DEFAULT 'elevenlabs';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+      WHERE conname='luko_cart_voice_attempts_voice_provider_check'
+        AND conrelid='public.luko_cart_voice_attempts'::regclass) THEN
+    ALTER TABLE public.luko_cart_voice_attempts
+      ADD CONSTRAINT luko_cart_voice_attempts_voice_provider_check
+      CHECK (voice_provider IN ('elevenlabs','qwen'));
+  END IF;
+END
+$$;
 CREATE INDEX IF NOT EXISTS luko_voice_attempt_call_session_idx
   ON public.luko_cart_voice_attempts(workspace_id,call_session_id) WHERE call_session_id IS NOT NULL;
 
@@ -349,7 +369,11 @@ $$;
 CREATE OR REPLACE FUNCTION public.begin_luko_cart_voice_call(p_id uuid,p_claim uuid,p_attempt jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE v public.luko_cart_recoveries%ROWTYPE; v_attempt_id uuid; v_number integer;
+  v_voice_provider text:=lower(coalesce(nullif(p_attempt->>'voice_provider',''),'elevenlabs'));
 BEGIN
+  IF v_voice_provider NOT IN ('elevenlabs','qwen') THEN
+    RAISE EXCEPTION 'invalid_voice_provider' USING ERRCODE='22023';
+  END IF;
   SELECT * INTO v FROM public.luko_cart_recoveries WHERE id=p_id FOR UPDATE;
   IF v.id IS NULL OR v.voice_claim_token IS DISTINCT FROM p_claim OR v.order_id IS NOT NULL
      OR NOT v.voice_marketing_consent OR NOT v.ai_voice_consent OR v.voice_status<>'CLAIMED'
@@ -372,11 +396,11 @@ BEGIN
   END IF;
   v_number:=v.voice_attempt_count+1;
   INSERT INTO public.luko_cart_voice_attempts(workspace_id,recovery_id,attempt_number,state,dry_run,amd_mode,
-    human_answer_mode,voice_id,voice_model_id,human_template_version,voicemail_template_version,
+    human_answer_mode,voice_provider,voice_id,voice_model_id,human_template_version,voicemail_template_version,
     rendered_human_text,rendered_voicemail_text,consent_event_id,provider_command_id,initiated_at)
   VALUES(v.workspace_id,v.id,v_number,CASE WHEN coalesce((p_attempt->>'dry_run')::boolean,true) THEN 'DRY_RUN' ELSE 'DIALING' END,
     coalesce((p_attempt->>'dry_run')::boolean,true),p_attempt->>'amd_mode',p_attempt->>'human_answer_mode',
-    p_attempt->>'voice_id',p_attempt->>'voice_model_id',p_attempt->>'human_template_version',
+    v_voice_provider,p_attempt->>'voice_id',p_attempt->>'voice_model_id',p_attempt->>'human_template_version',
     p_attempt->>'voicemail_template_version',p_attempt->>'rendered_human_text',p_attempt->>'rendered_voicemail_text',
     nullif(p_attempt->>'consent_event_id','')::bigint,p_attempt->>'provider_command_id',now()) RETURNING id INTO v_attempt_id;
   UPDATE public.luko_cart_recoveries SET voice_status=CASE WHEN coalesce((p_attempt->>'dry_run')::boolean,true) THEN 'DRY_RUN' ELSE 'DIALING' END,

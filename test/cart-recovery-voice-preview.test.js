@@ -46,7 +46,7 @@ test('recovery voice preview authorizes the voice and synthesizes the fixed safe
   assert.doesNotMatch(request.text, /customer|first_name|phone|order number/i);
   assert.equal(result.contentType, 'audio/mpeg');
   assert.ok(Buffer.isBuffer(result.audio));
-  assert.deepEqual(result.voice, { id: VIN_ID, name: 'Mark' });
+  assert.deepEqual(result.voice, { id: VIN_ID, name: 'Mark', provider: 'elevenlabs' });
 });
 
 test('recovery voice preview rejects malformed and unauthorized voices before synthesis', async () => {
