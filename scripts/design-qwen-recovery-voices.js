@@ -6,7 +6,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { designVoice, listDesignedVoices } = require('../lib/assistant/qwen-voice');
+const { designVoice, listDesignedVoices, speak } = require('../lib/assistant/qwen-voice');
 
 const PREVIEW = 'Hi Maya, it is Vin from Vici Peptides. You left GHK in your cart. I sent you a text earlier so you can pick up where you left off. If you have any questions, press 1 to speak with the Vici team.';
 
@@ -50,9 +50,16 @@ async function main() {
   const results = [];
   for (const profile of PROFILES) {
     const found = existing.find(voice => voice.id === profile.preferredName
-      || voice.id.startsWith(`${profile.preferredName}_`));
+      || voice.id.startsWith(`${profile.preferredName}_`)
+      || voice.id.includes(`-${profile.preferredName}-`));
     if (found) {
-      results.push({ preferredName: profile.preferredName, id: found.id, status: 'already_exists' });
+      const preview = await speak({ text: PREVIEW, voiceID: found.id, modelID: found.modelId });
+      const file = path.join(outputDir, `${profile.preferredName}.wav`);
+      await fs.writeFile(file, preview.audio, { flag: 'wx' }).catch(error => {
+        if (error.code !== 'EEXIST') throw error;
+      });
+      results.push({ preferredName: profile.preferredName, id: found.id,
+        status: 'already_exists', preview: file });
       continue;
     }
     const created = await designVoice({ preferredName: profile.preferredName,

@@ -28,11 +28,11 @@ test('Qwen catalogue is account-scoped and exposes only English Vici VoiceDesign
   const voices = await listDesignedVoices({ env: ENV, fetchImpl: async (url, options) => {
     request = { url, options };
     return new Response(JSON.stringify({ output: { voice_list: [
-      { voice: 'vici_miami', language: 'en', target_model: TARGET_MODEL,
+      { voice: 'qwen-tts-vd-vici_miami-voice-20260925183830381-1347', language: 'en', target_model: TARGET_MODEL,
         voice_prompt: 'A highly realistic young adult American female voice.' },
       { voice: 'other_voice', language: 'en', target_model: TARGET_MODEL },
-      { voice: 'vici_wrong', language: 'zh', target_model: TARGET_MODEL },
-      { voice: 'vici_old', language: 'en', target_model: 'different-model' }
+      { voice: 'qwen-tts-vd-vici_wrong-voice-20260925183830381-1347', language: 'zh', target_model: TARGET_MODEL },
+      { voice: 'qwen-tts-vd-vici_old-voice-20260925183830381-1347', language: 'en', target_model: 'different-model' }
     ] } }), { status: 200, headers: { 'content-type': 'application/json' } });
   } });
   assert.equal(request.url, 'https://ws-test123.ap-southeast-1.maas.aliyuncs.com/api/v1/services/audio/tts/customization');
@@ -54,7 +54,7 @@ test('Qwen VoiceDesign sends the approved request shape and parses its WAV previ
     fetchImpl: async (_url, options) => {
       body = JSON.parse(options.body);
       return new Response(JSON.stringify({ output: {
-        voice: 'vici_miami', target_model: TARGET_MODEL,
+        voice: 'qwen-tts-vd-vici_miami-voice-20260925183830381-1347', target_model: TARGET_MODEL,
         preview_audio: { data: Buffer.from('RIFF-test').toString('base64') }
       } }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
@@ -69,7 +69,8 @@ test('Qwen VoiceDesign sends the approved request shape and parses its WAV previ
 
 test('Qwen synthesis downloads only bounded audio from an Alibaba HTTPS location', async () => {
   const calls = [];
-  const result = await speak({ text: 'Hello from Vin.', voiceID: 'vici_miami', env: ENV,
+  const result = await speak({ text: 'Hello from Vin.',
+    voiceID: 'qwen-tts-vd-vici_miami-voice-20260925183830381-1347', env: ENV,
     fetchImpl: async (url, options = {}) => {
       calls.push({ url, options });
       if (url.includes('/multimodal-generation/')) {
@@ -82,7 +83,7 @@ test('Qwen synthesis downloads only bounded audio from an Alibaba HTTPS location
     } });
   assert.equal(JSON.parse(calls[0].options.body).model, TARGET_MODEL);
   assert.deepEqual(JSON.parse(calls[0].options.body).input,
-    { text: 'Hello from Vin.', voice: 'vici_miami' });
+    { text: 'Hello from Vin.', voice: 'qwen-tts-vd-vici_miami-voice-20260925183830381-1347' });
   assert.equal(calls[1].options.redirect, 'error');
   assert.equal(result.audio.toString(), 'RIFF-speech');
   assert.equal(result.characters, 15);
@@ -91,15 +92,17 @@ test('Qwen synthesis downloads only bounded audio from an Alibaba HTTPS location
 test('Qwen audio location validation rejects arbitrary hosts and oversized responses', async () => {
   assert.equal(safeAudioURL('https://169.254.169.254/metadata'), null);
   assert.equal(safeAudioURL('http://example.aliyuncs.com/audio.wav'), null);
-  assert.match(safeAudioURL('https://safe.aliyuncs.com/audio.wav'), /^https:/);
-  await assert.rejects(downloadAudio('https://safe.aliyuncs.com/audio.wav', {
+  assert.equal(safeAudioURL('https://safe.aliyuncs.com/audio.wav'), null);
+  assert.equal(safeAudioURL('http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav'),
+    'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav');
+  await assert.rejects(downloadAudio('https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav', {
     fetchImpl: async () => new Response('x', { status: 200,
       headers: { 'content-type': 'audio/wav', 'content-length': String(20 * 1024 * 1024) } })
   }), error => error.code === 'QWEN_AUDIO_DOWNLOAD_FAILED');
 });
 
 test('recovery catalogue previews Qwen through the Qwen provider and saves immutable provider metadata', async () => {
-  const qwenVoice = { id: 'vici_miami', name: 'Maya Social', provider: 'qwen',
+  const qwenVoice = { id: 'qwen-tts-vd-vici_miami-voice-20260925183830381-1347', name: 'Maya Social', provider: 'qwen',
     providerLabel: 'Qwen VoiceDesign', modelId: TARGET_MODEL, accent: 'american', gender: 'female',
     language: 'en', category: 'designed', verified: true, syntheticDesign: true };
   let synthesis;
