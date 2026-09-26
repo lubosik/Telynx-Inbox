@@ -10,6 +10,8 @@ const WITHOUT_FOOTER = "Vin from Vici: Hi {{first_name}}, how are you finding ev
 
 test('only VIP and automatic check-in workflows may omit the repeated footer', () => {
   assert.equal(requiresOptOutFooter('vip'), false);
+  assert.equal(requiresOptOutFooter('vip_welcome'), false);
+  assert.equal(requiresOptOutFooter('vip_reorder'), false);
   assert.equal(requiresOptOutFooter('checkin_21d'), false);
   assert.equal(requiresOptOutFooter('manual'), true);
   assert.equal(requiresOptOutFooter('winback'), true);
