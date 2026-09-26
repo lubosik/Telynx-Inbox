@@ -13,9 +13,10 @@ Pinned supply chain:
 - model revision: `ef2795fcc29c5abe6ffc91fd33808588b49bbc66`
 
 Required secrets are `DIA_API_TOKEN` (32+ random characters) and, for private
-or rate-limited downloads, `HF_TOKEN`. The reviewed Space sleeps after one idle
-minute. Railway retries a waking Space for up to five minutes, and synthesis
-still completes before Telnyx is permitted to dial.
+or rate-limited downloads, `HF_TOKEN`. The reviewed Space sleeps after ten idle
+minute. Railway sends bounded health probes while the Space loads, retries for
+up to eight minutes, and synthesis still completes before Telnyx is permitted
+to dial.
 
 The default profile is generated directly from a fixed, audited seed and does
 not clone a person. Two fallback seeds and signal-level duration, loudness, and

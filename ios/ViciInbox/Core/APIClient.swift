@@ -554,7 +554,7 @@ actor APIClient {
         // A private Dia GPU may be waking from zero. Production calls still
         // generate before dialing; the longer timeout is only for an explicit
         // operator preview and never keeps a customer on the line.
-        let (data, response) = try await post(path, body: [:], timeout: 330)
+        let (data, response) = try await post(path, body: [:], timeout: 510)
         try validate(data: data, response: response)
         guard !data.isEmpty else { throw APIError.decoding }
         return data
@@ -564,7 +564,7 @@ actor APIClient {
     /// a QC preview, not a recording of the customer call.
     func previewCartRecoveryAttempt(journeyID: String, branch: String) async throws -> Data {
         let path = "/api/cart-recovery/journeys/\(encodedPathSegment(journeyID))/voice-attempt/preview"
-        let (data, response) = try await post(path, body: ["branch": branch], timeout: 330)
+        let (data, response) = try await post(path, body: ["branch": branch], timeout: 510)
         try validate(data: data, response: response)
         guard !data.isEmpty else { throw APIError.decoding }
         return data

@@ -22,6 +22,9 @@ const ENV = {
   DIA_MODEL_REVISION: MODEL_REVISION
 };
 const MP3 = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00]);
+const HEALTHY = () => new Response('{"status":"ready"}', {
+  status: 200, headers: { 'content-type': 'application/json' }
+});
 
 test('Dia configuration is pinned, private-endpoint-shaped, and fails closed', () => {
   const config = configuration(ENV);
@@ -59,6 +62,7 @@ test('Dia synthesis authenticates, pins the model revision, and returns a bounde
     modelID: `${MODEL_ID}@${MODEL_REVISION}`,
     env: ENV,
     fetchImpl: async (url, options) => {
+      if (options.method === 'GET') return HEALTHY();
       request = { url, options };
       return new Response(MP3, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
     }
@@ -78,9 +82,10 @@ test('Dia synthesis authenticates, pins the model revision, and returns a bounde
   assert.equal(validMP3(result.audio), true);
 });
 
-test('Dia waits through a sleeping Space and retries the same authenticated request', async () => {
+test('Dia keeps a sleeping Space awake with bounded health probes before synthesis', async () => {
   let attempts = 0;
   let waits = 0;
+  let synthesisAttempts = 0;
   const result = await speak({
     text: 'Hi Alex, your RT is still in the cart.',
     voiceID: 'dia_vici_sunny_v1',
@@ -89,15 +94,20 @@ test('Dia waits through a sleeping Space and retries the same authenticated requ
       assert.equal(milliseconds, 500);
       waits += 1;
     },
-    fetchImpl: async () => {
+    fetchImpl: async (url, options) => {
       attempts += 1;
-      return attempts < 3
-        ? new Response('', { status: 503, headers: { 'content-type': 'text/plain' } })
-        : new Response(MP3, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+      if (options.method === 'GET') {
+        return attempts < 3
+          ? new Response('', { status: 503, headers: { 'content-type': 'text/plain' } })
+          : HEALTHY();
+      }
+      synthesisAttempts += 1;
+      return new Response(MP3, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
     }
   });
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 4);
   assert.equal(waits, 2);
+  assert.equal(synthesisAttempts, 1);
   assert.equal(validMP3(result.audio), true);
   assert.equal(retryDelayValue('999999'), 15_000);
 });
@@ -106,10 +116,12 @@ test('Dia synthesis rejects unauthorized profiles and malformed provider respons
   await assert.rejects(speak({ text: 'Hello.', voiceID: 'arbitrary_clone', env: ENV }),
     error => error.code === 'DIA_PROFILE_INVALID');
   await assert.rejects(speak({ text: 'Hello.', voiceID: 'dia_vici_sunny_v1', env: ENV,
-    fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) }),
+    fetchImpl: async (_url, options) => options.method === 'GET' ? HEALTHY()
+      : new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) }),
   error => error.code === 'DIA_AUDIO_INVALID');
   await assert.rejects(speak({ text: 'Hello.', voiceID: 'dia_vici_sunny_v1', env: ENV,
-    fetchImpl: async () => new Response('', { status: 401, headers: { 'content-type': 'text/plain' } }) }),
+    fetchImpl: async (_url, options) => options.method === 'GET' ? HEALTHY()
+      : new Response('', { status: 401, headers: { 'content-type': 'text/plain' } }) }),
   error => error.code === 'DIA_KEY_REJECTED');
 });
 
@@ -172,5 +184,5 @@ test('migration, GPU service, and iOS client preserve provider and long preview 
   assert.match(python, /async with runtime\.lock/);
   assert.match(dockerfile, /876125e461a03b157ec905b0fe8b57a0f8b9e7a0/);
   assert.match(models, /if provider == "dia" \{ return "Dia voice" \}/);
-  assert.match(api, /timeout: 330/);
+  assert.match(api, /timeout: 510/);
 });
