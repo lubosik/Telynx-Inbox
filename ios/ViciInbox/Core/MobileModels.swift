@@ -826,8 +826,15 @@ struct RecoveryVoiceOption: Decodable, Hashable, Identifiable {
     let previewUrl: String?
     let verified: Bool
 
+    var kindLabel: String? {
+        if provider == "dia" { return "Dia voice" }
+        if syntheticDesign == true { return "Designed voice" }
+        if professionalClone == true { return "Professional clone" }
+        return nil
+    }
+
     var subtitle: String {
-        [syntheticDesign == true ? "Designed voice" : (professionalClone == true ? "Professional clone" : nil),
+        [kindLabel,
          providerLabel, accent, gender, descriptive].compactMap { value in
             guard let value, !value.isEmpty else { return nil }
             return value.capitalized

@@ -1002,9 +1002,9 @@ struct CartRecoverySettingsView: View {
                                     if let model = voice.modelId { draft?.voiceModelID = model }
                                 } label: {
                                     if draft?.voiceID == voice.id {
-                                        Label("\(voice.name) · \(voice.syntheticDesign == true ? "Designed voice" : "Professional clone")", systemImage: "checkmark")
+                                        Label("\(voice.name) · \(voice.kindLabel ?? voice.providerLabel ?? "Authorized voice")", systemImage: "checkmark")
                                     } else {
-                                        Text("\(voice.name) · \(voice.syntheticDesign == true ? "Designed voice" : "Professional clone")")
+                                        Text("\(voice.name) · \(voice.kindLabel ?? voice.providerLabel ?? "Authorized voice")")
                                     }
                                 }
                             }
@@ -1419,6 +1419,10 @@ private func cartRecoveryVoiceBlocker(_ code: String) -> String {
         return "Connect the Qwen voice provider"
     case "qwen_workspace_missing":
         return "Add the Qwen Singapore workspace ID"
+    case "dia_endpoint_missing":
+        return "Connect the private Dia voice endpoint"
+    case "dia_api_key_missing":
+        return "Add the private Dia endpoint credential"
     case "invalid_voice_provider":
         return "Choose an available Vin voice again"
     case "transfer_number_missing":

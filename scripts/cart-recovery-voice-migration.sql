@@ -64,7 +64,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='luko_cart_recovery_settings_voice_provider_check'
       AND conrelid='public.luko_cart_recovery_settings'::regclass) THEN
     ALTER TABLE public.luko_cart_recovery_settings ADD CONSTRAINT luko_cart_recovery_settings_voice_provider_check
-      CHECK (voice_provider IN ('elevenlabs','qwen'));
+      CHECK (voice_provider IN ('elevenlabs','qwen','dia'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='luko_voice_attempt_limit_check'
       AND conrelid='public.luko_cart_recovery_settings'::regclass) THEN
@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS public.luko_cart_voice_attempts (
   provider text NOT NULL DEFAULT 'telnyx',
   amd_mode text NOT NULL,
   human_answer_mode text NOT NULL,
-  voice_provider text NOT NULL DEFAULT 'elevenlabs' CHECK (voice_provider IN ('elevenlabs','qwen')),
+  voice_provider text NOT NULL DEFAULT 'elevenlabs' CHECK (voice_provider IN ('elevenlabs','qwen','dia')),
   voice_id text NOT NULL,
   voice_model_id text NOT NULL,
   human_template_version text NOT NULL,
@@ -226,7 +226,7 @@ BEGIN
         AND conrelid='public.luko_cart_voice_attempts'::regclass) THEN
     ALTER TABLE public.luko_cart_voice_attempts
       ADD CONSTRAINT luko_cart_voice_attempts_voice_provider_check
-      CHECK (voice_provider IN ('elevenlabs','qwen'));
+      CHECK (voice_provider IN ('elevenlabs','qwen','dia'));
   END IF;
 END
 $$;
@@ -371,7 +371,7 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE v public.luko_cart_recoveries%ROWTYPE; v_attempt_id uuid; v_number integer;
   v_voice_provider text:=lower(coalesce(nullif(p_attempt->>'voice_provider',''),'elevenlabs'));
 BEGIN
-  IF v_voice_provider NOT IN ('elevenlabs','qwen') THEN
+  IF v_voice_provider NOT IN ('elevenlabs','qwen','dia') THEN
     RAISE EXCEPTION 'invalid_voice_provider' USING ERRCODE='22023';
   END IF;
   SELECT * INTO v FROM public.luko_cart_recoveries WHERE id=p_id FOR UPDATE;

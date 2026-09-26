@@ -81,6 +81,22 @@ test('a translated fault may claim nothing changed, because nothing did', () => 
   assert.match(body.error, /Nothing was changed/);
 });
 
+test('a waking Dia endpoint tells the operator to wait and retry without exposing provider internals', () => {
+  const log = recorder();
+  const { status, body } = presentError(
+    Object.assign(new Error('Dia voice request failed (502).'), {
+      code: 'DIA_ENDPOINT_WARMING', status: 502
+    }),
+    { action: 'previewing this Vin voice', logger: log }
+  );
+  assert.equal(status, 502);
+  assert.equal(body.code, 'VOICE_WARMING_UP');
+  assert.match(body.error, /Wait about a minute and try the preview again/);
+  assert.doesNotMatch(body.error, /502|endpoint|provider/i);
+  assert.match(body.error, /VIC-[A-Z2-9]{6}/);
+  assert.match(log.lines[0], /DIA_ENDPOINT_WARMING/);
+});
+
 test('an error with no code at all is hidden too', () => {
   // Default deny. A new internal error written next month is quiet by
   // default rather than leaking until somebody notices.

@@ -148,7 +148,8 @@ test('the Qwen pilot is fixed, gated, non-customer-facing, and migration/UI are 
   const view = fs.readFileSync(path.join(ROOT, 'ios/ViciInbox/UI/WorkspaceViews.swift'), 'utf8');
   assert.match(models, /var voiceProvider: String/);
   assert.match(models, /let syntheticDesign: Bool\?/);
-  assert.match(view, /Designed voice/);
+  assert.match(models, /return "Designed voice"/);
+  assert.match(view, /voice\.kindLabel/);
 });
 
 test('Qwen designed voices stay out of the production picker unless explicitly re-enabled', async () => {
