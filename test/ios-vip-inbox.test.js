@@ -72,7 +72,9 @@ test('Growth owns each VIP timing group and seeds a personalized campaign draft'
   assert.match(campaigns, /workflowCategory: "vip"/);
   assert.match(campaigns, /\{\{first_name\}\}/);
   assert.doesNotMatch(campaigns.slice(0, campaigns.indexOf('struct CampaignsView')), /Reply STOP to opt out\./);
-  assert.match(campaigns, /Never mention tracking, cadence, being overdue or running low/);
+  // The tail of this sentence grew when the quiet-VIP group gained an offer, so
+  // assert the surveillance prohibition itself rather than the exact wording.
+  assert.match(campaigns, /Never mention tracking, cadence, being overdue/);
 });
 
 test('VIP totals live in Analytics and are explicitly lifetime figures', () => {
@@ -100,4 +102,54 @@ test('campaign copy assistance uses compact list rows without a divider spacer',
   assert.match(section, /Improve this message/);
   assert.match(section, /Describe a different message or change/);
   assert.doesNotMatch(section, /Divider\(\)/);
+});
+
+// ── THE QUIET-VIP WIN-BACK OFFER ─────────────────────────────────────────
+//
+// The owner's instruction on 27 Sep 2026 was that a VIP who has gone quiet
+// gets a deeper discount plus the 1:1 coaching VIP already includes. The two
+// things worth locking are the ones that cost money or invite a complaint: the
+// percentage must travel with `{{code}}` so no coupon can be substituted for a
+// different amount, and the copy must never tell the customer that the shop
+// noticed they went quiet.
+test('the quiet-VIP group carries the verified discount and the included 1:1 support', () => {
+  const start = campaigns.indexOf('var campaignMessage: String');
+  const end = campaigns.indexOf('var campaignBrief: String');
+  assert.ok(start > 0 && end > start, 'campaignMessage block not found');
+  const messages = campaigns.slice(start, end);
+  const pastTiming = messages.slice(messages.indexOf('case .pastTiming:'));
+  const quiet = pastTiming.slice(0, pastTiming.indexOf('case .'), 1) || pastTiming;
+
+  // The offer itself.
+  assert.match(quiet, /30% off/);
+  // The coupon's real $100 minimum must be visible to the customer, or the code
+  // refuses them at checkout. The validator only permits this amount when
+  // WooCommerce has verified it, so the two sides cannot drift.
+  assert.match(quiet, /orders \$100 or more/);
+  assert.match(quiet, /\{\{code\}\}/);
+  assert.match(quiet, /1:1 research support/);
+  assert.match(quiet, /24\/7/);
+  assert.match(quiet, /can cost thousands a month/);
+  assert.match(quiet, /included at no extra cost/);
+  assert.match(quiet, /VIP/);
+
+  // A percentage with no coupon placeholder would be an unbacked promise.
+  assert.ok(quiet.includes('{{code}}'),
+    'a stated percentage must travel with {{code}} so the coupon gate can verify it');
+
+  // "free" and "sale" are blocked carrier-risk terms in the shared validator.
+  assert.doesNotMatch(quiet, /\bfree\b/i);
+  assert.doesNotMatch(quiet, /\bsale\b/i);
+  assert.doesNotMatch(quiet, /!/);
+
+  // Never tell the customer they were being watched.
+  assert.doesNotMatch(quiet, /gone quiet|quiet|overdue|running low|cadence|due for|haven't ordered/i);
+
+  // The brief must carry the coupon requirement forward to whoever edits it.
+  const briefs = campaigns.slice(end);
+  const briefStart = briefs.indexOf('case .pastTiming:');
+  const brief = briefs.slice(briefStart, briefs.indexOf('case .', briefStart + 10));
+  assert.match(brief, /verified 30% coupon/);
+  assert.match(brief, /Never say free/);
+  assert.match(brief, /gone quiet/);
 });

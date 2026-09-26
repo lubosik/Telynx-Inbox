@@ -33,7 +33,7 @@ private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .all: return "Every current VIP customer"
-        case .pastTiming: return "Personal check-ins for customers beyond their usual pattern"
+        case .pastTiming: return "Win back quiet VIPs with the deepest discount and included 1:1 support"
         case .atTiming: return "Customers currently around their usual reorder pattern"
         case .withinTiming: return "Active customers still within their usual pattern"
         case .noTiming: return "VIPs without enough history for a reliable pattern"
@@ -43,7 +43,7 @@ private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
     var campaignTitle: String {
         switch self {
         case .all: return "VIP customer update"
-        case .pastTiming: return "VIP personal check-in"
+        case .pastTiming: return "VIP win-back offer"
         case .atTiming: return "VIP first-access invitation"
         case .withinTiming: return "VIP loyalty thank-you"
         case .noTiming: return "VIP customer feedback"
@@ -54,8 +54,33 @@ private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
         switch self {
         case .all:
             return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Want first access to new arrivals and offers?"
+        // ── THE ONE GROUP THAT CARRIES AN OFFER ──────────────────────────
+        //
+        // The owner's instruction, 27 Sep 2026: a VIP who has gone quiet is
+        // worth a bigger incentive than a conversation opener, so this group
+        // leads with the deepest discount plus the 1:1 support already
+        // included in VIP.
+        //
+        // `{{code}}` and the stated percentage are what make this safe. A
+        // campaign using `{{code}}` cannot be tested or approved until a real
+        // WooCommerce coupon is attached, and `verifyExistingCoupon` refuses
+        // any coupon whose live amount is not the percentage written here. So
+        // this template cannot promise 30% until a published 30% coupon
+        // actually exists, and it can never quietly ship a 15% or 20% one.
+        //
+        // "included at no extra cost" rather than "free": both "free" and
+        // "sale" are blocked carrier-risk terms in the shared validator, and
+        // this group crosses the same gate as every other campaign.
+        //
+        // THE MINIMUM IS IN THE COPY ON PURPOSE. VICI30 carries a $100
+        // minimum, and a message promising 30% without saying so is the same
+        // fault as promising 20% on a 15% code: the customer types the code and
+        // it refuses them at checkout. The validator enforces this from the
+        // other side, permitting the currency amount only when WooCommerce has
+        // verified that exact minimum, and only in the phrase "orders $X or
+        // more".
         case .pastTiming:
-            return "Vin from Vici: Hi {{first_name}}, I wanted to check in personally. Is there anything we could improve for you?"
+            return "Hi {{first_name}}, it's Vin from Vici. As one of our VIP researchers your code {{code}} takes 30% off orders $100 or more, and you have 1:1 research support on this line, 24/7. Private coaching can cost thousands a month. Yours is included at no extra cost. Want the details?"
         case .atTiming:
             return "Vin from Vici: Hi {{first_name}}, I wanted to give you first access to our next new arrival. Would you like the details?"
         case .withinTiming:
@@ -70,7 +95,7 @@ private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
         case .all:
             return "Thank all VIP customers and invite them to ask for first access to verified new arrivals or a real VIP offer."
         case .pastTiming:
-            return "Write a warm personal check-in from Vin. Ask how Vici can improve. Never mention tracking, cadence, being overdue or running low."
+            return "Win back a quiet VIP with the deepest verified discount and the 1:1 research support VIP already includes. Attach the verified 30% coupon before testing or approving, and state the same percentage the coupon actually carries. Say private coaching can cost thousands a month and theirs is included at no extra cost. Never say free. Never mention tracking, cadence, being overdue, running low, or that they have gone quiet."
         case .atTiming:
             return "Invite VIP customers to request first access to a verified new arrival. Never mention reorder timing or monitoring."
         case .withinTiming:
