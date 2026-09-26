@@ -247,9 +247,9 @@ test('a refused audit stops that campaign rather than scheduling it unapproved',
 
 // ── When it sends ────────────────────────────────────────────────────────
 
-test('the send time is noon in the business zone, never inside quiet hours', async () => {
+test('the send time is 6 PM in the business zone, never inside quiet hours', async () => {
   // Quiet hours are 20:00–09:00 New York. Sweep from a spread of instants and
-  // check every answer lands at noon local.
+  // check every answer lands at 6 PM local.
   for (const iso of [
     '2026-01-15T03:00:00Z', '2026-01-15T14:00:00Z', '2026-01-15T23:30:00Z',
     '2026-06-15T04:00:00Z', '2026-06-15T16:45:00Z'
@@ -269,7 +269,7 @@ test('there is always time to cancel before it goes', async () => {
   }
 });
 
-test('noon is still noon across both daylight-saving boundaries', async () => {
+test('6 PM is still 6 PM across both daylight-saving boundaries', async () => {
   // 8 March 2026 clocks go forward, 1 November they go back. An offset baked in
   // at boot would put these an hour out, and an hour out at the edge of quiet
   // hours is the difference between legal and not.
@@ -393,4 +393,8 @@ test('the iOS switch owns its own state, so it moves when tapped', () => {
   // And it must say which state it is in, in words.
   assert.match(section, /ON, running every day/);
   assert.match(section, /OFF, nothing is sent/);
+  assert.match(section, /At 6:00 PM in the store time zone/,
+    'the automation screen must name the recurring business-local send hour');
+  assert.match(section, /timeZone\.identifier/,
+    'the next-send label must show which timezone defines 6 PM');
 });

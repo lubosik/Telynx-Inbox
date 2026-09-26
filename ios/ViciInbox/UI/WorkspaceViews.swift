@@ -1505,7 +1505,7 @@ struct CheckInAutomationSection: View {
 
                 if isOn, let next = automation?.nextSendDate {
                     LabeledContent("Next send") {
-                        Text(next.formatted(date: .abbreviated, time: .shortened))
+                        Text(checkInSendTime(next, timeZoneID: automation?.timeZone))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -1530,7 +1530,7 @@ struct CheckInAutomationSection: View {
             if !canApprove {
                 Text("Your role can see this but cannot switch it on or off. Switching it on authorises check-ins to be sent without anyone approving them, so it needs the same permission as approving a campaign.")
             } else if isOn {
-                Text("Everybody whose order passed the three-week mark in the last seven days is asked how it went. No offer, no code, and nobody is asked twice. It is built, approved and scheduled without you. Switching this off stops the next one; anything already scheduled still goes out unless you cancel it.")
+                Text("At 6:00 PM in the store time zone, everybody whose order passed the three-week mark in the last seven days is asked how it went. No offer, no code, and nobody is asked twice. It is built, approved and scheduled without you. Switching this off stops the next one; anything already scheduled still goes out unless you cancel it.")
             } else {
                 Text("Off. Nobody is checked in on unless you build the campaign yourself. Switching it on lets check-ins be approved and sent without you reading them first.")
             }
@@ -1570,6 +1570,16 @@ struct CheckInAutomationSection: View {
             failed = true
             message = error.localizedDescription
         }
+    }
+
+    private func checkInSendTime(_ date: Date, timeZoneID: String?) -> String {
+        let timeZone = timeZoneID.flatMap(TimeZone.init(identifier:))
+            ?? TimeZone(identifier: "America/New_York")!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d, h:mm a zzz"
+        return "\(formatter.string(from: date)) · \(timeZone.identifier)"
     }
 }
 
