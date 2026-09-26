@@ -6,7 +6,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * PROMISE ONE: NOBODY GETS THE SAME WORDING TWICE
  *
- *   Until this bank existed, every one of the ~40 people in a weekly check-in
+ *   Until this bank existed, every person in an automatic check-in
  *   received the identical sentence, every week, forever. The no-repeat rule
  *   is the whole point of Phase 2, so it is tested as an exhaustive property
  *   over every profile shape crossed with every possible previous variant
@@ -115,6 +115,15 @@ test('the bank holds at least four variants and every key matches its entry', ()
   }
 });
 
+test('every variant starts with the customer and asks a direct question', () => {
+  for (const key of VARIANT_KEYS) {
+    const template = VARIANTS[key].template;
+    assert.ok(template.startsWith('Hi {{first_name}}, it\'s Vin from Vici.'), key);
+    assert.ok(template.includes('?'), `${key} must invite a reply`);
+    assert.doesNotMatch(template, /I['’]m right here/i);
+  }
+});
+
 for (const key of VARIANT_KEYS) {
   test(`${key} passes validateCopy exactly as written`, () => {
     // The floor. A variant that fails here could never be sent to anybody.
@@ -154,7 +163,7 @@ for (const key of VARIANT_KEYS) {
   test(`${key} costs one SMS segment even at worst case`, () => {
     // Not a compliance rule, a cost one. The cap is 306 septets, two
     // concatenated segments, and every variant here fits 160. Recording it
-    // means somebody who doubles the price of the weekly batch does it on
+    // means somebody who doubles the price of the daily batch does it on
     // purpose rather than by adding a clause.
     const septets = septetLength(worstCase(VARIANTS[key].template));
     assert.ok(
@@ -175,21 +184,12 @@ for (const key of VARIANT_KEYS) {
     assert.equal(occurrences, 1);
   });
 
-  test(`${key} names the brand up front even when the first name renders empty`, () => {
-    // The reason every variant opens brand-first rather than with a greeting.
-    // The greeting exception in checkBrandPrefix needs a comma between the
-    // greeting and the brand; when {{first_name}} renders empty, `tidy()`
-    // collapses "Hi ," to "Hi. " and the brand lands past the six-character
-    // limit. render-recipients.js happens to drop that person one step
-    // earlier, but that is the caller's behaviour, not this bank's, and a
-    // variant whose compliance depends on the caller breaks the first time it
-    // is rendered somewhere else.
+  test(`${key} refuses to fake a greeting when the first name is missing`, () => {
+    // The owner wants every check-in to start with the customer's name. A
+    // missing name must therefore exclude the recipient rather than become
+    // "Hi there" or a visibly broken mail merge.
     const nameless = render(VARIANTS[key].template, { lastProductName: 'BPC-157 + TB-500' });
-    const verdict = validateCopy(nameless.text);
-    assert.ok(
-      !verdict.failedChecks.includes('brand_identifies_sender_first'),
-      `${nameless.text}\n${JSON.stringify(verdict.failures, null, 2)}`
-    );
+    assert.ok(nameless.missing.includes('first_name'));
   });
 }
 
@@ -347,15 +347,14 @@ test('selection does not depend on the clock', () => {
   }
 });
 
-test('a first-time buyer is offered the message that asks nothing of them', () => {
+test('a first-time buyer gets the concise journey question', () => {
   // A first order is a bigger fact about how to talk to somebody than their
-  // engagement tier, so it wins outright. An unanswered question reads as
-  // pressure to a customer who does not yet know what to ask; an open door
-  // does not.
+  // engagement tier, so it wins outright. The question is broad and easy to
+  // answer without pretending we know their goal.
   const profile = PROFILE_SHAPES.first_time_with_product;
   assert.equal(selectionBasisFor(profile), 'first_order');
   const chosen = selectCheckInVariant({ profile, lastVariant: null });
-  assert.equal(chosen.key, 'named_open_door');
+  assert.equal(chosen.key, 'named_journey');
   assert.equal(chosen.reason, 'first_order');
 });
 
@@ -367,14 +366,12 @@ test('somebody who talks to us gets the open question', () => {
   assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_how_it_went');
 });
 
-test('a repeat buyer who has never replied is asked for nothing at all', () => {
-  // 559 of 809 contacts have never sent an inbound message, so for them the
-  // lowest possible bar is the right one. That used to be "did it arrive",
-  // answerable in one word. With that angle retired the open door is lower
-  // still: it asks no question whatsoever and simply says the shop is here.
+test('a repeat buyer who has never replied gets the concise journey question', () => {
+  // The lowest-friction open question goes first for a quiet repeat buyer. It
+  // names the product when safe and never quotes their private history.
   const profile = PROFILE_SHAPES.repeat_silent;
   assert.equal(selectionBasisFor(profile), 'quiet');
-  assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_open_door');
+  assert.equal(selectCheckInVariant({ profile, lastVariant: null }).key, 'named_journey');
 });
 
 test('one order is a first order and two orders is not', () => {
@@ -457,7 +454,7 @@ test('an approved product opens the named variants and keeps the plain ones behi
 test('a profile that is not an object at all still selects a sendable message', () => {
   // The builder is another workstream. A null profile, or one that failed to
   // load, must produce the safest generic message rather than throwing inside
-  // a weekly sweep that is midway through building a campaign.
+  // a daily sweep that is midway through building a campaign.
   for (const profile of [null, undefined, {}, 0, 'nope']) {
     const chosen = selectCheckInVariant({ profile, lastVariant: null });
     assert.ok(VARIANT_KEYS.includes(chosen.key));

@@ -2,7 +2,7 @@
 /**
  * test/campaign-check-in.test.js — the 21-day check-in, both halves.
  *
- * The weekly sweep decides WHO is asked. lib/campaigns/check-in-reply.js
+ * The daily sweep decides WHO is asked. lib/campaigns/check-in-reply.js
  * decides who gets a code after answering. The second is the part that can
  * actually hurt somebody, so most of these tests are about what it refuses.
  */
@@ -66,21 +66,18 @@ test('only orders that actually went out qualify', () => {
 });
 
 test('the window is exactly the sweep cadence, and it looks backwards not forwards', () => {
-  assert.equal(BATCH_WINDOW_DAYS, 7);
+  assert.equal(BATCH_WINDOW_DAYS, 1);
   const at = days => order({ created_at: new Date(NOW.getTime() - days * DAY).toISOString() });
   assert.equal(dueInWindow(at(20), { now: NOW }), false, 'not due yet');
   assert.equal(dueInWindow(at(21), { now: NOW }), true, 'due today');
-  assert.equal(dueInWindow(at(27), { now: NOW }), true, 'came due six days ago');
-  // Beyond the window they are missed permanently, which is exactly why the
-  // sweep must run weekly and why this boundary is pinned.
-  assert.equal(dueInWindow(at(29), { now: NOW }), false, 'older than the window');
+  assert.equal(dueInWindow(at(22), { now: NOW }), false, 'older than the daily window');
 });
 
-test('somebody who ordered three times that week is asked once', () => {
+test('somebody whose three orders become due that day is asked once', () => {
   const rows = [
-    order({ created_at: new Date(NOW.getTime() - 27 * DAY).toISOString() }),
-    order({ created_at: new Date(NOW.getTime() - 24 * DAY).toISOString() }),
-    order({ created_at: new Date(NOW.getTime() - 22 * DAY).toISOString() })
+    order({ created_at: new Date(NOW.getTime() - 21 * DAY - 12 * 60 * 60 * 1000).toISOString() }),
+    order({ created_at: new Date(NOW.getTime() - 21 * DAY - 6 * 60 * 60 * 1000).toISOString() }),
+    order({ created_at: new Date(NOW.getTime() - 21 * DAY).toISOString() })
   ];
   const due = selectDue(rows, { now: NOW });
   assert.equal(due.length, 1, 'three orders must not become three questions');

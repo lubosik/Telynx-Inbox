@@ -52,10 +52,12 @@ test('no check-in message asks whether the order arrived', () => {
   }
 });
 
-test('what he liked is still there', () => {
-  // "The few weeks back is good." Every remaining variant keeps that framing.
+test('every current message now asks an open question', () => {
+  // The latest owner direction is that every check-in should solicit a real
+  // response. No open-door statement is allowed to replace the question.
   for (const key of VARIANT_KEYS) {
-    assert.match(VARIANTS[key].template, /a few weeks back|went out a few weeks/i, key);
+    assert.match(VARIANTS[key].template, /\?/, key);
+    assert.doesNotMatch(VARIANTS[key].template, /I['’]m right here/i, key);
   }
 });
 
