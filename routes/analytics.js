@@ -6,6 +6,7 @@ const {
   createAnalyticsService
 } = require('../lib/analytics/aggregate');
 const { CartRecoveryAnalyticsNotReadyError, createCartRecoveryAnalyticsService } = require('../lib/cart-recovery/analytics');
+const { createVIPLeaderboardService } = require('../lib/analytics/vip-leaderboard');
 
 const ALLOWED_PERIODS = new Set(['today', 'week', 'month', 'quarter', 'year', 'all', 'custom']);
 const ALLOWED_CONFIDENCE = new Set(['direct', 'strong', 'influenced', 'unattributed']);
@@ -82,9 +83,10 @@ function sendError(res, error) {
   return res.status(500).json({ error: 'Analytics could not be loaded.', code: 'ANALYTICS_LOAD_FAILED' });
 }
 
-function createAnalyticsRouter({ service, cartRecoveryService } = {}) {
+function createAnalyticsRouter({ service, cartRecoveryService, vipLeaderboardService } = {}) {
   const analyticsService = service || createAnalyticsService({ client: require('../db').supabase });
   let cartAnalytics = cartRecoveryService;
+  let vipLeaderboard = vipLeaderboardService;
   const cartAnalyticsService = () => {
     if (!cartAnalytics) cartAnalytics = createCartRecoveryAnalyticsService({
       client: require('../db').supabase,
@@ -92,6 +94,14 @@ function createAnalyticsRouter({ service, cartRecoveryService } = {}) {
       reliableFrom: process.env.ANALYTICS_RELIABLE_FROM || '2026-01-16'
     });
     return cartAnalytics;
+  };
+  const leaderboardService = () => {
+    if (!vipLeaderboard) vipLeaderboard = createVIPLeaderboardService({
+      client: require('../db').supabase,
+      workspace: process.env.LUKO_WP_STORE_ID || 'vici',
+      reliableFrom: process.env.ANALYTICS_RELIABLE_FROM || '2026-01-16'
+    });
+    return vipLeaderboard;
   };
   const router = express.Router();
 
@@ -118,6 +128,16 @@ function createAnalyticsRouter({ service, cartRecoveryService } = {}) {
   router.get('/cart-recovery', async (req, res) => {
     try {
       const result = await cartAnalyticsService().overview(requestParams(req.query));
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(result);
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
+  router.get('/vip-leaderboard', async (req, res) => {
+    try {
+      const result = await leaderboardService().overview(requestParams(req.query));
       res.set('Cache-Control', 'no-store, private');
       return res.json(result);
     } catch (error) {

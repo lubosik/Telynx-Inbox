@@ -157,6 +157,34 @@ final class AbandonedCartAnalyticsViewModel: ObservableObject {
 }
 
 @MainActor
+final class VIPLeaderboardViewModel: ObservableObject {
+    @Published private(set) var report: VIPLeaderboardOverview?
+    @Published private(set) var isLoading = false
+    @Published var errorMessage: String?
+
+    private var query: AnalyticsQuery?
+    private var generation = UUID()
+
+    func load(query: AnalyticsQuery, force: Bool = false) async {
+        guard force || self.query != query || report == nil else { return }
+        self.query = query
+        let current = UUID()
+        generation = current
+        isLoading = report == nil
+        defer { if generation == current { isLoading = false } }
+        do {
+            let loaded = try await APIClient.shared.fetchVIPLeaderboard(query: query)
+            guard generation == current else { return }
+            report = loaded
+            errorMessage = nil
+        } catch {
+            guard generation == current else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+@MainActor
 final class AttributionListModel: ObservableObject {
     @Published private(set) var records: [AttributionRecord] = []
     @Published private(set) var currency = "USD"

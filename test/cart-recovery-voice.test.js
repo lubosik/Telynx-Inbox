@@ -672,6 +672,8 @@ test('answered humans hear cached audio immediately without waiting for AMD or s
   started.occurred_at = new Date(NOW.getTime() + 400).toISOString();
   await handler.handle(started);
   assert.equal(client.state.attempt.human_answer_first_audio_latency_ms, 400);
+  assert.ok(client.state.attempt.human_answer_first_audio_latency_ms <= 500,
+    'pre-generated human audio must begin within the requested half-second target');
   await handler.handle(voiceEvent('call.machine.premium.detection.ended', { result: 'human_business' }, 'human-fast'));
   assert.equal(client.state.attempt.state, 'HUMAN_MESSAGE_PLAYING');
   assert.equal(client.state.attempt.amd_result, 'human_business');
@@ -709,6 +711,8 @@ test('a machine answer stops provisional audio and plays the full voicemail only
   const plays = calls.filter(call => call[0] === 'play');
   assert.equal(plays.length, 2);
   assert.match(plays[1][2], /voicemail\.mp3/);
+  assert.equal(calls.filter(call => call[0] === 'speak').length, 0,
+    'the beep path must play cached audio immediately without live synthesis');
 });
 
 test('voice event handler starts staged audio only after AMD decides human and never invokes recording', async () => {

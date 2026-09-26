@@ -59,6 +59,19 @@ currency fields, so it cannot safely create or update production contacts. Live
 membership always comes from the application's current contact and paid-order
 records.
 
+## Analytics leaderboard
+
+Analytics contains a separate VIP Top 10 view. It ranks only VIP customers who
+placed a paid order in the selected date range and recalculates whenever paid
+orders change. The score is transparent and gives equal weight to paid-order
+frequency, total paid spend, and average paid order value within that period.
+Today, week, month, quarter, year, all-time and custom filters use the store's
+configured timezone. Staff/test identities configured in Analytics exclusions,
+failed/cancelled orders, and duplicate order webhook rows never enter the score.
+
+The ranking is a prioritisation aid. It does not change VIP membership, consent,
+suppression, or who may be messaged.
+
 ## Deployment
 
 Apply `scripts/vip-customer-segment-migration.sql` once. It is repeatable and

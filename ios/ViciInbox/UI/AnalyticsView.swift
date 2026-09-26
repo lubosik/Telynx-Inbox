@@ -161,6 +161,27 @@ struct AnalyticsView: View {
         }
         .buttonStyle(.plain)
 
+        NavigationLink {
+            VIPLeaderboardView(initialQuery: model.query)
+        } label: {
+            AnalyticsCard {
+                HStack(spacing: 12) {
+                    Image(systemName: "trophy.fill")
+                        .font(.title2)
+                        .foregroundStyle(ViciTheme.tint)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("VIP Leaderboard").font(.headline)
+                        Text("Dynamic Top 10 by orders, spend and average order value")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+
         if overview.availability.paymentRecovery {
             NavigationLink(value: AnalyticsRouteValues.route(
                 query: model.query,
@@ -204,6 +225,131 @@ struct AnalyticsView: View {
                     .frame(maxWidth: .infinity)
             }
         }
+    }
+}
+
+private struct VIPLeaderboardView: View {
+    @StateObject private var model = VIPLeaderboardViewModel()
+    @State private var period: AnalyticsPeriod
+    @State private var customStart: Date
+    @State private var customEnd: Date
+    @State private var showingCustomRange = false
+
+    init(initialQuery: AnalyticsQuery) {
+        _period = State(initialValue: initialQuery.period)
+        _customStart = State(initialValue: initialQuery.start ?? Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date())
+        _customEnd = State(initialValue: initialQuery.end ?? Date())
+    }
+
+    private var query: AnalyticsQuery {
+        AnalyticsQuery(period: period,
+                       start: period == .custom ? customStart : nil,
+                       end: period == .custom ? customEnd : nil)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                AnalyticsPeriodPicker(selected: period) { selected in
+                    if selected == .custom {
+                        showingCustomRange = true
+                    } else {
+                        period = selected
+                        Task { await model.load(query: query, force: true) }
+                    }
+                }
+
+                if model.isLoading && model.report == nil {
+                    ProgressView("Ranking VIP customers…")
+                        .frame(maxWidth: .infinity, minHeight: 280)
+                } else if let report = model.report {
+                    leaderboard(report)
+                } else {
+                    AnalyticsUnavailableView(message: model.errorMessage) {
+                        Task { await model.load(query: query, force: true) }
+                    }
+                    .frame(minHeight: 280)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 28)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("VIP Top 10")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await model.load(query: query, force: true) }
+        .task { await model.load(query: query) }
+        .sheet(isPresented: $showingCustomRange) {
+            AnalyticsDateRangeSheet(start: customStart, end: customEnd) { start, end in
+                customStart = Calendar.current.startOfDay(for: min(start, end))
+                customEnd = Calendar.current.startOfDay(for: max(start, end))
+                period = .custom
+                Task { await model.load(query: query, force: true) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func leaderboard(_ report: VIPLeaderboardOverview) -> some View {
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "Top customers", symbol: "trophy.fill")
+            Text("\(report.activeVipCustomers.formatted()) VIP customers placed a paid order in this period. Rankings recalculate as orders arrive.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if report.leaders.isEmpty {
+                EmptyState(icon: "person.3.sequence",
+                           title: "No VIP purchases in this period",
+                           detail: "Choose another date range to compare your best repeat customers.")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            } else {
+                ForEach(report.leaders) { customer in
+                    VIPLeaderboardRow(customer: customer, currency: report.currency)
+                    if customer.id != report.leaders.last?.id { Divider() }
+                }
+            }
+        }
+
+        AnalyticsCard {
+            AnalyticsSectionHeader(title: "How ranking works", symbol: "function")
+            Text(report.methodology.explanation)
+                .font(.subheadline)
+            Text("Only paid orders in the selected period affect the score. VIP eligibility still uses lifetime history: 3 or more paid orders and at least $500 spent, plus approved manual additions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct VIPLeaderboardRow: View {
+    let customer: VIPLeaderboardEntry
+    let currency: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(customer.rank)")
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(customer.rank <= 3 ? ViciTheme.tint : Color.secondary)
+                .frame(width: 28, height: 28)
+                .background(Color(.tertiarySystemGroupedBackground), in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(customer.customerName).font(.headline).lineLimit(1)
+                    Spacer()
+                    Text("\(customer.score.formatted(.number.precision(.fractionLength(0...1))))")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .accessibilityLabel("Score \(customer.score)")
+                }
+                Text("\(customer.paidOrders.formatted()) paid order\(customer.paidOrders == 1 ? "" : "s")  •  \(AnalyticsFormatting.money(customer.totalSpend, currency: currency)) spent")
+                    .font(.subheadline)
+                Text("Average order \(AnalyticsFormatting.money(customer.averageOrderValue, currency: currency))  •  Lifetime \(AnalyticsFormatting.money(customer.lifetimeSpend, currency: currency))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -82,6 +82,16 @@ test('VIP totals live in Analytics and are explicitly lifetime figures', () => {
   assert.match(analytics, /These lifetime figures do not change with the date filter above/);
 });
 
+test('Analytics owns a clean, date-filtered VIP Top 10 leaderboard', () => {
+  assert.match(analytics, /VIPLeaderboardView/);
+  assert.match(analytics, /VIP Leaderboard/);
+  assert.match(analytics, /Dynamic Top 10 by orders, spend and average order value/);
+  assert.match(analytics, /AnalyticsPeriodPicker\(selected: period\)/);
+  assert.match(analytics, /Rankings recalculate as orders arrive/);
+  assert.match(analytics, /Only paid orders in the selected period affect the score/);
+  assert.doesNotMatch(analytics, /Color\.yellow\.opacity/);
+});
+
 test('campaign copy assistance uses compact list rows without a divider spacer', () => {
   const section = campaigns.slice(
     campaigns.indexOf('Section("Copy assistant")'),

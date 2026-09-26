@@ -55,6 +55,22 @@ test('abandoned-cart Analytics reuses period validation and is non-cacheable', a
   assert.equal(received.page, '2');
 });
 
+test('VIP leaderboard reuses Analytics date validation and is non-cacheable', async () => {
+  let received;
+  const router = createAnalyticsRouter({
+    service: {},
+    vipLeaderboardService: { overview: async params => {
+      received = params;
+      return { leaders: [] };
+    } }
+  });
+  const res = responseRecorder();
+  await routeHandler(router, '/vip-leaderboard')({ query: { period: 'week' } }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['Cache-Control'], 'no-store, private');
+  assert.equal(received.period, 'week');
+});
+
 test('invalid requests fail closed before calling the analytics service', async () => {
   let calls = 0;
   const router = createAnalyticsRouter({ service: { overview: async () => { calls += 1; } } });
@@ -176,6 +192,7 @@ test('both analytics endpoints remain behind the session and role boundary', () 
   for (const path of [
     '/api/analytics/overview', '/api/analytics/attributions',
     '/api/analytics/cart-recovery',
+    '/api/analytics/vip-leaderboard',
     '/api/analytics/campaigns/:id', '/api/analytics/campaigns/:id/attributions'
   ]) {
     const entry = ROUTE_POLICY.find(row => row.path === path && row.method === 'GET');

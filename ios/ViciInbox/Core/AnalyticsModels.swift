@@ -432,3 +432,39 @@ struct AnalyticsQuery: Hashable {
         return formatter
     }()
 }
+
+struct VIPLeaderboardMethodComponent: Codable, Hashable, Identifiable {
+    let key: String
+    let label: String
+    let weight: Double
+    var id: String { key }
+}
+
+struct VIPLeaderboardMethodology: Codable, Hashable {
+    let version: String
+    let explanation: String
+    let components: [VIPLeaderboardMethodComponent]
+}
+
+struct VIPLeaderboardEntry: Codable, Hashable, Identifiable {
+    let id: String
+    let rank: Int
+    let customerName: String
+    let score: Double
+    let paidOrders: Int
+    let totalSpend: FlexibleDecimal
+    let averageOrderValue: FlexibleDecimal
+    let lifetimePaidOrders: Int
+    let lifetimeSpend: FlexibleDecimal
+    let lastPaidAt: String?
+}
+
+struct VIPLeaderboardOverview: Codable, Hashable {
+    let generatedAt: String
+    let range: AnalyticsDateRange
+    let currency: String
+    let methodology: VIPLeaderboardMethodology
+    let totalVipCustomers: Int
+    let activeVipCustomers: Int
+    let leaders: [VIPLeaderboardEntry]
+}

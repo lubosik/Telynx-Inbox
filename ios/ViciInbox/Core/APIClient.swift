@@ -1434,6 +1434,10 @@ actor APIClient {
         return try await decodedGET("/api/analytics/cart-recovery", queryItems: items)
     }
 
+    func fetchVIPLeaderboard(query: AnalyticsQuery) async throws -> VIPLeaderboardOverview {
+        try await decodedGET("/api/analytics/vip-leaderboard", queryItems: query.queryItems)
+    }
+
     func fetchAttributions(query: AnalyticsQuery,
                            page: Int = 1,
                            pageSize: Int = 25,
