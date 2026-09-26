@@ -31,6 +31,7 @@ test('campaign router exposes the complete review lifecycle', () => {
     ['patch', '/:id'], ['get', '/:id/recipients'], ['post', '/:id/submit-review'],
     ['get', '/:id/performance'],
     ['post', '/:id/reject'], ['post', '/:id/approve'], ['post', '/:id/schedule'],
+    ['post', '/:id/reschedule'],
     ['post', '/:id/cancel'], ['post', '/:id/dry-run']
   ]) handler(router, method, path);
 });

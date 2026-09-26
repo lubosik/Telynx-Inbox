@@ -992,6 +992,31 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'scheduling this campaign'); }
   });
 
+  router.post('/:id/reschedule', async (req, res) => {
+    try {
+      const before = await campaigns.detail(req.params.id);
+      const campaign = await campaigns.reschedule(req.params.id, req.body?.scheduledFor, req.actor);
+      await auditCampaign('campaign.rescheduled', req, campaign, {
+        summary: `Rescheduled ${campaignSummaryName(campaign)} for ${campaign.scheduled_for}`,
+        previousState: {
+          status: 'scheduled', revision: campaign.revision,
+          scheduled_for: before.campaign.scheduled_for
+        },
+        newState: {
+          status: 'scheduled', revision: campaign.revision,
+          scheduled_for: campaign.scheduled_for
+        },
+        metadata: {
+          revision: campaign.revision,
+          previous_scheduled_for: before.campaign.scheduled_for,
+          scheduled_for: campaign.scheduled_for,
+          business_timezone: before.scheduling?.businessTimeZone || 'America/New_York'
+        }
+      });
+      return res.json({ campaign });
+    } catch (error) { return sendError(res, error, 'rescheduling this campaign'); }
+  });
+
   router.post('/:id/cancel', async (req, res) => {
     try {
       // Cancellation is the safety action and happens before best-effort audit.

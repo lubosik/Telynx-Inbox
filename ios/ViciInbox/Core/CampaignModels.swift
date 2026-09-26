@@ -147,6 +147,25 @@ struct CampaignApprovalRecord: Codable, Hashable {
 struct CampaignDetailResponse: Codable, Hashable {
     let campaign: CampaignRecord
     let latestApproval: CampaignApprovalRecord?
+    let scheduling: CampaignSchedulingContext?
+
+    init(campaign: CampaignRecord,
+         latestApproval: CampaignApprovalRecord?,
+         scheduling: CampaignSchedulingContext? = nil) {
+        self.campaign = campaign
+        self.latestApproval = latestApproval
+        self.scheduling = scheduling
+    }
+}
+
+struct CampaignSchedulingContext: Codable, Hashable {
+    let businessTimeZone: String
+    let scheduledBy: CampaignScheduler?
+}
+
+struct CampaignScheduler: Codable, Hashable {
+    let id: String
+    let name: String
 }
 
 /**

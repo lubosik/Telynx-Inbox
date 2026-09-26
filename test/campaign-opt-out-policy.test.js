@@ -31,3 +31,10 @@ test('the campaign review gate applies the exception from server-owned workflow 
   assert.throws(() => assertReviewableCopy(WITHOUT_FOOTER, { workflowCategory: 'manual' }),
     error => error.code === 'CAMPAIGN_COPY_NOT_REVIEWABLE');
 });
+
+test('VIP is treated as a customer-tier initialism rather than all-caps shouting', () => {
+  const message = "Hi {{first_name}}, it's Vin from Vici. You're now one of our VIP customers. What would be most helpful for you right now?";
+  const verdict = validateCopy(message, { requireOptOut: false });
+  assert.equal(verdict.ok, true, JSON.stringify(verdict.failures));
+  assert.doesNotThrow(() => assertReviewableCopy(message, { workflowCategory: 'vip_welcome' }));
+});

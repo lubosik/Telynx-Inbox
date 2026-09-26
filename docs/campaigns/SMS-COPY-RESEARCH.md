@@ -56,7 +56,7 @@ anywhere in the codebase.
 
 ```json
 {
-  "version": "2026-08-23",
+  "version": "2026-09-26",
   "brand": {
     "defaultName": "Vin from Vici",
     "recommendedPrefix": "Vin from Vici: "
@@ -94,7 +94,8 @@ anywhere in the codebase.
   },
   "allCaps": {
     "alwaysAllowedTokens": [
-      "STOP"
+      "STOP",
+      "VIP"
     ],
     "allowApprovedProductCodes": true
   },
@@ -539,7 +540,7 @@ anywhere in the codebase.
     },
     {
       "id": "no_all_caps_shouting",
-      "title": "No ALL-CAPS word except STOP and verified product codes."
+      "title": "No ALL-CAPS word except STOP, VIP and verified product codes."
     },
     {
       "id": "no_merge_fields_or_placeholders",
@@ -571,7 +572,7 @@ anywhere in the codebase.
     "Do not write the customer's actual name, phone number, email address, street address, order number, or what they have spent. Use {{first_name}} and {{order_count}} when the brief asks for them, and never imply that the business has been watching or tracking them.",
     "The only variables that exist are {{first_name}}, {{order_count}}, {{last_product}}, {{last_order_date}} and {{code}}. Any other placeholder, and any square bracket, angle bracket or single-brace stand-in, is sent to the customer as literal text.",
     "{{last_order_date}} renders a month name on its own, so write \"back in {{last_order_date}}\" and never \"on {{last_order_date}}\" or a day number beside it.",
-    "Do not write any word in capital letters except STOP.",
+    "Do not write any word in capital letters except STOP and VIP.",
     "Do not substitute characters to disguise a word. Writing Fr33 or S@ve is a carrier violation in itself, not a way around one.",
     "Include a link only if you are given an approved link, and then use it exactly once and exactly as given.",
     "Phrase a reorder message as an offer to help, never as knowledge that the customer needs to reorder.",

@@ -592,6 +592,7 @@ private struct CampaignStatusToast: View {
 
 struct CampaignDetailView: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var appearance: AppearanceModel
     @StateObject private var model: CampaignDetailModel
     @State private var showingEditor = false
     @State private var showingMessageEditor = false
@@ -659,9 +660,14 @@ struct CampaignDetailView: View {
             }
         }
         .sheet(isPresented: $showingSchedule) {
-            CampaignScheduleSheet { date in
+            let existing = model.campaign.flatMap { ServerDate.parse($0.scheduledFor) }
+            let businessZone = model.detail?.scheduling?.businessTimeZone ?? "America/New_York"
+            CampaignScheduleSheet(existingDate: existing,
+                                  businessTimeZoneID: businessZone,
+                                  viewerTimeZone: appearance.effectiveTimeZone,
+                                  actorName: session.currentUser?.displayName ?? "this account") { date in
                 showingSchedule = false
-                await confirmThenSchedule(for: date)
+                await confirmThenSchedule(for: date, rescheduling: existing != nil)
             }
         }
         .sheet(isPresented: $showingCancellation) {
@@ -729,12 +735,15 @@ struct CampaignDetailView: View {
         guard outcome != .declined else { return }
         await model.approve()
     }
-    private func confirmThenSchedule(for date: Date) async {
+    private func confirmThenSchedule(for date: Date, rescheduling: Bool) async {
         let outcome = await BiometricConfirmation.confirm(
-            reason: "Confirm scheduling this campaign to go out to customers"
+            reason: rescheduling
+                ? "Confirm the new send time for this campaign"
+                : "Confirm scheduling this campaign to go out to customers"
         )
         guard outcome != .declined else { return }
-        await model.schedule(for: date)
+        if rescheduling { await model.reschedule(for: date) }
+        else { await model.schedule(for: date) }
     }
 
     private var visibleRecipients: [CampaignRecipient] {
@@ -765,7 +774,23 @@ struct CampaignDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let date = keyDate(for: campaign) {
+                if let scheduled = ServerDate.parse(campaign.scheduledFor) {
+                    let businessZone = TimeZone(identifier: model.detail?.scheduling?.businessTimeZone
+                                                ?? "America/New_York")
+                        ?? TimeZone(identifier: "America/New_York")!
+                    LabeledContent("Customer send time",
+                                   value: formattedSchedule(scheduled, in: businessZone))
+                    if businessZone.identifier != appearance.effectiveTimeZone.identifier {
+                        LabeledContent("Your time",
+                                       value: formattedSchedule(scheduled,
+                                                                in: appearance.effectiveTimeZone))
+                    }
+                    if let scheduler = model.detail?.scheduling?.scheduledBy {
+                        LabeledContent("Scheduled by", value: scheduler.name)
+                    } else {
+                        LabeledContent("Scheduled by", value: "Automation")
+                    }
+                } else if let date = keyDate(for: campaign) {
                     LabeledContent(keyDateLabel(for: campaign),
                                    value: date.formatted(date: .abbreviated, time: .shortened))
                 }
@@ -998,6 +1023,11 @@ struct CampaignDetailView: View {
                     }
                 }
 
+                if campaign.status == .scheduled && canLaunch {
+                    Button("Reschedule Campaign") { showingSchedule = true }
+                        .disabled(model.isActing)
+                }
+
                 if (campaign.status == .approved || campaign.status == .scheduled) && canCancel {
                     Button("Cancel Campaign", role: .destructive) { showingCancellation = true }
                         .disabled(model.isActing)
@@ -1072,10 +1102,17 @@ struct CampaignDetailView: View {
     }
 
     private func keyDateLabel(for campaign: CampaignRecord) -> String {
-        if campaign.scheduledFor != nil { return "Scheduled for" }
         if campaign.approvedAt != nil { return "Approved" }
         if campaign.submittedForReviewAt != nil { return "Submitted" }
         return "Created"
+    }
+
+    private func formattedSchedule(_ date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE, MMM d 'at' h:mm a zzz"
+        return "\(formatter.string(from: date)) · \(timeZone.identifier)"
     }
 }
 
@@ -2427,18 +2464,61 @@ private struct CampaignReasonSheet: View {
 private struct CampaignScheduleSheet: View {
     @Environment(\.dismiss) private var dismiss
     let action: (Date) async -> Void
-    @State private var scheduledFor = Date().addingTimeInterval(900)
-    @State private var initialScheduledFor = Date().addingTimeInterval(900)
+    let businessTimeZone: TimeZone
+    let viewerTimeZone: TimeZone
+    let actorName: String
+    let isRescheduling: Bool
+    @State private var scheduledFor: Date
+    @State private var initialScheduledFor: Date
     @State private var isWorking = false
+
+    init(existingDate: Date?,
+         businessTimeZoneID: String,
+         viewerTimeZone: TimeZone,
+         actorName: String,
+         action: @escaping (Date) async -> Void) {
+        let now = Date()
+        // An overdue campaign can still be scheduled while live sending is
+        // gated off. Do not initialise DatePicker outside its future-only
+        // range; show the old time on the detail screen and start the edit at
+        // the next sensible time instead.
+        let initial = existingDate.flatMap { $0 > now ? $0 : nil }
+            ?? now.addingTimeInterval(900)
+        businessTimeZone = TimeZone(identifier: businessTimeZoneID)
+            ?? TimeZone(identifier: "America/New_York")!
+        self.viewerTimeZone = viewerTimeZone
+        self.actorName = actorName
+        isRescheduling = existingDate != nil
+        _scheduledFor = State(initialValue: initial)
+        _initialScheduledFor = State(initialValue: initial)
+        self.action = action
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Send Time") {
+                Section {
                     DatePicker("Schedule for",
                                selection: $scheduledFor,
                                in: Date()...,
                                displayedComponents: [.date, .hourAndMinute])
+                        .environment(\.timeZone, businessTimeZone)
+                } header: {
+                    Text("Send time")
+                } footer: {
+                    Text("Choose the customer send time in \(businessTimeZone.identifier).")
+                }
+
+                Section("Exact timing") {
+                    LabeledContent("Customer time") {
+                        Text(formatted(scheduledFor, in: businessTimeZone))
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Your time") {
+                        Text(formatted(scheduledFor, in: viewerTimeZone))
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Recorded as", value: actorName)
                 }
                 Section {
                     Text("The campaign sends at this time only while live sending is switched on for this workspace. Every recipient is checked again for consent, opt-outs and quiet hours at the moment of sending, not now.")
@@ -2446,14 +2526,14 @@ private struct CampaignScheduleSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Schedule Campaign")
+            .navigationTitle(isRescheduling ? "Reschedule Campaign" : "Schedule Campaign")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Back") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Schedule") {
+                    Button(isRescheduling ? "Reschedule" : "Schedule") {
                         isWorking = true
                         Task { await action(scheduledFor) }
                     }
@@ -2470,6 +2550,14 @@ private struct CampaignScheduleSheet: View {
                 dismiss()
             }
         )
+    }
+
+    private func formatted(_ date: Date, in timeZone: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE, MMM d 'at' h:mm a zzz"
+        return "\(formatter.string(from: date)) · \(timeZone.identifier)"
     }
 }
 

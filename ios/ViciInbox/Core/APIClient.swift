@@ -867,6 +867,12 @@ actor APIClient {
         ])
     }
 
+    func rescheduleCampaign(id: String, scheduledFor: Date) async throws -> CampaignActionResponse {
+        try await campaignMutation("/api/campaigns/\(encodedPathSegment(id))/reschedule", body: [
+            "scheduledFor": ISO8601DateFormatter().string(from: scheduledFor)
+        ])
+    }
+
     func cancelCampaign(id: String, reason: String?) async throws -> CampaignActionResponse {
         var body: [String: Any] = [:]
         if let reason, !reason.isEmpty { body["reason"] = reason }

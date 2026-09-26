@@ -373,7 +373,8 @@ final class CampaignDetailModel: ObservableObject {
         do {
             let verdict = try await APIClient.shared.checkCampaignCopy(
                 message: clean,
-                couponCode: campaign.couponCode
+                couponCode: campaign.couponCode,
+                workflowCategory: campaign.workflowCategory
             )
             let normalized = verdict.normalizedMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let normalized, !normalized.isEmpty, normalized != clean {
@@ -400,7 +401,8 @@ final class CampaignDetailModel: ObservableObject {
                 discountPercent: campaign.effectiveDiscountPercent
             )
             detail = CampaignDetailResponse(campaign: response.campaign,
-                                            latestApproval: detail?.latestApproval)
+                                            latestApproval: detail?.latestApproval,
+                                            scheduling: detail?.scheduling)
             preview = nil
             dryRun = nil
             async let previewDone: Void = refreshPreview()
@@ -565,6 +567,12 @@ final class CampaignDetailModel: ObservableObject {
         }
     }
 
+    func reschedule(for date: Date) async {
+        await perform(success: "Campaign rescheduled") {
+            try await APIClient.shared.rescheduleCampaign(id: campaignID, scheduledFor: date)
+        }
+    }
+
     func cancel(reason: String?) async {
         await perform(success: "Campaign cancelled") {
             try await APIClient.shared.cancelCampaign(id: campaignID, reason: reason)
@@ -580,7 +588,8 @@ final class CampaignDetailModel: ObservableObject {
             let response = try await action()
             if let current = detail {
                 detail = CampaignDetailResponse(campaign: response.campaign,
-                                                latestApproval: current.latestApproval)
+                                                latestApproval: current.latestApproval,
+                                                scheduling: current.scheduling)
             }
             confirmationMessage = success
             errorMessage = nil
