@@ -711,6 +711,7 @@ final class CampaignEditorModel: ObservableObject {
     let existingID: String?
     let existingCouponCode: String?
     let existingDiscountPercent: Int?
+    let workflowCategory: String
     private var contactRequestID = UUID()
     private let existingRecipientMetadata: [String: CampaignRecipientInput]
     private let initialTitle: String
@@ -724,7 +725,8 @@ final class CampaignEditorModel: ObservableObject {
          initialContacts: [ConversationSummary] = [],
          seedTitle: String = "",
          seedMessage: String = "Vin from Vici: ",
-         seedBrief: String = "") {
+         seedBrief: String = "",
+         seedWorkflowCategory: String = "manual") {
         var metadata: [String: CampaignRecipientInput] = [:]
         for recipient in recipients where recipient.selected {
             let key = Self.phoneKey(recipient.contactPhone)
@@ -768,6 +770,7 @@ final class CampaignEditorModel: ObservableObject {
         existingID = campaign?.id
         existingCouponCode = campaign?.couponCode
         existingDiscountPercent = campaign?.effectiveDiscountPercent
+        workflowCategory = campaign?.workflowCategory ?? seedWorkflowCategory
         title = resolvedTitle
         message = resolvedMessage
         audienceMode = resolvedAudienceMode
@@ -884,7 +887,8 @@ final class CampaignEditorModel: ObservableObject {
                 brief: instruction,
                 currentMessage: currentMessage,
                 couponCode: attachedCoupon?.code,
-                approvedLink: Self.approvedLink(in: currentMessage)
+                approvedLink: Self.approvedLink(in: currentMessage),
+                workflowType: workflowCategory
             )
             let safeCandidates = result.candidates.filter { candidate in
                 guard let coupon = attachedCoupon else { return true }
@@ -1136,7 +1140,8 @@ final class CampaignEditorModel: ObservableObject {
         do {
             let verdict = try await APIClient.shared.checkCampaignCopy(
                 message: cleanMessage,
-                couponCode: attachedCoupon?.code ?? existingCouponCode
+                couponCode: attachedCoupon?.code ?? existingCouponCode,
+                workflowCategory: workflowCategory
             )
             if let normalized = verdict.normalizedMessage,
                !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1191,6 +1196,7 @@ final class CampaignEditorModel: ObservableObject {
                     message: cleanMessage,
                     recipients: recipients,
                     allContacts: audienceMode == .allContacts,
+                    workflowCategory: workflowCategory,
                     couponCode: attachedCoupon?.code,
                     discountPercent: attachedCoupon?.percent
                 )

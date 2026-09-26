@@ -53,15 +53,15 @@ private enum VIPCampaignFocus: String, CaseIterable, Identifiable {
     var campaignMessage: String {
         switch self {
         case .all:
-            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Want first access to new arrivals and offers? Reply STOP to opt out."
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Want first access to new arrivals and offers?"
         case .pastTiming:
-            return "Vin from Vici: Hi {{first_name}}, I wanted to check in personally. Is there anything we could improve for you? Reply STOP to opt out."
+            return "Vin from Vici: Hi {{first_name}}, I wanted to check in personally. Is there anything we could improve for you?"
         case .atTiming:
-            return "Vin from Vici: Hi {{first_name}}, I wanted to give you first access to our next new arrival. Reply if you want details. Reply STOP to opt out."
+            return "Vin from Vici: Hi {{first_name}}, I wanted to give you first access to our next new arrival. Would you like the details?"
         case .withinTiming:
-            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. I can give you first access to our next release. Reply STOP to opt out."
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. Would you like first access to our next release?"
         case .noTiming:
-            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. What would you like to see from Vici next? Reply STOP to opt out."
+            return "Vin from Vici: Hi {{first_name}}, thanks for being one of our best customers. What would you like to see from Vici next?"
         }
     }
 
@@ -514,6 +514,7 @@ private struct VIPCampaignHubView: View {
                     initialTitle: focus.campaignTitle,
                     initialMessage: focus.campaignMessage,
                     initialBrief: focus.campaignBrief,
+                    workflowCategory: "vip",
                     onSaved: onSaved
                 )
             }
@@ -1530,13 +1531,15 @@ struct CampaignEditorView: View {
          initialTitle: String = "",
          initialMessage: String = "Vin from Vici: ",
          initialBrief: String = "",
+         workflowCategory: String = "manual",
          onSaved: @escaping () -> Void) {
         _model = StateObject(wrappedValue: CampaignEditorModel(campaign: campaign,
                                                                recipients: recipients,
                                                                initialContacts: initialContacts,
                                                                seedTitle: initialTitle,
                                                                seedMessage: initialMessage,
-                                                               seedBrief: initialBrief))
+                                                               seedBrief: initialBrief,
+                                                               seedWorkflowCategory: workflowCategory))
         self.onSaved = onSaved
     }
 

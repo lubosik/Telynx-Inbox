@@ -122,11 +122,13 @@ test('every recipe template is compliant copy at the worst case', () => {
     for (const [variant, template] of Object.entries(found.copy)) {
       const verdict = validateCopy(template, {
         brandName: RULES.brand.defaultName,
-        approvedProductCodes: RULES.defaultApprovedProductCodes
+        approvedProductCodes: RULES.defaultApprovedProductCodes,
+        requireOptOut: found.workflowCategory !== 'checkin_21d'
       });
       assert.equal(verdict.ok, true,
         `${key}.${variant}: ${JSON.stringify((verdict.failures || []).map(f => f.check))}`);
-      assert.match(template, /Reply STOP to opt out/);
+      if (found.workflowCategory === 'checkin_21d') assert.doesNotMatch(template, /Reply STOP to opt out/);
+      else assert.match(template, /Reply STOP to opt out/);
     }
   }
 });

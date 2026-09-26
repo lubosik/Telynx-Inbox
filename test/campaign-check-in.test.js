@@ -99,16 +99,19 @@ test('the check-in carries no code, and the reply does', () => {
   assert.ok(fieldsUsed(REPLY_TEMPLATE).includes('code'));
 });
 
-test('all three templates are compliant copy at the worst case', () => {
-  for (const template of [TEMPLATE, TEMPLATE_NO_PRODUCT, REPLY_TEMPLATE]) {
+test('check-in templates use the workflow exception while the reply retains the footer', () => {
+  for (const template of [TEMPLATE, TEMPLATE_NO_PRODUCT]) {
     const verdict = validateCopy(template, {
       brandName: RULES.brand.defaultName,
-      approvedProductCodes: RULES.defaultApprovedProductCodes
+      approvedProductCodes: RULES.defaultApprovedProductCodes,
+      requireOptOut: false
     });
     assert.equal(verdict.ok, true,
       `failed: ${JSON.stringify((verdict.failures || []).map(f => f.check))}`);
-    assert.match(template, /Reply STOP to opt out/);
+    assert.doesNotMatch(template, /Reply STOP to opt out/);
   }
+  assert.equal(validateCopy(REPLY_TEMPLATE).ok, true);
+  assert.match(REPLY_TEMPLATE, /Reply STOP to opt out/);
 });
 
 test('nothing claims the customer is due for anything', () => {

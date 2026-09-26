@@ -69,8 +69,9 @@ test('Growth owns each VIP timing group and seeds a personalized campaign draft'
   assert.match(campaigns, /initialTitle: focus\.campaignTitle/);
   assert.match(campaigns, /initialMessage: focus\.campaignMessage/);
   assert.match(campaigns, /initialBrief: focus\.campaignBrief/);
+  assert.match(campaigns, /workflowCategory: "vip"/);
   assert.match(campaigns, /\{\{first_name\}\}/);
-  assert.match(campaigns, /Reply STOP to opt out\./);
+  assert.doesNotMatch(campaigns.slice(0, campaigns.indexOf('struct CampaignsView')), /Reply STOP to opt out\./);
   assert.match(campaigns, /Never mention tracking, cadence, being overdue or running low/);
 });
 

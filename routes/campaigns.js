@@ -27,6 +27,7 @@ const { loadHumanStyle } = require('../lib/campaigns/human-style');
 const { createSegmentService } = require('../lib/campaigns/segment-service');
 const { createCampaignCoupon } = require('../lib/campaigns/coupon-builder');
 const { verifyExistingCoupon } = require('../lib/campaigns/existing-coupon');
+const { requiresOptOutFooter } = require('../lib/campaigns/opt-out-policy');
 
 const GENERATION_BODY_KEYS = new Set(['workflows', 'commit']);
 
@@ -739,13 +740,16 @@ function createCampaignRouter({
       const text = campaignCopyField(supplied);
       const couponCode = typeof req.body?.couponCode === 'string'
         ? req.body.couponCode.trim().toUpperCase() : null;
+      const workflowCategory = typeof req.body?.workflowCategory === 'string'
+        ? req.body.workflowCategory.trim().slice(0, 64) : 'manual';
       const verifiedCoupon = couponCode
         ? await verifyCoupon({ code: couponCode, message: text })
         : null;
       const verdict = validateCopy(text, {
         brandName: RULES.brand.defaultName,
         approvedProductCodes: RULES.defaultApprovedProductCodes,
-        approvedMinimumSpend: Number(verifiedCoupon?.minimum_amount || 0) || null
+        approvedMinimumSpend: Number(verifiedCoupon?.minimum_amount || 0) || null,
+        requireOptOut: requiresOptOutFooter(workflowCategory)
       });
       return res.json({
         ok: verdict.ok === true,

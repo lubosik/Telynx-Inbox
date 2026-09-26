@@ -706,8 +706,12 @@ actor APIClient {
     /// breaks and lets the operator decide. Before this existed nothing checked
     /// an edited message at all.
     func checkCampaignCopy(message: String,
-                           couponCode: String? = nil) async throws -> CampaignCopyVerdict {
-        var body: [String: Any] = ["message": message]
+                           couponCode: String? = nil,
+                           workflowCategory: String = "manual") async throws -> CampaignCopyVerdict {
+        var body: [String: Any] = [
+            "message": message,
+            "workflowCategory": workflowCategory
+        ]
         if let couponCode, !couponCode.isEmpty { body["couponCode"] = couponCode }
         let (data, response) = try await post("/api/campaigns/check-copy", body: body)
         try validate(data: data, response: response)
@@ -763,12 +767,13 @@ actor APIClient {
                         message: String,
                         recipients: [CampaignRecipientInput],
                         allContacts: Bool = false,
+                        workflowCategory: String = "manual",
                         couponCode: String? = nil,
                         discountPercent: Int? = nil) async throws -> CampaignActionResponse {
         var body: [String: Any] = [
             "title": title,
             "message": message,
-            "workflowCategory": "manual",
+            "workflowCategory": workflowCategory,
             "recipients": recipients.map(\.requestBody)
         ]
         if allContacts { body["audience"] = ["kind": "all_contacts"] }
@@ -1030,10 +1035,11 @@ actor APIClient {
         count: Int = 3,
         currentMessage: String? = nil,
         couponCode: String? = nil,
-        approvedLink: String? = nil
+        approvedLink: String? = nil,
+        workflowType: String = "manual"
     ) async throws -> CampaignCopySuggestions {
         var body: [String: Any] = [
-            "workflowType": "manual",
+            "workflowType": workflowType,
             "candidateCount": count
         ]
         if let brief, !brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

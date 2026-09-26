@@ -127,7 +127,7 @@ test('every variant starts with the customer and asks a direct question', () => 
 for (const key of VARIANT_KEYS) {
   test(`${key} passes validateCopy exactly as written`, () => {
     // The floor. A variant that fails here could never be sent to anybody.
-    const verdict = validateCopy(VARIANTS[key].template);
+    const verdict = validateCopy(VARIANTS[key].template, { requireOptOut: false });
     assert.equal(verdict.ok, true, JSON.stringify(verdict.failures, null, 2));
   });
 
@@ -142,7 +142,7 @@ for (const key of VARIANT_KEYS) {
       septets <= RULES.length.maxSeptets,
       `${key} expands to ${septets} septets, over the ${RULES.length.maxSeptets} cap`
     );
-    const verdict = validateCopy(VARIANTS[key].template);
+    const verdict = validateCopy(VARIANTS[key].template, { requireOptOut: false });
     assert.ok(
       !verdict.failedChecks.includes('length_within_one_segment'),
       JSON.stringify(verdict.failures, null, 2)
@@ -156,7 +156,7 @@ for (const key of VARIANT_KEYS) {
     // message with no variables left in it.
     const outcome = render(VARIANTS[key].template, WORST_CASE_FACTS);
     assert.deepEqual(outcome.missing, [], 'nothing may fall back for a fully populated person');
-    const verdict = validateCopy(outcome.text);
+    const verdict = validateCopy(outcome.text, { requireOptOut: false });
     assert.equal(verdict.ok, true, `${outcome.text}\n${JSON.stringify(verdict.failures, null, 2)}`);
   });
 
@@ -172,16 +172,8 @@ for (const key of VARIANT_KEYS) {
     );
   });
 
-  test(`${key} ends in exactly the opt-out sentence`, () => {
-    // 10DLC invariant. Checked separately from validateCopy so that a change
-    // to the validator cannot quietly stop enforcing it here.
-    assert.ok(
-      VARIANTS[key].template.endsWith(RULES.optOut.exactSuffix),
-      `${key} must end with "${RULES.optOut.exactSuffix}"`
-    );
-    // And nowhere else, so the message cannot end with the sentence twice.
-    const occurrences = VARIANTS[key].template.split(RULES.optOut.exactSuffix).length - 1;
-    assert.equal(occurrences, 1);
+  test(`${key} does not repeat the opt-out footer`, () => {
+    assert.doesNotMatch(VARIANTS[key].template, /Reply STOP to opt out/i);
   });
 
   test(`${key} refuses to fake a greeting when the first name is missing`, () => {
@@ -458,7 +450,7 @@ test('a profile that is not an object at all still selects a sendable message', 
   for (const profile of [null, undefined, {}, 0, 'nope']) {
     const chosen = selectCheckInVariant({ profile, lastVariant: null });
     assert.ok(VARIANT_KEYS.includes(chosen.key));
-    assert.equal(validateCopy(chosen.template).ok, true);
+    assert.equal(validateCopy(chosen.template, { requireOptOut: false }).ok, true);
     assert.ok(chosen.key.startsWith('plain_'), 'nothing is known about the product, so nothing may be named');
   }
   assert.ok(VARIANT_KEYS.includes(selectCheckInVariant().key), 'called with no arguments at all');
@@ -579,10 +571,10 @@ test('every message the selector can ever return is a compliant one', () => {
     for (const lastVariant of [null, ...VARIANT_KEYS]) {
       const chosen = selectCheckInVariant({ profile, lastVariant });
       assert.equal(typeof chosen.template, 'string');
-      assert.equal(validateCopy(chosen.template).ok, true, chosen.key);
+      assert.equal(validateCopy(chosen.template, { requireOptOut: false }).ok, true, chosen.key);
       const rendered = render(chosen.template, WORST_CASE_FACTS);
       assert.deepEqual(rendered.missing, []);
-      assert.equal(validateCopy(rendered.text).ok, true, rendered.text);
+      assert.equal(validateCopy(rendered.text, { requireOptOut: false }).ok, true, rendered.text);
     }
   }
 });

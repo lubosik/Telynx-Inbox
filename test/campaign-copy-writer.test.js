@@ -243,6 +243,23 @@ test('several candidates are returned so a human chooses', async () => {
   }
 });
 
+test('VIP suggestions omit the repeated footer while keeping the ordinary rule closed', async () => {
+  const drafts = [
+    `${BRAND}: Hi {{first_name}}, what would be most helpful for you right now?`,
+    `${BRAND}: Hi {{first_name}}, would you like first access to our next release?`
+  ];
+  const record = {};
+  const result = await draft({ workflowType: 'vip', candidateCount: 2 }, drafts, record);
+  assert.equal(result.candidates.length, 2, JSON.stringify(result.rejected));
+  for (const candidate of result.candidates) {
+    assert.doesNotMatch(candidate.text, /Reply STOP to opt out/i);
+    assert.equal(validateCopy(candidate.text, { requireOptOut: false }).ok, true);
+    assert.equal(validateCopy(candidate.text).ok, false, 'ordinary campaigns remain fail-closed');
+  }
+  assert.match(record.system, /Do not add an opt-out footer to this VIP message/);
+  assert.doesNotMatch(record.system, /End the message with the exact sentence: Reply STOP to opt out/);
+});
+
 test('rejected copy is retried with rule ids only and a compliant version wins', async () => {
   const record = { calls: [], replies: [
     ['Vin from Vici: We accept credit card payments. Reply STOP to opt out.'],
@@ -411,7 +428,13 @@ test('only the reviewed workflow types are drafted for', async () => {
     if (workflowType.startsWith('back_in_stock') || workflowType.startsWith('reorder')) {
       input.productName = 'Recovery Blend';
     }
-    const result = await draft(input, GOOD_DRAFTS);
+    const drafts = workflowType === 'vip'
+      ? [
+          `${BRAND}: Hi {{first_name}}, what would be most helpful for you right now?`,
+          `${BRAND}: Hi {{first_name}}, would you like first access to our next release?`
+        ]
+      : GOOD_DRAFTS;
+    const result = await draft(input, drafts);
     assert.ok(result.candidates.length > 0, workflowType);
   }
   await assert.rejects(
