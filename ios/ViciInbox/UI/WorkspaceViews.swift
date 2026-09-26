@@ -1518,6 +1518,40 @@ struct CheckInAutomationSection: View {
                         }
                     }
                 }
+                if let queued = automation?.queuedRecipients, !queued.isEmpty {
+                    LabeledContent("Queued personal check-ins", value: String(queued.count))
+                        .fontWeight(.semibold)
+                    ForEach(queued) { recipient in
+                        NavigationLink(value: AppRoute.campaign(id: recipient.campaignID)) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(recipient.contactName
+                                         ?? recipient.phone.map(PhoneFormatter.pretty)
+                                         ?? "Unknown customer")
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    if let sendDate = recipient.sendDate {
+                                        Text(checkInSendTime(sendDate,
+                                                             timeZoneID: automation?.timeZone))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                if let message = recipient.message, !message.isEmpty {
+                                    Text(message)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } else if isOn {
+                    Text("No personal check-ins are queued right now.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 if let message {
                     Text(message)
                         .font(.footnote)

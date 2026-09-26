@@ -29,6 +29,7 @@ const {
   SEND_HOUR_LOCAL,
   nextSendTime,
   partsInZone,
+  queuedCheckInRecipients,
   runCheckInSweep,
   sweptRecently
 } = require('../lib/campaigns/check-in-automation');
@@ -184,6 +185,61 @@ test('an unreadable history fails closed', async () => {
       return true;
     }
   );
+});
+
+test('every waiting check-in recipient is returned for the Automations screen', async () => {
+  const campaigns = [
+    { id: 'checkin-a', title: 'Three-week check-in', scheduled_for: '2026-09-27T22:00:00Z', status: 'scheduled' }
+  ];
+  const recipients = [
+    {
+      id: 'r1', campaign_id: 'checkin-a', contact_phone: '+15550000001',
+      contact_name_snapshot: 'Alex', rendered_message: 'Hi Alex, how is it going?',
+      planned_send_at: '2026-09-27T22:00:00Z', state: 'pending'
+    },
+    {
+      id: 'r2', campaign_id: 'checkin-a', contact_phone: '+15550000002',
+      contact_name_snapshot: null, rendered_message: 'Hi, how is it going?',
+      planned_send_at: '2026-09-27T22:00:00Z', state: 'deferred'
+    },
+    {
+      id: 'r3', campaign_id: 'checkin-a', contact_phone: '+15550000003',
+      contact_name_snapshot: 'Morgan', rendered_message: 'Hi Morgan, how is it going?',
+      planned_send_at: '2026-09-27T22:00:00Z', state: 'pending'
+    }
+  ];
+  const seen = [];
+  const client = {
+    from(table) {
+      const chain = {
+        select() { return chain; },
+        eq(column, value) { seen.push([table, 'eq', column, value]); return chain; },
+        in(column, value) { seen.push([table, 'in', column, value]); return chain; },
+        order() {
+          if (table === 'sms_campaigns') return Promise.resolve({ data: campaigns, error: null });
+          return chain;
+        },
+        range(from, to) {
+          return Promise.resolve({ data: recipients.slice(from, to + 1), error: null });
+        }
+      };
+      return chain;
+    }
+  };
+
+  const rows = await queuedCheckInRecipients({ client, pageSize: 2 });
+
+  assert.equal(rows.length, 3, 'the screen must show each recipient, not only the batch');
+  assert.deepEqual(rows.map(row => row.id), ['r1', 'r2', 'r3']);
+  assert.equal(rows[0].campaignTitle, 'Three-week check-in');
+  assert.equal(rows[1].contactName, null);
+  assert.equal(rows[2].message, 'Hi Morgan, how is it going?');
+  assert.ok(seen.some(call => call[0] === 'sms_campaigns'
+    && call[1] === 'in' && call[2] === 'status'
+    && call[3].join(',') === 'scheduled,sending'));
+  assert.ok(seen.some(call => call[0] === 'sms_campaign_recipients'
+    && call[1] === 'in' && call[2] === 'state'
+    && call[3].join(',') === 'pending,deferred'));
 });
 
 // ── The state machine ────────────────────────────────────────────────────
@@ -397,4 +453,10 @@ test('the iOS switch owns its own state, so it moves when tapped', () => {
     'the automation screen must name the recurring business-local send hour');
   assert.match(section, /timeZone\.identifier/,
     'the next-send label must show which timezone defines 6 PM');
+  assert.match(section, /Queued personal check-ins/,
+    'individual automatic check-ins must be visible under Automations');
+  assert.match(section, /automation\?\.queuedRecipients/,
+    'the Automations screen must read the individual recipient queue');
+  assert.match(section, /ForEach\(queued\)/,
+    'the screen must render every queued recipient rather than only a batch total');
 });

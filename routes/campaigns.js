@@ -439,7 +439,7 @@ function createCampaignRouter({
   router.get('/automations/check-in', async (_req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      const { SWEEP_WINDOW_DAYS, nextSendTime, sweptRecently } =
+      const { SWEEP_WINDOW_DAYS, nextSendTime, queuedCheckInRecipients, sweptRecently } =
         require('../lib/campaigns/check-in-automation');
       const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
 
@@ -452,12 +452,17 @@ function createCampaignRouter({
       // cannot say when the last one ran.
       const last = await sweptRecently({ client: db(), now })
         .catch(() => null);
+      // Unlike `last`, this must not fail open. The owner explicitly manages
+      // individual automatic check-ins here; an empty-looking queue caused by
+      // a read error would be a dangerous lie.
+      const queuedRecipients = await queuedCheckInRecipients({ client: db() });
 
       return res.json({
         enabled: settings?.checkin_automation_enabled === true,
         timeZone,
         sweepWindowDays: SWEEP_WINDOW_DAYS,
         lastCampaign: last ? { id: last.id, title: last.title, status: last.status, createdAt: last.created_at } : null,
+        queuedRecipients,
         // Null when a sweep has already covered this window: there is no next
         // send until the window rolls over, and inventing one would be a lie
         // on the face of the screen.

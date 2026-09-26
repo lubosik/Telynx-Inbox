@@ -501,6 +501,9 @@ struct CheckInAutomation: Codable, Hashable {
     let timeZone: String?
     let sweepWindowDays: Int?
     let lastCampaign: CheckInAutomationCampaign?
+    /// Every pending/deferred recipient is surfaced under Automations even
+    /// though campaign rows remain the underlying auditable delivery ledger.
+    let queuedRecipients: [CheckInAutomationRecipient]?
     /// Null when this window has already been swept: there is no next send
     /// until the window rolls over.
     ///
@@ -518,6 +521,19 @@ struct CheckInAutomationCampaign: Codable, Hashable {
     let title: String?
     let status: String?
     let createdAt: String?
+}
+
+struct CheckInAutomationRecipient: Codable, Hashable, Identifiable {
+    let id: String
+    let campaignID: String
+    let campaignTitle: String?
+    let contactName: String?
+    let phone: String?
+    let message: String?
+    let sendAt: String?
+    let state: String?
+
+    var sendDate: Date? { AssistantThreadSummary.parse(sendAt) }
 }
 
 /// The answer to switching it on or off.
