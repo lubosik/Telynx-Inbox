@@ -90,4 +90,6 @@ test('automatic check-ins stay in Automations instead of appearing as manual cam
   assert.match(service, /includeAutomations = false/);
   assert.match(service, /query = query\.neq\('workflow_category', 'checkin_21d'\)/);
   assert.match(service, /reviewCount[\s\S]*?neq\('workflow_category', 'checkin_21d'\)/);
+  assert.match(service, /query = query\.neq\('workflow_category', 'vip_welcome'\)/);
+  assert.match(service, /reviewCount[\s\S]*?neq\('workflow_category', 'vip_welcome'\)/);
 });

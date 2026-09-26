@@ -546,6 +546,37 @@ struct CheckInAutomationChange: Codable, Hashable {
     let note: String?
 }
 
+/// The one-time welcome sent after somebody first qualifies as a VIP.
+///
+/// Campaign rows remain the immutable approval and delivery ledger, exactly as
+/// they do for automatic check-ins, but this snapshot is the product-facing
+/// representation managed from Growth -> Automations.
+struct VIPWelcomeAutomation: Codable, Hashable {
+    let enabled: Bool
+    let timeZone: String?
+    let delayHours: Int?
+    let conversationGuardHours: Int?
+    let messageTemplate: String
+    let lastCampaign: CheckInAutomationCampaign?
+    let queuedRecipients: [VIPWelcomeAutomationRecipient]?
+    let note: String?
+}
+
+struct VIPWelcomeAutomationRecipient: Codable, Hashable, Identifiable {
+    let id: String
+    let campaignID: String
+    let campaignTitle: String?
+    let contactName: String?
+    let phone: String?
+    /// Frozen rendered copy for this customer. Changing the template must not
+    /// rewrite a message which has already been approved and queued.
+    let message: String?
+    let sendAt: String?
+    let state: String?
+
+    var sendDate: Date? { AssistantThreadSummary.parse(sendAt) }
+}
+
 struct CampaignRecipeCatalogue: Codable, Hashable {
     let recipes: [CampaignRecipeSummary]
     /// False when CAMPAIGN_AI_COPY_ENABLED is not set on the server. The

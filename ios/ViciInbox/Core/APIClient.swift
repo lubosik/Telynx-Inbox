@@ -1020,6 +1020,27 @@ actor APIClient {
         catch { throw APIError.decoding }
     }
 
+    /// `GET /api/campaigns/automations/vip-welcome`, `campaigns.read`.
+    func fetchVIPWelcomeAutomation() async throws -> VIPWelcomeAutomation {
+        try await decodedGET("/api/campaigns/automations/vip-welcome")
+    }
+
+    /// `PUT /api/campaigns/automations/vip-welcome`, `campaigns.approve`.
+    ///
+    /// One write owns both the standing authorisation and future template, so
+    /// a stale toggle request cannot quietly overwrite copy saved moments ago.
+    @discardableResult
+    func updateVIPWelcomeAutomation(enabled: Bool,
+                                    messageTemplate: String) async throws -> VIPWelcomeAutomation {
+        let (data, response) = try await put("/api/campaigns/automations/vip-welcome", body: [
+            "enabled": enabled,
+            "messageTemplate": messageTemplate
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(VIPWelcomeAutomation.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     /// `GET /api/campaigns/recipes`, `campaigns.read`.
     func fetchCampaignRecipeCatalogue() async throws -> CampaignRecipeCatalogue {
         try await decodedGET("/api/campaigns/recipes")

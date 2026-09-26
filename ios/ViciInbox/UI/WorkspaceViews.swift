@@ -1621,6 +1621,239 @@ struct CheckInAutomationSection: View {
     }
 }
 
+/// A one-time welcome sent after a customer first crosses the VIP threshold.
+/// The queue is shown person-by-person here even though campaign rows remain
+/// underneath as the immutable approval and delivery ledger.
+struct VIPWelcomeAutomationSection: View {
+    @EnvironmentObject private var session: SessionModel
+    @State private var automation: VIPWelcomeAutomation?
+    @State private var isOn = false
+    @State private var isBusy = false
+    @State private var isEditingTemplate = false
+    @State private var templateDraft = ""
+    @State private var message: String?
+    @State private var failed = false
+    @State private var loadFailed = false
+
+    private var canApprove: Bool { session.can(Permission.campaignsApprove) }
+
+    var body: some View {
+        Section {
+            if loadFailed {
+                Label("Could not load the VIP welcome automation",
+                      systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(ViciTheme.warning)
+                Button("Try again") { Task { await load() } }
+            } else if automation == nil {
+                HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
+            } else {
+                Toggle(isOn: Binding(
+                    get: { isOn },
+                    set: { wanted in
+                        guard wanted != isOn, !isBusy else { return }
+                        isOn = wanted
+                        Task { await save(enabled: wanted,
+                                          template: automation?.messageTemplate ?? templateDraft,
+                                          revertingToggleOnFailure: true) }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Welcome new VIP customers")
+                        if isBusy {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.mini)
+                                Text(isOn ? "Turning on" : "Turning off")
+                            }
+                            .font(.footnote).foregroundStyle(.secondary)
+                        } else {
+                            Label(isOn ? "ON, welcoming new VIPs" : "OFF, nothing is sent",
+                                  systemImage: isOn ? "checkmark.circle.fill" : "pause.circle")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(isOn ? ViciTheme.success : .secondary)
+                        }
+                    }
+                }
+                .disabled(!canApprove || isBusy)
+
+                LabeledContent(
+                    "Timing",
+                    value: "\(automation?.delayHours ?? 24) hours after becoming VIP"
+                )
+                LabeledContent(
+                    "Conversation guard",
+                    value: "Waits at least \(automation?.conversationGuardHours ?? 2) hours"
+                )
+
+                if isEditingTemplate {
+                    TextEditor(text: $templateDraft)
+                        .frame(minHeight: 150)
+                        .textInputAutocapitalization(.sentences)
+                    HStack {
+                        Text("\(templateDraft.count)/500 characters")
+                            .foregroundStyle(templateProblem == nil ? Color.secondary
+                                                                    : ViciTheme.destructive)
+                        Spacer()
+                        Button("Cancel") {
+                            templateDraft = automation?.messageTemplate ?? ""
+                            isEditingTemplate = false
+                        }
+                        Button("Save") {
+                            Task { await save(enabled: isOn,
+                                              template: templateDraft,
+                                              revertingToggleOnFailure: false) }
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(isBusy || templateProblem != nil
+                                  || templateDraft == automation?.messageTemplate)
+                    }
+                    .font(.caption)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("Future welcome message")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Button {
+                                templateDraft = automation?.messageTemplate ?? ""
+                                isEditingTemplate = true
+                            } label: {
+                                Label("Edit message", systemImage: "pencil")
+                                    .labelStyle(.iconOnly)
+                            }
+                            .disabled(!canApprove || isBusy)
+                            .accessibilityLabel("Edit VIP welcome message")
+                        }
+                        Text(automation?.messageTemplate ?? "")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                if let last = automation?.lastCampaign {
+                    NavigationLink(value: AppRoute.campaign(id: last.id)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(last.title ?? "Latest VIP welcome").lineLimit(2)
+                            Text((last.status ?? "").capitalized)
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let queued = automation?.queuedRecipients, !queued.isEmpty {
+                    LabeledContent("Queued VIP welcomes", value: String(queued.count))
+                        .fontWeight(.semibold)
+                    ForEach(queued) { recipient in
+                        NavigationLink(value: AppRoute.campaign(id: recipient.campaignID)) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(recipient.contactName
+                                         ?? recipient.phone.map(PhoneFormatter.pretty)
+                                         ?? "Unknown customer")
+                                        .fontWeight(.semibold)
+                                    Spacer()
+                                    if let sendDate = recipient.sendDate {
+                                        Text(vipWelcomeSendTime(sendDate,
+                                                                timeZoneID: automation?.timeZone))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .multilineTextAlignment(.trailing)
+                                    }
+                                }
+                                if let copy = recipient.message, !copy.isEmpty {
+                                    Text(copy)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                } else if isOn {
+                    Text("No VIP welcomes are queued right now.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let message {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(failed ? ViciTheme.destructive : .secondary)
+                }
+            }
+        } header: {
+            Text("VIP welcome")
+        } footer: {
+            if !canApprove {
+                Text("Your role can see the VIP welcome queue but cannot change its standing authorisation or future message.")
+            } else {
+                Text("A customer is welcomed once, \(automation?.delayHours ?? 24) hours after first becoming VIP. If either side of this conversation was active in the previous \(automation?.conversationGuardHours ?? 2) hours, the welcome waits so messages do not pile up. Editing the template changes future welcomes only; queued messages remain exactly as approved.")
+            }
+        }
+        .task { if automation == nil { await load() } }
+    }
+
+    private var templateProblem: String? {
+        let clean = templateDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty { return "The welcome message cannot be empty." }
+        if clean.count > 500 { return "Keep the welcome message to 500 characters or fewer." }
+        if !clean.contains("{{first_name}}") {
+            return "Include {{first_name}} so every welcome is personal."
+        }
+        return nil
+    }
+
+    private func load() async {
+        do {
+            let fresh = try await APIClient.shared.fetchVIPWelcomeAutomation()
+            automation = fresh
+            if !isBusy {
+                isOn = fresh.enabled
+                templateDraft = fresh.messageTemplate
+            }
+            loadFailed = false
+        } catch {
+            loadFailed = true
+        }
+    }
+
+    private func save(enabled: Bool,
+                      template: String,
+                      revertingToggleOnFailure: Bool) async {
+        guard !isBusy else { return }
+        isBusy = true
+        message = nil
+        failed = false
+        defer { isBusy = false }
+        do {
+            let fresh = try await APIClient.shared.updateVIPWelcomeAutomation(
+                enabled: enabled,
+                messageTemplate: template.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            automation = fresh
+            isOn = fresh.enabled
+            templateDraft = fresh.messageTemplate
+            isEditingTemplate = false
+            message = fresh.note ?? "VIP welcome automation updated."
+        } catch {
+            if revertingToggleOnFailure { isOn.toggle() }
+            failed = true
+            message = error.localizedDescription
+        }
+    }
+
+    private func vipWelcomeSendTime(_ date: Date, timeZoneID: String?) -> String {
+        let timeZone = timeZoneID.flatMap(TimeZone.init(identifier:))
+            ?? TimeZone(identifier: "America/New_York")!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "MMM d, h:mm a zzz"
+        return "\(formatter.string(from: date)) · \(timeZone.identifier)"
+    }
+}
+
 struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
     @EnvironmentObject private var session: SessionModel
@@ -1641,6 +1874,7 @@ struct AutomationQueueView: View {
             // messages customers on its own initiative rather than in reply to
             // an order they just placed.
             CheckInAutomationSection()
+            VIPWelcomeAutomationSection()
             if let stats = model.stats {
                 Section("Today") {
                     HStack {

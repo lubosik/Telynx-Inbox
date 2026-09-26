@@ -695,6 +695,71 @@ function startCheckInAutomation() {
 }
 
 /**
+ * The one-time welcome after a customer first crosses the permanent VIP rule.
+ * It deliberately uses the campaign service rather than sending directly, so
+ * consent, STOP, DND, quiet hours, cadence, audit and provider fencing remain
+ * identical to a campaign a person approved in the app.
+ */
+function startVIPWelcomeAutomation() {
+  let runVIPWelcomeSweep, createCampaignService, logAudit;
+  try {
+    ({ runVIPWelcomeSweep } = require('./lib/campaigns/vip-welcome-automation'));
+    ({ createCampaignService } = require('./lib/campaigns/service'));
+    ({ logAudit } = require('./lib/audit/log'));
+  } catch (err) {
+    console.error('[VIP WELCOME] Automation not started:', err.message);
+    return;
+  }
+
+  const ONE_HOUR = 60 * 60 * 1000;
+  const audit = async ({ campaign, recipientCount, audienceHash, messageHash }) => {
+    const fingerprint = `campaign-approved:${campaign.id}:${campaign.revision}`;
+    const result = await logAudit({
+      eventType: 'campaign.approved', actorType: 'system', entityId: campaign.id,
+      summary: `Automatic VIP welcome approved “${String(campaign.title || '').slice(0, 160)}” `
+        + `revision ${campaign.revision} for ${recipientCount} recipients`,
+      previousState: { status: 'review_required', revision: campaign.revision },
+      newState: { status: 'approval_pending', revision: campaign.revision },
+      metadata: {
+        revision: campaign.revision, recipient_count: recipientCount,
+        audience_digest: audienceHash, message_digest: messageHash,
+        message_length: String(campaign.final_message || '').length,
+        approved_by_automation: 'vip_welcome'
+      },
+      fingerprint
+    });
+    if (!result.recorded && result.reason !== 'duplicate') {
+      throw Object.assign(new Error('VIP welcome approval audit was not recorded.'), {
+        code: 'CAMPAIGN_APPROVAL_AUDIT_REQUIRED'
+      });
+    }
+    return { ...result, fingerprint };
+  };
+
+  const run = async () => {
+    try {
+      const summary = await runVIPWelcomeSweep({
+        client: supabase,
+        service: createCampaignService({ client: supabase, env: process.env }),
+        audit
+      });
+      if (summary.reason === 'scheduled') {
+        console.log(`[VIP WELCOME] Scheduled ${summary.recipients} welcome(s) for ${summary.sendAt}`);
+      } else if (summary.reason === 'draft_failed') {
+        console.error('[VIP WELCOME] A welcome draft could not be scheduled.');
+      }
+    } catch (err) {
+      console.error('[VIP WELCOME] Sweep error:', err.message);
+    }
+  };
+
+  // After the segment cycle has had time to initialise, then hourly. The flag
+  // is read on every sweep and is false before the additive migration.
+  setTimeout(run, 3 * 60 * 1000);
+  setInterval(run, ONE_HOUR);
+}
+
+/**
  * The nightly drift sweep for deterministic client profiles.
  *
  * The two live refresh triggers — the WooCommerce order webhook and inbound
@@ -860,6 +925,7 @@ app.listen(PORT, async () => {
   startDoNotDisturbSync();
   startDailySegmentationCycle();
   startCheckInAutomation();
+  startVIPWelcomeAutomation();
   startContactProfileSweep();
 startNarrativeProfileSweep();
   startRecordingRetentionJob();

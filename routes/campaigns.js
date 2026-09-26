@@ -11,6 +11,7 @@ const { presentError } = require('../lib/user-facing-errors');
 const {
   CampaignNotReadyError,
   CampaignRequestError,
+  assertReviewableCopy,
   campaignCopyField,
   createCampaignService
 } = require('../lib/campaigns/service');
@@ -290,6 +291,35 @@ function createCampaignRouter({
     require('../telnyx').sendSMS(to, text));
   const router = express.Router();
 
+  const vipWelcomeSnapshot = async () => {
+    const {
+      RECENT_CONVERSATION_GAP_HOURS,
+      WELCOME_DELAY_HOURS,
+      WELCOME_MESSAGE,
+      latestVIPWelcomeCampaign,
+      queuedVIPWelcomeRecipients
+    } = require('../lib/campaigns/vip-welcome-automation');
+    const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+    const settings = await loadCampaignSettings(db());
+    const [last, queuedRecipients] = await Promise.all([
+      latestVIPWelcomeCampaign({ client: db() }).catch(() => null),
+      queuedVIPWelcomeRecipients({ client: db() })
+    ]);
+    return {
+      available: settings?.vipWelcomeAutomationAvailable === true,
+      enabled: settings?.vip_welcome_automation_enabled === true,
+      timeZone: settings?.business_timezone || 'America/New_York',
+      delayHours: WELCOME_DELAY_HOURS,
+      conversationGuardHours: RECENT_CONVERSATION_GAP_HOURS,
+      messageTemplate: settings?.vip_welcome_message_template || WELCOME_MESSAGE,
+      queuedRecipients,
+      lastCampaign: last ? {
+        id: String(last.id), title: last.title || null, status: last.status || null,
+        createdAt: last.created_at || null, scheduledFor: last.scheduled_for || null
+      } : null
+    };
+  };
+
   router.get('/', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
@@ -524,6 +554,80 @@ function createCampaignRouter({
           : 'No further check-ins will be built. Anything already scheduled still goes out unless you cancel it.'
       });
     } catch (error) { return sendError(res, error, 'changing the check-in automation'); }
+  });
+
+  /** The one-time welcome sent 24 hours after a customer first becomes VIP. */
+  router.get('/automations/vip-welcome', async (_req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      return res.json(await vipWelcomeSnapshot());
+    } catch (error) { return sendError(res, error, 'loading the VIP welcome automation'); }
+  });
+
+  /**
+   * Change its standing authorisation and/or message. Copy crosses the exact
+   * same validator as a manual VIP campaign before it can be stored.
+   */
+  router.put('/automations/vip-welcome', async (req, res) => {
+    try {
+      res.set('Cache-Control', 'no-store, private');
+      const hasEnabled = Object.hasOwn(req.body || {}, 'enabled');
+      const hasTemplate = Object.hasOwn(req.body || {}, 'messageTemplate');
+      if (!hasEnabled && !hasTemplate) {
+        throw new CampaignRequestError(
+          'Choose whether the VIP welcome is on, or edit its message.',
+          'INVALID_AUTOMATION_STATE', 400
+        );
+      }
+      if (hasEnabled && typeof req.body.enabled !== 'boolean') {
+        throw new CampaignRequestError('enabled must be true or false.', 'INVALID_AUTOMATION_STATE', 400);
+      }
+      let messageTemplate;
+      if (hasTemplate) {
+        messageTemplate = campaignCopyField(req.body.messageTemplate);
+        assertReviewableCopy(messageTemplate, { workflowCategory: 'vip_welcome' });
+      }
+      const changes = { updated_at: new Date().toISOString() };
+      if (hasEnabled) changes.vip_welcome_automation_enabled = req.body.enabled;
+      if (hasTemplate) changes.vip_welcome_message_template = messageTemplate;
+      const { data, error } = await db().from('sms_campaign_settings')
+        .update(changes)
+        .eq('workspace_id', 'vici')
+        .select('vip_welcome_automation_enabled,vip_welcome_message_template')
+        .maybeSingle();
+      if (error) {
+        const migrationMissing = ['PGRST204', '42703'].includes(error.code)
+          || /vip_welcome_/i.test(String(error.message || ''));
+        throw Object.assign(new Error(error.message), {
+          code: migrationMissing ? 'CAMPAIGNS_NOT_READY' : 'CAMPAIGN_SETTINGS_UPDATE_FAILED',
+          status: migrationMissing ? 503 : 500
+        });
+      }
+      if (!data) throw new CampaignNotReadyError('Campaign settings are not configured for this workspace.');
+
+      await logAuditSafely({
+        eventType: 'campaign.settings_changed', req,
+        summary: hasEnabled
+          ? `Turned the VIP welcome automation ${req.body.enabled ? 'on' : 'off'}`
+          : 'Updated the VIP welcome automation message',
+        changedFields: Object.keys(changes).filter(key => key !== 'updated_at'),
+        newState: {
+          enabled: data.vip_welcome_automation_enabled === true,
+          messageTemplateChanged: hasTemplate
+        },
+        metadata: { automation: 'vip_welcome' }
+      });
+
+      const snapshot = await vipWelcomeSnapshot();
+      return res.json({
+        ...snapshot,
+        note: hasEnabled
+          ? (snapshot.enabled
+            ? 'VIP welcomes are on. Each new VIP is queued once, after a 24-hour pause and a conversation check.'
+            : 'VIP welcomes are off. Anything already scheduled still needs to be cancelled separately.')
+          : 'The VIP welcome message was saved.'
+      });
+    } catch (error) { return sendError(res, error, 'changing the VIP welcome automation'); }
   });
 
   router.get('/recipes', async (_req, res) => {

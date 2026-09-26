@@ -97,7 +97,11 @@ test('every selected column exists in the migration that creates the table', () 
   // The other direction: selecting a column that was never migrated makes the
   // whole read fail with PGRST204, which takes the campaigns screen down
   // rather than degrading one feature.
-  const migrations = ['campaigns-migration.sql', 'checkin-automation-migration.sql']
+  const migrations = [
+    'campaigns-migration.sql',
+    'checkin-automation-migration.sql',
+    'vip-welcome-automation-migration.sql'
+  ]
     .map(name => {
       const file = path.join(ROOT, 'scripts', name);
       return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
