@@ -53,11 +53,28 @@ function database(tables) {
 test('the stored VIP welcome is concise and passes the real VIP copy gate', () => {
   const verdict = validateCopy(WELCOME_MESSAGE, { requireOptOut: false });
   assert.equal(verdict.ok, true, JSON.stringify(verdict.failures));
-  assert.match(WELCOME_MESSAGE, /most loyal researchers/i);
-  assert.match(WELCOME_MESSAGE, /VIP access/i);
+  // Written to the person, not about them. The earlier wording said "for one of
+  // our most loyal researchers", which describes a third party in front of the
+  // reader; the owner asked for it to be theirs.
+  assert.match(WELCOME_MESSAGE, /You're one of our most loyal customers/i);
+  assert.match(WELCOME_MESSAGE, /your VIP access is unlocked/i);
+  assert.doesNotMatch(WELCOME_MESSAGE, /for one of our/i);
   assert.match(WELCOME_MESSAGE, /private code/i);
   assert.match(WELCOME_MESSAGE, /1:1 research support/i);
   assert.match(WELCOME_MESSAGE, /24\/7/);
+  assert.match(WELCOME_MESSAGE, /can cost thousands a month/i);
+  assert.match(WELCOME_MESSAGE, /included at no extra cost/i);
+
+  // No coupon may be named or templated here. Dominic chooses the VIP code
+  // himself, and {{code}} would require a verified WooCommerce coupon before
+  // this could send at all. VICI30 is the separate quiet-VIP win-back offer and
+  // must never appear in the welcome.
+  assert.doesNotMatch(WELCOME_MESSAGE, /\{\{code\}\}/);
+  assert.doesNotMatch(WELCOME_MESSAGE, /VICI\d+|CC\d+/i);
+
+  // Blocked carrier-risk terms, and the opt-out footer VIP traffic omits.
+  assert.doesNotMatch(WELCOME_MESSAGE, /\bfree\b|\bsale\b/i);
+  assert.doesNotMatch(WELCOME_MESSAGE, /Reply STOP to opt out/i);
 });
 
 test('only a named VIP beyond 24 hours, never welcomed and quiet for two hours, is due', async () => {
