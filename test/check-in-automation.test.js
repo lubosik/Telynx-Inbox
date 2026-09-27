@@ -174,6 +174,16 @@ test('a check-in built by hand this week also stops the automation', async () =>
   assert.equal(found.id, 'manual-1');
 });
 
+test('an operator-cancelled check-in batch is not recreated by the next sweep', async () => {
+  const found = await sweptRecently({
+    client: fakeClient({ settings: SETTINGS, history: [{
+      id: 'stopped-week', status: 'cancelled', cancelled_by: 7,
+      created_at: new Date().toISOString()
+    }] }), now: new Date()
+  });
+  assert.equal(found?.id, 'stopped-week');
+});
+
 test('an unreadable history fails closed', async () => {
   await assert.rejects(
     sweptRecently({
@@ -236,7 +246,7 @@ test('every waiting check-in recipient is returned for the Automations screen', 
   assert.equal(rows[2].message, 'Hi Morgan, how is it going?');
   assert.ok(seen.some(call => call[0] === 'sms_campaigns'
     && call[1] === 'in' && call[2] === 'status'
-    && call[3].join(',') === 'scheduled,sending'));
+    && call[3].join(',') === 'scheduled,sending,paused'));
   assert.ok(seen.some(call => call[0] === 'sms_campaign_recipients'
     && call[1] === 'in' && call[2] === 'state'
     && call[3].join(',') === 'pending,deferred'));

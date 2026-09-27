@@ -627,6 +627,8 @@ struct CampaignDetailView: View {
     @State private var showingRejection = false
     @State private var showingSchedule = false
     @State private var showingCancellation = false
+    @State private var confirmingPause = false
+    @State private var recipientToCancel: CampaignRecipient?
     @State private var showingAllRecipients = false
     @State private var confirmingRemoveAllExcluded = false
 
@@ -688,11 +690,16 @@ struct CampaignDetailView: View {
             let existing = model.campaign.flatMap { ServerDate.parse($0.scheduledFor) }
             let businessZone = model.detail?.scheduling?.businessTimeZone ?? "America/New_York"
             CampaignScheduleSheet(existingDate: existing,
+                                  isResuming: model.campaign?.status == .paused,
                                   businessTimeZoneID: businessZone,
                                   viewerTimeZone: appearance.effectiveTimeZone,
                                   actorName: session.currentUser?.displayName ?? "this account") { date in
                 showingSchedule = false
-                await confirmThenSchedule(for: date, rescheduling: existing != nil)
+                if model.campaign?.status == .paused {
+                    await model.resume(for: date)
+                } else {
+                    await confirmThenSchedule(for: date, rescheduling: existing != nil)
+                }
             }
         }
         .sheet(isPresented: $showingCancellation) {
@@ -704,6 +711,23 @@ struct CampaignDetailView: View {
                 showingCancellation = false
                 await model.cancel(reason: reason)
             }
+        }
+        .confirmationDialog("Pause this campaign?", isPresented: $confirmingPause) {
+            Button("Pause remaining messages") { Task { await model.pause() } }
+        } message: {
+            Text("No new messages will start. A message already being sent cannot be recalled. You can resume the remaining messages later with a new send time.")
+        }
+        .confirmationDialog("Cancel only this person's message?", isPresented: Binding(
+            get: { recipientToCancel != nil },
+            set: { if !$0 { recipientToCancel = nil } }
+        )) {
+            if let recipient = recipientToCancel {
+                Button("Cancel this message", role: .destructive) {
+                    Task { await model.cancelRecipient(recipient) }
+                }
+            }
+        } message: {
+            Text("The rest of the campaign will continue. A message already sending cannot be recalled.")
         }
         // MARK: Face ID on the two irreversible steps
         //
@@ -926,6 +950,15 @@ struct CampaignDetailView: View {
                 ForEach(visibleRecipients) { recipient in
                     CampaignRecipientRow(recipient: recipient,
                                          eligibility: eligibility(for: recipient))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if session.can(Permission.campaignsCancel)
+                                && [.scheduled, .sending, .paused].contains(campaign.status)
+                                && ["pending", "deferred", "claimed"].contains(recipient.state) {
+                                Button("Cancel", role: .destructive) {
+                                    recipientToCancel = recipient
+                                }
+                            }
+                        }
                         .onAppear {
                             guard showingAllRecipients else { return }
                             Task { await model.loadMoreRecipientsIfNeeded(after: recipient) }
@@ -1053,7 +1086,17 @@ struct CampaignDetailView: View {
                         .disabled(model.isActing)
                 }
 
-                if (campaign.status == .approved || campaign.status == .scheduled) && canCancel {
+                if (campaign.status == .scheduled || campaign.status == .sending) && canCancel {
+                    Button("Pause Remaining Messages") { confirmingPause = true }
+                        .disabled(model.isActing)
+                }
+
+                if campaign.status == .paused && canLaunch {
+                    Button("Resume With New Send Time") { showingSchedule = true }
+                        .disabled(model.isActing)
+                }
+
+                if (campaign.status == .approved || campaign.status == .scheduled || campaign.status == .sending || campaign.status == .paused) && canCancel {
                     Button("Cancel Campaign", role: .destructive) { showingCancellation = true }
                         .disabled(model.isActing)
                 }
@@ -1562,7 +1605,7 @@ private struct CampaignStatusBadge: View {
         // attention, which is exactly backwards while it is the one state that
         // needs nothing from anybody.
         case .sending: return ViciTheme.tint
-        case .reviewRequired, .approvalPending, .scheduled: return ViciTheme.warning
+        case .reviewRequired, .approvalPending, .scheduled, .paused: return ViciTheme.warning
         case .failed, .rejected, .cancelled: return ViciTheme.destructive
         case .draft: return ViciTheme.inkSecondary
         }
@@ -2490,6 +2533,7 @@ private struct CampaignScheduleSheet: View {
     @Environment(\.dismiss) private var dismiss
     let action: (Date) async -> Void
     let businessTimeZone: TimeZone
+    let isResuming: Bool
     let viewerTimeZone: TimeZone
     let actorName: String
     let isRescheduling: Bool
@@ -2498,6 +2542,7 @@ private struct CampaignScheduleSheet: View {
     @State private var isWorking = false
 
     init(existingDate: Date?,
+         isResuming: Bool = false,
          businessTimeZoneID: String,
          viewerTimeZone: TimeZone,
          actorName: String,
@@ -2513,7 +2558,8 @@ private struct CampaignScheduleSheet: View {
             ?? TimeZone(identifier: "America/New_York")!
         self.viewerTimeZone = viewerTimeZone
         self.actorName = actorName
-        isRescheduling = existingDate != nil
+        isRescheduling = existingDate != nil && !isResuming
+        self.isResuming = isResuming
         _scheduledFor = State(initialValue: initial)
         _initialScheduledFor = State(initialValue: initial)
         self.action = action
@@ -2551,14 +2597,14 @@ private struct CampaignScheduleSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle(isRescheduling ? "Reschedule Campaign" : "Schedule Campaign")
+            .navigationTitle(isResuming ? "Resume Campaign" : (isRescheduling ? "Reschedule Campaign" : "Schedule Campaign"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Back") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isRescheduling ? "Reschedule" : "Schedule") {
+                    Button(isResuming ? "Resume" : (isRescheduling ? "Reschedule" : "Schedule")) {
                         isWorking = true
                         Task { await action(scheduledFor) }
                     }

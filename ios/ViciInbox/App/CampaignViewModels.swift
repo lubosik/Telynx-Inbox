@@ -579,6 +579,33 @@ final class CampaignDetailModel: ObservableObject {
         }
     }
 
+    func pause() async {
+        await perform(success: "Campaign paused. Messages already being sent cannot be recalled.") {
+            try await APIClient.shared.pauseCampaign(id: campaignID)
+        }
+    }
+
+    func cancelRecipient(_ recipient: CampaignRecipient) async {
+        guard !isActing else { return }
+        isActing = true
+        defer { isActing = false }
+        do {
+            try await APIClient.shared.cancelCampaignRecipient(
+                campaignID: campaignID, recipientID: recipient.id)
+            confirmationMessage = "Cancelled only \(recipient.contactName ?? recipient.contactPhone)'s pending message."
+            errorMessage = nil
+            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func resume(for date: Date) async {
+        await perform(success: "Campaign resumed") {
+            try await APIClient.shared.resumeCampaign(id: campaignID, scheduledFor: date)
+        }
+    }
+
     private func perform(success: String,
                          action: () async throws -> CampaignActionResponse) async {
         guard !isActing else { return }

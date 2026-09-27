@@ -1565,7 +1565,7 @@ struct CheckInAutomationSection: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 if let queued = automation?.queuedRecipients, !queued.isEmpty {
-                    LabeledContent("Pending", value: String(queued.count))
+                    LabeledContent("Pending", value: String(queued.filter { $0.campaignStatus != "paused" }.count))
                         .fontWeight(.semibold)
                     ForEach(Array(queued.prefix(3))) { recipient in
                         AutomationRecipientPreview(name: recipient.contactName,
@@ -1574,7 +1574,7 @@ struct CheckInAutomationSection: View {
                                                    sendDate: recipient.sendDate,
                                                    timeZoneID: automation?.timeZone)
                     }
-                    Button("See all \(queued.count) check-ins") { showingQueue = true }
+                    Button("See all \(queued.count) queued or paused check-ins") { showingQueue = true }
                 } else if isOn {
                     Text("No personal check-ins are queued right now.")
                         .font(.footnote)
@@ -1605,9 +1605,11 @@ struct CheckInAutomationSection: View {
                     AutomationRecipientSummary(id: $0.id, campaignID: $0.campaignID,
                                                campaignTitle: $0.campaignTitle,
                                                name: $0.contactName, phone: $0.phone,
-                                               message: $0.message, sendDate: $0.sendDate)
+                                               message: $0.message, sendDate: $0.sendDate,
+                                               campaignStatus: $0.campaignStatus)
                 },
-                timeZoneID: automation?.timeZone
+                timeZoneID: automation?.timeZone,
+                onChanged: { Task { await load() } }
             )
         }
         .sheet(isPresented: $showingTemplateEditor) {
@@ -1830,7 +1832,7 @@ struct VIPWelcomeAutomationSection: View {
                                                    sendDate: recipient.sendDate,
                                                    timeZoneID: automation?.timeZone)
                     }
-                    Button("See all \(queued.count) VIP welcomes") { showingQueue = true }
+                    Button("See all \(queued.count) queued or paused VIP welcomes") { showingQueue = true }
                 } else if isOn {
                     Text("No VIP welcomes are queued right now.")
                         .font(.footnote)
@@ -1860,9 +1862,11 @@ struct VIPWelcomeAutomationSection: View {
                     AutomationRecipientSummary(id: $0.id, campaignID: $0.campaignID,
                                                campaignTitle: $0.campaignTitle,
                                                name: $0.contactName, phone: $0.phone,
-                                               message: $0.message, sendDate: $0.sendDate)
+                                               message: $0.message, sendDate: $0.sendDate,
+                                               campaignStatus: $0.campaignStatus)
                 },
-                timeZoneID: automation?.timeZone
+                timeZoneID: automation?.timeZone,
+                onChanged: { Task { await load() } }
             )
         }
     }
@@ -1995,6 +1999,7 @@ private struct AutomationRecipientSummary: Identifiable {
     let phone: String?
     let message: String?
     let sendDate: Date?
+    let campaignStatus: String?
 }
 
 private struct AutomationRecipientPreview: View {
@@ -2028,26 +2033,38 @@ private struct AutomationRecipientQueueSheet: View {
     let title: String
     let recipients: [AutomationRecipientSummary]
     let timeZoneID: String?
+    let onChanged: () -> Void
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var session: SessionModel
+    @State private var cancelledIDs = Set<String>()
+    @State private var cancellingID: String?
+    @State private var recipientToCancel: AutomationRecipientSummary?
+    @State private var cancelError: String?
 
-    private struct Batch: Identifiable { let id: String; let title: String }
+    private struct Batch: Identifiable { let id: String; let title: String; let paused: Bool }
 
     private var batches: [Batch] {
         var seen = Set<String>()
-        return recipients.compactMap { recipient in
+        return visibleRecipients.compactMap { recipient in
             guard seen.insert(recipient.campaignID).inserted else { return nil }
             return Batch(id: recipient.campaignID,
-                         title: recipient.campaignTitle ?? "Scheduled batch")
+                         title: recipient.campaignTitle ?? "Automation batch",
+                         paused: recipient.campaignStatus == "paused")
         }
+    }
+
+    private var visibleRecipients: [AutomationRecipientSummary] {
+        recipients.filter { !cancelledIDs.contains($0.id) }
     }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(recipients) { recipient in
-                        if let phone = recipient.phone {
+                    ForEach(visibleRecipients) { recipient in
+                        Group {
+                          if let phone = recipient.phone {
                             Button {
                                 dismiss()
                                 _ = router.open(.conversation(phone: phone))
@@ -2064,35 +2081,83 @@ private struct AutomationRecipientQueueSheet: View {
                                 }
                             }
                             .buttonStyle(.plain)
-                        } else {
+                          } else {
                             AutomationRecipientPreview(name: recipient.name,
                                                        phone: recipient.phone,
                                                        message: recipient.message,
                                                        sendDate: recipient.sendDate,
                                                        timeZoneID: timeZoneID)
+                          }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if recipient.campaignStatus == "paused" {
+                                Text("Paused")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(ViciTheme.warning)
+                                    .padding(.trailing, 16)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if session.can(Permission.campaignsCancel) {
+                                Button("Cancel", role: .destructive) {
+                                    recipientToCancel = recipient
+                                }
+                                .disabled(cancellingID != nil)
+                            }
                         }
                     }
                 } header: {
-                    Text("Pending · \(recipients.count)")
+                    Text("Messages · \(visibleRecipients.count)")
                 }
                 if !batches.isEmpty {
                     Section {
                         ForEach(batches) { batch in
-                            Button("Open \(batch.title)") {
+                            Button(batch.paused ? "Paused · \(batch.title)" : "Open \(batch.title)") {
                                 dismiss()
                                 _ = router.open(.campaign(id: batch.id))
                             }
                         }
                     } header: {
-                        Text("Scheduled batches")
+                        Text("Batches")
                     } footer: {
-                        Text("Queued copy is frozen after approval. Open a batch to review or cancel it before sending.")
+                        Text("Swipe left on one person to cancel only their message. Open a batch to pause, resume, or cancel all remaining messages.")
                     }
                 }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .confirmationDialog("Cancel this person's message?", isPresented: Binding(
+                get: { recipientToCancel != nil },
+                set: { if !$0 { recipientToCancel = nil } }
+            )) {
+                if let recipient = recipientToCancel {
+                    Button("Cancel only this message", role: .destructive) {
+                        Task { await cancel(recipient) }
+                    }
+                }
+            } message: {
+                Text("Everyone else in the batch will still receive their scheduled message.")
+            }
+            .alert("Could not cancel this message", isPresented: Binding(
+                get: { cancelError != nil }, set: { if !$0 { cancelError = nil } }
+            )) { Button("OK") { cancelError = nil } } message: {
+                Text(cancelError ?? "Please try again.")
+            }
+        }
+    }
+
+    private func cancel(_ recipient: AutomationRecipientSummary) async {
+        guard cancellingID == nil else { return }
+        cancellingID = recipient.id
+        defer { cancellingID = nil }
+        do {
+            try await APIClient.shared.cancelCampaignRecipient(
+                campaignID: recipient.campaignID, recipientID: recipient.id)
+            cancelledIDs.insert(recipient.id)
+            onChanged()
+        } catch {
+            cancelError = error.localizedDescription
         }
     }
 }

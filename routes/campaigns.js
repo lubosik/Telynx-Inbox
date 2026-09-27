@@ -1149,7 +1149,8 @@ function createCampaignRouter({
   router.post('/:id/cancel', async (req, res) => {
     try {
       // Cancellation is the safety action and happens before best-effort audit.
-      const campaign = await campaigns.cancel(req.params.id, req.body?.reason, req.actor);
+      const campaign = await campaigns.cancel(req.params.id,
+        req.body?.reason || 'Cancelled by an operator in the app', req.actor);
       await auditCampaign('campaign.cancelled', req, campaign, {
         summary: `Cancelled ${campaignSummaryName(campaign)}`,
         newState: { status: 'cancelled', revision: campaign.revision },
@@ -1157,6 +1158,40 @@ function createCampaignRouter({
       });
       return res.json({ campaign });
     } catch (error) { return sendError(res, error, 'cancelling this campaign'); }
+  });
+
+  router.post('/:id/recipients/:recipientId/cancel', async (req, res) => {
+    try {
+      const recipient = await campaigns.cancelRecipient(req.params.id, req.params.recipientId, req.actor);
+      await auditCampaign('campaign.recipient_cancelled', req, { id: req.params.id }, {
+        summary: 'Cancelled one scheduled message',
+        metadata: { recipient_id: recipient.id, campaign_id: req.params.id }
+      });
+      return res.json({ recipient });
+    } catch (error) { return sendError(res, error, 'cancelling this scheduled message'); }
+  });
+
+  router.post('/:id/pause', async (req, res) => {
+    try {
+      const campaign = await campaigns.pause(req.params.id, req.actor);
+      await auditCampaign('campaign.paused', req, campaign, {
+        summary: `Paused ${campaignSummaryName(campaign)}`,
+        newState: { status: 'paused', revision: campaign.revision }
+      });
+      return res.json({ campaign });
+    } catch (error) { return sendError(res, error, 'pausing this campaign'); }
+  });
+
+  router.post('/:id/resume', async (req, res) => {
+    try {
+      const campaign = await campaigns.resume(req.params.id, req.body?.scheduledFor, req.actor);
+      await auditCampaign('campaign.resumed', req, campaign, {
+        summary: `Resumed ${campaignSummaryName(campaign)}`,
+        newState: { status: 'scheduled', revision: campaign.revision,
+          scheduled_for: campaign.scheduled_for }
+      });
+      return res.json({ campaign });
+    } catch (error) { return sendError(res, error, 'resuming this campaign'); }
   });
 
   router.post('/:id/dry-run', async (req, res) => {

@@ -6,6 +6,7 @@ enum CampaignStatus: String, Codable, Hashable {
     case approvalPending = "approval_pending"
     case approved
     case scheduled
+    case paused
     case sending
     case completed
     case rejected
@@ -19,6 +20,7 @@ enum CampaignStatus: String, Codable, Hashable {
         case .approvalPending: return "Approval Pending"
         case .approved: return "Approved"
         case .scheduled: return "Scheduled"
+        case .paused: return "Paused"
         case .sending: return "Sending"
         // "Live", not "Completed" and not "Sent".
         //
@@ -534,6 +536,7 @@ struct CheckInAutomationRecipient: Codable, Hashable, Identifiable {
     let message: String?
     let sendAt: String?
     let state: String?
+    let campaignStatus: String?
 
     var sendDate: Date? { AssistantThreadSummary.parse(sendAt) }
 }
@@ -575,6 +578,7 @@ struct VIPWelcomeAutomationRecipient: Codable, Hashable, Identifiable {
     let message: String?
     let sendAt: String?
     let state: String?
+    let campaignStatus: String?
 
     var sendDate: Date? { AssistantThreadSummary.parse(sendAt) }
 }
