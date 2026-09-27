@@ -51,9 +51,12 @@ router.get('/stats', async (req, res) => {
   }
 });
 
-// GET /api/activity/queue?flow=&page=1
+// GET /api/activity/queue?flow=&page=1&status=pending|failed|cancelled
 router.get('/queue', async (req, res) => {
-  const { flow, page = 1 } = req.query;
+  const { flow, page = 1, status = 'pending' } = req.query;
+  if (!['pending', 'failed', 'cancelled'].includes(status)) {
+    return res.status(400).json({ error: 'Choose pending, failed or cancelled messages.' });
+  }
   const limit  = 50;
   const offset = (parseInt(page) - 1) * limit;
 
@@ -61,8 +64,8 @@ router.get('/queue', async (req, res) => {
     let query = supabase
       .from('sms_scheduled')
       .select('id, order_id, phone, flow_type, message_body, send_at, status, created_at')
-      .eq('status', 'pending')
-      .order('send_at', { ascending: true })
+      .eq('status', status)
+      .order('send_at', { ascending: status === 'pending' })
       .range(offset, offset + limit - 1);
 
     if (flow && flow !== 'all') query = query.eq('flow_type', flow);

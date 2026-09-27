@@ -223,6 +223,17 @@ final class ActivityModel: ObservableObject {
     @Published private(set) var stats: ActivityStats?
     @Published private(set) var queue: [ActivityRecord] = []
     @Published private(set) var recent: [ActivityRecord] = []
+    @Published private(set) var failed: [ActivityRecord] = []
+    @Published private(set) var cancelled: [ActivityRecord] = []
+    @Published private(set) var queueHasMore = false
+    @Published private(set) var recentHasMore = false
+    @Published private(set) var failedHasMore = false
+    @Published private(set) var cancelledHasMore = false
+    @Published private(set) var isLoadingMore = false
+    private var queuePage = 1
+    private var recentPage = 1
+    private var failedPage = 0
+    private var cancelledPage = 0
     /// The store's zone, so a queued reminder shows the instant the business
     /// will send it rather than whatever zone the phone happens to be in.
     @Published private(set) var timeZoneID: String?
@@ -237,15 +248,86 @@ final class ActivityModel: ObservableObject {
         isLoading = stats == nil
         defer { isLoading = false }
         do {
+            let requestedFlow = flow
             async let newStats = APIClient.shared.fetchActivityStats()
-            async let newQueue = APIClient.shared.fetchActivityQueue(flow: flow)
-            async let newRecent = APIClient.shared.fetchRecentActivity(flow: flow)
+            async let newQueue = APIClient.shared.fetchActivityQueue(flow: requestedFlow)
+            async let newRecent = APIClient.shared.fetchRecentActivity(flow: requestedFlow)
             let values = try await (newStats, newQueue, newRecent)
+            guard requestedFlow == flow else { return }
             stats = values.0
             queue = values.1.items
             recent = values.2.items
+            failed = []
+            cancelled = []
+            failedPage = 0
+            cancelledPage = 0
+            failedHasMore = false
+            cancelledHasMore = false
+            queuePage = 1
+            recentPage = 1
+            queueHasMore = values.1.hasMore
+            recentHasMore = values.2.hasMore
             timeZoneID = values.1.timeZone ?? values.2.timeZone
             errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadMoreQueue() async {
+        guard queueHasMore, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let requestedFlow = flow
+            let next = queuePage + 1
+            let page = try await APIClient.shared.fetchActivityQueue(flow: requestedFlow, page: next)
+            guard requestedFlow == flow else { return }
+            queue.append(contentsOf: page.items)
+            queuePage = next
+            queueHasMore = page.hasMore
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadMoreRecent() async {
+        guard recentHasMore, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let requestedFlow = flow
+            let next = recentPage + 1
+            let page = try await APIClient.shared.fetchRecentActivity(flow: requestedFlow, page: next)
+            guard requestedFlow == flow else { return }
+            recent.append(contentsOf: page.items)
+            recentPage = next
+            recentHasMore = page.hasMore
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func loadStatus(_ status: String, more: Bool = false) async {
+        guard status == "failed" || status == "cancelled", !isLoadingMore else { return }
+        let currentPage = status == "failed" ? failedPage : cancelledPage
+        if more {
+            guard currentPage > 0,
+                  (status == "failed" ? failedHasMore : cancelledHasMore) else { return }
+        } else if currentPage > 0 {
+            return
+        }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let requestedFlow = flow
+            let next = currentPage + 1
+            let page = try await APIClient.shared.fetchActivityQueue(flow: requestedFlow, page: next,
+                                                                     status: status)
+            guard requestedFlow == flow else { return }
+            if status == "failed" {
+                if next == 1 { failed = page.items } else { failed.append(contentsOf: page.items) }
+                failedPage = next
+                failedHasMore = page.hasMore
+            } else {
+                if next == 1 { cancelled = page.items } else { cancelled.append(contentsOf: page.items) }
+                cancelledPage = next
+                cancelledHasMore = page.hasMore
+            }
         } catch { errorMessage = error.localizedDescription }
     }
 

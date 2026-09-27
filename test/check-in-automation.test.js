@@ -453,10 +453,12 @@ test('the iOS switch owns its own state, so it moves when tapped', () => {
     'the automation screen must name the recurring business-local send hour');
   assert.match(section, /timeZone\.identifier/,
     'the next-send label must show which timezone defines 6 PM');
-  assert.match(section, /Queued personal check-ins/,
-    'individual automatic check-ins must be visible under Automations');
+  assert.match(section, /See all.*check-ins/,
+    'the full recipient queue must be one tap away');
   assert.match(section, /automation\?\.queuedRecipients/,
     'the Automations screen must read the individual recipient queue');
-  assert.match(section, /ForEach\(queued\)/,
-    'the screen must render every queued recipient rather than only a batch total');
+  assert.match(section, /ForEach\(Array\(queued\.prefix\(3\)\)\)/,
+    'the dashboard must show only three recipients before the full queue');
+  assert.match(section, /AutomationRecipientQueueSheet\(/,
+    'the remaining recipients must be available in a full queue');
 });

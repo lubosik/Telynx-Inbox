@@ -501,9 +501,11 @@ actor APIClient {
         try await decodedGET("/api/activity/stats")
     }
 
-    func fetchActivityQueue(flow: String = "all", page: Int = 1) async throws -> ActivityPage {
+    func fetchActivityQueue(flow: String = "all", page: Int = 1,
+                            status: String = "pending") async throws -> ActivityPage {
         try await decodedGET("/api/activity/queue", queryItems: [
-            URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page))
+            URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "status", value: status)
         ])
     }
 

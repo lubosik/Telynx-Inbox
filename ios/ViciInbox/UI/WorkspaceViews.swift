@@ -1475,7 +1475,7 @@ private func cartRecoveryMoney(_ amount: FlexibleDecimal, currency: String) -> S
         ?? "\(formatter.currencySymbol ?? "$")\(amount.currencyText)"
 }
 
-/// The automatic 21-day check-in, at the top of the Automations screen.
+/// The automatic 21-day check-in in the Automations dashboard.
 /// Enabling it authorizes future automatic customer messages, so its copy is
 /// intentionally explicit about what the switch does.
 struct CheckInAutomationSection: View {
@@ -1502,6 +1502,7 @@ struct CheckInAutomationSection: View {
     @State private var message: String?
     @State private var failed = false
     @State private var loadFailed = false
+    @State private var showingQueue = false
 
     private var canApprove: Bool { session.can(Permission.campaignsApprove) }
 
@@ -1548,44 +1549,17 @@ struct CheckInAutomationSection: View {
                                            storeZoneID: automation?.timeZone,
                                            viewerZone: appearance.effectiveTimeZone)
                 }
-                if let last = automation?.lastCampaign {
-                    NavigationLink(value: AppRoute.campaign(id: last.id)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(last.title ?? "This week's check-in").lineLimit(2)
-                            Text((last.status ?? "").capitalized)
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                }
                 if let queued = automation?.queuedRecipients, !queued.isEmpty {
-                    LabeledContent("Queued personal check-ins", value: String(queued.count))
+                    LabeledContent("Pending", value: String(queued.count))
                         .fontWeight(.semibold)
-                    ForEach(queued) { recipient in
-                        NavigationLink(value: AppRoute.campaign(id: recipient.campaignID)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(recipient.contactName
-                                         ?? recipient.phone.map(PhoneFormatter.pretty)
-                                         ?? "Unknown customer")
-                                        .fontWeight(.semibold)
-                                    Spacer()
-                                    if let sendDate = recipient.sendDate {
-                                        Text(checkInSendTime(sendDate,
-                                                             timeZoneID: automation?.timeZone))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                if let message = recipient.message, !message.isEmpty {
-                                    Text(message)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
+                    ForEach(Array(queued.prefix(3))) { recipient in
+                        AutomationRecipientPreview(name: recipient.contactName,
+                                                   phone: recipient.phone,
+                                                   message: recipient.message,
+                                                   sendDate: recipient.sendDate,
+                                                   timeZoneID: automation?.timeZone)
                     }
+                    Button("See all \(queued.count) check-ins") { showingQueue = true }
                 } else if isOn {
                     Text("No personal check-ins are queued right now.")
                         .font(.footnote)
@@ -1609,6 +1583,18 @@ struct CheckInAutomationSection: View {
             }
         }
         .task { if automation == nil { await load() } }
+        .sheet(isPresented: $showingQueue) {
+            AutomationRecipientQueueSheet(
+                title: "Scheduled check-ins",
+                recipients: (automation?.queuedRecipients ?? []).map {
+                    AutomationRecipientSummary(id: $0.id, campaignID: $0.campaignID,
+                                               campaignTitle: $0.campaignTitle,
+                                               name: $0.contactName, phone: $0.phone,
+                                               message: $0.message, sendDate: $0.sendDate)
+                },
+                timeZoneID: automation?.timeZone
+            )
+        }
     }
 
     private func load() async {
@@ -1652,8 +1638,8 @@ struct CheckInAutomationSection: View {
 }
 
 /// A one-time welcome sent after a customer first crosses the VIP threshold.
-/// The queue is shown person-by-person here even though campaign rows remain
-/// underneath as the immutable approval and delivery ledger.
+/// The dashboard previews three people; the full queue opens in one sheet.
+/// Campaign rows remain the immutable approval and delivery ledger.
 struct VIPWelcomeAutomationSection: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var appearance: AppearanceModel
@@ -1665,6 +1651,7 @@ struct VIPWelcomeAutomationSection: View {
     @State private var message: String?
     @State private var failed = false
     @State private var loadFailed = false
+    @State private var showingQueue = false
 
     private var canApprove: Bool { session.can(Permission.campaignsApprove) }
 
@@ -1706,14 +1693,8 @@ struct VIPWelcomeAutomationSection: View {
                 }
                 .disabled(!canApprove || isBusy)
 
-                LabeledContent(
-                    "Timing",
-                    value: "\(automation?.delayHours ?? 24) hours after becoming VIP"
-                )
-                LabeledContent(
-                    "Conversation guard",
-                    value: "Waits at least \(automation?.conversationGuardHours ?? 2) hours"
-                )
+                Text("Welcomes new VIPs after \(automation?.delayHours ?? 24) hours, at the scheduled store time.")
+                    .font(.footnote).foregroundStyle(.secondary)
 
                 if isEditingTemplate {
                     TextEditor(text: $templateDraft)
@@ -1741,7 +1722,7 @@ struct VIPWelcomeAutomationSection: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Text("Future welcome message")
+                            Text("VIP welcome template")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                             Button {
@@ -1757,22 +1738,13 @@ struct VIPWelcomeAutomationSection: View {
                         Text(automation?.messageTemplate ?? "")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .lineLimit(3)
                             .textSelection(.enabled)
                     }
                 }
 
-                if let last = automation?.lastCampaign {
-                    NavigationLink(value: AppRoute.campaign(id: last.id)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(last.title ?? "Latest VIP welcome").lineLimit(2)
-                            Text((last.status ?? "").capitalized)
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
                 if let queued = automation?.queuedRecipients, !queued.isEmpty {
-                    LabeledContent("Queued VIP welcomes", value: String(queued.count))
+                    LabeledContent("Pending", value: String(queued.count))
                         .fontWeight(.semibold)
                     // The queue is sorted soonest first, so its head is when this
                     // batch actually goes out. Shown once, with the owner's own
@@ -1782,33 +1754,14 @@ struct VIPWelcomeAutomationSection: View {
                                                storeZoneID: automation?.timeZone,
                                                viewerZone: appearance.effectiveTimeZone)
                     }
-                    ForEach(queued) { recipient in
-                        NavigationLink(value: AppRoute.campaign(id: recipient.campaignID)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(recipient.contactName
-                                         ?? recipient.phone.map(PhoneFormatter.pretty)
-                                         ?? "Unknown customer")
-                                        .fontWeight(.semibold)
-                                    Spacer()
-                                    if let sendDate = recipient.sendDate {
-                                        Text(vipWelcomeSendTime(sendDate,
-                                                                timeZoneID: automation?.timeZone))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .multilineTextAlignment(.trailing)
-                                    }
-                                }
-                                if let copy = recipient.message, !copy.isEmpty {
-                                    Text(copy)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
+                    ForEach(Array(queued.prefix(3))) { recipient in
+                        AutomationRecipientPreview(name: recipient.contactName,
+                                                   phone: recipient.phone,
+                                                   message: recipient.message,
+                                                   sendDate: recipient.sendDate,
+                                                   timeZoneID: automation?.timeZone)
                     }
+                    Button("See all \(queued.count) VIP welcomes") { showingQueue = true }
                 } else if isOn {
                     Text("No VIP welcomes are queued right now.")
                         .font(.footnote)
@@ -1827,10 +1780,22 @@ struct VIPWelcomeAutomationSection: View {
             if !canApprove {
                 Text("Your role can see the VIP welcome queue but cannot change its standing authorisation or future message.")
             } else {
-                Text("A customer is welcomed once, \(automation?.delayHours ?? 24) hours after first becoming VIP. If either side of this conversation was active in the previous \(automation?.conversationGuardHours ?? 2) hours, the welcome waits so messages do not pile up. Editing the template changes future welcomes only; queued messages remain exactly as approved.")
+                Text("Recent conversations delay the welcome by at least \(automation?.conversationGuardHours ?? 2) hours. Editing the template changes future welcomes only; queued messages remain exactly as approved.")
             }
         }
         .task { if automation == nil { await load() } }
+        .sheet(isPresented: $showingQueue) {
+            AutomationRecipientQueueSheet(
+                title: "Scheduled VIP welcomes",
+                recipients: (automation?.queuedRecipients ?? []).map {
+                    AutomationRecipientSummary(id: $0.id, campaignID: $0.campaignID,
+                                               campaignTitle: $0.campaignTitle,
+                                               name: $0.contactName, phone: $0.phone,
+                                               message: $0.message, sendDate: $0.sendDate)
+                },
+                timeZoneID: automation?.timeZone
+            )
+        }
     }
 
     private var templateProblem: String? {
@@ -1953,105 +1918,255 @@ private struct AutomationSendTimeRows: View {
     }
 }
 
+private struct AutomationRecipientSummary: Identifiable {
+    let id: String
+    let campaignID: String
+    let campaignTitle: String?
+    let name: String?
+    let phone: String?
+    let message: String?
+    let sendDate: Date?
+}
+
+private struct AutomationRecipientPreview: View {
+    let name: String?
+    let phone: String?
+    let message: String?
+    let sendDate: Date?
+    let timeZoneID: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(name ?? phone.map(PhoneFormatter.pretty) ?? "Unknown customer")
+                .font(.subheadline.weight(.semibold))
+            if let sendDate {
+                Text(AutomationSendTime.exact(sendDate, inZoneNamed: timeZoneID))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let message, !message.isEmpty {
+                Text(message).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// The entire queue is one tap away. Each approved batch gets one edit link;
+/// repeating that link on every customer made the dashboard look like a list
+/// of campaigns instead of a list of scheduled personal messages.
+private struct AutomationRecipientQueueSheet: View {
+    let title: String
+    let recipients: [AutomationRecipientSummary]
+    let timeZoneID: String?
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var router: AppRouter
+
+    private struct Batch: Identifiable { let id: String; let title: String }
+
+    private var batches: [Batch] {
+        var seen = Set<String>()
+        return recipients.compactMap { recipient in
+            guard seen.insert(recipient.campaignID).inserted else { return nil }
+            return Batch(id: recipient.campaignID,
+                         title: recipient.campaignTitle ?? "Scheduled batch")
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(recipients) { recipient in
+                        AutomationRecipientPreview(name: recipient.name,
+                                                   phone: recipient.phone,
+                                                   message: recipient.message,
+                                                   sendDate: recipient.sendDate,
+                                                   timeZoneID: timeZoneID)
+                    }
+                } header: {
+                    Text("Pending · \(recipients.count)")
+                }
+                if !batches.isEmpty {
+                    Section {
+                        ForEach(batches) { batch in
+                            Button("Open \(batch.title)") {
+                                dismiss()
+                                _ = router.open(.campaign(id: batch.id))
+                            }
+                        }
+                    } header: {
+                        Text("Scheduled batches")
+                    } footer: {
+                        Text("Queued copy is frozen after approval. Open a batch to review or cancel it before sending.")
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
 struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
-    @EnvironmentObject private var session: SessionModel
-    @State private var cancelTarget: ActivityRecord?
-
-    /// Cancelling a queued automation is a permissioned action. The control is
-    /// disabled rather than hidden: a Support Agent should understand why the
-    /// button will not work, not conclude the app is broken. The server rejects
-    /// the request independently either way.
-    private var canCancel: Bool { session.can(Permission.automationCancel) }
-
-    private let flows = ["all", "failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "confirmed-new", "confirmed-returning", "shipped-msg1"]
+    @State private var showingPaymentActivity = false
 
     var body: some View {
         List {
-            AbandonedCartRecoverySection()
-            // First, because it is the only automation on this screen that
-            // messages customers on its own initiative rather than in reply to
-            // an order they just placed.
-            CheckInAutomationSection()
-            VIPWelcomeAutomationSection()
-            if let stats = model.stats {
-                Section("Today") {
+            Section("Payment reminders and order updates") {
+                if let stats = model.stats {
                     HStack {
                         Stat(value: stats.pending, label: "Pending", color: ViciTheme.warning)
                         Stat(value: stats.sentToday, label: "Sent", color: ViciTheme.success)
                         Stat(value: stats.failedToday, label: "Failed", color: ViciTheme.destructive)
                         Stat(value: stats.cancelledToday, label: "Cancelled", color: .secondary)
                     }.padding(.vertical, 6)
+                    Text("Sent, failed and cancelled today · pending now")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-            }
-            Section {
-                Picker("Flow", selection: $model.flow) {
-                    ForEach(flows, id: \.self) { Text(flowLabel($0)).tag($0) }
-                }
-            }
-            Section {
-                if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
-                ForEach(model.queue) { item in
-                    // Visible button rather than swipe-only: a hidden
-                    // gesture is undiscoverable, and stopping a message
-                    // before it reaches a customer is time-sensitive.
-                    // The swipe stays for anyone used to it.
-                    HStack(alignment: .top, spacing: 12) {
-                        // ActivityRow already stretches to fill, so it takes
-                        // the slack and the button keeps its intrinsic width.
-                        // The row itself opens this message's own history:
-                        // scheduled by the hold flow at 09:12, cancelled by
-                        // Dominic at 14:32.
+                if model.isLoading && model.stats == nil {
+                    ProgressView("Loading messages")
+                } else if model.queue.isEmpty {
+                    Text("No payment or order messages are pending.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(model.queue.prefix(3))) { item in
                         NavigationLink(value: AppRoute.automationHistory(id: item.id)) {
                             ActivityRow(item: item, date: item.sendAt, timeZoneID: model.timeZoneID)
                         }
-                        Button {
-                            cancelTarget = item
-                        } label: {
-                            if model.cancellingID == item.id {
-                                ProgressView()
-                            } else {
-                                Text("Cancel")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
-                            }
-                        }
-                        // Borderless keeps the button's tap target separate
-                        // from the row's, which List would otherwise merge.
-                        .buttonStyle(.borderless)
-                        .disabled(!canCancel || model.cancellingID != nil)
-                        .accessibilityLabel("Cancel scheduled \(item.flowType ?? "automation")")
-                        .accessibilityHint(canCancel
-                                           ? "Stops this queued automation"
-                                           : "Your role cannot cancel automations")
-                    }
-                    // The swipe shortcut is attached only when the action is
-                    // actually permitted; a swipe that always fails is worse
-                    // than no swipe. The disabled button above carries the
-                    // explanation.
-                    .swipeActions {
-                        if canCancel {
-                            Button("Cancel", role: .destructive) { cancelTarget = item }
-                        }
                     }
                 }
-            } header: {
-                Text("Queued automations")
-            } footer: {
-                if canCancel {
-                    Text("Tap a queued message to see everything that has happened to it.")
-                } else {
-                    Text("Your role can see the queue but cannot cancel automations. Ask an admin if a queued message needs stopping. Tap a message to see its history.")
+                Button("See all payment and order activity") {
+                    showingPaymentActivity = true
                 }
             }
-            Section("Recent sends") {
-                if model.recent.isEmpty { Text("No recent sends").foregroundStyle(.secondary) }
-                ForEach(model.recent) { item in ActivityRow(item: item, date: item.sentAt, timeZoneID: model.timeZoneID) }
-            }
+            VIPWelcomeAutomationSection()
+            CheckInAutomationSection()
+            AbandonedCartRecoverySection()
         }
         .refreshable { await model.load() }
         .task { if model.stats == nil { await model.load() } }
-        .onChange(of: model.flow) { _ in Task { await model.load() } }
+        .sheet(isPresented: $showingPaymentActivity) {
+            AutomationPaymentActivitySheet(model: model)
+        }
+        .alert("Activity error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(model.errorMessage ?? "Unknown error") }
+    }
+}
+
+private struct AutomationPaymentActivitySheet: View {
+    @ObservedObject var model: ActivityModel
+    @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var router: AppRouter
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0
+    @State private var cancelTarget: ActivityRecord?
+    private let flows = ["all", "failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "confirmed-new", "confirmed-returning", "shipped-msg1"]
+
+    private var canCancel: Bool { session.can(Permission.automationCancel) }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("Status", selection: $tab) {
+                        Text("Pending").tag(0)
+                        Text("Sent").tag(1)
+                        Text("Failed").tag(2)
+                        Text("Cancelled").tag(3)
+                    }.pickerStyle(.segmented)
+                    Picker("Flow", selection: $model.flow) {
+                        ForEach(flows, id: \.self) { Text(flowLabel($0)).tag($0) }
+                    }
+                }
+                if tab == 0 {
+                    Section("Scheduled messages") {
+                        if model.queue.isEmpty { Text("Queue is empty").foregroundStyle(.secondary) }
+                        ForEach(model.queue) { item in
+                            HStack(alignment: .top, spacing: 12) {
+                                Button {
+                                    dismiss()
+                                    _ = router.open(.automationHistory(id: item.id))
+                                } label: {
+                                    ActivityRow(item: item, date: item.sendAt, timeZoneID: model.timeZoneID)
+                                }
+                                .buttonStyle(.plain)
+                                Spacer(minLength: 0)
+                                Button("Cancel") { cancelTarget = item }
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
+                                    .disabled(!canCancel || model.cancellingID != nil)
+                            }
+                        }
+                        if model.queueHasMore {
+                            Button(model.isLoadingMore ? "Loading" : "Load more") {
+                                Task { await model.loadMoreQueue() }
+                            }.disabled(model.isLoadingMore)
+                        }
+                    }
+                } else if tab == 1 {
+                    Section("Recent sends") {
+                        if model.recent.isEmpty { Text("No recent sends").foregroundStyle(.secondary) }
+                        ForEach(model.recent) { item in
+                            ActivityRow(item: item, date: item.sentAt, timeZoneID: model.timeZoneID)
+                        }
+                        if model.recentHasMore {
+                            Button(model.isLoadingMore ? "Loading" : "Load more") {
+                                Task { await model.loadMoreRecent() }
+                            }.disabled(model.isLoadingMore)
+                        }
+                    }
+                } else {
+                    let records = tab == 2 ? model.failed : model.cancelled
+                    let hasMore = tab == 2 ? model.failedHasMore : model.cancelledHasMore
+                    let status = tab == 2 ? "failed" : "cancelled"
+                    Section(tab == 2 ? "Failed messages" : "Cancelled messages") {
+                        if records.isEmpty && model.isLoadingMore {
+                            ProgressView("Loading messages")
+                        } else if records.isEmpty {
+                            Text("No \(status) messages.").foregroundStyle(.secondary)
+                        }
+                        ForEach(records) { item in
+                            ActivityRow(item: item, date: item.sendAt, timeZoneID: model.timeZoneID)
+                        }
+                        if hasMore {
+                            Button(model.isLoadingMore ? "Loading" : "Load more") {
+                                Task { await model.loadStatus(status, more: true) }
+                            }.disabled(model.isLoadingMore)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Payment and order activity")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .refreshable {
+                await model.load()
+                if tab == 2 || tab == 3 {
+                    await model.loadStatus(tab == 2 ? "failed" : "cancelled")
+                }
+            }
+            .onChange(of: tab) { selected in
+                if selected == 2 || selected == 3 {
+                    Task { await model.loadStatus(selected == 2 ? "failed" : "cancelled") }
+                }
+            }
+            .onChange(of: model.flow) { _ in
+                Task {
+                    await model.load()
+                    if tab == 2 || tab == 3 {
+                        await model.loadStatus(tab == 2 ? "failed" : "cancelled")
+                    }
+                }
+            }
+            .onDisappear {
+                if model.flow != "all" {
+                    model.flow = "all"
+                }
+            }
+        }
         .confirmationDialog("Cancel this scheduled message?", isPresented: Binding(
             get: { cancelTarget != nil }, set: { if !$0 { cancelTarget = nil } }
         ), titleVisibility: .visible) {

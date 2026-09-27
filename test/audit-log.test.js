@@ -109,6 +109,32 @@ const QUEUED_ROW = Object.freeze({
   send_at: '2026-08-22T14:00:00.000Z'
 });
 
+test('automation activity rejects unknown statuses and reads failed messages by their stored state', async () => {
+  const filters = [];
+  const client = {
+    from(table) {
+      const query = {
+        select: () => query,
+        eq(field, value) { if (table === 'sms_scheduled') filters.push([field, value]); return query; },
+        order: () => query,
+        range: () => query,
+        then(resolve) { return Promise.resolve({ data: [], error: null }).then(resolve); }
+      };
+      return query;
+    }
+  };
+  await withFakeDatabase(client, async () => {
+    const handler = routeHandler(require('../routes/activity'), 'get', '/queue');
+    const invalid = responseRecorder();
+    await handler({ query: { status: 'sent' } }, invalid);
+    assert.equal(invalid.statusCode, 400);
+    const failed = responseRecorder();
+    await handler({ query: { status: 'failed' } }, failed);
+    assert.equal(failed.statusCode, 200);
+    assert.ok(filters.some(([field, value]) => field === 'status' && value === 'failed'));
+  });
+});
+
 // ── The flagship ───────────────────────────────────────────────────────────
 
 test('cancelling a queued automation writes exactly one audit row with actor, timing, before/after and changed fields', async () => {

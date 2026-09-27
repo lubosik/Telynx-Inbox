@@ -49,17 +49,18 @@ test('VIP welcome is a visible, editable automation with a person-by-person queu
   assert.match(section, /Label\("Edit message", systemImage: "pencil"\)/);
   assert.match(section, /TextEditor\(text: \$templateDraft\)/);
   assert.match(section, /Editing the template changes future welcomes only/);
-  assert.match(section, /LabeledContent\("Queued VIP welcomes"/);
-  assert.match(section, /ForEach\(queued\)/);
+  assert.match(section, /LabeledContent\("Pending"/);
+  assert.match(section, /ForEach\(Array\(queued\.prefix\(3\)\)\)/);
   assert.match(section, /recipient\.message/);
-  assert.match(section, /AppRoute\.campaign\(id: recipient\.campaignID\)/);
+  assert.match(section, /AutomationRecipientQueueSheet\(/);
+  assert.doesNotMatch(section, /AppRoute\.campaign\(id: recipient\.campaignID\)/);
   assert.match(section, /America\/New_York/);
   assert.match(section, /timeZone\.identifier/);
 
   const queue = views.slice(queueStart);
   assert.ok(
-    queue.indexOf('CheckInAutomationSection()') < queue.indexOf('VIPWelcomeAutomationSection()'),
-    'the VIP welcome belongs directly after the automatic check-in'
+    queue.indexOf('VIPWelcomeAutomationSection()') < queue.indexOf('CheckInAutomationSection()'),
+    'the VIP welcome and check-in are adjacent in the compact dashboard'
   );
 });
 
