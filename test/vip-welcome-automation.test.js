@@ -79,8 +79,17 @@ test('only a named VIP beyond 24 hours, never welcomed and quiet for two hours, 
       contact_name_snapshot: 'Future Person', first_seen_at: '2026-09-26T12:00:00.000Z',
       membership_source: 'computed'
     }]),
-    sms_campaigns: [{ id: 'old', workspace_id: 'vici', workflow_category: 'vip_welcome' }],
-    sms_campaign_recipients: [{ workspace_id: 'vici', campaign_id: 'old', contact_phone: reached }],
+    // A welcome that genuinely reached somebody: a live campaign and a recipient
+    // carrying sent_at. Only delivery suppresses a repeat, so this fixture has
+    // to say so rather than relying on the row merely existing.
+    sms_campaigns: [{
+      id: 'old', workspace_id: 'vici', workflow_category: 'vip_welcome',
+      status: 'completed', archived_at: null
+    }],
+    sms_campaign_recipients: [{
+      workspace_id: 'vici', campaign_id: 'old', contact_phone: reached,
+      state: 'sent', sent_at: '2026-09-25T10:00:00.000Z'
+    }],
     sms_contacts: [
       { id: 1, phone: due, name: 'Alex Smith', first_name: 'Alex' },
       { id: 2, phone: reached, name: 'Jo Reed', first_name: 'Jo' },
@@ -214,4 +223,60 @@ test('a fenced claimed welcome is deferred and never reaches the provider', asyn
   assert.equal(summary.skipped, 1);
   assert.deepEqual(summary.reasons, { vip_welcome_recent_conversation: 1 });
   assert.equal(calls.includes('begin_sms_campaign_provider_attempt'), false);
+});
+
+// ── THE RETIRED DRAFT MUST NOT SUPPRESS ANYBODY ──────────────────────────
+//
+// Found against production on 27 Sep 2026. `priorWelcomePhones` counted every
+// recipient row on every vip_welcome campaign regardless of state or archival,
+// so the retired 101-person welcome draft (state 'draft', sent_at null, on an
+// archived campaign) suppressed the entire VIP population. Enabling the
+// automation would have queued nobody while reporting all 101 as already
+// enrolled, which reads as a dead feature rather than a bug.
+test('an abandoned welcome draft does not suppress a real welcome', async () => {
+  const abandoned = '+15550000201';
+  const inFlight = '+15550000202';
+  const cancelledLive = '+15550000203';
+  const trulySent = '+15550000204';
+  const phones = [abandoned, inFlight, cancelledLive, trulySent];
+
+  const client = database({
+    sms_campaign_settings: [{ workspace_id: 'vici', business_timezone: 'America/New_York' }],
+    sms_campaign_segments: [{ id: 'vip', workspace_id: 'vici', segment_key: 'best_repeat_customers', archived_at: null }],
+    sms_campaign_segment_members: phones.map((phone, index) => ({
+      workspace_id: 'vici', segment_id: 'vip', contact_phone: phone,
+      contact_id: index + 1, contact_name_snapshot: `Person ${index}`,
+      first_seen_at: '2026-09-24T12:00:00.000Z', membership_source: 'computed'
+    })),
+    sms_campaigns: [
+      // Retired without sending: must hold nobody back.
+      { id: 'archived', workspace_id: 'vici', workflow_category: 'vip_welcome', status: 'draft', archived_at: '2026-09-26T23:48:00.000Z' },
+      // Live and still going out: must prevent a second welcome racing it.
+      { id: 'live', workspace_id: 'vici', workflow_category: 'vip_welcome', status: 'scheduled', archived_at: null },
+      // Cancelled before sending: must hold nobody back either.
+      { id: 'cancelled', workspace_id: 'vici', workflow_category: 'vip_welcome', status: 'cancelled', archived_at: null },
+      // Cancelled, but this one did reach the customer before it stopped.
+      { id: 'partial', workspace_id: 'vici', workflow_category: 'vip_welcome', status: 'cancelled', archived_at: null }
+    ],
+    sms_campaign_recipients: [
+      { workspace_id: 'vici', campaign_id: 'archived', contact_phone: abandoned, state: 'draft', sent_at: null },
+      { workspace_id: 'vici', campaign_id: 'live', contact_phone: inFlight, state: 'pending', sent_at: null },
+      { workspace_id: 'vici', campaign_id: 'cancelled', contact_phone: cancelledLive, state: 'pending', sent_at: null },
+      { workspace_id: 'vici', campaign_id: 'partial', contact_phone: trulySent, state: 'sent', sent_at: '2026-09-25T09:00:00.000Z' }
+    ],
+    sms_contacts: phones.map((phone, index) => ({
+      id: index + 1, phone, name: `Person ${index}`, first_name: `Person${index}`
+    })),
+    sms_messages: []
+  });
+
+  const result = await dueVIPWelcomes({ client, now: NOW });
+  const due = result.due.map(row => row.phone).sort();
+
+  // Abandoned draft and cancelled-before-sending are both free to be welcomed.
+  assert.deepEqual(due, [abandoned, cancelledLive].sort(),
+    'only delivery, or an in-flight send on a live campaign, may suppress a welcome');
+  assert.ok(!due.includes(inFlight), 'a pending welcome on a live campaign must not be queued twice');
+  assert.ok(!due.includes(trulySent), 'a delivered welcome suppresses forever, even if its campaign was cancelled');
+  assert.equal(result.reasons.already_enrolled, 2);
 });
