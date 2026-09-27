@@ -194,7 +194,55 @@ test('an enabled sweep uses the audited campaign state machine in order', async 
   assert.deepEqual(calls.map(row => row[0]), ['create', 'submit', 'approve', 'audit', 'finalize', 'schedule']);
   assert.equal(calls[0][1].workflowCategory, 'vip_welcome');
   assert.equal(calls[0][1].message, WELCOME_MESSAGE);
-  assert.equal(calls.at(-1)[2], '2026-09-26T16:01:00.000Z');
+  // 6 PM in the store zone, not a minute from now. NOW is 12:00 in New York, so
+  // the next 18:00 there is the same afternoon: 22:00 UTC.
+  assert.equal(calls.at(-1)[2], '2026-09-26T22:00:00.000Z');
+});
+
+// ── SWITCHING IT ON MUST NOT FIRE IMMEDIATELY ────────────────────────────
+//
+// The owner switches this on from the UK, where it can easily be past midnight
+// while New York is still the previous evening. Scheduling `now + 60s` would
+// have queued every welcome for the middle of the store's night and left the
+// quiet-hours fence to argue with each recipient, while the Automations screen
+// showed a time nobody chose.
+test('a sweep after the store hour waits for the next 6 PM, not the middle of the night', async () => {
+  const scheduled = [];
+  const service = {
+    async create() { return { campaign: { id: 'w' } }; },
+    async submitReview() {},
+    async approve(id) {
+      return { campaign: { id, revision: 1 }, recipientCount: 1, audienceHash: 'a', messageHash: 'm' };
+    },
+    async finalizeApproval() {},
+    async schedule(id, at) { scheduled.push(at); return { scheduled_for: at }; }
+  };
+  const settings = {
+    vipWelcomeAutomationAvailable: true,
+    vip_welcome_automation_enabled: true,
+    vip_welcome_message_template: WELCOME_MESSAGE,
+    business_timezone: 'America/New_York'
+  };
+  const sweep = when => runVIPWelcomeSweep({
+    client: {}, service, now: new Date(when),
+    loadSettings: async () => settings,
+    readDue: async () => ({ candidates: 1, reasons: {}, due: [{ phone: '+15550000001', name: 'Alex' }] }),
+    audit: async () => ({ fingerprint: 'proof' })
+  });
+
+  // 00:34 UTC on the 27th is 20:34 on the 26th in New York, past that day's
+  // 18:00, so the welcome belongs to the next evening.
+  await sweep('2026-09-27T00:34:00.000Z');
+  assert.equal(scheduled.at(-1), '2026-09-27T22:00:00.000Z');
+
+  // 17:30 in New York is inside the two-hour lead, so it also rolls forward
+  // rather than firing half an hour later.
+  await sweep('2026-09-27T21:30:00.000Z');
+  assert.equal(scheduled.at(-1), '2026-09-28T22:00:00.000Z');
+
+  // Comfortably before the hour on the same day stays on that day.
+  await sweep('2026-09-27T13:00:00.000Z');
+  assert.equal(scheduled.at(-1), '2026-09-27T22:00:00.000Z');
 });
 
 test('the delivery fence waits until two hours after the latest conversation', async () => {
