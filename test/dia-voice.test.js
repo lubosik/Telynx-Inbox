@@ -156,6 +156,39 @@ test('recovery voice service dispatches preview and saves immutable Dia metadata
   assert.equal(saved.voice_model_id, `${MODEL_ID}@${MODEL_REVISION}`);
 });
 
+test('Dia selection preview uses the private saved clip without waking its GPU', async () => {
+  const [diaVoice] = await listDiaVoices({ env: ENV });
+  let syntheses = 0;
+  const service = createCartRecoveryService({
+    client: { storage: { from() { return {}; } } },
+    env: ENV,
+    listDiaVoices: async () => [diaVoice],
+    synthesizeDiaSpeech: async () => {
+      syntheses += 1;
+      return { audio: MP3, contentType: 'audio/mpeg' };
+    },
+    readPreviewAudio: async () => ({ audio: MP3, contentType: 'audio/mpeg', cached: true })
+  });
+  const preview = await service.previewRecoveryVoice({ voiceID: diaVoice.id });
+  assert.deepEqual(preview.audio, MP3);
+  assert.equal(syntheses, 0);
+});
+
+test('a missing Dia preview starts one warm-up and returns promptly', async () => {
+  const [diaVoice] = await listDiaVoices({ env: ENV });
+  let warmups = 0;
+  const service = createCartRecoveryService({
+    client: { storage: { from() { return {}; } } },
+    env: ENV,
+    listDiaVoices: async () => [diaVoice],
+    readPreviewAudio: async () => null,
+    warmPreviewAudio: () => { warmups += 1; }
+  });
+  await assert.rejects(service.previewRecoveryVoice({ voiceID: diaVoice.id }),
+    error => error.code === 'RECOVERY_VOICE_PREVIEW_PREPARING' && error.status === 503);
+  assert.equal(warmups, 1);
+});
+
 test('Dia remains hidden until explicitly enabled and fully configured', async () => {
   const service = createCartRecoveryService({
     client: {},
@@ -167,7 +200,7 @@ test('Dia remains hidden until explicitly enabled and fully configured', async (
   assert.deepEqual(catalogue.voices, []);
 });
 
-test('migration, GPU service, and iOS client preserve provider and long preview behavior', () => {
+test('migration, GPU service, and iOS client preserve provider and bound selection preview waits', () => {
   const migration = fs.readFileSync(path.join(ROOT, 'scripts/dia-voice-provider-migration.sql'), 'utf8');
   const python = fs.readFileSync(path.join(ROOT, 'services/dia-tts/app.py'), 'utf8');
   const dockerfile = fs.readFileSync(path.join(ROOT, 'services/dia-tts/Dockerfile'), 'utf8');
@@ -184,5 +217,6 @@ test('migration, GPU service, and iOS client preserve provider and long preview 
   assert.match(python, /async with runtime\.lock/);
   assert.match(dockerfile, /876125e461a03b157ec905b0fe8b57a0f8b9e7a0/);
   assert.match(models, /if provider == "dia" \{ return "Dia voice" \}/);
-  assert.match(api, /timeout: 510/);
+  assert.match(api, /previewCartRecoveryVoice[\s\S]*?timeout: 30/);
+  assert.match(api, /previewCartRecoveryAttempt[\s\S]*?timeout: 510/);
 });

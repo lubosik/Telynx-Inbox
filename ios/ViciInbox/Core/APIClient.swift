@@ -551,10 +551,9 @@ actor APIClient {
 
     func previewCartRecoveryVoice(id: String) async throws -> Data {
         let path = "/api/cart-recovery/voices/\(encodedPathSegment(id))/preview"
-        // A private Dia GPU may be waking from zero. Production calls still
-        // generate before dialing; the longer timeout is only for an explicit
-        // operator preview and never keeps a customer on the line.
-        let (data, response) = try await post(path, body: [:], timeout: 510)
+        // Voice choices use pre-rendered server previews. A selection screen
+        // must never wait through a sleeping GPU's multi-minute cold start.
+        let (data, response) = try await post(path, body: [:], timeout: 30)
         try validate(data: data, response: response)
         guard !data.isEmpty else { throw APIError.decoding }
         return data

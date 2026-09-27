@@ -49,6 +49,24 @@ test('recovery voice preview authorizes the voice and synthesizes the fixed safe
   assert.deepEqual(result.voice, { id: VIN_ID, name: 'Mark', provider: 'elevenlabs' });
 });
 
+test('the settings catalogue is reused when previewing instead of refetching every provider', async () => {
+  let catalogueReads = 0;
+  const service = createCartRecoveryService({
+    client: {}, env: { ELEVENLABS_API_KEY: 'XI_TEST' },
+    listVoices: async () => {
+      catalogueReads += 1;
+      return [{ id: VIN_ID, name: 'Mark', accent: 'american', verified: true,
+        category: 'professional', language: 'en', professionalClone: true, sharingStatus: 'copied' }];
+    },
+    synthesizeSpeech: async () => ({
+      audio: Buffer.from('ID3-preview-audio'), contentType: 'audio/mpeg'
+    })
+  });
+  await service.listRecoveryVoices();
+  await service.previewRecoveryVoice({ voiceID: VIN_ID });
+  assert.equal(catalogueReads, 1);
+});
+
 test('recovery voice preview rejects malformed and unauthorized voices before synthesis', async () => {
   let syntheses = 0;
   const service = previewService({

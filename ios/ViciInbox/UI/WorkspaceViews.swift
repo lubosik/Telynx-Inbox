@@ -1024,12 +1024,28 @@ struct CartRecoverySettingsView: View {
                         .disabled(recoveryVoices.isEmpty)
 
                         Button(voicePreview.previewingVoiceID == nil
-                               ? (voicePreview.isLoading ? "Loading preview" : "Preview voice")
+                               ? (voicePreview.isLoading ? "Loading preview…" : "Preview voice")
                                : "Stop preview") {
                             toggleVoicePreview()
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(selectedRecoveryVoice == nil)
+
+                        if voicePreview.isLoading {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Fetching the saved preview. This should take only a few seconds.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if let previewError = voicePreview.errorMessage {
+                            Text(previewError)
+                                .font(.caption)
+                                .foregroundStyle(ViciTheme.warning)
+                                .multilineTextAlignment(.center)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
@@ -1277,6 +1293,7 @@ private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, 
 
     private var player: AVAudioPlayer?
     private var loadTask: Task<Void, Never>?
+    private var cachedAudio: [String: Data] = [:]
 
     func toggle(_ voice: RecoveryVoiceOption) {
         if previewingVoiceID == voice.id || isLoading {
@@ -1298,6 +1315,10 @@ private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, 
     }
 
     private func start(_ voice: RecoveryVoiceOption) {
+        if let data = cachedAudio[voice.id] {
+            play(data, id: voice.id)
+            return
+        }
         start(id: voice.id) {
             try await APIClient.shared.previewCartRecoveryVoice(id: voice.id)
         }
@@ -1311,28 +1332,42 @@ private final class CartRecoveryVoicePreviewPlayer: NSObject, ObservableObject, 
             do {
                 let data = try await retrieve()
                 guard !Task.isCancelled, let self else { return }
-
-                let session = AVAudioSession.sharedInstance()
-                try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-                try session.setActive(true)
-
-                let player = try AVAudioPlayer(data: data)
-                player.delegate = self
-                guard player.prepareToPlay(), player.play() else {
-                    throw NSError(domain: "ViciVoicePreview", code: 1,
-                                  userInfo: [NSLocalizedDescriptionKey: "The preview audio could not start."])
-                }
-                self.player = player
-                self.previewingVoiceID = id
-                self.isLoading = false
+                self.cachedAudio[id] = data
+                self.play(data, id: id)
             } catch {
                 guard !Task.isCancelled, let self else { return }
                 self.player = nil
                 self.previewingVoiceID = nil
                 self.isLoading = false
-                self.errorMessage = "That preview could not be played. Check your connection and try again."
+                self.errorMessage = error.localizedDescription.isEmpty
+                    ? "That preview could not be played. Try again."
+                    : error.localizedDescription
                 self.deactivateSession()
             }
+        }
+    }
+
+    private func play(_ data: Data, id: String) {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            guard player.prepareToPlay(), player.play() else {
+                throw NSError(domain: "ViciVoicePreview", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "The preview audio could not start."])
+            }
+            self.player = player
+            self.previewingVoiceID = id
+            self.isLoading = false
+            self.errorMessage = nil
+        } catch {
+            self.player = nil
+            self.previewingVoiceID = nil
+            self.isLoading = false
+            self.errorMessage = "That preview could not be played. Try again."
+            deactivateSession()
         }
     }
 
