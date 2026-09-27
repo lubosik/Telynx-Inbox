@@ -2047,11 +2047,30 @@ private struct AutomationRecipientQueueSheet: View {
             List {
                 Section {
                     ForEach(recipients) { recipient in
-                        AutomationRecipientPreview(name: recipient.name,
-                                                   phone: recipient.phone,
-                                                   message: recipient.message,
-                                                   sendDate: recipient.sendDate,
-                                                   timeZoneID: timeZoneID)
+                        if let phone = recipient.phone {
+                            Button {
+                                dismiss()
+                                _ = router.open(.conversation(phone: phone))
+                            } label: {
+                                HStack {
+                                    AutomationRecipientPreview(name: recipient.name,
+                                                               phone: recipient.phone,
+                                                               message: recipient.message,
+                                                               sendDate: recipient.sendDate,
+                                                               timeZoneID: timeZoneID)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            AutomationRecipientPreview(name: recipient.name,
+                                                       phone: recipient.phone,
+                                                       message: recipient.message,
+                                                       sendDate: recipient.sendDate,
+                                                       timeZoneID: timeZoneID)
+                        }
                     }
                 } header: {
                     Text("Pending · \(recipients.count)")
