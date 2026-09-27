@@ -2099,23 +2099,42 @@ private struct AutomationRecipientQueueSheet: View {
 
 struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
+    @State private var overview: AutomationOverview?
+    @State private var overviewError: String?
     @State private var showingPaymentActivity = false
     @State private var showingPaymentTemplates = false
     @EnvironmentObject private var session: SessionModel
 
     var body: some View {
         List {
-            Section("Payment reminders and order updates") {
-                if let stats = model.stats {
+            Section("All automations") {
+                if let overview {
                     HStack {
-                        Stat(value: stats.pending, label: "Pending", color: ViciTheme.warning)
-                        Stat(value: stats.sentToday, label: "Sent", color: ViciTheme.success)
-                        Stat(value: stats.failedToday, label: "Failed", color: ViciTheme.destructive)
-                        Stat(value: stats.cancelledToday, label: "Cancelled", color: .secondary)
+                        Stat(value: overview.pending, label: "Pending", color: ViciTheme.warning)
+                        Stat(value: overview.sentToday, label: "Sent", color: ViciTheme.success)
+                        Stat(value: overview.failedToday, label: "Failed", color: ViciTheme.destructive)
+                        Stat(value: overview.cancelledToday, label: "Cancelled", color: .secondary)
                     }.padding(.vertical, 6)
-                    Text("Sent, failed and cancelled today · pending now")
+                    Text("Pending now · sent or started, failed and cancelled today in \(overview.timeZone.replacingOccurrences(of: "_", with: " "))")
                         .font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup("Pending by automation") {
+                        LabeledContent("Payment and order", value: String(overview.breakdown.paymentAndOrders.pending))
+                        LabeledContent("VIP welcome", value: String(overview.breakdown.vipWelcome.pending))
+                        LabeledContent("Check-ins", value: String(overview.breakdown.checkIns.pending))
+                        LabeledContent("Abandoned cart", value: String(overview.breakdown.abandonedCart.pending))
+                        Text("A cart can have a text, push and call queued separately.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if let overviewError {
+                    Label("Automation totals unavailable", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(ViciTheme.warning)
+                    Text(overviewError).font(.footnote).foregroundStyle(.secondary)
+                    Button("Try again") { Task { await loadOverview() } }
+                } else {
+                    HStack { ProgressView(); Text("Loading all automations").foregroundStyle(.secondary) }
                 }
+            }
+            Section("Payment reminders and order updates") {
                 if model.isLoading && model.stats == nil {
                     ProgressView("Loading messages")
                 } else if model.queue.isEmpty {
@@ -2140,8 +2159,14 @@ struct AutomationQueueView: View {
             CheckInAutomationSection()
             AbandonedCartRecoverySection()
         }
-        .refreshable { await model.load() }
-        .task { if model.stats == nil { await model.load() } }
+        .refreshable {
+            await model.load()
+            await loadOverview()
+        }
+        .task {
+            if model.stats == nil { await model.load() }
+            if overview == nil { await loadOverview() }
+        }
         .sheet(isPresented: $showingPaymentActivity) {
             AutomationPaymentActivitySheet(model: model)
         }
@@ -2151,6 +2176,16 @@ struct AutomationQueueView: View {
         .alert("Activity error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "Unknown error") }
+    }
+
+    private func loadOverview() async {
+        do {
+            overview = try await APIClient.shared.fetchAutomationOverview()
+            overviewError = nil
+        } catch {
+            overview = nil
+            overviewError = error.localizedDescription
+        }
     }
 }
 

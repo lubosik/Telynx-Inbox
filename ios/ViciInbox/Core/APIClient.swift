@@ -501,6 +501,10 @@ actor APIClient {
         try await decodedGET("/api/activity/stats")
     }
 
+    func fetchAutomationOverview() async throws -> AutomationOverview {
+        try await decodedGET("/api/activity/overview")
+    }
+
     func fetchActivityQueue(flow: String = "all", page: Int = 1,
                             status: String = "pending") async throws -> ActivityPage {
         try await decodedGET("/api/activity/queue", queryItems: [

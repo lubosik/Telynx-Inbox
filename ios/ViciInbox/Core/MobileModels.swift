@@ -334,6 +334,32 @@ struct ActivityStats: Codable {
     let updatedAt: String?
 }
 
+/// One outbound SMS, push or voice call is one action. The four headline
+/// counts include every automation source; the existing ActivityStats remains
+/// payment/order-only for older clients and the assistant.
+struct AutomationCounts: Decodable {
+    let pending: Int
+    let sentToday: Int
+    let failedToday: Int
+    let cancelledToday: Int
+}
+
+struct AutomationOverview: Decodable {
+    let pending: Int
+    let sentToday: Int
+    let failedToday: Int
+    let cancelledToday: Int
+    let timeZone: String
+    let breakdown: Breakdown
+
+    struct Breakdown: Decodable {
+        let paymentAndOrders: AutomationCounts
+        let vipWelcome: AutomationCounts
+        let checkIns: AutomationCounts
+        let abandonedCart: AutomationCounts
+    }
+}
+
 struct PaymentTemplateSettings: Codable {
     let available: Bool
     let templates: [String: String]

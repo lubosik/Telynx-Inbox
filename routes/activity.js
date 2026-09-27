@@ -24,11 +24,30 @@ const { messageFingerprint } = require('../lib/audit/redact');
 const { isGsm7 } = require('../lib/campaigns/copy-validator');
 const { KEYS: PAYMENT_TEMPLATE_KEYS, validatePaymentTemplates,
   loadPaymentTemplates } = require('../lib/automation/payment-templates');
+const { automationOverview } = require('../lib/automation/overview');
 
 const EDITABLE_FLOWS = new Set([
   'failed-msg1', 'failed-msg2', 'failed-msg3',
   'hold-msg1', 'hold-msg2', 'hold-msg3', 'hold-failed-nudge'
 ]);
+
+// The legacy /stats route intentionally remains payment/order-only for older
+// clients. New Automations screens use this complete, independently sourced
+// overview so the headline never says zero while VIP/check-in queues are full.
+router.get('/overview', async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, private');
+    const { data: settings, error } = await supabase.from('sms_campaign_settings')
+      .select('business_timezone').eq('workspace_id', 'vici').maybeSingle();
+    if (error) throw error;
+    if (!settings) throw new Error('Store time zone settings are missing.');
+    return res.json(await automationOverview({ client: supabase,
+      timeZone: settings.business_timezone || 'America/New_York' }));
+  } catch (error) {
+    console.error('[ACTIVITY] overview error:', error.message);
+    return res.status(503).json({ error: 'Could not load all automation counts. Please refresh.' });
+  }
+});
 
 router.get('/templates/payment', async (_req, res) => {
   try {
