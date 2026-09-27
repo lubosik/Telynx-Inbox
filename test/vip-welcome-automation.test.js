@@ -7,6 +7,7 @@ const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
 const {
   WELCOME_MESSAGE,
   dueVIPWelcomes,
+  latestVIPWelcomeCampaign,
   runVIPWelcomeSweep
 } = require('../lib/campaigns/vip-welcome-automation');
 const {
@@ -344,4 +345,56 @@ test('an abandoned welcome draft does not suppress a real welcome', async () => 
   assert.ok(!due.includes(inFlight), 'a pending welcome on a live campaign must not be queued twice');
   assert.ok(!due.includes(trulySent), 'a delivered welcome suppresses forever, even if its campaign was cancelled');
   assert.equal(result.reasons.already_enrolled, 2);
+});
+
+// ── THE RETIRED DRAFT MUST LEAVE THE SCREEN ──────────────────────────────
+//
+// The superseded 101-person "Welcome our Vici VIP customers" draft was archived,
+// but this read ignored archived_at, so it kept presenting itself as the latest
+// VIP welcome. The owner saw a campaign he had already retired, and following it
+// showed the old wording instead of the template the automation actually sends.
+test('an archived welcome campaign is not reported as the latest run', async () => {
+  const retired = {
+    id: 'retired', workspace_id: 'vici', workflow_category: 'vip_welcome',
+    status: 'draft', created_at: '2026-09-26T00:49:00.000Z',
+    archived_at: '2026-09-26T23:48:00.000Z', scheduled_for: null
+  };
+  const real = {
+    id: 'real', workspace_id: 'vici', workflow_category: 'vip_welcome',
+    status: 'scheduled', created_at: '2026-09-20T00:00:00.000Z',
+    archived_at: null, scheduled_for: '2026-09-27T22:00:00.000Z'
+  };
+
+  // Newest first, so the retired draft would win on created_at if it were read.
+  const onlyRetired = database({ sms_campaigns: [retired] });
+  assert.equal(await latestVIPWelcomeCampaign({ client: onlyRetired }), null,
+    'an archived draft is not a run and must not appear');
+
+  const both = database({ sms_campaigns: [retired, real] });
+  const latest = await latestVIPWelcomeCampaign({ client: both });
+  assert.equal(latest?.id, 'real', 'the newest UNARCHIVED campaign is the latest run');
+
+  // A failed sweep leaves a real draft behind, and that must stay visible.
+  const failedRun = database({ sms_campaigns: [{ ...real, id: 'stuck', status: 'draft' }] });
+  assert.equal((await latestVIPWelcomeCampaign({ client: failedRun }))?.id, 'stuck',
+    'an unarchived draft is a failed run the owner needs to see');
+});
+
+// ── ONE COPY, NOT TWO ────────────────────────────────────────────────────
+//
+// The owner's instruction of 27 Sep 2026: the future welcome message is the
+// message every VIP gets. The screen must therefore not be able to show one
+// string while the sweep sends another, which is exactly the class of bug that
+// produced "it says 20% but the code is for 15%" on the campaign side.
+test('the future welcome message is the copy that actually sends', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.resolve(__dirname, '..');
+  const source = fs.readFileSync(path.join(root, 'lib/campaigns/vip-welcome-automation.js'), 'utf8');
+  const route = fs.readFileSync(path.join(root, 'routes/campaigns.js'), 'utf8');
+
+  // The sweep sends the stored template, falling back to the versioned default.
+  assert.match(source, /message: settings\.vip_welcome_message_template \|\| WELCOME_MESSAGE/);
+  // The screen shows the same expression, so the two cannot diverge.
+  assert.match(route, /messageTemplate: settings\?\.vip_welcome_message_template \|\| WELCOME_MESSAGE/);
 });
