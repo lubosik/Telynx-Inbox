@@ -1503,6 +1503,9 @@ struct CheckInAutomationSection: View {
     @State private var failed = false
     @State private var loadFailed = false
     @State private var showingQueue = false
+    @State private var showingTemplateEditor = false
+    @State private var templateDrafts: [String: String] = [:]
+    @State private var selectedTemplate = "named_how_it_went"
 
     private var canApprove: Bool { session.can(Permission.campaignsApprove) }
 
@@ -1548,6 +1551,18 @@ struct CheckInAutomationSection: View {
                     AutomationSendTimeRows(label: "Next send", date: next,
                                            storeZoneID: automation?.timeZone,
                                            viewerZone: appearance.effectiveTimeZone)
+                }
+                if automation?.templateEditingAvailable == true {
+                    Button {
+                        templateDrafts = automation?.templates ?? [:]
+                        showingTemplateEditor = true
+                    } label: {
+                        Label("Edit future check-in messages", systemImage: "pencil")
+                    }
+                    .disabled(!canApprove || isBusy)
+                } else if canApprove {
+                    Text("Check-in message editing becomes available after the database update.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 if let queued = automation?.queuedRecipients, !queued.isEmpty {
                     LabeledContent("Pending", value: String(queued.count))
@@ -1595,6 +1610,43 @@ struct CheckInAutomationSection: View {
                 timeZoneID: automation?.timeZone
             )
         }
+        .sheet(isPresented: $showingTemplateEditor) {
+            NavigationStack {
+                Form {
+                    Picker("Message version", selection: $selectedTemplate) {
+                        Text("Product check-in").tag("named_how_it_went")
+                        Text("General check-in").tag("plain_how_it_went")
+                        Text("Product journey").tag("named_journey")
+                        Text("General journey").tag("plain_journey")
+                    }
+                    Section("Future message") {
+                        TextEditor(text: Binding(
+                            get: { templateDrafts[selectedTemplate] ?? "" },
+                            set: { templateDrafts[selectedTemplate] = $0 }
+                        ))
+                        .frame(minHeight: 150)
+                        Text("Use {{first_name}}. Product versions also need {{last_product}}. Keep a question and leave out offers.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Section {
+                        Button("Save all four versions") { Task { await saveTemplates() } }
+                            .disabled(isBusy || templateDrafts.count != 4)
+                        if failed, let message {
+                            Text(message).foregroundStyle(ViciTheme.destructive)
+                        }
+                    } footer: {
+                        Text("Only future check-ins change. Messages already scheduled keep their approved wording.")
+                    }
+                }
+                .navigationTitle("Check-in messages")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showingTemplateEditor = false }
+                    }
+                }
+            }
+        }
     }
 
     private func load() async {
@@ -1626,6 +1678,23 @@ struct CheckInAutomationSection: View {
             // was tapped while the change did not happen is worse than one that
             // visibly refuses.
             isOn = !wanted
+            failed = true
+            message = error.localizedDescription
+        }
+    }
+
+    private func saveTemplates() async {
+        guard !isBusy else { return }
+        isBusy = true
+        message = nil
+        failed = false
+        defer { isBusy = false }
+        do {
+            let result = try await APIClient.shared.saveCheckInTemplates(templateDrafts)
+            automation = try await APIClient.shared.fetchCheckInAutomation()
+            message = result.note
+            showingTemplateEditor = false
+        } catch {
             failed = true
             message = error.localizedDescription
         }
@@ -2012,6 +2081,8 @@ private struct AutomationRecipientQueueSheet: View {
 struct AutomationQueueView: View {
     @StateObject private var model = ActivityModel()
     @State private var showingPaymentActivity = false
+    @State private var showingPaymentTemplates = false
+    @EnvironmentObject private var session: SessionModel
 
     var body: some View {
         List {
@@ -2040,6 +2111,11 @@ struct AutomationQueueView: View {
                 Button("See all payment and order activity") {
                     showingPaymentActivity = true
                 }
+                if session.can(Permission.campaignsApprove) {
+                    Button { showingPaymentTemplates = true } label: {
+                        Label("Edit future payment reminders", systemImage: "pencil")
+                    }
+                }
             }
             VIPWelcomeAutomationSection()
             CheckInAutomationSection()
@@ -2050,9 +2126,94 @@ struct AutomationQueueView: View {
         .sheet(isPresented: $showingPaymentActivity) {
             AutomationPaymentActivitySheet(model: model)
         }
+        .sheet(isPresented: $showingPaymentTemplates) {
+            PaymentTemplateEditorView()
+        }
         .alert("Activity error", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "Unknown error") }
+    }
+}
+
+private struct PaymentTemplateEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var settings: PaymentTemplateSettings?
+    @State private var drafts: [String: String] = [:]
+    @State private var selectedFlow = "hold-msg1"
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let labels: [(key: String, label: String)] = [
+        ("hold-msg1", "Payment reminder 1"),
+        ("hold-msg2", "Payment reminder 2"),
+        ("hold-msg3", "Payment reminder 3"),
+        ("failed-msg1", "Card retry 1"),
+        ("failed-msg2", "Card retry 2"),
+        ("failed-msg3", "Card retry 3")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if settings == nil && errorMessage == nil {
+                    ProgressView("Loading messages")
+                } else if let settings, !settings.available {
+                    Text("Run the payment reminder template database update to enable editing.")
+                        .foregroundStyle(.secondary)
+                } else if settings != nil {
+                    Picker("Message", selection: $selectedFlow) {
+                        ForEach(labels.indices, id: \.self) { index in
+                            Text(labels[index].label).tag(labels[index].key)
+                        }
+                    }
+                    Section("Future message") {
+                        TextEditor(text: Binding(
+                            get: { drafts[selectedFlow] ?? "" },
+                            set: { drafts[selectedFlow] = $0 }
+                        ))
+                        .frame(minHeight: 180)
+                        Text("Keep the placeholders in double braces. Hold reminders must end with Reply STOP to opt out.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Section {
+                        Button(isSaving ? "Saving" : "Save all six messages") {
+                            Task { await save() }
+                        }
+                        .disabled(isSaving || drafts.count != 6)
+                    } footer: {
+                        Text("This changes future payment reminders. Use the pencil in the pending queue to edit one message already scheduled.")
+                    }
+                }
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(ViciTheme.destructive)
+                    Button("Try again") { Task { await load() } }
+                }
+            }
+            .navigationTitle("Payment messages")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .task { if settings == nil { await load() } }
+        }
+    }
+
+    private func load() async {
+        do {
+            let fresh = try await APIClient.shared.fetchPaymentTemplates()
+            settings = fresh
+            drafts = fresh.templates
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func save() async {
+        guard !isSaving else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        do {
+            settings = try await APIClient.shared.savePaymentTemplates(drafts)
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 
@@ -2063,7 +2224,12 @@ private struct AutomationPaymentActivitySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tab = 0
     @State private var cancelTarget: ActivityRecord?
+    @State private var editingItem: ActivityRecord?
+    @State private var editDraft = ""
+    @State private var editError: String?
+    @State private var isSavingEdit = false
     private let flows = ["all", "failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "confirmed-new", "confirmed-returning", "shipped-msg1"]
+    private let editableFlows: Set<String> = ["failed-msg1", "failed-msg2", "failed-msg3", "hold-msg1", "hold-msg2", "hold-msg3", "hold-failed-nudge"]
 
     private var canCancel: Bool { session.can(Permission.automationCancel) }
 
@@ -2094,6 +2260,19 @@ private struct AutomationPaymentActivitySheet: View {
                                 }
                                 .buttonStyle(.plain)
                                 Spacer(minLength: 0)
+                                if editableFlows.contains(item.flowType ?? "") {
+                                    Button {
+                                        editDraft = item.messageBody ?? ""
+                                        editError = nil
+                                        editingItem = item
+                                    } label: {
+                                        Image(systemName: "pencil")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(!canCancel || !canEditBeforeSend(item))
+                                    .accessibilityLabel("Edit pending message")
+                                    .accessibilityHint("Available until two minutes before sending")
+                                }
                                 Button("Cancel") { cancelTarget = item }
                                     .buttonStyle(.borderless)
                                     .foregroundStyle(canCancel ? ViciTheme.destructive : Color.secondary)
@@ -2167,6 +2346,32 @@ private struct AutomationPaymentActivitySheet: View {
                 }
             }
         }
+        .sheet(item: $editingItem) { item in
+            NavigationStack {
+                Form {
+                    Section("Message for \(item.contactName ?? item.phone.map(PhoneFormatter.pretty) ?? "customer")") {
+                        TextEditor(text: $editDraft)
+                            .frame(minHeight: 180)
+                        Text("This changes only this pending reminder. Future reminders keep their existing wording.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let editError {
+                        Text(editError).foregroundStyle(ViciTheme.destructive)
+                    }
+                    Button(isSavingEdit ? "Saving" : "Save pending message") {
+                        Task { await savePendingMessage(item) }
+                    }
+                    .disabled(isSavingEdit || editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .navigationTitle("Edit reminder")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { editingItem = nil }
+                    }
+                }
+            }
+        }
         .confirmationDialog("Cancel this scheduled message?", isPresented: Binding(
             get: { cancelTarget != nil }, set: { if !$0 { cancelTarget = nil } }
         ), titleVisibility: .visible) {
@@ -2181,6 +2386,26 @@ private struct AutomationPaymentActivitySheet: View {
     }
 
     private func flowLabel(_ flow: String) -> String { flow == "all" ? "All flows" : flow.replacingOccurrences(of: "-", with: " ").capitalized }
+
+    private func canEditBeforeSend(_ item: ActivityRecord) -> Bool {
+        guard let date = ServerDate.parse(item.sendAt) else { return false }
+        return date > Date().addingTimeInterval(2 * 60)
+    }
+
+    private func savePendingMessage(_ item: ActivityRecord) async {
+        guard !isSavingEdit else { return }
+        isSavingEdit = true
+        editError = nil
+        defer { isSavingEdit = false }
+        do {
+            try await APIClient.shared.updateScheduledMessage(
+                id: item.id, message: editDraft, expectedMessage: item.messageBody ?? "")
+            editingItem = nil
+            await model.load()
+        } catch {
+            editError = error.localizedDescription
+        }
+    }
 }
 private struct Stat: View {
     let value: Int; let label: String; let color: Color

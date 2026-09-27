@@ -520,6 +520,27 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
+    func updateScheduledMessage(id: String, message: String,
+                                expectedMessage: String) async throws {
+        let (data, response) = try await patch("/api/activity/queue/\(encodedPathSegment(id))", body: [
+            "message": message, "expectedMessage": expectedMessage
+        ])
+        try validate(data: data, response: response)
+    }
+
+    func fetchPaymentTemplates() async throws -> PaymentTemplateSettings {
+        try await decodedGET("/api/activity/templates/payment")
+    }
+
+    func savePaymentTemplates(_ templates: [String: String]) async throws -> PaymentTemplateSettings {
+        let (data, response) = try await put("/api/activity/templates/payment", body: [
+            "templates": templates
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(PaymentTemplateSettings.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
     // MARK: - Abandoned cart recovery
 
     /// Aggregate state for the Growth card. This is read-only and deliberately
@@ -1016,6 +1037,15 @@ actor APIClient {
     func setCheckInAutomation(enabled: Bool) async throws -> CheckInAutomationChange {
         let (data, response) = try await put("/api/campaigns/automations/check-in",
                                              body: ["enabled": enabled])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(CheckInAutomationChange.self, from: data) }
+        catch { throw APIError.decoding }
+    }
+
+    @discardableResult
+    func saveCheckInTemplates(_ templates: [String: String]) async throws -> CheckInAutomationChange {
+        let (data, response) = try await put("/api/campaigns/automations/check-in",
+                                             body: ["templates": templates])
         try validate(data: data, response: response)
         do { return try decoder.decode(CheckInAutomationChange.self, from: data) }
         catch { throw APIError.decoding }

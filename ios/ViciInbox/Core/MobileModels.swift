@@ -334,6 +334,11 @@ struct ActivityStats: Codable {
     let updatedAt: String?
 }
 
+struct PaymentTemplateSettings: Codable {
+    let available: Bool
+    let templates: [String: String]
+}
+
 /// `timeZone` is the store's business zone, sent so queued send times can be
 /// printed as an exact instant in the zone the business actually runs on. Older
 /// servers omit it, so it is optional and the app falls back to New York.

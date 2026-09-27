@@ -495,6 +495,8 @@ struct CampaignMergeField: Codable, Hashable, Identifiable {
 /// it says as much.
 struct CheckInAutomation: Codable, Hashable {
     let enabled: Bool
+    let templates: [String: String]?
+    let templateEditingAvailable: Bool?
     /// The business time zone the send hour is measured in, so the app can
     /// show "noon in New York" rather than converting to the phone's zone and
     /// quietly showing a different hour to somebody travelling.

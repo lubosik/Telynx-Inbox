@@ -21,6 +21,54 @@ const { selectIn } = require('../lib/fetch-all-rows');
 const { broadcast } = require('../lib/broadcaster');
 const { logAudit } = require('../lib/audit/log');
 const { messageFingerprint } = require('../lib/audit/redact');
+const { isGsm7 } = require('../lib/campaigns/copy-validator');
+const { KEYS: PAYMENT_TEMPLATE_KEYS, validatePaymentTemplates,
+  loadPaymentTemplates } = require('../lib/automation/payment-templates');
+
+const EDITABLE_FLOWS = new Set([
+  'failed-msg1', 'failed-msg2', 'failed-msg3',
+  'hold-msg1', 'hold-msg2', 'hold-msg3', 'hold-failed-nudge'
+]);
+
+router.get('/templates/payment', async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, private');
+    const settings = await loadPaymentTemplates(supabase);
+    return res.json({ available: settings.available, templates: settings.templates });
+  } catch (error) {
+    console.error('[ACTIVITY] payment templates read error:', error.message);
+    return res.status(500).json({ error: 'Could not load payment reminder messages.' });
+  }
+});
+
+router.put('/templates/payment', async (req, res) => {
+  let templates;
+  try { templates = validatePaymentTemplates(req.body?.templates); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
+  try {
+    const { data, error } = await supabase.from('sms_campaign_settings')
+      .update({ payment_reminder_templates: templates, updated_at: new Date().toISOString() })
+      .eq('workspace_id', 'vici')
+      .select('payment_reminder_templates').maybeSingle();
+    if (error) {
+      const missing = ['PGRST204', '42703'].includes(error.code)
+        && /payment_reminder_templates/i.test(error.message || '');
+      return res.status(missing ? 503 : 500).json({ error: missing
+        ? 'Run the payment reminder template database update, then try again.'
+        : 'Could not save payment reminder messages. Try again.' });
+    }
+    if (!data) return res.status(409).json({ error: 'Payment reminder settings are missing.' });
+    await logAudit({ eventType: 'automation.payment_templates.updated', req,
+      entityId: 'vici', summary: 'Updated future payment reminder templates',
+      changedFields: ['payment_reminder_templates'],
+      newState: { templates_changed: true },
+      metadata: { template_keys: PAYMENT_TEMPLATE_KEYS } });
+    return res.json({ available: true, templates: data.payment_reminder_templates });
+  } catch (error) {
+    console.error('[ACTIVITY] payment templates save error:', error.message);
+    return res.status(500).json({ error: 'Could not save payment reminder messages. Try again.' });
+  }
+});
 
 // GET /api/activity/stats
 router.get('/stats', async (req, res) => {
@@ -113,6 +161,71 @@ router.get('/recent', async (req, res) => {
   } catch (err) {
     console.error('[ACTIVITY] recent error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/activity/queue/:id — revise one transactional reminder while it
+// is still pending and more than two minutes from its send time. The old body
+// is an optimistic lock: a webhook may have rebuilt this message meanwhile.
+router.patch('/queue/:id', async (req, res) => {
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const expectedMessage = req.body?.expectedMessage;
+  if (!message || message.length > 1000 || !isGsm7(message.replace(/\n/g, ' ')) || /{{|}}/.test(message)) {
+    return res.status(400).json({ error: 'Write a message of up to 1,000 standard SMS characters. Remove emoji, special punctuation and unfinished placeholders.' });
+  }
+  if (typeof expectedMessage !== 'string') {
+    return res.status(400).json({ error: 'Reload this message before editing it.' });
+  }
+  try {
+    const { data: row, error: readError } = await supabase.from('sms_scheduled')
+      .select('id,order_id,phone,flow_type,message_body,send_at,status')
+      .eq('id', req.params.id).eq('status', 'pending').maybeSingle();
+    if (readError) throw readError;
+    if (!row) return res.status(409).json({ error: 'This message is no longer pending. Refresh the queue.' });
+    if (!EDITABLE_FLOWS.has(row.flow_type)) {
+      return res.status(400).json({ error: 'This type of message cannot be edited here.' });
+    }
+    const cutoff = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+    if (!Number.isFinite(Date.parse(row.send_at))
+        || Date.parse(row.send_at) <= Date.parse(cutoff)) {
+      return res.status(409).json({ error: 'This message is too close to sending. Cancel it if you need to stop it.' });
+    }
+    if (row.message_body !== expectedMessage) {
+      return res.status(409).json({ error: 'This message changed since you opened it. Refresh before editing.' });
+    }
+    if (/reply stop to opt out/i.test(row.message_body)
+        && !/reply stop to opt out\.?$/i.test(message)) {
+      return res.status(400).json({ error: 'Keep “Reply STOP to opt out” at the end of this reminder.' });
+    }
+    const { data: saved, error: updateError } = await supabase.from('sms_scheduled')
+      .update({ message_body: message })
+      .eq('id', row.id).eq('status', 'pending')
+      .eq('message_body', expectedMessage).gt('send_at', cutoff)
+      .select('id,order_id,phone,flow_type,message_body,send_at,status')
+      .maybeSingle();
+    if (updateError) throw updateError;
+    if (!saved) return res.status(409).json({ error: 'The message changed or is about to send. Refresh the queue.' });
+    const before = messageFingerprint(row.message_body);
+    const after = messageFingerprint(message);
+    await logAudit({
+      eventType: 'automation.queue_item.edited', req, entityId: row.id,
+      contactPhone: row.phone,
+      summary: `Edited the pending ${row.flow_type} message for order ${row.order_id || 'n/a'}`,
+      previousState: { id: row.id, order_id: row.order_id, phone: row.phone,
+        flow_type: row.flow_type, send_at: row.send_at, status: 'pending' },
+      newState: { id: row.id, order_id: row.order_id, phone: row.phone,
+        flow_type: row.flow_type, send_at: row.send_at, status: 'pending' },
+      changedFields: ['message_body'],
+      metadata: { scheduled_id: row.id, order_id: row.order_id, flow_type: row.flow_type,
+        send_at: row.send_at, previous_message_length: before.message_length,
+        previous_message_digest: before.message_digest,
+        new_message_length: after.message_length, new_message_digest: after.message_digest }
+    });
+    broadcast({ type: 'queue_updated', id: row.id, flow_type: row.flow_type });
+    return res.json({ item: saved });
+  } catch (error) {
+    console.error('[ACTIVITY] queue edit error:', error.message);
+    return res.status(500).json({ error: 'Could not save this message. Refresh the queue and try again.' });
   }
 });
 

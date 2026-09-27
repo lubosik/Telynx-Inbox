@@ -135,6 +135,70 @@ test('automation activity rejects unknown statuses and reads failed messages by 
   });
 });
 
+test('editing a pending payment reminder uses an optimistic lock and audits only message digests', async () => {
+  const auditRows = [];
+  const original = 'Hey Ana, your order is waiting. Reply STOP to opt out.';
+  const revised = 'Hey Ana, your order is ready. Reply STOP to opt out.';
+  let row = { ...QUEUED_ROW, status: 'pending', message_body: original,
+    send_at: new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+  const client = fakeClient({ auditRows });
+  const ordinaryFrom = client.from.bind(client);
+  client.from = table => {
+    if (table !== 'sms_scheduled') return ordinaryFrom(table);
+    let update = null;
+    const filters = [];
+    const query = {
+      select: () => query,
+      update(changes) { update = changes; return query; },
+      eq(field, value) { filters.push([field, value]); return query; },
+      gt(field, value) { filters.push([field, value, 'gt']); return query; },
+      async maybeSingle() {
+        const matches = filters.every(([field, value, op]) => op === 'gt'
+          ? row[field] > value : String(row[field]) === String(value));
+        if (!matches) return { data: null, error: null };
+        if (update) row = { ...row, ...update };
+        return { data: { ...row }, error: null };
+      }
+    };
+    return query;
+  };
+  await withFakeDatabase(client, async () => {
+    const handler = routeHandler(require('../routes/activity'), 'patch', '/queue/:id');
+    const saved = responseRecorder();
+    await handler({ params: { id: String(row.id) }, body: {
+      message: revised, expectedMessage: original
+    } }, saved);
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.payload.item.message_body, revised);
+    const stale = responseRecorder();
+    await handler({ params: { id: String(row.id) }, body: {
+      message: original, expectedMessage: original
+    } }, stale);
+    assert.equal(stale.statusCode, 409);
+  });
+  assert.equal(auditRows.length, 1);
+  assert.equal(auditRows[0].event_type, 'automation.queue_item.edited');
+  assert.equal(JSON.stringify(auditRows[0]).includes(revised), false);
+  assert.equal(auditRows[0].metadata.new_message_digest,
+    crypto.createHash('sha256').update(revised).digest('hex'));
+});
+
+test('editing preserves an existing STOP footer and refuses last-minute changes', async () => {
+  const auditRows = [];
+  const original = 'Hey Ana, your order is waiting. Reply STOP to opt out.';
+  const client = fakeClient({ scheduledRow: { ...QUEUED_ROW, status: 'pending',
+    message_body: original, send_at: new Date(Date.now() + 30 * 1000).toISOString() }, auditRows });
+  await withFakeDatabase(client, async () => {
+    const handler = routeHandler(require('../routes/activity'), 'patch', '/queue/:id');
+    const tooLate = responseRecorder();
+    await handler({ params: { id: '4821' }, body: {
+      message: original, expectedMessage: original
+    } }, tooLate);
+    assert.equal(tooLate.statusCode, 409);
+  });
+  assert.equal(auditRows.length, 0);
+});
+
 // ── The flagship ───────────────────────────────────────────────────────────
 
 test('cancelling a queued automation writes exactly one audit row with actor, timing, before/after and changed fields', async () => {

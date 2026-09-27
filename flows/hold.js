@@ -15,6 +15,7 @@
 
 const { formatPhone, scheduleSMS, sendAndLog, alreadySent } = require('./utils');
 const { supabase } = require('../db');
+const { loadPaymentTemplates, renderPaymentTemplate } = require('../lib/automation/payment-templates');
 
 // ---------------------------------------------------------------------------
 // WooCommerce helpers
@@ -158,25 +159,37 @@ function detectPaymentMethod(order) {
  */
 const OPT_OUT = 'Reply STOP to opt out.';
 
-function buildMsg1(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, Vin here from Vici. Your order #${orderNumber} is set aside, `
+function buildMsg1(firstName, orderNumber, total, handle, method, overrides = null) {
+  const fallback = `Hey ${firstName}, Vin here from Vici. Your order #${orderNumber} is set aside, `
     + `waiting on the balance of $${total}.\n\nOur ${method} address is ${handle}.\n\n`
     + `Any questions, please reach out. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg1', overrides, {
+    first_name: firstName, order_description: `order #${orderNumber}`,
+    balance: total, method, handle
+  }, fallback);
 }
 
-function buildMsg2(firstName, orderNumber, total, handle, method) {
-  return `Hey ${firstName}, Vin again from Vici. Order #${orderNumber} is still set aside for you, `
+function buildMsg2(firstName, orderNumber, total, handle, method, overrides = null) {
+  const fallback = `Hey ${firstName}, Vin again from Vici. Order #${orderNumber} is still set aside for you, `
     + `$${total} outstanding.\n\nOur ${method} address is ${handle}.\n\n`
     + `Any questions, please reach out. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg2', overrides, {
+    first_name: firstName, order_description: `order #${orderNumber}`,
+    balance: total, method, handle
+  }, fallback);
 }
 
-function buildMsg3(firstName, orderNumber, total, handle, method) {
+function buildMsg3(firstName, orderNumber, total, handle, method, overrides = null) {
   // No deadline and no "last call". Somebody who has not paid after two
   // reminders is more likely to answer an easy way out than a threat, and an
   // order that is never going to be paid is better cancelled than chased.
-  return `Hey ${firstName}, Vin from Vici. Still holding order #${orderNumber} for you. `
+  const fallback = `Hey ${firstName}, Vin from Vici. Still holding order #${orderNumber} for you. `
     + `The balance is $${total} and our ${method} address is ${handle}.\n\n`
     + `If you would rather cancel, just say and I will sort it. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg3', overrides, {
+    first_name: firstName, order_description: `order #${orderNumber}`,
+    balance: total, method, handle
+  }, fallback);
 }
 
 function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, checkoutUrl) {
@@ -193,22 +206,34 @@ function buildFailedNudgeMsg(firstName, failedOrderNumber, failedProducts, check
 // The same rewrite as the single-order messages above, for the same reasons.
 // Two orders means a larger number beside the payment address, so if anything
 // these needed it more.
-function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, Vin here from Vici. Your orders ${orderRef} are set aside, `
+function buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method, overrides = null) {
+  const fallback = `Hey ${firstName}, Vin here from Vici. Your orders ${orderRef} are set aside, `
     + `waiting on the balance of $${combinedTotal}.\n\nOur ${method} address is ${handle}.\n\n`
     + `Any questions, please reach out. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg1', overrides, {
+    first_name: firstName, order_description: `orders ${orderRef}`,
+    balance: combinedTotal, method, handle
+  }, fallback);
 }
 
-function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, Vin again from Vici. Orders ${orderRef} are still set aside for you, `
+function buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method, overrides = null) {
+  const fallback = `Hey ${firstName}, Vin again from Vici. Orders ${orderRef} are still set aside for you, `
     + `$${combinedTotal} outstanding.\n\nOur ${method} address is ${handle}.\n\n`
     + `Any questions, please reach out. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg2', overrides, {
+    first_name: firstName, order_description: `orders ${orderRef}`,
+    balance: combinedTotal, method, handle
+  }, fallback);
 }
 
-function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method) {
-  return `Hey ${firstName}, Vin from Vici. Still holding orders ${orderRef} for you. `
+function buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method, overrides = null) {
+  const fallback = `Hey ${firstName}, Vin from Vici. Still holding orders ${orderRef} for you. `
     + `The balance is $${combinedTotal} and our ${method} address is ${handle}.\n\n`
     + `If you would rather cancel, just say and I will sort it. ${OPT_OUT}`;
+  return renderPaymentTemplate('hold-msg3', overrides, {
+    first_name: firstName, order_description: `orders ${orderRef}`,
+    balance: combinedTotal, method, handle
+  }, fallback);
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +253,9 @@ async function handleOrderOnHold(order) {
     console.log(`[HOLD] No phone | order=${orderId} — skipping`);
     return;
   }
+  let paymentTemplates = null;
+  try { paymentTemplates = (await loadPaymentTemplates(supabase)).overrides; }
+  catch (error) { console.warn(`[HOLD] Payment templates unavailable: ${error.message}`); }
 
   // -------------------------------------------------------------------------
   // STEP 1: Smart failed-flow detection
@@ -342,9 +370,9 @@ async function handleOrderOnHold(order) {
     }
 
     const msgMap = {
-      'hold-msg1': buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method),
-      'hold-msg2': buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method),
-      'hold-msg3': buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method)
+      'hold-msg1': buildCombinedMsg1(firstName, orderRef, combinedTotal, handle, method, paymentTemplates),
+      'hold-msg2': buildCombinedMsg2(firstName, orderRef, combinedTotal, handle, method, paymentTemplates),
+      'hold-msg3': buildCombinedMsg3(firstName, orderRef, combinedTotal, handle, method, paymentTemplates)
     };
 
     for (const row of existingFlow) {
@@ -388,7 +416,7 @@ async function handleOrderOnHold(order) {
     orderId,
     phone,
     flowType: 'hold-msg1',
-    message:  buildMsg1(firstName, orderNumber, total, handle, method),
+    message:  buildMsg1(firstName, orderNumber, total, handle, method, paymentTemplates),
     sendAt:   new Date(Date.now() + 30 * 1000).toISOString()
   });
 
@@ -397,7 +425,7 @@ async function handleOrderOnHold(order) {
     orderId,
     phone,
     flowType: 'hold-msg2',
-    message:  buildMsg2(firstName, orderNumber, total, handle, method),
+    message:  buildMsg2(firstName, orderNumber, total, handle, method, paymentTemplates),
     sendAt:   new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
   });
 
@@ -406,7 +434,7 @@ async function handleOrderOnHold(order) {
     orderId,
     phone,
     flowType: 'hold-msg3',
-    message:  buildMsg3(firstName, orderNumber, total, handle, method),
+    message:  buildMsg3(firstName, orderNumber, total, handle, method, paymentTemplates),
     sendAt:   new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   });
 

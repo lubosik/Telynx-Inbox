@@ -472,8 +472,10 @@ function createCampaignRouter({
       const { SWEEP_WINDOW_DAYS, nextSendTime, queuedCheckInRecipients, sweptRecently } =
         require('../lib/campaigns/check-in-automation');
       const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+      const { loadCheckInTemplates } = require('../lib/campaigns/checkin-template-settings');
 
       const settings = await loadCampaignSettings(db());
+      const templateSettings = await loadCheckInTemplates(db());
       const now = new Date();
       const timeZone = settings?.business_timezone || 'America/New_York';
 
@@ -493,6 +495,8 @@ function createCampaignRouter({
         sweepWindowDays: SWEEP_WINDOW_DAYS,
         lastCampaign: last ? { id: last.id, title: last.title, status: last.status, createdAt: last.created_at } : null,
         queuedRecipients,
+        templates: templateSettings.templates,
+        templateEditingAvailable: templateSettings.available,
         // Null when a sweep has already covered this window: there is no next
         // send until the window rolls over, and inventing one would be a lie
         // on the face of the screen.
@@ -513,18 +517,29 @@ function createCampaignRouter({
   router.put('/automations/check-in', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      if (typeof req.body?.enabled !== 'boolean') {
+      const hasEnabled = Object.hasOwn(req.body || {}, 'enabled');
+      const hasTemplates = Object.hasOwn(req.body || {}, 'templates');
+      if ((!hasEnabled && !hasTemplates)
+          || (hasEnabled && typeof req.body.enabled !== 'boolean')) {
         throw Object.assign(new Error('enabled must be true or false.'), {
           code: 'INVALID_AUTOMATION_STATE', status: 400
         });
       }
       const enabled = req.body.enabled;
+      const templates = hasTemplates
+        ? require('../lib/campaigns/checkin-template-settings').validateTemplates(req.body.templates)
+        : null;
+      const changes = { updated_at: new Date().toISOString() };
+      if (hasEnabled) changes.checkin_automation_enabled = enabled;
+      if (hasTemplates) changes.checkin_message_templates = templates;
 
       const { data, error } = await db()
         .from('sms_campaign_settings')
-        .update({ checkin_automation_enabled: enabled, updated_at: new Date().toISOString() })
+        .update(changes)
         .eq('workspace_id', 'vici')
-        .select('checkin_automation_enabled')
+        .select(hasTemplates
+          ? 'checkin_automation_enabled,checkin_message_templates'
+          : 'checkin_automation_enabled')
         .maybeSingle();
       if (error) {
         throw Object.assign(new Error(error.message), { code: 'CAMPAIGN_SETTINGS_UPDATE_FAILED', status: 500 });
@@ -538,20 +553,25 @@ function createCampaignRouter({
       await logAuditSafely({
         eventType: 'campaign.settings_changed',
         req,
-        summary: enabled
-          ? 'Switched ON the automatic 21-day check-in: future check-ins are approved and sent without human review'
-          : 'Switched OFF the automatic 21-day check-in',
-        previousState: { checkin_automation_enabled: !enabled },
-        newState: { checkin_automation_enabled: enabled },
-        changedFields: ['checkin_automation_enabled'],
-        metadata: { automation: 'checkin_21d', enabled }
+        summary: hasTemplates && !hasEnabled
+          ? 'Updated future 21-day check-in messages'
+          : enabled
+            ? 'Switched ON the automatic 21-day check-in: future check-ins are approved and sent without human review'
+            : 'Switched OFF the automatic 21-day check-in',
+        previousState: hasEnabled ? { checkin_automation_enabled: !enabled } : null,
+        newState: { ...(hasEnabled ? { checkin_automation_enabled: enabled } : {}),
+          ...(hasTemplates ? { checkin_message_templates_changed: true } : {}) },
+        changedFields: Object.keys(changes).filter(key => key !== 'updated_at'),
+        metadata: { automation: 'checkin_21d', ...(hasEnabled ? { enabled } : {}) }
       });
 
       return res.json({
         enabled: data.checkin_automation_enabled === true,
-        note: enabled
-          ? 'The next sweep will build, approve and schedule a check-in on its own.'
-          : 'No further check-ins will be built. Anything already scheduled still goes out unless you cancel it.'
+        note: hasTemplates && !hasEnabled
+          ? 'Future check-in messages were saved. Already scheduled messages keep their approved wording.'
+          : enabled
+            ? 'The next sweep will build, approve and schedule a check-in on its own.'
+            : 'No further check-ins will be built. Anything already scheduled still goes out unless you cancel it.'
       });
     } catch (error) { return sendError(res, error, 'changing the check-in automation'); }
   });

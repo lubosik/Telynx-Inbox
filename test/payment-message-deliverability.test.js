@@ -39,10 +39,10 @@ function renderAll() {
   const end = HOLD.indexOf('module.exports');
   const scope = {};
   // eslint-disable-next-line no-new-func
-  const load = new Function(`${HOLD.slice(start, end)}
+  const load = new Function('renderPaymentTemplate', `${HOLD.slice(start, end)}
     return { buildMsg1, buildMsg2, buildMsg3,
              buildCombinedMsg1, buildCombinedMsg2, buildCombinedMsg3 };`);
-  Object.assign(scope, load());
+  Object.assign(scope, load(require('../lib/automation/payment-templates').renderPaymentTemplate));
   const args = ['Lisa', '4542', '1190.48', 'support@vicipeptides.com', 'Zelle'];
   return [
     scope.buildMsg1(...args), scope.buildMsg2(...args), scope.buildMsg3(...args),

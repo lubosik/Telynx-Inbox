@@ -11,25 +11,35 @@
 
 const { formatPhone, sendAndLog, scheduleSMS, cancelScheduled, alreadySent } = require('./utils');
 const { supabase } = require('../db');
+const { loadPaymentTemplates, renderPaymentTemplate } = require('../lib/automation/payment-templates');
 
 // ---------------------------------------------------------------------------
 // Message builders
 // ---------------------------------------------------------------------------
 
-function buildMsg1(firstName, productPhrase, checkoutUrl) {
+function buildMsg1(firstName, productPhrase, checkoutUrl, overrides = null) {
   const ref = productPhrase ? `your ${productPhrase} order` : 'your order';
-  return `Hey ${firstName}! It's Vin from Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged.\n\nGive it 5 mins and try again here: ${checkoutUrl}\n\nIf your bank is flagging it, give them a quick call to let them know about the transaction and try again.\n\nVin`;
+  const fallback = `Hey ${firstName}! It's Vin from Vici Peptides. Looks like payment didn't go through on ${ref} - don't worry, nothing was charged.\n\nGive it 5 mins and try again here: ${checkoutUrl}\n\nIf your bank is flagging it, give them a quick call to let them know about the transaction and try again.\n\nVin`;
+  return renderPaymentTemplate('failed-msg1', overrides, {
+    first_name: firstName, order_reference: ref, checkout_url: checkoutUrl
+  }, fallback);
 }
 
-function buildMsg2(firstName) {
+function buildMsg2(firstName, overrides = null) {
   const venmo = process.env.VENMO_HANDLE || '@ViciPeptides';
   const zelle = process.env.ZELLE_HANDLE || 'support@vicipeptides.com';
-  return `Did you call your bank and try again, ${firstName}?\n\nIf it still didn't work no worries - we also accept Venmo (${venmo}) or Zelle (${zelle}). Just reply here and I'll sort it.\n\nVin`;
+  const fallback = `Did you call your bank and try again, ${firstName}?\n\nIf it still didn't work no worries - we also accept Venmo (${venmo}) or Zelle (${zelle}). Just reply here and I'll sort it.\n\nVin`;
+  return renderPaymentTemplate('failed-msg2', overrides, {
+    first_name: firstName, venmo_handle: venmo, zelle_handle: zelle
+  }, fallback);
 }
 
-function buildMsg3(firstName, productPhrase, checkoutUrl) {
+function buildMsg3(firstName, productPhrase, checkoutUrl, overrides = null) {
   const ref = productPhrase ? `your ${productPhrase}` : 'your cart';
-  return `Hey ${firstName}, ${ref} is still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nVin`;
+  const fallback = `Hey ${firstName}, ${ref} is still saved. Gonna be honest - I really want to get this order out to you.\n\nUse VICISAVE for 10% off, it's good for today only: ${checkoutUrl}\n\nVin`;
+  return renderPaymentTemplate('failed-msg3', overrides, {
+    first_name: firstName, order_reference: ref, checkout_url: checkoutUrl
+  }, fallback);
 }
 
 function buildCheckoutUrl(order, utmContent = 'msg1') {
@@ -81,6 +91,9 @@ async function handleOrderFailed(order) {
     console.log(`[FAILED] No phone | order=${orderId} — skipping`);
     return;
   }
+  let paymentTemplates = null;
+  try { paymentTemplates = (await loadPaymentTemplates(supabase)).overrides; }
+  catch (error) { console.warn(`[FAILED] Payment templates unavailable: ${error.message}`); }
 
   // PHONE-LEVEL DEDUP: if customer already has a pending failed flow, merge both
   // orders into one by updating the message bodies to reference combined products,
@@ -121,9 +134,9 @@ async function handleOrderFailed(order) {
 
     // Rebuild each pending message with combined product context + new checkout URL
     const msgMap = {
-      'failed-msg1': buildMsg1(firstName, phrase, checkoutUrl1),
-      'failed-msg2': buildMsg2(firstName),
-      'failed-msg3': buildMsg3(firstName, phrase, checkoutUrl3),
+      'failed-msg1': buildMsg1(firstName, phrase, checkoutUrl1, paymentTemplates),
+      'failed-msg2': buildMsg2(firstName, paymentTemplates),
+      'failed-msg3': buildMsg3(firstName, phrase, checkoutUrl3, paymentTemplates),
     };
 
     for (const row of existingFlow) {
@@ -146,7 +159,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg1',
-    message:  buildMsg1(firstName, productPhrase, checkoutUrl1),
+    message:  buildMsg1(firstName, productPhrase, checkoutUrl1, paymentTemplates),
     sendAt:   new Date(Date.now() + 10 * 60 * 1000).toISOString()
   });
 
@@ -155,7 +168,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg2',
-    message:  buildMsg2(firstName),
+    message:  buildMsg2(firstName, paymentTemplates),
     sendAt:   new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
   });
 
@@ -164,7 +177,7 @@ async function handleOrderFailed(order) {
     orderId,
     phone,
     flowType: 'failed-msg3',
-    message:  buildMsg3(firstName, productPhrase, checkoutUrl3),
+    message:  buildMsg3(firstName, productPhrase, checkoutUrl3, paymentTemplates),
     sendAt:   new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   });
 
