@@ -32,13 +32,53 @@ test('the queued rows print an exact instant, never a relative string', () => {
   assert.ok(start > 0, 'ActivityRow not found');
   const row = workspace.slice(start, workspace.indexOf('struct CallsView', start));
 
-  // An exact, zone-labelled format, matching the check-in and VIP welcome rows.
-  assert.match(row, /dateFormat = "MMM d, h:mm a zzz"/);
+  // Formatted through the shared helper, so this screen cannot drift from the
+  // campaign screen's wording of the same instant.
+  assert.match(row, /AutomationSendTime\.exact\(parsed, inZoneNamed: timeZoneID\)/);
   // "in 3 days" is the thing being removed; it must not come back here.
   assert.doesNotMatch(row, /style: \.relative/);
-  // The store's zone, not the device's, with New York as the documented fallback.
   assert.match(row, /timeZoneID/);
-  assert.match(row, /America\/New_York/);
+});
+
+test('one send-time format is shared with the campaign screen', () => {
+  const campaigns = read('ios/ViciInbox/UI/CampaignsView.swift');
+  // The exact format string the campaign screen uses for a scheduled send. The
+  // owner asked to read automation times "just like we can see the campaigns",
+  // so a difference here is the defect, not a detail.
+  const format = /dateFormat = "EEE, MMM d 'at' h:mm a zzz"/;
+  assert.match(campaigns, format, 'campaign screen format changed; update the shared helper');
+  assert.match(workspace, format);
+
+  // Exactly one definition of it on the automations screen: the shared helper.
+  const occurrences = workspace.match(/dateFormat = "EEE, MMM d 'at' h:mm a zzz"/g) || [];
+  assert.equal(occurrences.length, 1, 'the automations screen must format send times in one place');
+
+  // And the three surfaces all go through it rather than rolling their own.
+  assert.match(workspace, /enum AutomationSendTime/);
+  assert.match(workspace, /private func checkInSendTime[\s\S]{0,160}AutomationSendTime\.exact/);
+  assert.match(workspace, /private func vipWelcomeSendTime[\s\S]{0,160}AutomationSendTime\.exact/);
+});
+
+test('Eastern Time is expressed as a zone, never as a fixed EST offset', () => {
+  // America/New_York IS Eastern Time and prints EDT or EST as appropriate.
+  // Hard-coding EST would mislabel every summer send and invites a fixed -5
+  // offset that would fire an hour late for eight months of the year.
+  assert.match(workspace, /America\/New_York/);
+  assert.doesNotMatch(workspace, /TimeZone\(abbreviation: "EST"\)/);
+  assert.doesNotMatch(workspace, /secondsFromGMT: -5 \* 3600/);
+});
+
+test('the store time and the viewer time are shown together, as on campaigns', () => {
+  // The owner reads this from the UK, and the London gap is not even constant:
+  // 6 PM New York is 23:00 in London in September, 22:00 on 25 October, then
+  // 23:00 again from 1 November. One clock time cannot serve both.
+  assert.match(workspace, /struct AutomationSendTimeRows: View/);
+  assert.match(workspace, /LabeledContent\("Your time"\)/);
+  assert.match(workspace, /store\.identifier != viewerZone\.identifier/);
+  // Both campaign-backed automations use it.
+  assert.match(workspace, /AutomationSendTimeRows\(label: "Next send"/);
+  assert.match(workspace, /AutomationSendTimeRows\(label: "Sends at"/);
+  assert.match(workspace, /viewerZone: appearance\.effectiveTimeZone/);
 });
 
 test('both queue lists are given the store time zone', () => {

@@ -1445,6 +1445,7 @@ private func cartRecoveryMoney(_ amount: FlexibleDecimal, currency: String) -> S
 /// intentionally explicit about what the switch does.
 struct CheckInAutomationSection: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var appearance: AppearanceModel
     @State private var automation: CheckInAutomation?
 
     /// ── WHY THE SWITCH HAS ITS OWN STATE ─────────────────────────────────
@@ -1508,10 +1509,9 @@ struct CheckInAutomationSection: View {
                 .disabled(!canApprove || isBusy)
 
                 if isOn, let next = automation?.nextSendDate {
-                    LabeledContent("Next send") {
-                        Text(checkInSendTime(next, timeZoneID: automation?.timeZone))
-                            .foregroundStyle(.secondary)
-                    }
+                    AutomationSendTimeRows(label: "Next send", date: next,
+                                           storeZoneID: automation?.timeZone,
+                                           viewerZone: appearance.effectiveTimeZone)
                 }
                 if let last = automation?.lastCampaign {
                     NavigationLink(value: AppRoute.campaign(id: last.id)) {
@@ -1610,14 +1610,9 @@ struct CheckInAutomationSection: View {
         }
     }
 
+    /// Delegates so this screen and the campaign screen cannot drift apart.
     private func checkInSendTime(_ date: Date, timeZoneID: String?) -> String {
-        let timeZone = timeZoneID.flatMap(TimeZone.init(identifier:))
-            ?? TimeZone(identifier: "America/New_York")!
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "MMM d, h:mm a zzz"
-        return "\(formatter.string(from: date)) · \(timeZone.identifier)"
+        AutomationSendTime.exact(date, inZoneNamed: timeZoneID)
     }
 }
 
@@ -1626,6 +1621,7 @@ struct CheckInAutomationSection: View {
 /// underneath as the immutable approval and delivery ledger.
 struct VIPWelcomeAutomationSection: View {
     @EnvironmentObject private var session: SessionModel
+    @EnvironmentObject private var appearance: AppearanceModel
     @State private var automation: VIPWelcomeAutomation?
     @State private var isOn = false
     @State private var isBusy = false
@@ -1743,6 +1739,14 @@ struct VIPWelcomeAutomationSection: View {
                 if let queued = automation?.queuedRecipients, !queued.isEmpty {
                     LabeledContent("Queued VIP welcomes", value: String(queued.count))
                         .fontWeight(.semibold)
+                    // The queue is sorted soonest first, so its head is when this
+                    // batch actually goes out. Shown once, with the owner's own
+                    // time beside it, rather than on all hundred rows.
+                    if let soonest = queued.compactMap(\.sendDate).min() {
+                        AutomationSendTimeRows(label: "Sends at", date: soonest,
+                                               storeZoneID: automation?.timeZone,
+                                               viewerZone: appearance.effectiveTimeZone)
+                    }
                     ForEach(queued) { recipient in
                         NavigationLink(value: AppRoute.campaign(id: recipient.campaignID)) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -1843,14 +1847,74 @@ struct VIPWelcomeAutomationSection: View {
         }
     }
 
+    /// Delegates so this screen and the campaign screen cannot drift apart.
     private func vipWelcomeSendTime(_ date: Date, timeZoneID: String?) -> String {
-        let timeZone = timeZoneID.flatMap(TimeZone.init(identifier:))
-            ?? TimeZone(identifier: "America/New_York")!
+        AutomationSendTime.exact(date, inZoneNamed: timeZoneID)
+    }
+}
+
+/// ── ONE SEND-TIME FORMAT, SHARED WITH CAMPAIGNS ──────────────────────────
+///
+/// The owner asked to read automation send times "just like we can see the
+/// campaigns", so this is deliberately the same format string the campaign
+/// screen uses in `formattedSchedule`: weekday, date, time, zone abbreviation,
+/// then the IANA identifier. Three automations previously printed a shorter
+/// format with no weekday, which made the same instant look like a different
+/// kind of fact depending on which screen it was read from.
+///
+/// ON "EASTERN STANDARD TIME". The store zone is `America/New_York`, which IS
+/// Eastern Time and is the correct way to express it. The abbreviation shown is
+/// whichever is actually in force: EDT through 31 October 2026, EST from
+/// 1 November. Hard-coding "EST" year-round would print the wrong label all
+/// summer and, worse, invite a fixed -5 offset that would send an hour late for
+/// eight months of the year.
+enum AutomationSendTime {
+    static let storeZoneFallback = "America/New_York"
+
+    static func zone(_ identifier: String?) -> TimeZone {
+        identifier.flatMap(TimeZone.init(identifier:))
+            ?? TimeZone(identifier: storeZoneFallback)!
+    }
+
+    /// The exact instant, in the given zone, matching the campaign screen.
+    static func exact(_ date: Date, in timeZone: TimeZone) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.timeZone = timeZone
-        formatter.dateFormat = "MMM d, h:mm a zzz"
+        formatter.dateFormat = "EEE, MMM d 'at' h:mm a zzz"
         return "\(formatter.string(from: date)) · \(timeZone.identifier)"
+    }
+
+    static func exact(_ date: Date, inZoneNamed identifier: String?) -> String {
+        exact(date, in: zone(identifier))
+    }
+}
+
+/// The campaign screen's pairing: the customer send time, and the viewer's own
+/// time beneath it whenever the two zones differ. Shown once per automation
+/// rather than on every queued person, because the queue can run to a hundred
+/// rows and the owner has already asked twice for these screens to be less
+/// cluttered.
+private struct AutomationSendTimeRows: View {
+    let label: String
+    let date: Date
+    let storeZoneID: String?
+    let viewerZone: TimeZone
+
+    var body: some View {
+        let store = AutomationSendTime.zone(storeZoneID)
+        LabeledContent(label) {
+            Text(AutomationSendTime.exact(date, in: store))
+                .multilineTextAlignment(.trailing)
+                .foregroundStyle(.secondary)
+        }
+        if store.identifier != viewerZone.identifier {
+            LabeledContent("Your time") {
+                Text(AutomationSendTime.exact(date, in: viewerZone))
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -1990,13 +2054,7 @@ private struct ActivityRow: View {
     var timeZoneID: String?
 
     private func exactTime(_ parsed: Date) -> String {
-        let zone = timeZoneID.flatMap(TimeZone.init(identifier:))
-            ?? TimeZone(identifier: "America/New_York")!
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.timeZone = zone
-        formatter.dateFormat = "MMM d, h:mm a zzz"
-        return formatter.string(from: parsed)
+        AutomationSendTime.exact(parsed, inZoneNamed: timeZoneID)
     }
 
     var body: some View {
