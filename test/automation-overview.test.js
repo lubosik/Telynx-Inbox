@@ -5,13 +5,27 @@ const test = require('node:test');
 const { automationOverview } = require('../lib/automation/overview');
 
 function fakeClient(tables, failures = {}) {
+  const campaigns = tables.sms_campaigns || [...new Map((tables.sms_campaign_recipients || [])
+    .map(row => [row.campaign_id, {
+      id: row.campaign_id, workspace_id: row.workspace_id,
+      workflow_category: row.sms_campaigns.workflow_category,
+      status: row.sms_campaigns.status
+    }])).values()];
   return {
     from(table) {
       const filters = [];
+      let head = false;
+      let range = null;
       return {
-        select() { return this; },
+        select(columns, options) {
+          assert.doesNotMatch(columns, /!inner/, 'overview must not use the live-breaking embedded join');
+          head = options?.head === true;
+          return this;
+        },
         eq(field, value) { filters.push(row => valueFor(row, field) === value); return this; },
         in(field, values) { filters.push(row => values.includes(valueFor(row, field))); return this; },
+        order() { return this; },
+        range(from, to) { range = [from, to]; return this; },
         is(field, value) { filters.push(row => valueFor(row, field) == value); return this; },
         not(field, operator, value) {
           assert.equal(operator, 'is');
@@ -20,10 +34,12 @@ function fakeClient(tables, failures = {}) {
         gte(field, value) { filters.push(row => valueFor(row, field) >= value); return this; },
         lt(field, value) { filters.push(row => valueFor(row, field) < value); return this; },
         then(resolve) {
-          const rows = (tables[table] || []).filter(row => filters.every(predicate => predicate(row)));
+          const rows = (table === 'sms_campaigns' ? campaigns : tables[table] || [])
+            .filter(row => filters.every(predicate => predicate(row)));
+          const page = range ? rows.slice(range[0], range[1] + 1) : rows;
           return Promise.resolve(failures[table]
             ? { count: null, error: { message: failures[table] } }
-            : { count: rows.length, error: null }).then(resolve);
+            : { count: head ? page.length : null, data: head ? null : page, error: null }).then(resolve);
         }
       };
     }
@@ -37,7 +53,8 @@ function valueFor(row, field) {
 
 function campaignRows(category, count, state = 'pending', extras = {}) {
   return Array.from({ length: count }, (_, index) => ({
-    id: `${category}-${index}`, workspace_id: 'vici', selected: true, state,
+    id: `${category}-${index}`, campaign_id: category,
+    workspace_id: 'vici', selected: true, state,
     sms_campaigns: { workflow_category: category, status: 'scheduled' },
     ...extras
   }));
@@ -116,6 +133,7 @@ test('sent, failed and cancelled use the New York day and one category each', as
 });
 
 test('a failed count query fails closed instead of presenting an invented zero', async () => {
-  const client = fakeClient({}, { sms_campaign_recipients: 'permission denied' });
+  const client = fakeClient({ sms_campaign_recipients: campaignRows('vip_welcome', 1) },
+    { sms_campaign_recipients: 'permission denied' });
   await assert.rejects(() => automationOverview({ client, now: NOW }), /permission denied/);
 });
