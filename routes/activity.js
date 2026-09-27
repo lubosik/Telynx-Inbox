@@ -71,7 +71,16 @@ router.get('/queue', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message });
 
     const enriched = await enrichWithNames(data || []);
-    res.json({ items: enriched, page: parseInt(page), hasMore: (data?.length || 0) === limit });
+    // The owner reads this screen from the UK while the store runs on New York
+    // time, so a bare clock time is ambiguous and a relative "in 3 days" hides
+    // the thing he is checking. Send the business zone with the rows so the app
+    // can print the exact instant a reminder goes out, labelled with its zone.
+    const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+    const settings = await loadCampaignSettings(supabase).catch(() => null);
+    res.json({
+      items: enriched, page: parseInt(page), hasMore: (data?.length || 0) === limit,
+      timeZone: settings?.business_timezone || 'America/New_York'
+    });
   } catch (err) {
     console.error('[ACTIVITY] queue error:', err.message);
     res.status(500).json({ error: err.message });

@@ -334,7 +334,15 @@ struct ActivityStats: Codable {
     let updatedAt: String?
 }
 
-struct ActivityPage: Codable { let items: [ActivityRecord]; let page: Int; let hasMore: Bool }
+/// `timeZone` is the store's business zone, sent so queued send times can be
+/// printed as an exact instant in the zone the business actually runs on. Older
+/// servers omit it, so it is optional and the app falls back to New York.
+struct ActivityPage: Codable {
+    let items: [ActivityRecord]
+    let page: Int
+    let hasMore: Bool
+    let timeZone: String?
+}
 
 struct ActivityRecord: Codable, Identifiable, Hashable {
     let recordID: FlexibleID

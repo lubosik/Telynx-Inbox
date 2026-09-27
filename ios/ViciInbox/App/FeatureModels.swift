@@ -223,6 +223,9 @@ final class ActivityModel: ObservableObject {
     @Published private(set) var stats: ActivityStats?
     @Published private(set) var queue: [ActivityRecord] = []
     @Published private(set) var recent: [ActivityRecord] = []
+    /// The store's zone, so a queued reminder shows the instant the business
+    /// will send it rather than whatever zone the phone happens to be in.
+    @Published private(set) var timeZoneID: String?
     @Published private(set) var isLoading = false
     @Published var flow = "all"
     @Published var errorMessage: String?
@@ -241,6 +244,7 @@ final class ActivityModel: ObservableObject {
             stats = values.0
             queue = values.1.items
             recent = values.2.items
+            timeZoneID = values.1.timeZone ?? values.2.timeZone
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }

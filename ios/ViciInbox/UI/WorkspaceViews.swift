@@ -1904,7 +1904,7 @@ struct AutomationQueueView: View {
                         // scheduled by the hold flow at 09:12, cancelled by
                         // Dominic at 14:32.
                         NavigationLink(value: AppRoute.automationHistory(id: item.id)) {
-                            ActivityRow(item: item, date: item.sendAt)
+                            ActivityRow(item: item, date: item.sendAt, timeZoneID: model.timeZoneID)
                         }
                         Button {
                             cancelTarget = item
@@ -1947,7 +1947,7 @@ struct AutomationQueueView: View {
             }
             Section("Recent sends") {
                 if model.recent.isEmpty { Text("No recent sends").foregroundStyle(.secondary) }
-                ForEach(model.recent) { item in ActivityRow(item: item, date: item.sentAt) }
+                ForEach(model.recent) { item in ActivityRow(item: item, date: item.sentAt, timeZoneID: model.timeZoneID) }
             }
         }
         .refreshable { await model.load() }
@@ -1973,14 +1973,43 @@ private struct Stat: View {
     var body: some View { VStack { Text(String(value)).font(.title3.bold()).foregroundColor(color); Text(label).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity) }
 }
 
+/// ── AN EXACT INSTANT, NOT "IN 3 DAYS" ────────────────────────────────────
+///
+/// This row used to print `style: .relative`. The owner's instruction of
+/// 27 Sep 2026 was that the Automations screen must show "the exact date and
+/// time that these messages are going to be sent", for payment reminders as
+/// well as check-ins and VIP welcomes, and a relative string hides exactly the
+/// fact he opens this screen to check.
+///
+/// The zone is the store's, not the phone's. He reads this from the UK while
+/// the business runs on New York time, so "6:00 PM" alone would be wrong by
+/// four or five hours depending on the date. The zone is printed beside the
+/// time for the same reason it is on the check-in and VIP welcome rows.
 private struct ActivityRow: View {
     let item: ActivityRecord; let date: String?
+    var timeZoneID: String?
+
+    private func exactTime(_ parsed: Date) -> String {
+        let zone = timeZoneID.flatMap(TimeZone.init(identifier:))
+            ?? TimeZone(identifier: "America/New_York")!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.timeZone = zone
+        formatter.dateFormat = "MMM d, h:mm a zzz"
+        return formatter.string(from: parsed)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(item.contactName ?? item.phone.map(PhoneFormatter.pretty) ?? "Unknown contact").fontWeight(.semibold)
                 Spacer()
-                if let parsed = ServerDate.parse(date) { Text(parsed, style: .relative).font(.caption).foregroundStyle(.secondary) }
+                if let parsed = ServerDate.parse(date) {
+                    Text(exactTime(parsed))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
             Text((item.flowType ?? "automation").replacingOccurrences(of: "-", with: " ").capitalized).font(.caption).foregroundStyle(.secondary)
             if let message = item.messageBody, !message.isEmpty { Text(message).font(.subheadline).lineLimit(3) }
