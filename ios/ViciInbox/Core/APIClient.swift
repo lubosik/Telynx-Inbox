@@ -497,6 +497,12 @@ actor APIClient {
 
     // MARK: - Automations
 
+    func hideFailedMessage(id: Int, phone: String) async throws {
+        let (data, response) = try await delete(
+            "/api/conversations/\(encodedPathSegment(phone))/messages/\(id)")
+        try validate(data: data, response: response)
+    }
+
     func fetchActivityStats() async throws -> ActivityStats {
         try await decodedGET("/api/activity/stats")
     }

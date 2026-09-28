@@ -98,6 +98,18 @@ final class InboxModel: ObservableObject {
         }
     }
 
+    func hideFailedMessage(_ message: MessageRecord, phone: String) async {
+        guard let id = message.numericID else { return }
+        do {
+            try await APIClient.shared.hideFailedMessage(id: id, phone: phone)
+            messages[phone]?.removeAll { $0.id == message.id }
+            await load()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Pin somebody into the canonical Best Repeat Customers segment. This is
     /// an auditable include override on the existing contact, not a duplicate
     /// VIP contact and not permission to message them.

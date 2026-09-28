@@ -319,6 +319,7 @@ struct MessageThreadView: View {
     @State private var didInitialScroll = false
     @State private var showsReferralComposer = false
     @State private var activeReferralID: String?
+    @State private var failedMessageToHide: MessageRecord?
 
     private var messages: [MessageRecord] { model.messages[conversation.phone] ?? [] }
 
@@ -331,10 +332,12 @@ struct MessageThreadView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(messages) { message in
-                            MessageBubble(message: message) {
+                            MessageBubble(message: message, canDeleteFailed: session.can(Permission.messageSend)) {
                                 replyTarget = message
                             } react: { type in
                                 Task { await model.react(to: message, type: type, phone: conversation.phone) }
+                            } deleteFailed: {
+                                failedMessageToHide = message
                             }
                             .id(message.id)
                         }
@@ -397,6 +400,18 @@ struct MessageThreadView: View {
             .padding(.horizontal).padding(.vertical, 10)
         }
         .navigationTitle(conversation.displayName)
+        .confirmationDialog("Delete this failed message?", isPresented: Binding(
+            get: { failedMessageToHide != nil },
+            set: { if !$0 { failedMessageToHide = nil } }
+        )) {
+            if let message = failedMessageToHide {
+                Button("Delete failed message", role: .destructive) {
+                    Task { await model.hideFailedMessage(message, phone: conversation.phone) }
+                }
+            }
+        } message: {
+            Text("This removes it from the conversation. The failed delivery record is kept for troubleshooting. Nothing is resent.")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .task {
             while !Task.isCancelled {
@@ -507,8 +522,10 @@ struct MessageThreadView: View {
 
 private struct MessageBubble: View {
     let message: MessageRecord
+    let canDeleteFailed: Bool
     let reply: () -> Void
     let react: (String) -> Void
+    let deleteFailed: () -> Void
     // The same timezone Settings displays and the appearance schedule uses:
     // the account's, the workspace default, or this device, in that order. A
     // bubble that read the device clock directly would disagree with the rest
@@ -557,6 +574,12 @@ private struct MessageBubble: View {
                 }
             }
             .contextMenu {
+                if canDeleteFailed && !message.isInbound && message.numericID != nil
+                    && ["failed", "sending_failed", "delivery_failed"].contains(message.status?.lowercased() ?? "") {
+                    Button(role: .destructive, action: deleteFailed) {
+                        Label("Delete failed message", systemImage: "trash")
+                    }
+                }
                 Button("Reply", systemImage: "arrowshape.turn.up.left", action: reply)
                 if message.body?.isEmpty == false || !attachmentURLs.isEmpty {
                     Button("Copy", systemImage: "doc.on.doc") { copyMessage() }

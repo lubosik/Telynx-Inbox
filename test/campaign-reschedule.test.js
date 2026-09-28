@@ -19,9 +19,10 @@ test('rescheduling calls the atomic workspace-aware RPC with the exact instant a
     }
   };
   const service = createCampaignService({ client, env: {}, workspaceID: 'vici' });
+  const scheduledFor = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   const result = await service.reschedule(
     '11111111-1111-4111-8111-111111111111',
-    '2026-09-27T22:00:00.000Z',
+    scheduledFor,
     { id: 7 }
   );
   assert.equal(called.name, 'reschedule_sms_campaign');
@@ -29,9 +30,9 @@ test('rescheduling calls the atomic workspace-aware RPC with the exact instant a
     p_campaign_id: '11111111-1111-4111-8111-111111111111',
     p_workspace_id: 'vici',
     p_actor_user_id: 7,
-    p_scheduled_for: '2026-09-27T22:00:00.000Z'
+    p_scheduled_for: scheduledFor
   });
-  assert.equal(result.scheduled_for, '2026-09-27T22:00:00.000Z');
+  assert.equal(result.scheduled_for, scheduledFor);
 });
 
 test('rescheduling refuses an invalid time before touching the database', async () => {

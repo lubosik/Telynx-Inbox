@@ -5,6 +5,8 @@ const { fetchAllRows } = require('../lib/fetch-all-rows');
 const { buildCustomerFacts } = require('../lib/campaigns/segment-facts');
 const { normalisePhone } = require('../lib/phone');
 const { classifyVIPCustomer, VIP_SEGMENT_KEY } = require('../lib/vip-customers');
+const { logAuditSafely } = require('../lib/audit/log');
+const { hideFailedInboxMessage } = require('../lib/failed-message-cleanup');
 
 let warnedVIPRead = false;
 
@@ -63,7 +65,9 @@ router.get('/', async (req, res) => {
     const [contacts, allMessages, allOrders, vipMembership] = await Promise.all([
       fetchAllRows(supabase, 'sms_contacts', '*', { orderBy: 'id', ascending: true }),
       fetchAllRows(supabase, 'sms_messages',
-        'id,contact_phone,body,direction,created_at,media_urls', { thenBy: 'id' }),
+        'id,contact_phone,body,direction,created_at,media_urls', {
+          thenBy: 'id', filter: query => query.is('hidden_at', null)
+        }),
       fetchAllRows(supabase, 'sms_orders',
         'id,contact_phone,status,created_at,woo_order_id,total', { thenBy: 'id' }),
       readVIPManualMembership()
@@ -119,6 +123,7 @@ router.get('/:phone', async (req, res) => {
       .from('sms_messages')
       .select('*')
       .eq('contact_phone', phone)
+      .is('hidden_at', null)
       .order('created_at', { ascending: true });
     if (error) throw error;
 
@@ -131,6 +136,20 @@ router.get('/:phone', async (req, res) => {
     res.json(reconciled);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load thread' });
+  }
+});
+
+router.delete('/:phone/messages/:id', async (req, res) => {
+  try {
+    const result = await hideFailedInboxMessage({ client: supabase, id: req.params.id, phone: req.params.phone });
+    const messageID = result.messageID;
+    await logAuditSafely({ eventType: 'message.failed_hidden', req,
+      entityId: String(messageID), summary: 'Removed a failed message from the inbox',
+      metadata: { message_id: messageID } });
+    return res.json(result);
+  } catch (error) {
+    console.error('[INBOX CLEANUP] Hide failed:', error.code || 'write_failed');
+    return res.status(error.status || 503).json({ error: error.status ? error.message : 'The failed message could not be removed. Please try again.' });
   }
 });
 
