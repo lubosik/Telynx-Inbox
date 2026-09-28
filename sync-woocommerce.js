@@ -2,6 +2,7 @@ const { supabase } = require('./db');
 const { normalizePhone, fetchOrders, wooGet, extractTracking } = require('./woocommerce');
 const { searchContactByEmail } = require('./ghl');
 const { wooOrderItems } = require('./lib/woocommerce-order-items');
+const { invalidateVIPMembership } = require('./lib/vip-inbox-messaging');
 
 // fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
 // fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
@@ -123,6 +124,9 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
     }, { onConflict: 'woo_order_id', ignoreDuplicates: true });
   }
 
+  // The next order-confirmation/payment send must see a newly qualified VIP
+  // immediately rather than retain the previous five-minute sender cache.
+  invalidateVIPMembership(phone);
   return { phone, status: writtenStatus };
 }
 

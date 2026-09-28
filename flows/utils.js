@@ -3,7 +3,7 @@
  * flows/utils.js — shared helpers used by all SMS flow files
  */
 
-const { supabase } = require('../db');
+const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS }  = require('../telnyx');
 const { broadcast } = require('../lib/broadcaster');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
@@ -296,14 +296,22 @@ async function sendAndLog(phone, message, orderId, flowType) {
     }
 
     // Also store in sms_messages for inbox display
-    await supabase.from('sms_messages').insert({
-      telnyx_message_id: result?.messageId || null,
-      contact_phone:     phone,
-      direction:         'outbound',
-      body:              message,
-      status:            normaliseTelnyxStatus(result?.status),
-      created_at:        new Date().toISOString()
-    });
+    // Provider acceptance and the sent-log dedup record already exist. A
+    // display/provenance write must never mark this send failed and cause a
+    // future retry to send the customer another message.
+    try {
+      await insertSmsMessage({
+        telnyx_message_id: result?.messageId || null,
+        contact_phone:     phone,
+        direction:         'outbound',
+        business_phone:    result?.from || null,
+        body:              message,
+        status:            normaliseTelnyxStatus(result?.status),
+        created_at:        new Date().toISOString()
+      });
+    } catch (inboxError) {
+      console.error(`[SMS] Inbox history write failed after acceptance: ${inboxError.message}`);
+    }
     await supabase.from('sms_contacts')
       .update({ last_seen: new Date().toISOString() })
       .eq('phone', phone);

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { logAudit, diffFields } = require('../lib/audit/log');
+const { readVIPContactSnapshot } = require('../lib/vip-inbox-snapshot');
 
 /**
  * The snapshot stored in an audit row's previous_state/new_state.
@@ -54,7 +55,8 @@ router.get('/', async (req, res) => {
       if ((data?.length || 0) < batchSize) break;
     }
 
-    const normalised = rows.map(normaliseContact).sort((a, b) => {
+    const enriched = await readVIPContactSnapshot(supabase, rows);
+    const normalised = enriched.map(normaliseContact).sort((a, b) => {
       const aHasName = Boolean(a.first_name || a.last_name || a.name);
       const bHasName = Boolean(b.first_name || b.last_name || b.name);
       if (aHasName !== bHasName) return aHasName ? -1 : 1;
@@ -100,8 +102,9 @@ router.get('/:phone', async (req, res) => {
       finalOrders = await fetchWooOrdersByEmail(contact.email);
     }
 
+    const [enrichedContact] = await readVIPContactSnapshot(supabase, [contact]);
     res.json({
-      contact: normaliseContact(contact),
+      contact: normaliseContact(enrichedContact),
       orders: finalOrders,
       total_orders: finalOrders.length,
       total_spent: totalSpent,

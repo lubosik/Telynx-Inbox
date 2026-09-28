@@ -3,11 +3,22 @@ const crypto = require('crypto');
 // mediaUrls: optional array of publicly-accessible HTTPS URLs — presence makes
 // this an MMS. Telnyx caps media_urls at 10; carrier-safe total size is ~600KB.
 async function sendSMS(to, message, mediaUrls = null, options = {}) {
+  const env = options.env || process.env;
+  let from = options.from || env.TELNYX_PHONE_NUMBER;
+  // Resolve at the transport boundary, not just in manual replies. Existing
+  // payment, order and cart automations then follow the customer's VIP line.
+  // Keep DB setup lazy so unconfigured installations and offline tests retain
+  // the established main-number path without requiring database credentials.
+  if (!options.from && env.VIP_INBOX_PHONE_NUMBER) {
+    const { senderNumberFor } = require('./lib/vip-inbox-messaging');
+    const client = options.client || require('./db').supabase;
+    from = await senderNumberFor({ client, phone: to, env });
+  }
   const body = {
-    from: options.from || process.env.TELNYX_PHONE_NUMBER,
+    from,
     to,
     text: message || '',
-    messaging_profile_id: process.env.TELNYX_MESSAGING_PROFILE_ID
+    messaging_profile_id: env.TELNYX_MESSAGING_PROFILE_ID
   };
   if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
     body.media_urls = mediaUrls.slice(0, 10);
@@ -16,14 +27,14 @@ async function sendSMS(to, message, mediaUrls = null, options = {}) {
   const response = await fetch('https://api.telnyx.com/v2/messages', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.TELNYX_API_KEY}`,
+      'Authorization': `Bearer ${env.TELNYX_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data?.errors?.[0]?.detail || 'Telnyx send failed');
-  return { messageId: data.data.id, status: data.data.to?.[0]?.status };
+  return { messageId: data.data.id, status: data.data.to?.[0]?.status, from };
 }
 
 function verifyWebhookSignature(rawBody, signatureHeader, secret) {

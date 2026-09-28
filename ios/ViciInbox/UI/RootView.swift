@@ -485,6 +485,7 @@ private struct AuthenticationLostBanner: View {
 }
 
 struct MainTabView: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @StateObject private var inboxModel = InboxModel()
     // Owned here rather than inside the Calls tab so the badge is right before
     // the operator ever opens it.
@@ -517,7 +518,7 @@ struct MainTabView: View {
         TabView(selection: $router.selectedTab) {
             InboxView(model: inboxModel)
                 .tabItem { Label("Inbox", systemImage: "message.fill") }
-                .badge(inboxModel.unreadTotal)
+                .badge(workspace.unreadCount(in: inboxModel.conversations))
                 .tag(AppTab.inbox)
 
             ContactsView()

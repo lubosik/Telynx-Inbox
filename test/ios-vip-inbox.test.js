@@ -13,9 +13,9 @@ const analytics = fs.readFileSync(path.join(root, 'ios/ViciInbox/UI/AnalyticsVie
 const featureModel = fs.readFileSync(path.join(root, 'ios/ViciInbox/App/FeatureModels.swift'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'scripts/vip-customer-segment-migration.sql'), 'utf8');
 
-test('VIP and All Customers are filters over the same canonical conversation route', () => {
-  assert.match(view, /case \.all: return model\.conversations/);
-  assert.match(view, /case \.vip: return model\.conversations\.filter\(\\\.isVIP\)/);
+test('Main and VIP are disjoint filters over the same canonical conversation route', () => {
+  assert.match(view, /model\.conversations\.filter\(workspace\.includes\)/);
+  assert.match(models, /conversation\.isVIP == \(self == \.vip\)/);
   assert.match(view, /AppRoute\.conversation\(phone: conversation\.phone\)/);
   assert.doesNotMatch(view, /VIPConversation|vipMessages|duplicateContact/);
 });
@@ -49,7 +49,7 @@ test('the inbox stays focused on conversations without counts, workspaces or gol
   assert.match(models, /Past usual reorder timing/);
   assert.match(models, /days beyond their usual/);
   assert.doesNotMatch(models, /case "needs_attention": return "Needs attention"/);
-  assert.match(view, /Text\("VIP"\)\.tag\(InboxAudience\.vip\)/);
+  assert.match(view, /ForEach\(InboxWorkspace\.allCases\)/);
   assert.ok(!view.includes('Text("VIP \\(vipCount)")'));
   assert.doesNotMatch(view, /VIPWorkspaceCard/);
   assert.doesNotMatch(view, /Color\.yellow\.opacity\(0\.055\)/);

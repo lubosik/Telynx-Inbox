@@ -26,7 +26,7 @@ module.exports = (broadcastSSE) => {
       }
 
       const from = await senderNumberFor({ client: supabase, phone: normalisedTo });
-      const { messageId, status: providerStatus } = await sendSMS(
+      const { messageId, status: providerStatus, from: acceptedFrom } = await sendSMS(
         normalisedTo,
         text,
         media.length ? media : null,
@@ -47,6 +47,7 @@ module.exports = (broadcastSSE) => {
           telnyx_message_id: messageId,
           contact_phone: normalisedTo,
           direction: 'outbound',
+          business_phone: acceptedFrom || null,
           body: text,
           status: normaliseTelnyxStatus(providerStatus),
           ghl_contact_id: null,

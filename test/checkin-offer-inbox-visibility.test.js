@@ -36,14 +36,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'lib', 'campaigns', 'check-in-reply.js'), 'utf8');
+const HISTORY = fs.readFileSync(path.join(__dirname, '..', 'lib', 'sms-history.js'), 'utf8');
+const INBOX_WRITE = 'await insertSmsHistory(client, {';
 
 test('the offer is written to the table the inbox reads', () => {
-  assert.match(SRC, /from\('sms_messages'\)\s*\.insert\(/,
+  assert.match(SRC, /insertSmsHistory\(client, \{/,
     'sms_sent_log is a dedup ledger; sms_messages is the conversation');
+  assert.match(HISTORY, /from\('sms_messages'\)\.insert\(payload\)/,
+    'the compatibility helper must still write the canonical inbox table');
 });
 
 test('it is written with the fields a thread needs to render', () => {
-  const block = SRC.slice(SRC.indexOf("from('sms_messages')"));
+  const block = SRC.slice(SRC.indexOf(INBOX_WRITE));
   const insert = block.slice(0, block.indexOf('});') + 3);
   for (const field of ['contact_phone', 'direction', 'body', 'status', 'created_at']) {
     assert.match(insert, new RegExp(field), `${field} is required to render the message`);
@@ -64,8 +68,8 @@ test('a failure to record it never loses the message', () => {
   // The SMS has already left and the dedup row is already written. This runs
   // un-awaited inside the Telnyx webhook, so a throw would lose the thread and
   // gain nothing.
-  const block = SRC.slice(SRC.indexOf("from('sms_messages')"));
-  const guarded = SRC.slice(0, SRC.indexOf("from('sms_messages')")).lastIndexOf('try {');
+  const block = SRC.slice(SRC.indexOf(INBOX_WRITE));
+  const guarded = SRC.slice(0, SRC.indexOf(INBOX_WRITE)).lastIndexOf('try {');
   assert.ok(guarded > -1, 'the insert is inside a try');
   assert.match(block, /catch \(inboxError\)/, 'and its failure is caught');
   assert.match(block, /console\.error/, 'and reported rather than swallowed silently');
@@ -78,7 +82,7 @@ test('the send itself still records to the dedup ledger', () => {
   // a double send. Adding inbox visibility must not have displaced it.
   assert.match(SRC, /from\('sms_sent_log'\)\s*\.insert\(/);
   assert.ok(
-    SRC.indexOf("from('sms_sent_log')") < SRC.indexOf("from('sms_messages')"),
+    SRC.indexOf("from('sms_sent_log')") < SRC.indexOf(INBOX_WRITE),
     'the dedup row is written first, so a crash between the two cannot double-send'
   );
 });

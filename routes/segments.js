@@ -1,4 +1,5 @@
 'use strict';
+const { invalidateVIPMembership } = require('../lib/vip-inbox-messaging');
 /**
  * routes/segments.js — saved campaign segments.
  *
@@ -331,6 +332,7 @@ function createSegmentRouter({
         'Only phone, overrideType, contactId, name and reason may be provided.'
       );
       const result = await segments.setOverride(req.params.id, input, req.actor);
+      invalidateVIPMembership(result.override.contactPhone);
       await auditSegment('campaign.segment.override_set', req, { id: req.params.id }, {
         summary: result.override.overrideType === 'exclude'
           ? 'Excluded a person from an automatic segment until this is revoked'
@@ -352,6 +354,7 @@ function createSegmentRouter({
       const result = await segments.revokeOverride(
         req.params.id, req.params.phone, req.body || {}, req.actor
       );
+      invalidateVIPMembership(result.override.contactPhone);
       await auditSegment('campaign.segment.override_revoked', req, { id: req.params.id }, {
         summary: `Revoked a ${result.override.overrideType} override on an automatic segment`,
         contactPhone: result.override.contactPhone,

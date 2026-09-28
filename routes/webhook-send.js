@@ -20,7 +20,7 @@
  */
 
 const crypto = require('crypto');
-const { supabase } = require('../db');
+const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 
@@ -108,18 +108,23 @@ module.exports = (broadcastSSE) => {
 
     try {
       // Send via Telnyx
-      const { messageId, status: providerStatus } = await sendSMS(to, message);
+      const { messageId, status: providerStatus, from: acceptedFrom } = await sendSMS(to, message);
 
       // Insert before secondary contact work so an immediate Telnyx delivery
       // callback always has a row to update.
-      await supabase.from('sms_messages').insert({
-        telnyx_message_id: messageId,
-        contact_phone: to,
-        direction: 'outbound',
-        body: message,
-        status: normaliseTelnyxStatus(providerStatus),
-        ghl_contact_id: contactId || null
-      });
+      try {
+        await insertSmsMessage({
+          telnyx_message_id: messageId,
+          contact_phone: to,
+          direction: 'outbound',
+          business_phone: acceptedFrom || null,
+          body: message,
+          status: normaliseTelnyxStatus(providerStatus),
+          ghl_contact_id: contactId || null
+        });
+      } catch (historyError) {
+        console.error('GHL SMS accepted but inbox history write failed:', historyError.message);
+      }
 
       // Ensure contact exists in Supabase
       await supabase.from('sms_contacts').upsert({

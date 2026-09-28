@@ -29,7 +29,7 @@ test('sends an image-only MMS using public media_urls', async () => {
     assert.equal(captured.url, 'https://api.telnyx.com/v2/messages');
     assert.deepEqual(captured.body.media_urls, ['https://media.example/photo.jpg']);
     assert.equal(captured.body.text, '');
-    assert.deepEqual(result, { messageId: 'message-test', status: 'queued' });
+    assert.deepEqual(result, { messageId: 'message-test', status: 'queued', from: '+15555550100' });
   } finally {
     global.fetch = originalFetch;
     for (const [name, value] of Object.entries(originalEnv)) {

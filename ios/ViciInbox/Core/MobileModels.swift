@@ -1,5 +1,28 @@
 import Foundation
 
+/// One customer workspace, not a second account or a second customer record.
+/// Historical messages remain attached to the canonical phone across promotion.
+enum InboxWorkspace: String, CaseIterable, Identifiable {
+    case main
+    case vip
+
+    static let storageKey = "vici.inbox.workspace"
+    var id: String { rawValue }
+    var label: String { self == .vip ? "VIP" : "Main" }
+
+    func includes(_ conversation: ConversationSummary) -> Bool {
+        conversation.isVIP == (self == .vip)
+    }
+
+    func unreadCount(in conversations: [ConversationSummary]) -> Int {
+        conversations.filter(includes).reduce(0) { $0 + max(0, $1.unreadCount ?? 0) }
+    }
+
+    static func destination(for conversation: ConversationSummary) -> InboxWorkspace {
+        conversation.isVIP ? .vip : .main
+    }
+}
+
 /// Supabase identifiers are not consistent across the existing tables: some
 /// arrive as JSON numbers and others as UUID strings. Keep that inconsistency
 /// at the API boundary instead of leaking it into the views.
@@ -75,6 +98,8 @@ struct MessageRecord: Codable, Identifiable, Hashable {
     let recordID: FlexibleID?
     let telnyxMessageID: String?
     let contactPhone: String
+    /// Actual sending/receiving business line. Legacy rows can be unknown.
+    let businessPhone: String?
     let direction: String
     let body: String?
     let status: String?
@@ -96,6 +121,7 @@ struct MessageRecord: Codable, Identifiable, Hashable {
         case recordID = "id"
         case telnyxMessageID = "telnyx_message_id"
         case contactPhone = "contact_phone"
+        case businessPhone = "business_phone"
         case direction, body, status, reactions
         case mediaURLs = "media_urls"
         case replyToMessageID = "reply_to_message_id"

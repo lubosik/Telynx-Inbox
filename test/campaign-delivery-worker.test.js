@@ -113,6 +113,47 @@ test('recovery runs before any claim, so abandoned rows are resolved first', asy
   assert.equal(order[1], 'claim_sms_campaign_recipients');
 });
 
+test('accepted campaign mirrors actual sender with safe pre-migration fallback and no provider resend', async () => {
+  for (const missingColumn of [false, true]) {
+    const client = fakeClient(baseHandlers());
+    const rows = [];
+    client.from = table => ({
+      insert(row) {
+        rows.push({ ...row });
+        if (missingColumn && rows.length === 1) return Promise.resolve({ error: {
+          code: 'PGRST204', message: "Could not find the 'business_phone' column"
+        } });
+        return Promise.resolve({ error: null });
+      },
+      update() { return this; }, eq: async () => ({ error: null })
+    });
+    let sends = 0;
+    const summary = await deliverBatch({
+      client, env: ON, log: SILENT,
+      send: async () => { sends++; return { messageId: 'actual-line', from: '+19177254009' }; }
+    });
+    assert.equal(summary.accepted, 1);
+    assert.equal(sends, 1);
+    assert.equal(rows[0].business_phone, '+19177254009');
+    assert.equal(rows.length, missingColumn ? 2 : 1);
+    if (missingColumn) assert.equal(rows[1].business_phone, undefined);
+  }
+});
+
+test('accepted campaign history failure never becomes another provider attempt', async () => {
+  const client = fakeClient(baseHandlers());
+  client.from = () => ({ insert: async () => ({ error: { code: 'NETWORK_ERROR', message: 'uncertain history write' } }) });
+  let sends = 0;
+  const summary = await deliverBatch({
+    client, env: ON, log: SILENT,
+    send: async () => { sends++; return { messageId: 'accepted' }; }
+  });
+  assert.equal(summary.accepted, 1);
+  assert.equal(summary.uncertain, 0);
+  assert.equal(summary.reasons.inbox_write_failed, 1);
+  assert.equal(sends, 1);
+});
+
 // ── The rule that matters ───────────────────────────────────────────────────
 
 test('an uncertain provider call is never retried and never marked failed', async () => {

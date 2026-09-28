@@ -2,28 +2,17 @@ import SwiftUI
 import PhotosUI
 import UIKit
 
-private enum InboxAudience: String, CaseIterable, Identifiable {
-    case all
-    case vip
-
-    var id: String { rawValue }
-    var label: String { self == .all ? "All Customers" : "VIP" }
-}
-
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @State private var search = ""
-    @State private var audience: InboxAudience = .all
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var session: SessionModel
     @ObservedObject private var notifications = MessageNotificationManager.shared
     @Environment(\.scenePhase) private var scenePhase
 
     private var audienceConversations: [ConversationSummary] {
-        switch audience {
-        case .all: return model.conversations
-        case .vip: return model.conversations.filter(\.isVIP)
-        }
+        model.conversations.filter(workspace.includes)
     }
 
     private var filtered: [ConversationSummary] {
@@ -40,9 +29,10 @@ struct InboxView: View {
         NavigationStack(path: $router.inboxPath) {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Picker("Customer view", selection: $audience) {
-                        Text("All Customers").tag(InboxAudience.all)
-                        Text("VIP").tag(InboxAudience.vip)
+                    Picker("Inbox", selection: $workspace) {
+                        ForEach(InboxWorkspace.allCases) { value in
+                            Text(value.label).tag(value)
+                        }
                     }
                     .pickerStyle(.segmented)
                 }
@@ -56,8 +46,8 @@ struct InboxView: View {
                         ProgressView("Loading inbox…")
                     } else if filtered.isEmpty {
                         EmptyState(
-                            icon: audience == .vip ? "crown" : "message",
-                            title: audience == .vip ? "No VIP customers" : "No conversations",
+                            icon: workspace == .vip ? "crown" : "message",
+                            title: workspace == .vip ? "No VIP customers" : "No conversations",
                             detail: emptyDetail
                         )
                     } else {
@@ -75,7 +65,7 @@ struct InboxView: View {
                     }
                 }
             }
-            .navigationTitle(audience == .vip ? "VIP Inbox" : "Inbox")
+            .navigationTitle(workspace == .vip ? "VIP Inbox" : "Main Inbox")
             .navigationDestination(for: AppRoute.self) { route in
                 if case .conversation(let phone) = route {
                     ConversationDestinationView(phone: phone, model: model)
@@ -115,7 +105,7 @@ struct InboxView: View {
 
     private var emptyDetail: String {
         if !search.isEmpty { return "Try another search." }
-        if audience == .vip {
+        if workspace == .vip {
             return "Customers with 3+ paid orders and $500+ lifetime spend appear here automatically."
         }
         return "Messages will appear here."
@@ -152,6 +142,7 @@ private struct ConversationDestinationView: View {
     let phone: String
     var referralID: String? = nil
     @ObservedObject var model: InboxModel
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     private var conversation: ConversationSummary? {
         model.conversations.first { $0.phone == phone }
@@ -173,6 +164,11 @@ private struct ConversationDestinationView: View {
         }
         .task {
             if conversation == nil { await model.load() }
+        }
+        // Pushes can arrive before the inbox snapshot. Follow authoritative
+        // membership when it arrives without clearing paths or draft text.
+        .task(id: conversation?.customerTier) {
+            if let conversation { workspace = InboxWorkspace.destination(for: conversation) }
         }
     }
 }
@@ -329,7 +325,7 @@ struct MessageThreadView: View {
                 ReferralContextBanner(referralID: referralID)
             }
             if let number = conversation.replyFromNumber, !number.isEmpty {
-                Label("Replies from \(conversation.isVIP ? "VIP" : "main") line: \(PhoneFormatter.pretty(number))",
+                Label("SMS replies from \(conversation.isVIP ? "VIP" : "main") line: \(PhoneFormatter.pretty(number))",
                       systemImage: conversation.isVIP ? "crown.fill" : "phone")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -580,6 +576,11 @@ private struct MessageBubble: View {
                     Text(reactions.map { reactionSymbol($0.type) }.joined())
                         .font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
                         .background(Color(.tertiarySystemBackground)).clipShape(Capsule())
+                }
+                if let line = message.businessPhone, !line.isEmpty {
+                    Text("SMS line \(PhoneFormatter.pretty(line))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             .contextMenu {

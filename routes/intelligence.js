@@ -115,14 +115,20 @@ router.post('/campaigns/:id/send', async (req, res) => {
       });
     }
 
-    const { messageId, status: providerStatus } = await sendSMS(suggestion.contact_phone, suggestion.suggested_message);
-    const inserted = await insertSmsMessage({
-      telnyx_message_id: messageId,
-      contact_phone: suggestion.contact_phone,
-      direction: 'outbound',
-      body: suggestion.suggested_message,
-      status: normaliseTelnyxStatus(providerStatus)
-    });
+    const { messageId, status: providerStatus, from: acceptedFrom } = await sendSMS(suggestion.contact_phone, suggestion.suggested_message);
+    let inserted = null;
+    try {
+      inserted = await insertSmsMessage({
+        telnyx_message_id: messageId,
+        contact_phone: suggestion.contact_phone,
+        direction: 'outbound',
+        business_phone: acceptedFrom || null,
+        body: suggestion.suggested_message,
+        status: normaliseTelnyxStatus(providerStatus)
+      });
+    } catch (historyError) {
+      console.error('Suggestion SMS accepted but inbox history write failed:', historyError.message);
+    }
     await supabase.from('sms_campaign_suggestions')
       .update({ status: 'sent' }).eq('id', req.params.id);
     await supabase.from('sms_contacts').upsert({

@@ -13,7 +13,7 @@
  */
 
 const router = require('express').Router();
-const { supabase } = require('../db');
+const { supabase, insertSmsMessage } = require('../db');
 const { sendSMS } = require('../telnyx');
 const { normaliseTelnyxStatus } = require('../lib/message-status');
 const { logAuditSafely } = require('../lib/audit/log');
@@ -134,15 +134,20 @@ router.post('/send', async (req, res) => {
       const msg = ORDER_SMS(firstName);
 
       try {
-        const { messageId, status: providerStatus } = await sendSMS(order.contact_phone, msg);
-        await supabase.from('sms_messages').insert({
-          telnyx_message_id: messageId,
-          contact_phone: order.contact_phone,
-          direction: 'outbound',
-          body: msg,
-          status: normaliseTelnyxStatus(providerStatus),
-          created_at: new Date().toISOString()
-        });
+        const { messageId, status: providerStatus, from: acceptedFrom } = await sendSMS(order.contact_phone, msg);
+        try {
+          await insertSmsMessage({
+            telnyx_message_id: messageId,
+            contact_phone: order.contact_phone,
+            direction: 'outbound',
+            business_phone: acceptedFrom || null,
+            body: msg,
+            status: normaliseTelnyxStatus(providerStatus),
+            created_at: new Date().toISOString()
+          });
+        } catch (historyError) {
+          console.error('Catchup SMS accepted but inbox history write failed:', historyError.message);
+        }
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
         results.push({ phone: order.contact_phone, name: contact?.name, type: 'processing', status: 'sent' });
         sent++;
@@ -189,15 +194,20 @@ router.post('/send', async (req, res) => {
       const msg = SHIPPED_SMS(firstName, order.tracking_number, order.carrier);
 
       try {
-        const { messageId, status: providerStatus } = await sendSMS(order.contact_phone, msg);
-        await supabase.from('sms_messages').insert({
-          telnyx_message_id: messageId,
-          contact_phone: order.contact_phone,
-          direction: 'outbound',
-          body: msg,
-          status: normaliseTelnyxStatus(providerStatus),
-          created_at: new Date().toISOString()
-        });
+        const { messageId, status: providerStatus, from: acceptedFrom } = await sendSMS(order.contact_phone, msg);
+        try {
+          await insertSmsMessage({
+            telnyx_message_id: messageId,
+            contact_phone: order.contact_phone,
+            direction: 'outbound',
+            business_phone: acceptedFrom || null,
+            body: msg,
+            status: normaliseTelnyxStatus(providerStatus),
+            created_at: new Date().toISOString()
+          });
+        } catch (historyError) {
+          console.error('Catchup SMS accepted but inbox history write failed:', historyError.message);
+        }
         await supabase.from('sms_contacts').update({ last_seen: new Date().toISOString() }).eq('phone', order.contact_phone);
         results.push({ phone: order.contact_phone, name: contact?.name, type: 'shipped', status: 'sent' });
         sent++;

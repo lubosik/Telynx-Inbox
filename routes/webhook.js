@@ -20,7 +20,8 @@ const { draftReplyForInbound } = require('../lib/campaigns/reply-triage');
 const { recordCampaignReplyEvents } = require('../lib/campaigns/reply-events');
 const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 const { sendSMS } = require('../telnyx');
-const { isVIPInboxNumber } = require('../lib/vip-inbox-messaging');
+const { isVIPCustomer } = require('../lib/vip-inbox-messaging');
+const { normalisePhone } = require('../lib/phone');
 const { decodeVerifiedTelnyxEvent, claimTelnyxEvent, finishTelnyxEvent, failTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 
 const DELIVERY_EVENTS = new Set(['message.sent', 'message.delivered', 'message.finalized']);
@@ -145,7 +146,8 @@ module.exports = (broadcastSSE) => {
       const fromPhone = payload?.from?.phone_number;
       const inboundToEntry = Array.isArray(payload?.to) ? payload.to[0] : payload?.to;
       const inboundToPhone = inboundToEntry?.phone_number || inboundToEntry || null;
-      const isVIPMessage = isVIPInboxNumber(inboundToPhone);
+      const inboundBusinessPhone = typeof inboundToPhone === 'string'
+        ? normalisePhone(inboundToPhone) : null;
       const text = payload?.text || '';
       const inboundMedia = Array.isArray(payload?.media) ? payload.media : [];
 
@@ -208,15 +210,15 @@ module.exports = (broadcastSSE) => {
         // `error`, never as a rejection, so try/catch around the await is the
         // correct shape.
         try {
-          const { error: stopLogError } = await supabase.from('sms_messages').insert({
+          await insertSmsMessage({
             telnyx_message_id: messageId,
             contact_phone: fromPhone,
             direction: 'inbound',
+            business_phone: inboundBusinessPhone,
             body: text,
             status: 'delivered',
             created_at: payload.received_at || new Date().toISOString()
           });
-          if (stopLogError) console.error('[OPT-OUT] Could not record the STOP message:', stopLogError.message);
         } catch (stopLogErr) {
           console.error('[OPT-OUT] Could not record the STOP message:', stopLogErr.message);
         }
@@ -229,6 +231,13 @@ module.exports = (broadcastSSE) => {
         phone: fromPhone,
         last_seen: new Date().toISOString()
       }, { onConflict: 'phone' });
+
+      // Spaces follow current customer membership, not the line a customer
+      // happened to reply to. A promoted VIP replying to an old main-number
+      // message still belongs in VIP; texting our VIP number never promotes
+      // a standard customer. Keep received-on provenance separate above.
+      // Never perform this lookup before the STOP suppression early return.
+      const isVIPMessage = await isVIPCustomer({ client: supabase, phone: fromPhone });
 
       // ── iPhone tapback (reaction) detection ─────────────────────────────────
       // "Loved \"...\"" / "Liked an image" etc. arrive as plain SMS text.
@@ -256,6 +265,7 @@ module.exports = (broadcastSSE) => {
               telnyx_message_id: messageId,
               contact_phone: fromPhone,
               direction: 'inbound',
+              business_phone: inboundBusinessPhone,
               body: text,
               status: 'delivered',
               reply_to_message_id: target.id,
@@ -313,6 +323,7 @@ module.exports = (broadcastSSE) => {
           telnyx_message_id: messageId,
           contact_phone: fromPhone,
           direction: 'inbound',
+          business_phone: inboundBusinessPhone,
           body: text,
           status: 'delivered',
           ghl_contact_id: ghlContactId,

@@ -57,7 +57,7 @@ module.exports = (broadcastSSE) => {
         : `${verb} an image`;
 
       const from = await senderNumberFor({ client: supabase, phone: target.contact_phone });
-      const { messageId: telnyxId, status: providerStatus } = await sendSMS(
+      const { messageId: telnyxId, status: providerStatus, from: acceptedFrom } = await sendSMS(
         target.contact_phone, text, null, { from });
 
       const reactions = removing
@@ -74,6 +74,7 @@ module.exports = (broadcastSSE) => {
         telnyx_message_id: telnyxId,
         contact_phone: target.contact_phone,
         direction: 'outbound',
+        business_phone: acceptedFrom || null,
         body: text,
         status: normaliseTelnyxStatus(providerStatus),
         reply_to_message_id: target.id

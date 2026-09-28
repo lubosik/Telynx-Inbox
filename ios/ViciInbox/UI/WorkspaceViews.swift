@@ -3,14 +3,20 @@ import AVKit
 import AVFoundation
 
 struct ContactsView: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @StateObject private var model = ContactsModel()
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var router: AppRouter
     @State private var search = ""
     @State private var showingCreate = false
 
+    private var businessLineNumber: String {
+        if workspace == .main { return session.callerNumber }
+        return model.contacts.first(where: \.isVIP)?.replyFromNumber ?? ""
+    }
+
     private var filtered: [ConversationSummary] {
-        let contacts = model.contacts.filter { $0.phone != session.callerNumber }
+        let contacts = model.contacts.filter { $0.phone != session.callerNumber && workspace.includes($0) }
         guard !search.isEmpty else { return contacts }
         let query = search.lowercased()
         return contacts.filter {
@@ -20,15 +26,25 @@ struct ContactsView: View {
     }
 
     private var businessLineMatchesSearch: Bool {
-        guard !session.callerNumber.isEmpty else { return false }
+        guard !businessLineNumber.isEmpty else { return false }
         guard !search.isEmpty else { return true }
         let query = search.lowercased()
-        return "vici peptides".contains(query) || session.callerNumber.contains(query) ||
-            PhoneFormatter.pretty(session.callerNumber).lowercased().contains(query)
+        return "vici peptides".contains(query) || businessLineNumber.contains(query) ||
+            PhoneFormatter.pretty(businessLineNumber).lowercased().contains(query)
     }
 
     var body: some View {
         NavigationStack(path: $router.contactsPath) {
+            VStack(spacing: 0) {
+                Picker("Inbox", selection: $workspace) {
+                    ForEach(InboxWorkspace.allCases) { value in
+                        Text(value.label).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+                Divider()
             Group {
                 if model.isLoading && model.contacts.isEmpty { ProgressView("Loading contacts…") }
                 else if filtered.isEmpty && !businessLineMatchesSearch {
@@ -41,14 +57,14 @@ struct ContactsView: View {
                                     InitialsAvatar(name: "Vici Peptides", imageURL: nil)
                                     VStack(alignment: .leading, spacing: 3) {
                                         HStack(spacing: 5) {
-                                            Text("Vici Peptides").fontWeight(.semibold)
+                                            Text(workspace == .vip ? "Vici VIP" : "Vici Peptides").fontWeight(.semibold)
                                             Image(systemName: "pin.fill").font(.caption2).foregroundColor(ViciTheme.tint)
                                         }
-                                        Text(PhoneFormatter.pretty(session.callerNumber))
+                                        Text(PhoneFormatter.pretty(businessLineNumber))
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text("Business line").font(.caption2).foregroundStyle(.secondary)
+                                    Text("SMS line").font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -73,11 +89,12 @@ struct ContactsView: View {
                     }.listStyle(.plain).refreshable { await model.load() }
                 }
             }
-            .navigationTitle("Contacts")
+            }
+            .navigationTitle(workspace == .vip ? "VIP Contacts" : "Main Contacts")
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {
                 case .businessLine:
-                    BusinessLineDetailView(phone: session.callerNumber)
+                    BusinessLineDetailView(phone: businessLineNumber)
                 case .contact(let phone):
                     ContactDetailView(phone: phone, model: model)
                 default:
@@ -131,15 +148,16 @@ private struct BusinessLineDetailView: View {
                     Label(copied ? "Number copied" : "Copy business number", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
             } footer: {
-                Text("This is the Vici Peptides Telnyx number used for customer messages and calls.")
+                Text("This is the Vici Peptides line used for SMS in this inbox. Phone calls use the separately configured calling line.")
             }
         }
-        .navigationTitle("Business Line")
+        .navigationTitle("SMS Line")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 private struct ContactDetailView: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     let phone: String
     @ObservedObject var model: ContactsModel
     @EnvironmentObject private var session: SessionModel
@@ -201,6 +219,11 @@ private struct ContactDetailView: View {
         .navigationTitle("Contact")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.loadDetail(phone: phone) }
+        .task(id: model.detail?.contact.phone == phone ? model.detail?.contact.customerTier : nil) {
+            if let contact = model.detail?.contact, contact.phone == phone, contact.customerTier != nil {
+                workspace = InboxWorkspace.destination(for: contact)
+            }
+        }
     }
 }
 
