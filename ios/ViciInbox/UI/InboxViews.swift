@@ -75,7 +75,7 @@ struct InboxView: View {
                     }
                 }
             }
-            .navigationTitle("Inbox")
+            .navigationTitle(audience == .vip ? "VIP Inbox" : "Inbox")
             .navigationDestination(for: AppRoute.self) { route in
                 if case .conversation(let phone) = route {
                     ConversationDestinationView(phone: phone, model: model)
@@ -327,6 +327,15 @@ struct MessageThreadView: View {
         VStack(spacing: 0) {
             if let referralID = activeReferralID ?? referralID {
                 ReferralContextBanner(referralID: referralID)
+            }
+            if let number = conversation.replyFromNumber, !number.isEmpty {
+                Label("Replies from \(conversation.isVIP ? "VIP" : "main") line: \(PhoneFormatter.pretty(number))",
+                      systemImage: conversation.isVIP ? "crown.fill" : "phone")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                Divider()
             }
             ScrollViewReader { proxy in
                 ScrollView {

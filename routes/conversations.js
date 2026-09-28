@@ -102,6 +102,9 @@ router.get('/', async (req, res) => {
       return {
         ...c,
         ...vip,
+        reply_from_number: vip.customer_tier === 'vip'
+          ? (normalisePhone(process.env.VIP_INBOX_PHONE_NUMBER) || normalisePhone(process.env.TELNYX_PHONE_NUMBER))
+          : normalisePhone(process.env.TELNYX_PHONE_NUMBER),
         lastMessage: latestMessage[c.phone] || null,
         latest_order_status: latestOrder[c.phone]?.status || null,
         latest_order_date: latestOrder[c.phone]?.created_at || null,

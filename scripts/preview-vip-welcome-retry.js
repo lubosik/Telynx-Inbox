@@ -16,7 +16,7 @@ const FAILED_BATCHES = new Set([
   '5c4550d6-da4a-4218-93fd-ebd04ee32ee0'
 ]);
 
-async function main() {
+async function loadRetryAudience(supabase) {
   const welcomes = await fetchAllRows(supabase, 'sms_campaigns', 'id', {
     filter: query => query.eq('workspace_id', 'vici').eq('workflow_category', 'vip_welcome'),
     maxRows: 50000
@@ -35,6 +35,11 @@ async function main() {
     && !FAILED_BATCHES.has(row.campaign_id)).map(row => row.contact_phone));
   const phones = [...failed].filter(phone => !protectedPhones.has(phone));
   const facts = await gatherFacts({ client: supabase, phones });
+  return { original, failed, phones, facts };
+}
+
+async function main() {
+  const { original, failed, phones, facts } = await loadRetryAudience(supabase);
   const months = {};
   let renderable = 0;
   let invalid = 0;
@@ -58,4 +63,5 @@ async function main() {
   }, null, 2));
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+module.exports = { loadRetryAudience };

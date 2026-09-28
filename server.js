@@ -738,6 +738,12 @@ function startVIPWelcomeAutomation() {
 
   const run = async () => {
     try {
+      const settings = await require('./lib/campaigns/eligibility').loadCampaignSettings(supabase);
+      if (settings?.vip_welcome_automation_enabled === true) {
+        // Keep the repeat-use benefit restricted as VIP membership changes.
+        // A coupon sync failure stops this welcome sweep, never other automations.
+        await require('./lib/vip-benefit-coupon').syncVIPBenefitCoupon({ client: supabase });
+      }
       const summary = await runVIPWelcomeSweep({
         client: supabase,
         service: createCampaignService({ client: supabase, env: process.env }),

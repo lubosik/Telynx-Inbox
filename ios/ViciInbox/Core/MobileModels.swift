@@ -119,6 +119,8 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
     let latestOrderStatus: String?
     let latestOrderDate: String?
     let latestOrderID: FlexibleID?
+    /// The server-selected line for the next reply, not historical send evidence.
+    let replyFromNumber: String?
     /// Commercial tiering is deliberately separate from messaging consent.
     /// The server derives this from paid-order history plus an auditable manual
     /// include; neither value grants permission to contact the customer.
@@ -210,6 +212,7 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
         case latestOrderStatus = "latest_order_status"
         case latestOrderDate = "latest_order_date"
         case latestOrderID = "latest_order_id"
+        case replyFromNumber = "reply_from_number"
         case customerTier = "customer_tier"
         case vipState = "vip_state"
         case vipSource = "vip_source"

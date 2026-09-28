@@ -12,8 +12,8 @@ test('VIP loyalty copy uses the earliest recorded paid history, not an invented 
     orderHistory: [{ created_at: '2026-09-01T12:00:00Z' }, { created_at: '2026-03-15T12:00:00Z' }]
   });
   assert.deepEqual(result.missing, []);
-  assert.match(result.text, /have ordered since March 2026/);
-  assert.match(result.text, /Want me to send your code\?$/);
+  assert.match(result.text, /ordering since March 2026/);
+  assert.match(result.text, /Want your code\?$/);
 });
 
 test('VIP loyalty refuses missing or invalid purchase dates', () => {

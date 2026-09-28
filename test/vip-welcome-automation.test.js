@@ -58,7 +58,7 @@ test('the stored VIP welcome is concise and passes the real VIP copy gate', () =
   // our most loyal researchers", which describes a third party in front of the
   // reader; the owner asked for it to be theirs.
   assert.match(WELCOME_MESSAGE, /You're one of our most loyal customers/i);
-  assert.match(WELCOME_MESSAGE, /VIP unlocked/i);
+  assert.match(WELCOME_MESSAGE, /You've unlocked our VIP service/i);
   assert.doesNotMatch(WELCOME_MESSAGE, /for one of our/i);
   assert.match(WELCOME_MESSAGE, /private code/i);
   assert.match(WELCOME_MESSAGE, /1:1 research support/i);
@@ -66,7 +66,8 @@ test('the stored VIP welcome is concise and passes the real VIP copy gate', () =
   assert.match(WELCOME_MESSAGE, /\{\{loyalty_since\}\}/);
   // No unverified competitor pricing comparison in customer-facing copy.
   assert.doesNotMatch(WELCOME_MESSAGE, /thousands a month/i);
-  assert.match(WELCOME_MESSAGE, /included at no extra cost/i);
+  assert.match(WELCOME_MESSAGE, /at no extra cost/i);
+  assert.match(WELCOME_MESSAGE, /private code for all orders/i);
 
   // No coupon may be named or templated here. Dominic chooses the VIP code
   // himself, and {{code}} would require a verified WooCommerce coupon before
