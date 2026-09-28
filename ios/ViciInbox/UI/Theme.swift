@@ -163,3 +163,29 @@ private struct KeyboardDoneBackground: ViewModifier {
         }
     }
 }
+
+/// One persistent customer-space control reused by every customer-facing tab.
+/// It changes the server-side lens; it does not create another account or copy
+/// any customer record.
+struct CustomerWorkspacePicker: View {
+    @Binding var selection: InboxWorkspace
+    var areaLabel: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Picker("Customer space", selection: $selection) {
+                ForEach(InboxWorkspace.allCases) { workspace in
+                    Label(workspace.label, systemImage: workspace.symbolName).tag(workspace)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(WorkspacePresentation.current(selection, area: areaLabel).detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .contain)
+    }
+}

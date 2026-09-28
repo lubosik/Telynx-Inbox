@@ -5,9 +5,19 @@ This document does not deploy code, migrate data, change schedules, or send mess
 
 ## Local implementation checkpoint
 
-The first implementation is on local branch `feature/vip-customer-workspaces`,
-not pushed, merged, deployed, or distributed. Existing production schedules are
-untouched. This is an inbox-and-SMS foundation, not the complete VIP business zone.
+The first implementation (`fd4ac6a`) is merged and deployed on Railway and
+distributed as TestFlight build 116. Non-signing cloud iOS build, server CI,
+signed archive and tester distribution succeeded. The owner applied the migration
+and the business_phone column was verified. Existing schedules are untouched.
+This is an inbox-and-SMS foundation, not the complete VIP business zone.
+
+The follow-up branch `feature/vip-growth-call-workspaces` adds server-side
+Main/VIP Growth and Calls projections. Campaign approvals, recipients, schedules
+and standing automation templates remain canonical/shared. Mixed jobs are marked
+shared rather than duplicated. Scoped pages filter before pagination; incomplete
+membership reads fail visibly instead of inventing zero counts. Native outbound
+and automated voice caller ID remain unchanged. Follow-up cloud compilation and
+deployment are not established by the initial build 116.
 
 Implemented locally:
 
@@ -38,8 +48,8 @@ Remaining before claiming a complete separate VIP zone:
   booking availability, cancellation and payout policies are not defined yet.
 - External writes/other backend instances can retain a five-minute tier cache.
   Local order-webhook invalidation is implemented, not a cross-instance event bus.
-- Migration execution, non-signing cloud build, release approval, production and
-  physical-device verification remain pending.
+- Initial migration, cloud build and distribution are complete. Physical-device
+  verification of the switch remains a separate owner check.
 
 Validation at this checkpoint: 2,629 / 2,629 offline Node tests passed with local
 HTTP test servers allowed; complete documented Foundation-layer typecheck passed

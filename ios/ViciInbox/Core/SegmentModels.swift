@@ -150,6 +150,11 @@ struct SegmentRecord: Codable, Identifiable, Hashable {
     let archiveReason: String?
     let createdAt: String
     let updatedAt: String
+    /// Present on a Main/VIP projection. `memberCount` is the visible space;
+    /// this retains the complete canonical count so the UI can be explicit
+    /// when an audience spans both customer spaces.
+    let globalMemberCount: Int?
+    let audience: String?
 
     var isArchived: Bool { archivedAt?.isEmpty == false }
     var lastComputedDate: Date? { ServerDate.parse(lastComputedAt) }
@@ -175,6 +180,11 @@ struct SegmentRecord: Codable, Identifiable, Hashable {
         case .manual, .unknown:
             return people
         }
+    }
+
+    var spansCustomerSpaces: Bool {
+        guard let globalMemberCount else { return false }
+        return globalMemberCount > memberCount
     }
 }
 
@@ -244,6 +254,8 @@ struct SegmentMemberPage: Codable, Hashable {
     let page: Int
     let pageSize: Int
     let total: Int
+    let globalTotal: Int?
+    let audience: String?
 }
 
 /// `shapeOverride()`. The actor id travels with the row so the interface can
@@ -1032,6 +1044,8 @@ struct SegmentCandidateResponse: Codable, Hashable {
     /// difference between what was searched for and what came back.
     let alreadyInCount: Int?
     let memberCount: Int?
+    let globalMemberCount: Int?
+    let audience: String?
     let search: String?
 
     var heldPeople: [SegmentHeldCandidate] { held ?? [] }

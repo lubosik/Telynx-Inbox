@@ -64,7 +64,7 @@ function analytics(service, { env = process.env, audit = logAuditSafely } = {}) 
     try {
       noStore(res);
       const result = typeof service.dashboard === 'function'
-        ? await service.dashboard({ actor: req.actor })
+        ? await service.dashboard({ actor: req.actor, query: req.query || {} })
         : { metrics: await service.metrics() };
       res.json({ ...(result || {}), mode: mode(env) });
     } catch (error) {

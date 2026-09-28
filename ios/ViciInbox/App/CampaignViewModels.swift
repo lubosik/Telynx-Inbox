@@ -8,17 +8,21 @@ import Foundation
 final class CampaignReviewCountModel: ObservableObject {
     @Published private(set) var count = 0
     private var isLoading = false
+    private var generation = 0
 
-    func load(enabled: Bool) async {
+    func load(enabled: Bool, audience: InboxWorkspace) async {
+        generation += 1
+        let requestGeneration = generation
         guard enabled else {
             count = 0
             return
         }
-        guard !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
-            count = max(0, try await APIClient.shared.fetchCampaignReviewCount())
+            let value = try await APIClient.shared.fetchCampaignReviewCount(audience: audience)
+            guard generation == requestGeneration else { return }
+            count = max(0, value)
         } catch {
             // Cosmetic and best effort. CampaignsView still exposes a retryable
             // load error when the operator opens the real review queue.
@@ -57,6 +61,8 @@ final class CampaignListModel: ObservableObject {
     private var nextPage = 1
     private var total = 0
     private let pageSize = 25
+    private var generation = 0
+    private(set) var audience: InboxWorkspace = .main
 
     var hasMore: Bool { campaigns.count < total }
 
@@ -72,20 +78,24 @@ final class CampaignListModel: ObservableObject {
         campaign.status.isEditable
     }
 
-    func load(reset: Bool = false) async {
+    func load(audience: InboxWorkspace, reset: Bool = false) async {
+        generation += 1
+        let requestGeneration = generation
+        self.audience = audience
         if reset {
             nextPage = 1
             total = 0
         }
-        guard !isLoading else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
             async let page = APIClient.shared.fetchCampaigns(page: 1,
                                                              pageSize: pageSize,
-                                                             includeArchived: showsArchived)
-            async let count = APIClient.shared.fetchCampaignReviewCount()
+                                                             includeArchived: showsArchived,
+                                                             audience: audience)
+            async let count = APIClient.shared.fetchCampaignReviewCount(audience: audience)
             let result = try await (page, count)
+            guard generation == requestGeneration, self.audience == audience else { return }
             campaigns = result.0.page.items
             archivedAt = result.0.archivedAt
             total = result.0.page.total
@@ -102,9 +112,13 @@ final class CampaignListModel: ObservableObject {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
+            let requestedAudience = audience
+            let requestGeneration = generation
             let result = try await APIClient.shared.fetchCampaigns(page: nextPage,
                                                                    pageSize: pageSize,
-                                                                   includeArchived: showsArchived)
+                                                                   includeArchived: showsArchived,
+                                                                   audience: requestedAudience)
+            guard generation == requestGeneration, audience == requestedAudience else { return }
             let known = Set(campaigns.map(\.id))
             campaigns.append(contentsOf: result.page.items.filter { !known.contains($0.id) })
             archivedAt.merge(result.archivedAt) { _, new in new }
@@ -161,7 +175,7 @@ final class CampaignListModel: ObservableObject {
             errorMessage = error.localizedDescription
             return
         }
-        await load(reset: true)
+        await load(audience: audience, reset: true)
     }
 }
 
@@ -176,6 +190,7 @@ final class CampaignDetailModel: ObservableObject {
     @Published private(set) var detail: CampaignDetailResponse?
     @Published private(set) var recipients: [CampaignRecipient] = []
     @Published private(set) var recipientTotal = 0
+    @Published private(set) var recipientGlobalTotal = 0
     @Published private(set) var dryRun: CampaignDryRun?
     @Published private(set) var preview: CampaignPreview?
     @Published private(set) var isLoadingPreview = false
@@ -201,6 +216,8 @@ final class CampaignDetailModel: ObservableObject {
     private var allowsDryRun = false
     private var allowsFinancial = false
     private var previewRequestID = UUID()
+    private var loadGeneration = 0
+    private(set) var audience: InboxWorkspace = .main
 
     init(campaignID: String) {
         self.campaignID = campaignID
@@ -236,22 +253,28 @@ final class CampaignDetailModel: ObservableObject {
      * filling in its own section, so the slowest no longer sets the pace for
      * the others and none of them holds the first paint.
      */
-    func load(canDryRun: Bool, canFinancial: Bool) async {
-        guard !isLoading && !isEnriching else { return }
+    func load(audience: InboxWorkspace, canDryRun: Bool, canFinancial: Bool) async {
+        loadGeneration += 1
+        let requestGeneration = loadGeneration
+        self.audience = audience
         allowsDryRun = canDryRun
         allowsFinancial = canFinancial
         isLoading = true
 
         do {
             async let detailRequest = APIClient.shared.fetchCampaign(id: campaignID)
-            async let recipientRequest = APIClient.shared.fetchCampaignRecipients(id: campaignID)
+            async let recipientRequest = APIClient.shared.fetchCampaignRecipients(id: campaignID,
+                                                                                   audience: audience)
             let values = try await (detailRequest, recipientRequest)
+            guard loadGeneration == requestGeneration, self.audience == audience else { return }
             detail = values.0
             recipients = values.1.items
             recipientTotal = values.1.total
+            recipientGlobalTotal = values.1.globalTotal ?? values.1.total
             nextRecipientPage = 2
             errorMessage = nil
         } catch {
+            guard loadGeneration == requestGeneration else { return }
             errorMessage = error.localizedDescription
             isLoading = false
             return
@@ -267,7 +290,9 @@ final class CampaignDetailModel: ObservableObject {
             financialUnavailableMessage = nil
         }
 
-        await enrich(canDryRun: canDryRun, canFinancial: canFinancial)
+        guard loadGeneration == requestGeneration else { return }
+        await enrich(canDryRun: canDryRun, canFinancial: canFinancial,
+                     generation: requestGeneration)
     }
 
     /**
@@ -278,7 +303,7 @@ final class CampaignDetailModel: ObservableObject {
      * another, so running them in sequence only ever added their latencies
      * together.
      */
-    private func enrich(canDryRun: Bool, canFinancial: Bool) async {
+    private func enrich(canDryRun: Bool, canFinancial: Bool, generation: Int) async {
         isEnriching = true
         defer { isEnriching = false }
 
@@ -300,6 +325,8 @@ final class CampaignDetailModel: ObservableObject {
 
         let (performanceResult, financialResult, _, _) =
             await (performanceValue, financialValue, dryRunDone, previewDone)
+
+        guard loadGeneration == generation else { return }
 
         performance = performanceResult
 
@@ -427,14 +454,19 @@ final class CampaignDetailModel: ObservableObject {
     /// A fast tap on Remove all can otherwise update the server while the
     /// screen keeps showing the old blocked count until it is reopened.
     private func refreshAudienceState() async {
-        async let recipientsValue = APIClient.shared.fetchCampaignRecipients(id: campaignID)
+        let requestedAudience = audience
+        let generation = loadGeneration
+        async let recipientsValue = APIClient.shared.fetchCampaignRecipients(id: campaignID,
+                                                                               audience: requestedAudience)
         async let previewDone: Void = refreshPreview()
         async let eligibilityDone: Void = dryRunIfWanted(allowsDryRun)
 
         do {
             let page = try await recipientsValue
+            guard loadGeneration == generation, audience == requestedAudience else { return }
             recipients = page.items
             recipientTotal = page.total
+            recipientGlobalTotal = page.globalTotal ?? page.total
             nextRecipientPage = 2
         } catch {
             errorMessage = error.localizedDescription
@@ -464,13 +496,18 @@ final class CampaignDetailModel: ObservableObject {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
+            let requestedAudience = audience
+            let generation = loadGeneration
             let page = try await APIClient.shared.fetchCampaignRecipients(
                 id: campaignID,
-                page: nextRecipientPage
+                page: nextRecipientPage,
+                audience: requestedAudience
             )
+            guard loadGeneration == generation, audience == requestedAudience else { return }
             let known = Set(recipients.map(\.id))
             recipients.append(contentsOf: page.items.filter { !known.contains($0.id) })
             recipientTotal = page.total
+            recipientGlobalTotal = page.globalTotal ?? page.total
             nextRecipientPage += 1
         } catch {
             errorMessage = error.localizedDescription
@@ -594,7 +631,7 @@ final class CampaignDetailModel: ObservableObject {
                 campaignID: campaignID, recipientID: recipient.id)
             confirmationMessage = "Cancelled only \(recipient.contactName ?? recipient.contactPhone)'s pending message."
             errorMessage = nil
-            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+            await load(audience: audience, canDryRun: allowsDryRun, canFinancial: allowsFinancial)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -620,7 +657,7 @@ final class CampaignDetailModel: ObservableObject {
             }
             confirmationMessage = success
             errorMessage = nil
-            await load(canDryRun: allowsDryRun, canFinancial: allowsFinancial)
+            await load(audience: audience, canDryRun: allowsDryRun, canFinancial: allowsFinancial)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -748,6 +785,9 @@ final class CampaignEditorModel: ObservableObject {
     let existingCouponCode: String?
     let existingDiscountPercent: Int?
     let workflowCategory: String
+    /// Fixed for this draft session. Changing the app switch while this sheet
+    /// is open cannot silently move a reviewed audience into another space.
+    let customerScope: InboxWorkspace?
     private var contactRequestID = UUID()
     private let existingRecipientMetadata: [String: CampaignRecipientInput]
     private let initialTitle: String
@@ -762,7 +802,8 @@ final class CampaignEditorModel: ObservableObject {
          seedTitle: String = "",
          seedMessage: String = "Vin from Vici: ",
          seedBrief: String = "",
-         seedWorkflowCategory: String = "manual") {
+         seedWorkflowCategory: String = "manual",
+         customerScope: InboxWorkspace? = nil) {
         var metadata: [String: CampaignRecipientInput] = [:]
         for recipient in recipients where recipient.selected {
             let key = Self.phoneKey(recipient.contactPhone)
@@ -807,6 +848,7 @@ final class CampaignEditorModel: ObservableObject {
         existingCouponCode = campaign?.couponCode
         existingDiscountPercent = campaign?.effectiveDiscountPercent
         workflowCategory = campaign?.workflowCategory ?? seedWorkflowCategory
+        self.customerScope = campaign == nil ? customerScope : campaign?.storedCustomerScope
         title = resolvedTitle
         message = resolvedMessage
         audienceMode = resolvedAudienceMode
@@ -1140,21 +1182,19 @@ final class CampaignEditorModel: ObservableObject {
             if contactRequestID == requestID { isLoadingContacts = false }
         }
         do {
-            let pageSize = 200
-            let page = try await APIClient.shared.fetchContacts(search: query,
-                                                                page: 1,
-                                                                pageSize: pageSize)
+            let scoped = try await APIClient.shared.fetchAllContacts(search: query,
+                                                                     audience: customerScope)
             guard contactRequestID == requestID else { return }
             if query.isEmpty {
                 hasLoadedContactSnapshot = true
-                allContactsTotal = page.total ?? page.contacts.count
+                allContactsTotal = scoped.count
                 allContactsAvailable = allContactsTotal > 0
-                allContactsSnapshot = page.contacts
+                allContactsSnapshot = scoped
                 contactResults = allContactsSnapshot
-                contactResultsTruncated = page.hasMore
+                contactResultsTruncated = false
             } else {
-                contactResults = page.contacts
-                contactResultsTruncated = page.hasMore
+                contactResults = scoped
+                contactResultsTruncated = false
             }
             contactErrorMessage = nil
         } catch {
@@ -1211,6 +1251,10 @@ final class CampaignEditorModel: ObservableObject {
         do {
             let response: CampaignActionResponse
             if let existingID {
+                let audienceChanged = !(audienceMode == .allContacts ||
+                    (audienceMode == initialAudienceMode &&
+                     recipientsText == initialRecipientsText &&
+                     selectedContacts.isEmpty))
                 response = try await APIClient.shared.editCampaign(
                     id: existingID,
                     title: cleanTitle,
@@ -1219,12 +1263,14 @@ final class CampaignEditorModel: ObservableObject {
                     // copy must never replace the frozen audience with that
                     // partial page. Omit recipients unless the operator
                     // explicitly changed them in this editor.
-                    recipients: audienceMode == .allContacts ||
-                        (audienceMode == initialAudienceMode &&
-                         recipientsText == initialRecipientsText &&
-                         selectedContacts.isEmpty) ? nil : recipients,
+                    recipients: audienceChanged ? recipients : nil,
                     couponCode: attachedCoupon?.code,
-                    discountPercent: attachedCoupon?.percent
+                    discountPercent: attachedCoupon?.percent,
+                    // Copy-only edits deliberately omit this. Sending the
+                    // currently selected app space would rebind a legacy or
+                    // mixed frozen campaign without the operator selecting a
+                    // complete replacement audience.
+                    customerScope: audienceChanged ? customerScope : nil
                 )
             } else {
                 response = try await APIClient.shared.createCampaign(
@@ -1234,7 +1280,8 @@ final class CampaignEditorModel: ObservableObject {
                     allContacts: audienceMode == .allContacts,
                     workflowCategory: workflowCategory,
                     couponCode: attachedCoupon?.code,
-                    discountPercent: attachedCoupon?.percent
+                    discountPercent: attachedCoupon?.percent,
+                    customerScope: customerScope
                 )
             }
             isSaving = false

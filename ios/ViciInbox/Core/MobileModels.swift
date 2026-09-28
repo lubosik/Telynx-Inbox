@@ -9,6 +9,15 @@ enum InboxWorkspace: String, CaseIterable, Identifiable {
     static let storageKey = "vici.inbox.workspace"
     var id: String { rawValue }
     var label: String { self == .vip ? "VIP" : "Main" }
+    /// Query/body vocabulary shared by inbox-scoped server APIs. There is no
+    /// `all` case in the app switch: the signed-in experience is always inside
+    /// one customer space, while individual immutable records can still show
+    /// their complete cross-space history.
+    var audienceValue: String { rawValue }
+
+    var customerLabel: String { self == .vip ? "VIP customers" : "Main customers" }
+
+    var symbolName: String { self == .vip ? "crown.fill" : "person.2.fill" }
 
     func includes(_ conversation: ConversationSummary) -> Bool {
         conversation.isVIP == (self == .vip)
@@ -20,6 +29,25 @@ enum InboxWorkspace: String, CaseIterable, Identifiable {
 
     static func destination(for conversation: ConversationSummary) -> InboxWorkspace {
         conversation.isVIP ? .vip : .main
+    }
+}
+
+/// The compact switch reused at the top of Inbox, Contacts, Growth and Calls.
+/// Keeping the vocabulary here prevents four almost-identical controls from
+/// drifting into different meanings.
+struct WorkspacePresentation: Hashable {
+    let title: String
+    let detail: String
+
+    static func current(_ workspace: InboxWorkspace, area: String) -> WorkspacePresentation {
+        switch workspace {
+        case .main:
+            return WorkspacePresentation(title: "Main \(area)",
+                                         detail: "Standard customers only")
+        case .vip:
+            return WorkspacePresentation(title: "VIP \(area)",
+                                         detail: "VIP customers only")
+        }
     }
 }
 
@@ -1051,6 +1079,10 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     /// archives on demand when playback is first requested.
     let recordingAvailable: Bool?
     let contactName: String?
+    /// Current customer classification used for this scoped history response.
+    /// It is not caller-ID provenance and must never be presented as the line
+    /// the call used.
+    let customerTier: String?
     /// Set once anyone has opened call history. Nil on a schema that has not had
     /// scripts/missed-calls-seen-migration.sql applied, which is why the app
     /// also keeps its own record of what it has shown — see CallHistoryModel.
@@ -1077,8 +1109,21 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
         case recordingURL = "recording_url"
         case recordingAvailable = "recording_available"
         case contactName = "contact_name"
+        case customerTier = "customer_tier"
         case seenAt = "seen_at"
     }
+}
+
+struct MissedCallCountResponse: Codable, Hashable {
+    let count: Int
+    let globalCount: Int
+}
+
+struct MarkCallsSeenResponse: Codable, Hashable {
+    let marked: Int
+    let ok: Bool
+    let count: Int
+    let globalCount: Int
 }
 
 /**

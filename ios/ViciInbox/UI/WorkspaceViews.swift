@@ -86,7 +86,7 @@ struct ContactsView: View {
                                 }
                             }
                         }
-                    }.listStyle(.plain).refreshable { await model.load() }
+                    }.listStyle(.plain).refreshable { await model.load(audience: workspace) }
                 }
             }
             }
@@ -116,7 +116,7 @@ struct ContactsView: View {
                     return saved
                 }
             }
-            .task { if model.contacts.isEmpty { await model.load() } }
+            .task(id: workspace) { await model.load(audience: workspace) }
             .alert("Contacts error", isPresented: errorBinding) { Button("OK", role: .cancel) {} }
                 message: { Text(model.errorMessage ?? "Unknown error") }
         }
@@ -320,6 +320,7 @@ private struct ContactEditor: View {
 struct AbandonedCartRecoverySection: View {
     @StateObject private var model = CartRecoveryDashboardModel()
     @EnvironmentObject private var session: SessionModel
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     private var canRead: Bool { session.can(Permission.automationRead) }
     private var canConfigure: Bool { session.can(Permission.campaignsApprove) }
@@ -333,7 +334,7 @@ struct AbandonedCartRecoverySection: View {
                 HStack { ProgressView(); Text("Loading recovery activity").foregroundStyle(.secondary) }
             } else if let dashboard = model.dashboard {
                 NavigationLink {
-                    CartRecoveryJourneyListView()
+                    CartRecoveryJourneyListView(workspace: workspace)
                 } label: {
                     VStack(alignment: .leading, spacing: 7) {
                         HStack {
@@ -379,14 +380,14 @@ struct AbandonedCartRecoverySection: View {
                 Label("Recovery activity unavailable", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(ViciTheme.warning)
                 Text(error).font(.footnote).foregroundStyle(.secondary)
-                Button("Try again") { Task { await model.load() } }
+                Button("Try again") { Task { await model.load(audience: workspace) } }
             }
         } header: {
             Text("Abandoned cart recovery")
         } footer: {
             Text("AI may classify a customer reply and prepare a draft. It never sends that draft without a person approving it.")
         }
-        .task { if canRead && model.dashboard == nil { await model.load() } }
+        .task(id: workspace) { if canRead { await model.load(audience: workspace) } }
     }
 }
 
@@ -403,6 +404,7 @@ private struct CartRecoveryMiniStat: View {
 }
 
 struct CartRecoveryJourneyListView: View {
+    let workspace: InboxWorkspace
     @StateObject private var model = CartRecoveryJourneyListModel()
     @StateObject private var dashboardModel = CartRecoveryDashboardModel()
 
@@ -498,13 +500,13 @@ struct CartRecoveryJourneyListView: View {
         .navigationTitle("Cart Recovery")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            async let journeys: Void = model.load()
-            async let dashboard: Void = dashboardModel.load()
+            async let journeys: Void = model.load(audience: workspace)
+            async let dashboard: Void = dashboardModel.load(audience: workspace)
             _ = await (journeys, dashboard)
         }
-        .task {
-            async let journeys: Void = model.load()
-            async let dashboard: Void = dashboardModel.load()
+        .task(id: workspace) {
+            async let journeys: Void = model.load(audience: workspace)
+            async let dashboard: Void = dashboardModel.load(audience: workspace)
             _ = await (journeys, dashboard)
         }
         .onChange(of: model.status) { _ in Task { await model.reloadForStatus() } }
@@ -1502,6 +1504,7 @@ private func cartRecoveryMoney(_ amount: FlexibleDecimal, currency: String) -> S
 /// Enabling it authorizes future automatic customer messages, so its copy is
 /// intentionally explicit about what the switch does.
 struct CheckInAutomationSection: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var appearance: AppearanceModel
     @State private var automation: CheckInAutomation?
@@ -1541,6 +1544,8 @@ struct CheckInAutomationSection: View {
             } else if automation == nil {
                 HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
             } else {
+                Text("The queue shows \(workspace.customerLabel.lowercased()). The on/off switch and message templates are shared across both spaces.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle(isOn: Binding(
                     get: { isOn },
                     set: { wanted in
@@ -1620,7 +1625,7 @@ struct CheckInAutomationSection: View {
                 Text("Off. Nobody is checked in on unless you build the campaign yourself. Switching it on lets check-ins be approved and sent without you reading them first.")
             }
         }
-        .task { if automation == nil { await load() } }
+        .task(id: workspace) { automation = nil; await load() }
         .sheet(isPresented: $showingQueue) {
             AutomationRecipientQueueSheet(
                 title: "Scheduled check-ins",
@@ -1676,7 +1681,9 @@ struct CheckInAutomationSection: View {
 
     private func load() async {
         do {
-            let fresh = try await APIClient.shared.fetchCheckInAutomation()
+            let requestedWorkspace = workspace
+            let fresh = try await APIClient.shared.fetchCheckInAutomation(audience: requestedWorkspace)
+            guard requestedWorkspace == workspace else { return }
             automation = fresh
             // Only adopt the server's value when no write is in flight, or a
             // slow GET landing after a fast PUT would undo what was just set.
@@ -1697,7 +1704,7 @@ struct CheckInAutomationSection: View {
             // Trust the server's answer over the optimistic one.
             isOn = change.enabled
             message = change.note
-            automation = try? await APIClient.shared.fetchCheckInAutomation()
+            automation = try? await APIClient.shared.fetchCheckInAutomation(audience: workspace)
         } catch {
             // Put the switch back where it was. A control that stays where it
             // was tapped while the change did not happen is worse than one that
@@ -1716,7 +1723,7 @@ struct CheckInAutomationSection: View {
         defer { isBusy = false }
         do {
             let result = try await APIClient.shared.saveCheckInTemplates(templateDrafts)
-            automation = try await APIClient.shared.fetchCheckInAutomation()
+            automation = try await APIClient.shared.fetchCheckInAutomation(audience: workspace)
             message = result.note
             showingTemplateEditor = false
         } catch {
@@ -1735,6 +1742,7 @@ struct CheckInAutomationSection: View {
 /// The dashboard previews three people; the full queue opens in one sheet.
 /// Campaign rows remain the immutable approval and delivery ledger.
 struct VIPWelcomeAutomationSection: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var appearance: AppearanceModel
     @State private var automation: VIPWelcomeAutomation?
@@ -1759,6 +1767,8 @@ struct VIPWelcomeAutomationSection: View {
             } else if automation == nil {
                 HStack { ProgressView(); Text("Loading").foregroundStyle(.secondary) }
             } else {
+                Text("The queue shows \(workspace.customerLabel.lowercased()). The on/off switch and welcome template are shared across both spaces.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle(isOn: Binding(
                     get: { isOn },
                     set: { wanted in
@@ -1877,7 +1887,7 @@ struct VIPWelcomeAutomationSection: View {
                 Text("Recent conversations delay the welcome by at least \(automation?.conversationGuardHours ?? 2) hours. Editing the template changes future welcomes only; queued messages remain exactly as approved.")
             }
         }
-        .task { if automation == nil { await load() } }
+        .task(id: workspace) { automation = nil; await load() }
         .sheet(isPresented: $showingQueue) {
             AutomationRecipientQueueSheet(
                 title: "Scheduled VIP welcomes",
@@ -1906,7 +1916,9 @@ struct VIPWelcomeAutomationSection: View {
 
     private func load() async {
         do {
-            let fresh = try await APIClient.shared.fetchVIPWelcomeAutomation()
+            let requestedWorkspace = workspace
+            let fresh = try await APIClient.shared.fetchVIPWelcomeAutomation(audience: requestedWorkspace)
+            guard requestedWorkspace == workspace else { return }
             automation = fresh
             if !isBusy {
                 isOn = fresh.enabled
@@ -1931,7 +1943,7 @@ struct VIPWelcomeAutomationSection: View {
                 enabled: enabled,
                 messageTemplate: template.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            automation = fresh
+            automation = try await APIClient.shared.fetchVIPWelcomeAutomation(audience: workspace)
             isOn = fresh.enabled
             templateDraft = fresh.messageTemplate
             isEditingTemplate = false
@@ -2186,11 +2198,13 @@ private struct AutomationRecipientQueueSheet: View {
 }
 
 struct AutomationQueueView: View {
+    let workspace: InboxWorkspace
     @StateObject private var model = ActivityModel()
     @State private var overview: AutomationOverview?
     @State private var overviewError: String?
     @State private var showingPaymentActivity = false
     @State private var showingPaymentTemplates = false
+    @State private var overviewGeneration = 0
     @EnvironmentObject private var session: SessionModel
 
     var body: some View {
@@ -2248,12 +2262,14 @@ struct AutomationQueueView: View {
             AbandonedCartRecoverySection()
         }
         .refreshable {
-            await model.load()
+            await model.load(audience: workspace)
             await loadOverview()
         }
-        .task {
-            if model.stats == nil { await model.load() }
-            if overview == nil { await loadOverview() }
+        .task(id: workspace) {
+            overviewGeneration += 1
+            overview = nil
+            await model.load(audience: workspace)
+            await loadOverview()
         }
         .sheet(isPresented: $showingPaymentActivity) {
             AutomationPaymentActivitySheet(model: model)
@@ -2267,12 +2283,18 @@ struct AutomationQueueView: View {
     }
 
     private func loadOverview() async {
+        overviewGeneration += 1
+        let generation = overviewGeneration
         do {
-            overview = try await APIClient.shared.fetchAutomationOverview()
+            let result = try await APIClient.shared.fetchAutomationOverview(audience: workspace)
+            guard generation == overviewGeneration else { return }
+            overview = result
             overviewError = nil
         } catch {
-            overview = nil
-            overviewError = error.localizedDescription
+            if generation == overviewGeneration {
+                overview = nil
+                overviewError = error.localizedDescription
+            }
         }
     }
 }
@@ -2464,7 +2486,7 @@ private struct AutomationPaymentActivitySheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .refreshable {
-                await model.load()
+                await model.load(audience: model.audience)
                 if tab == 2 || tab == 3 {
                     await model.loadStatus(tab == 2 ? "failed" : "cancelled")
                 }
@@ -2476,7 +2498,7 @@ private struct AutomationPaymentActivitySheet: View {
             }
             .onChange(of: model.flow) { _ in
                 Task {
-                    await model.load()
+                    await model.load(audience: model.audience)
                     if tab == 2 || tab == 3 {
                         await model.loadStatus(tab == 2 ? "failed" : "cancelled")
                     }
@@ -2543,7 +2565,7 @@ private struct AutomationPaymentActivitySheet: View {
             try await APIClient.shared.updateScheduledMessage(
                 id: item.id, message: editDraft, expectedMessage: item.messageBody ?? "")
             editingItem = nil
-            await model.load()
+            await model.load(audience: model.audience)
         } catch {
             editError = error.localizedDescription
         }
@@ -2596,13 +2618,24 @@ struct CallsView: View {
     @ObservedObject var model: CallHistoryModel
     @State private var section = 0
     @EnvironmentObject private var router: AppRouter
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     var body: some View {
         NavigationStack(path: $router.callsPath) {
             VStack(spacing: 0) {
+                CustomerWorkspacePicker(selection: $workspace, areaLabel: "Calls")
+                if workspace == .vip {
+                    Text("History is filtered to VIP customers. New calls still use the configured business calling line.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 6)
+                }
+                Divider()
                 Picker("Calls section", selection: $section) {
                     Text("Keypad").tag(0); Text("History").tag(1)
                 }.pickerStyle(.segmented).padding()
-                if section == 0 { DialerView() } else { CallHistoryView(model: model) }
+                if section == 0 { DialerView() }
+                else { CallHistoryView(model: model, workspace: workspace) }
             }
             .navigationTitle("Calls")
             .accountToolbar()
@@ -2612,6 +2645,7 @@ struct CallsView: View {
 
 private struct CallHistoryView: View {
     @ObservedObject var model: CallHistoryModel
+    let workspace: InboxWorkspace
     @EnvironmentObject private var session: SessionModel
     /// Only one player is open at a time, so audio never overlaps.
     @State private var expandedRecording: String?
@@ -2670,20 +2704,23 @@ private struct CallHistoryView: View {
                         }
                     }
                 }.listStyle(.plain)
-                    .refreshable { await model.load(); await model.markHistorySeen() }
+                    .refreshable {
+                        await model.load(audience: workspace)
+                        await model.markHistorySeen(audience: workspace)
+                    }
             }
         }
         // Reaching this list is what clears the missed-call count: the operator
         // can see who called without opening anything further.
-        .task {
-            if model.logs.isEmpty { await model.load() }
-            await model.markHistorySeen()
+        .task(id: workspace) {
+            await model.load(audience: workspace)
+            await model.markHistorySeen(audience: workspace)
         }
         // A refresh can raise the count while this list is already on screen —
         // returning to the foreground reloads it. Clear it again rather than
         // showing a badge for calls the operator is currently looking at.
         .onChange(of: model.unseenMissed) { count in
-            if count > 0 { Task { await model.markHistorySeen() } }
+            if count > 0 { Task { await model.markHistorySeen(audience: workspace) } }
         }
     }
 

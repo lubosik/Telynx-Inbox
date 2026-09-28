@@ -25,6 +25,7 @@ const { isGsm7 } = require('../lib/campaigns/copy-validator');
 const { KEYS: PAYMENT_TEMPLATE_KEYS, validatePaymentTemplates,
   loadPaymentTemplates } = require('../lib/automation/payment-templates');
 const { automationOverview } = require('../lib/automation/overview');
+const { parseAudience, readInboxAudience, readAllInboxRows } = require('../lib/inbox-audience');
 
 const EDITABLE_FLOWS = new Set([
   'failed-msg1', 'failed-msg2', 'failed-msg3',
@@ -34,7 +35,7 @@ const EDITABLE_FLOWS = new Set([
 // The legacy /stats route intentionally remains payment/order-only for older
 // clients. New Automations screens use this complete, independently sourced
 // overview so the headline never says zero while VIP/check-in queues are full.
-router.get('/overview', async (_req, res) => {
+router.get('/overview', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store, private');
     const { data: settings, error } = await supabase.from('sms_campaign_settings')
@@ -42,10 +43,10 @@ router.get('/overview', async (_req, res) => {
     if (error) throw error;
     if (!settings) throw new Error('Store time zone settings are missing.');
     return res.json(await automationOverview({ client: supabase,
-      timeZone: settings.business_timezone || 'America/New_York' }));
+      timeZone: settings.business_timezone || 'America/New_York', audience: req.query.audience }));
   } catch (error) {
     console.error('[ACTIVITY] overview error:', error.message);
-    return res.status(503).json({ error: 'Could not load all automation counts. Please refresh.' });
+    return res.status(error.status || 503).json({ error: error.status ? error.message : 'Could not load all automation counts. Please refresh.' });
   }
 });
 
@@ -96,6 +97,14 @@ router.get('/stats', async (req, res) => {
   const todayISO = todayStart.toISOString();
 
   try {
+    if (parseAudience(req.query.audience) !== 'all') {
+      const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+      const settings = await loadCampaignSettings(supabase);
+      const overview = await automationOverview({ client: supabase, audience: req.query.audience,
+        timeZone: settings?.business_timezone || 'America/New_York' });
+      return res.json({ ...overview.breakdown.paymentAndOrders, audience: overview.audience,
+        timeZone: overview.timeZone, updatedAt: overview.updatedAt });
+    }
     const [pending, sentToday, failedToday, cancelledToday] = await Promise.all([
       supabase.from('sms_scheduled').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('sms_sent_log').select('id', { count: 'exact', head: true }).gte('sent_at', todayISO),
@@ -114,7 +123,7 @@ router.get('/stats', async (req, res) => {
     });
   } catch (err) {
     console.error('[ACTIVITY] stats error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not load automation counts. Please refresh.' });
   }
 });
 
@@ -128,6 +137,18 @@ router.get('/queue', async (req, res) => {
   const offset = (parseInt(page) - 1) * limit;
 
   try {
+    if (parseAudience(req.query.audience) !== 'all') {
+      const scoped = await scopedActivityPage({ table: 'sms_scheduled',
+        columns: 'id,order_id,phone,flow_type,message_body,send_at,status,created_at',
+        audience: req.query.audience, page, orderBy: 'send_at', ascending: status === 'pending',
+        filter: query => {
+          query = query.eq('status', status);
+          return flow && flow !== 'all' ? query.eq('flow_type', flow) : query;
+        } });
+      const { loadCampaignSettings } = require('../lib/campaigns/eligibility');
+      const settings = await loadCampaignSettings(supabase);
+      return res.json({ ...scoped, timeZone: settings?.business_timezone || 'America/New_York' });
+    }
     let query = supabase
       .from('sms_scheduled')
       .select('id, order_id, phone, flow_type, message_body, send_at, status, created_at')
@@ -153,7 +174,7 @@ router.get('/queue', async (req, res) => {
     });
   } catch (err) {
     console.error('[ACTIVITY] queue error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not load these queued messages. Please refresh.' });
   }
 });
 
@@ -164,6 +185,12 @@ router.get('/recent', async (req, res) => {
   const offset = (parseInt(page) - 1) * limit;
 
   try {
+    if (parseAudience(req.query.audience) !== 'all') {
+      return res.json(await scopedActivityPage({ table: 'sms_sent_log',
+        columns: 'id,order_id,flow_type,phone,message_body,telnyx_message_id,sent_at',
+        audience: req.query.audience, page, orderBy: 'sent_at', ascending: false,
+        filter: query => flow && flow !== 'all' ? query.eq('flow_type', flow) : query }));
+    }
     let query = supabase
       .from('sms_sent_log')
       .select('id, order_id, flow_type, phone, message_body, telnyx_message_id, sent_at')
@@ -179,7 +206,7 @@ router.get('/recent', async (req, res) => {
     res.json({ items: enriched, page: parseInt(page), hasMore: (data?.length || 0) === limit });
   } catch (err) {
     console.error('[ACTIVITY] recent error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not load sent messages. Please refresh.' });
   }
 });
 
@@ -323,6 +350,17 @@ router.delete('/queue/:id', async (req, res) => {
 });
 
 // Enrich rows with contact name from sms_contacts
+async function scopedActivityPage({ table, columns, audience, page, orderBy, ascending, filter }) {
+  const context = await readInboxAudience(supabase, audience);
+  const rows = await readAllInboxRows(supabase, table, columns, { orderBy, ascending, thenBy: 'id', filter });
+  const matched = context.filter(rows, 'phone');
+  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const offset = (safePage - 1) * 50;
+  return { items: await enrichWithNames(matched.slice(offset, offset + 50)),
+    page: safePage, total: matched.length, hasMore: offset + 50 < matched.length,
+    audience: context.audience };
+}
+
 async function enrichWithNames(rows) {
   if (!rows.length) return rows;
   const phones = [...new Set(rows.map(r => r.phone).filter(Boolean))];

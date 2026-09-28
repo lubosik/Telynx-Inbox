@@ -28,7 +28,7 @@ const { prepareSegmentChangeNotifications } = require('../lib/campaigns/segment-
 const CREATE_BODY_KEYS = new Set(['kind', 'name', 'description', 'purpose', 'members', 'definitionKey']);
 const REMOVE_BODY_KEYS = new Set(['mode', 'reason']);
 const RULE_DRAFT_BODY_KEYS = new Set(['description']);
-const RULE_PREVIEW_BODY_KEYS = new Set(['rules', 'selfSegmentKey']);
+const RULE_PREVIEW_BODY_KEYS = new Set(['rules', 'selfSegmentKey', 'customerScope']);
 const RULE_CREATE_BODY_KEYS = new Set(['name', 'description', 'rules']);
 const MEMBER_BODY_KEYS = new Set(['phone', 'contactPhone', 'contactId', 'contactID', 'name', 'reason']);
 const OVERRIDE_BODY_KEYS = new Set([
@@ -198,7 +198,7 @@ function createSegmentRouter({
       res.set('Cache-Control', 'no-store, private');
       const input = rejectUnknownKeys(
         req.body, RULE_PREVIEW_BODY_KEYS,
-        'Only rules and selfSegmentKey may be provided.'
+        'Only rules, selfSegmentKey and customerScope may be provided.'
       );
       return res.json(await segments.previewRules(input));
     } catch (error) { return sendError(res, error, 'previewing this segment'); }

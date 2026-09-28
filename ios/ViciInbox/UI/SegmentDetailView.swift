@@ -25,6 +25,7 @@ struct SegmentDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingAddMember = false
     @State private var confirmingSegmentRemoval = false
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     private let initialName: String
     private let focusPeopleOnAppear: Bool
@@ -92,14 +93,15 @@ struct SegmentDetailView: View {
         }
         .navigationTitle(model.segment?.name ?? initialName)
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await model.load()
+        .task(id: workspace) {
+            await model.load(audience: workspace)
             await authors.load(canReadTeam: session.can(Permission.userRead))
         }
-        .refreshable { await model.load() }
+        .refreshable { await model.load(audience: workspace) }
         .sheet(isPresented: $showingAddMember) {
             SegmentAddMemberSheet(model: model,
                                   picker: picker,
+                                  workspace: workspace,
                                   segmentKind: model.segment?.kind ?? .manual,
                                   segmentPurpose: model.segment?.statedPurpose)
         }
@@ -147,6 +149,11 @@ struct SegmentDetailView: View {
                     Spacer()
                     Text(segment.memberCount == 1 ? "1 person" : "\(segment.memberCount.formatted()) people")
                         .font(.subheadline.weight(.semibold).monospacedDigit())
+                }
+                if model.globalMemberTotal > model.memberTotal {
+                    Text("Showing \(workspace.customerLabel.lowercased()) here. This audience has \(model.globalMemberTotal.formatted()) people across Main and VIP.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 if let purpose = segment.statedPurpose {
                     // The segment's one reason. It is the explanation for
@@ -963,6 +970,7 @@ private struct SegmentReasonSheet: View {
 private struct SegmentAddMemberSheet: View {
     @ObservedObject var model: SegmentDetailModel
     @ObservedObject var picker: SegmentCandidatePickerModel
+    let workspace: InboxWorkspace
     let segmentKind: SegmentKind
     let segmentPurpose: String?
 
@@ -1019,7 +1027,7 @@ private struct SegmentAddMemberSheet: View {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     guard !Task.isCancelled else { return }
                 }
-                await picker.load()
+                await picker.load(audience: workspace)
             }
             .task { await authors.load(canReadTeam: session.can(Permission.userRead)) }
         }
@@ -1045,7 +1053,7 @@ private struct SegmentAddMemberSheet: View {
         Section {
             if let problem = picker.problem {
                 Text(problem).font(.footnote).foregroundStyle(.secondary)
-                Button("Try again") { Task { await picker.load() } }
+                Button("Try again") { Task { await picker.load(audience: workspace) } }
             } else if picker.isSearching && picker.candidates.isEmpty {
                 ProgressView("Loading contacts")
             } else if picker.candidates.isEmpty {

@@ -444,20 +444,24 @@ actor APIClient {
 
     // MARK: - Contacts and orders
 
-    func fetchContacts(search: String = "", page: Int = 1, pageSize: Int = 100) async throws -> ContactPage {
+    func fetchContacts(search: String = "", page: Int = 1, pageSize: Int = 100,
+                       audience: InboxWorkspace? = nil) async throws -> ContactPage {
         var query = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "per_page", value: String(pageSize))
         ]
         if !search.isEmpty { query.append(URLQueryItem(name: "search", value: search)) }
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
         return try await decodedGET("/api/contacts", queryItems: query)
     }
 
-    func fetchAllContacts(search: String = "") async throws -> [ConversationSummary] {
+    func fetchAllContacts(search: String = "",
+                          audience: InboxWorkspace? = nil) async throws -> [ConversationSummary] {
         var contacts: [ConversationSummary] = []
         var pageNumber = 1
         while true {
-            let response = try await fetchContacts(search: search, page: pageNumber, pageSize: 1000)
+            let response = try await fetchContacts(search: search, page: pageNumber,
+                                                   pageSize: 1000, audience: audience)
             contacts.append(contentsOf: response.contacts)
             guard response.hasMore, pageNumber < 100 else { break }
             pageNumber += 1
@@ -503,26 +507,36 @@ actor APIClient {
         try validate(data: data, response: response)
     }
 
-    func fetchActivityStats() async throws -> ActivityStats {
-        try await decodedGET("/api/activity/stats")
+    func fetchActivityStats(audience: InboxWorkspace? = nil) async throws -> ActivityStats {
+        try await decodedGET("/api/activity/stats", queryItems: audience.map {
+            [URLQueryItem(name: "audience", value: $0.audienceValue)]
+        } ?? [])
     }
 
-    func fetchAutomationOverview() async throws -> AutomationOverview {
-        try await decodedGET("/api/activity/overview")
+    func fetchAutomationOverview(audience: InboxWorkspace? = nil) async throws -> AutomationOverview {
+        try await decodedGET("/api/activity/overview", queryItems: audience.map {
+            [URLQueryItem(name: "audience", value: $0.audienceValue)]
+        } ?? [])
     }
 
     func fetchActivityQueue(flow: String = "all", page: Int = 1,
-                            status: String = "pending") async throws -> ActivityPage {
-        try await decodedGET("/api/activity/queue", queryItems: [
+                            status: String = "pending",
+                            audience: InboxWorkspace? = nil) async throws -> ActivityPage {
+        var query = [
             URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "status", value: status)
-        ])
+        ]
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
+        return try await decodedGET("/api/activity/queue", queryItems: query)
     }
 
-    func fetchRecentActivity(flow: String = "all", page: Int = 1) async throws -> ActivityPage {
-        try await decodedGET("/api/activity/recent", queryItems: [
+    func fetchRecentActivity(flow: String = "all", page: Int = 1,
+                             audience: InboxWorkspace? = nil) async throws -> ActivityPage {
+        var query = [
             URLQueryItem(name: "flow", value: flow), URLQueryItem(name: "page", value: String(page))
-        ])
+        ]
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
+        return try await decodedGET("/api/activity/recent", queryItems: query)
     }
 
     func cancelScheduledMessage(id: String) async throws {
@@ -556,16 +570,20 @@ actor APIClient {
     /// Aggregate state for the Growth card. This is read-only and deliberately
     /// reuses the cart recovery root instead of introducing a second analytics
     /// endpoint whose figures could drift from the journey list.
-    func fetchCartRecoveryDashboard() async throws -> CartRecoveryDashboard {
-        try await decodedGET("/api/cart-recovery")
+    func fetchCartRecoveryDashboard(audience: InboxWorkspace? = nil) async throws -> CartRecoveryDashboard {
+        try await decodedGET("/api/cart-recovery", queryItems: audience.map {
+            [URLQueryItem(name: "audience", value: $0.audienceValue)]
+        } ?? [])
     }
 
     func fetchCartRecoveryJourneys(status: String? = nil,
                                     limit: Int = 50,
-                                    cursor: String? = nil) async throws -> CartRecoveryJourneyPage {
+                                    cursor: String? = nil,
+                                    audience: InboxWorkspace? = nil) async throws -> CartRecoveryJourneyPage {
         var query = [URLQueryItem(name: "limit", value: String(min(100, max(1, limit))))]
         if let status, status != "all" { query.append(URLQueryItem(name: "status", value: status)) }
         if let cursor, !cursor.isEmpty { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
         return try await decodedGET("/api/cart-recovery/journeys", queryItems: query)
     }
 
@@ -646,8 +664,11 @@ actor APIClient {
 
     // MARK: - Campaigns
 
-    func fetchCampaigns(page: Int = 1, pageSize: Int = 25) async throws -> CampaignPage {
-        try await fetchCampaigns(page: page, pageSize: pageSize, includeArchived: false).page
+    func fetchCampaigns(page: Int = 1,
+                        pageSize: Int = 25,
+                        audience: InboxWorkspace? = nil) async throws -> CampaignPage {
+        try await fetchCampaigns(page: page, pageSize: pageSize,
+                                 includeArchived: false, audience: audience).page
     }
 
     /// The campaign list, plus which of its items are archived.
@@ -662,13 +683,17 @@ actor APIClient {
     /// receives a query parameter it does not understand.
     func fetchCampaigns(page: Int,
                         pageSize: Int,
-                        includeArchived: Bool) async throws -> CampaignListResult {
+                        includeArchived: Bool,
+                        audience: InboxWorkspace? = nil) async throws -> CampaignListResult {
         var items = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
         ]
         if includeArchived {
             items.append(URLQueryItem(name: "includeArchived", value: "true"))
+        }
+        if let audience {
+            items.append(URLQueryItem(name: "audience", value: audience.audienceValue))
         }
         let (data, response) = try await get("/api/campaigns", queryItems: items)
         try validate(data: data, response: response)
@@ -684,8 +709,10 @@ actor APIClient {
         return CampaignListResult(page: page, archivedAt: archived)
     }
 
-    func fetchCampaignReviewCount() async throws -> Int {
-        let result: CampaignReviewCount = try await decodedGET("/api/campaigns/review-count")
+    func fetchCampaignReviewCount(audience: InboxWorkspace? = nil) async throws -> Int {
+        let query = audience.map { [URLQueryItem(name: "audience", value: $0.audienceValue)] } ?? []
+        let result: CampaignReviewCount = try await decodedGET("/api/campaigns/review-count",
+                                                               queryItems: query)
         return result.count
     }
 
@@ -769,11 +796,15 @@ actor APIClient {
 
     func fetchCampaignRecipients(id: String,
                                  page: Int = 1,
-                                 pageSize: Int = 100) async throws -> CampaignRecipientPage {
-        try await decodedGET("/api/campaigns/\(encodedPathSegment(id))/recipients", queryItems: [
+                                 pageSize: Int = 100,
+                                 audience: InboxWorkspace? = nil) async throws -> CampaignRecipientPage {
+        var query = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
-        ])
+        ]
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
+        return try await decodedGET("/api/campaigns/\(encodedPathSegment(id))/recipients",
+                                    queryItems: query)
     }
 
     func fetchCampaignPerformance(id: String) async throws -> CampaignPerformance {
@@ -804,7 +835,8 @@ actor APIClient {
                         allContacts: Bool = false,
                         workflowCategory: String = "manual",
                         couponCode: String? = nil,
-                        discountPercent: Int? = nil) async throws -> CampaignActionResponse {
+                        discountPercent: Int? = nil,
+                        customerScope: InboxWorkspace? = nil) async throws -> CampaignActionResponse {
         var body: [String: Any] = [
             "title": title,
             "message": message,
@@ -814,6 +846,7 @@ actor APIClient {
         if allContacts { body["audience"] = ["kind": "all_contacts"] }
         if let couponCode { body["couponCode"] = couponCode }
         if let discountPercent { body["discountPercent"] = discountPercent }
+        if let customerScope { body["customerScope"] = customerScope.audienceValue }
         return try await campaignMutation("/api/campaigns", body: body)
     }
 
@@ -845,7 +878,8 @@ actor APIClient {
                       message: String,
                       recipients: [CampaignRecipientInput]?,
                       couponCode: String? = nil,
-                      discountPercent: Int? = nil) async throws -> CampaignActionResponse {
+                      discountPercent: Int? = nil,
+                      customerScope: InboxWorkspace? = nil) async throws -> CampaignActionResponse {
         var body: [String: Any] = [
             "title": title,
             "message": message
@@ -853,6 +887,7 @@ actor APIClient {
         if let recipients { body["recipients"] = recipients.map(\.requestBody) }
         if let couponCode { body["couponCode"] = couponCode }
         if let discountPercent { body["discountPercent"] = discountPercent }
+        if let customerScope { body["customerScope"] = customerScope.audienceValue }
         let (data, response) = try await patch("/api/campaigns/\(encodedPathSegment(id))", body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignActionResponse.self, from: data) }
@@ -947,7 +982,8 @@ actor APIClient {
     ///
     /// Writes nothing. Describe the campaign and it works out who, chooses the
     /// offer, drafts the copy and says whether it may be sent.
-    func planCampaign(brief: String) async throws -> CampaignPlan {
+    func planCampaign(brief: String,
+                      customerScope: InboxWorkspace? = nil) async throws -> CampaignPlan {
         var lastError: Error?
         for attempt in 1...3 {
             do {
@@ -956,7 +992,10 @@ actor APIClient {
                 // timeout made a healthy planner look broken on a slower run.
                 let (data, response) = try await post(
                     "/api/campaigns/plan",
-                    body: ["brief": brief],
+                    body: [
+                        "brief": brief,
+                        "customerScope": customerScope?.audienceValue ?? "all"
+                    ],
                     timeout: 60
                 )
                 try validate(data: data, response: response)
@@ -998,7 +1037,8 @@ actor APIClient {
         message: String,
         discountPercent: Int?,
         couponCode: String?,
-        workflowCategory: String
+        workflowCategory: String,
+        customerScope: InboxWorkspace? = nil
     ) async throws {
         var body: [String: Any] = [
             "title": title,
@@ -1010,6 +1050,7 @@ actor APIClient {
         if let ruleSet { body["ruleSet"] = ruleSet.rawValue }
         if let discountPercent { body["discountPercent"] = discountPercent }
         if let couponCode { body["couponCode"] = couponCode }
+        if let customerScope { body["customerScope"] = customerScope.audienceValue }
         let data: Data
         let response: HTTPURLResponse
         do {
@@ -1052,8 +1093,10 @@ actor APIClient {
     }
 
     /// `GET /api/campaigns/automations/check-in`, `campaigns.read`.
-    func fetchCheckInAutomation() async throws -> CheckInAutomation {
-        try await decodedGET("/api/campaigns/automations/check-in")
+    func fetchCheckInAutomation(audience: InboxWorkspace? = nil) async throws -> CheckInAutomation {
+        try await decodedGET("/api/campaigns/automations/check-in", queryItems: audience.map {
+            [URLQueryItem(name: "audience", value: $0.audienceValue)]
+        } ?? [])
     }
 
     /// `PUT /api/campaigns/automations/check-in`, `campaigns.approve`.
@@ -1081,6 +1124,12 @@ actor APIClient {
     /// `GET /api/campaigns/automations/vip-welcome`, `campaigns.read`.
     func fetchVIPWelcomeAutomation() async throws -> VIPWelcomeAutomation {
         try await decodedGET("/api/campaigns/automations/vip-welcome")
+    }
+
+    func fetchVIPWelcomeAutomation(audience: InboxWorkspace) async throws -> VIPWelcomeAutomation {
+        try await decodedGET("/api/campaigns/automations/vip-welcome", queryItems: [
+            URLQueryItem(name: "audience", value: audience.audienceValue)
+        ])
     }
 
     /// `PUT /api/campaigns/automations/vip-welcome`, `campaigns.approve`.
@@ -1148,9 +1197,13 @@ actor APIClient {
     /// mint a coupon or send. `dryRun` reports the numbers and writes nothing,
     /// which is what the screen calls first so the owner sees how many people
     /// are left after the duplicate check before committing to a build.
-    func buildCampaign(recipe: String, dryRun: Bool) async throws -> CampaignBuildResult {
+    func buildCampaign(recipe: String,
+                       dryRun: Bool,
+                       customerScope: InboxWorkspace? = nil) async throws -> CampaignBuildResult {
+        var body: [String: Any] = ["recipe": recipe, "dryRun": dryRun]
+        if let customerScope { body["customerScope"] = customerScope.audienceValue }
         let (data, response) = try await post("/api/campaigns/build",
-                                              body: ["recipe": recipe, "dryRun": dryRun])
+                                              body: body)
         try validate(data: data, response: response)
         do { return try decoder.decode(CampaignBuildResult.self, from: data) }
         catch { throw APIError.decoding }
@@ -1232,12 +1285,14 @@ actor APIClient {
     /// it and is simply left off.
     func fetchSegments(page: Int = 1,
                        pageSize: Int = 50,
-                       includeArchived: Bool = false) async throws -> SegmentListPage {
+                       includeArchived: Bool = false,
+                       audience: InboxWorkspace? = nil) async throws -> SegmentListPage {
         var items = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
         ]
         if includeArchived { items.append(URLQueryItem(name: "archived", value: "true")) }
+        if let audience { items.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
         return try await decodedGET("/api/segments", queryItems: items)
     }
 
@@ -1246,11 +1301,14 @@ actor APIClient {
     /// person has intervened.
     func fetchSegment(id: String,
                       page: Int = 1,
-                      pageSize: Int = 50) async throws -> SegmentDetailResponse {
-        try await decodedGET("/api/segments/\(encodedPathSegment(id))", queryItems: [
+                      pageSize: Int = 50,
+                      audience: InboxWorkspace? = nil) async throws -> SegmentDetailResponse {
+        var query = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
-        ])
+        ]
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
+        return try await decodedGET("/api/segments/\(encodedPathSegment(id))", queryItems: query)
     }
 
     /// `GET /api/segments/:id/members/:phone`, `campaigns.read`.
@@ -1390,12 +1448,14 @@ actor APIClient {
     func fetchSegmentCandidates(id: String,
                                 search: String = "",
                                 page: Int = 1,
-                                pageSize: Int = 50) async throws -> SegmentCandidateResponse {
+                                pageSize: Int = 50,
+                                audience: InboxWorkspace? = nil) async throws -> SegmentCandidateResponse {
         var items = [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "pageSize", value: String(pageSize))
         ]
         if !search.isEmpty { items.append(URLQueryItem(name: "search", value: search)) }
+        if let audience { items.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
         return try await decodedGET("/api/segments/\(encodedPathSegment(id))/candidates",
                                     queryItems: items)
     }
@@ -1456,9 +1516,11 @@ actor APIClient {
     /// the whole workspace, so it gets the same 90-second timeout a recompute
     /// gets.
     func previewSegmentRules(_ rules: SegmentRuleSet,
-                             selfSegmentKey: String? = nil) async throws -> SegmentRulePreviewResponse {
+                             selfSegmentKey: String? = nil,
+                             customerScope: InboxWorkspace? = nil) async throws -> SegmentRulePreviewResponse {
         var body: [String: Any] = ["rules": rules.requestBody()]
         if let selfSegmentKey, !selfSegmentKey.isEmpty { body["selfSegmentKey"] = selfSegmentKey }
+        if let customerScope { body["customerScope"] = customerScope.audienceValue }
         return try await segmentDecoded(post("/api/segments/rules/preview", body: body, timeout: 90))
     }
 
@@ -1577,15 +1639,31 @@ actor APIClient {
 
     // MARK: - Call history
 
-    func fetchCallLogs(page: Int = 1) async throws -> [CallLogRecord] {
-        try await decodedGET("/api/voice/logs", queryItems: [URLQueryItem(name: "page", value: String(page))])
+    func fetchCallLogs(page: Int = 1,
+                       audience: InboxWorkspace? = nil) async throws -> [CallLogRecord] {
+        var query = [URLQueryItem(name: "page", value: String(page))]
+        if let audience { query.append(URLQueryItem(name: "audience", value: audience.audienceValue)) }
+        return try await decodedGET("/api/voice/logs", queryItems: query)
     }
 
-    /// Clears the missed-call badge for everyone signed in. Deliberately
-    /// non-throwing: the device has already recorded what it has shown, so a
-    /// failure here must not surface an error over call history.
-    func markMissedCallsSeen() async {
-        _ = try? await post("/api/voice/logs/seen", body: [:])
+    func fetchMissedCallCount(audience: InboxWorkspace) async throws -> MissedCallCountResponse {
+        try await decodedGET("/api/voice/missed-count", queryItems: [
+            URLQueryItem(name: "audience", value: audience.audienceValue)
+        ])
+    }
+
+    /// Marks only the rendered rows in the selected customer space. A late
+    /// workspace switch can therefore never clear unseen calls in the other
+    /// space. The response retains the global count used for the app badge.
+    func markMissedCallsSeen(audience: InboxWorkspace,
+                             ids: [String]) async throws -> MarkCallsSeenResponse {
+        let (data, response) = try await post("/api/voice/logs/seen", body: [
+            "audience": audience.audienceValue,
+            "ids": Array(ids.prefix(1_000))
+        ])
+        try validate(data: data, response: response)
+        do { return try decoder.decode(MarkCallsSeenResponse.self, from: data) }
+        catch { throw APIError.decoding }
     }
 
     // MARK: - Voice

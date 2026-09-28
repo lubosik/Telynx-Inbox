@@ -115,6 +115,7 @@ struct CampaignsView: View {
     @State private var showingPlanner = false
     @State private var showingVIPCampaigns = false
     @State private var showingVIPPlaybook = false
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     /// The campaign a confirmation is currently being asked about, and which
     /// question is being asked. One piece of state rather than two booleans and
@@ -184,18 +185,18 @@ struct CampaignsView: View {
             }
         }
         .sheet(isPresented: $showingNewCampaign) {
-            CampaignEditorView {
-                Task { await model.load(reset: true) }
+            CampaignEditorView(customerScope: workspace) {
+                Task { await model.load(audience: workspace, reset: true) }
             }
         }
         .sheet(isPresented: $showingPlanner) {
-            CampaignPlannerSheet {
-                Task { await model.load(reset: true) }
+            CampaignPlannerSheet(customerScope: workspace) {
+                Task { await model.load(audience: workspace, reset: true) }
             }
         }
         .sheet(isPresented: $showingVIPCampaigns) {
             VIPCampaignHubView(conversations: vipConversations) {
-                Task { await model.load(reset: true) }
+                Task { await model.load(audience: workspace, reset: true) }
             }
         }
         .sheet(isPresented: $showingVIPPlaybook) {
@@ -203,25 +204,25 @@ struct CampaignsView: View {
         }
         .refreshable {
             guard session.can(Permission.campaignsRead) else { return }
-            await model.load(reset: true)
+            await model.load(audience: workspace, reset: true)
             await inboxModel.load()
         }
-        .task(id: session.can(Permission.campaignsRead)) {
+        .task(id: "\(session.can(Permission.campaignsRead))-\(workspace.rawValue)") {
             guard session.can(Permission.campaignsRead) else { return }
-            await model.load()
+            await model.load(audience: workspace, reset: true)
             await inboxModel.load()
         }
         // Reloads from page one when archived items are shown or hidden. Paging
         // state cannot survive a change to what the pages contain.
         .task(id: model.showsArchived) {
             guard session.can(Permission.campaignsRead), !model.campaigns.isEmpty else { return }
-            await model.load(reset: true)
+            await model.load(audience: workspace, reset: true)
         }
         .alert("Campaigns error", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
-            Button("Retry") { Task { await model.load(reset: true) } }
+            Button("Retry") { Task { await model.load(audience: workspace, reset: true) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "Please try again.")
@@ -361,6 +362,7 @@ struct CampaignsView: View {
                 ForEach(model.campaigns) { campaign in
                     NavigationLink(value: AppRoute.campaign(id: campaign.id)) {
                         CampaignRow(campaign: campaign,
+                                    workspace: workspace,
                                     isArchived: model.isArchived(campaign),
                                     isMutating: model.mutatingID == campaign.id)
                     }
@@ -540,6 +542,7 @@ private struct VIPCampaignHubView: View {
                     initialMessage: focus.campaignMessage,
                     initialBrief: focus.campaignBrief,
                     workflowCategory: "vip",
+                    customerScope: .vip,
                     onSaved: onSaved
                 )
             }
@@ -549,6 +552,7 @@ private struct VIPCampaignHubView: View {
 
 private struct CampaignRow: View {
     let campaign: CampaignRecord
+    let workspace: InboxWorkspace
     /// Archived rows stay legible but visibly set aside. Dimming alone would
     /// read as "disabled", so there is a word as well as an opacity change —
     /// archived and deleted must never look the same, and neither should look
@@ -580,9 +584,18 @@ private struct CampaignRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
             HStack(spacing: 10) {
-                if let count = campaign.requestedRecipientCount {
+                if let scoped = campaign.scopedRecipientCount {
+                    if campaign.isSharedAcrossCustomerSpaces,
+                       let global = campaign.globalRecipientTotal {
+                        Label("\(scoped.formatted()) here · \(global.formatted()) total",
+                              systemImage: "person.2")
+                    } else {
+                        Label("\(scoped.formatted())", systemImage: "person.2")
+                    }
+                } else if let count = campaign.requestedRecipientCount {
                     Label("\(count.formatted())", systemImage: "person.2")
                 }
+                if let label = campaign.scopeLabel(visibleIn: workspace) { Text(label) }
                 Text("Revision \(campaign.revision)")
                 if let created = ServerDate.parse(campaign.createdAt) {
                     Text(created.formatted(date: .abbreviated, time: .omitted))
@@ -631,6 +644,7 @@ struct CampaignDetailView: View {
     @State private var recipientToCancel: CampaignRecipient?
     @State private var showingAllRecipients = false
     @State private var confirmingRemoveAllExcluded = false
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     /// How many recipients to show before the reviewer asks for more.
     private let recipientSampleSize = 3
@@ -654,18 +668,21 @@ struct CampaignDetailView: View {
         }
         .navigationTitle(model.campaign?.title ?? "Campaign")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await model.load(canDryRun: session.can(Permission.campaignsManage),
+        .task(id: workspace) {
+            await model.load(audience: workspace,
+                             canDryRun: session.can(Permission.campaignsManage),
                              canFinancial: session.can(Permission.analyticsRead))
         }
         .refreshable {
-            await model.load(canDryRun: session.can(Permission.campaignsManage),
+            await model.load(audience: workspace,
+                             canDryRun: session.can(Permission.campaignsManage),
                              canFinancial: session.can(Permission.analyticsRead))
         }
         .sheet(isPresented: $showingEditor) {
             CampaignEditorView(campaign: model.campaign, recipients: editorRecipients) {
                 Task {
-                    await model.load(canDryRun: session.can(Permission.campaignsManage),
+                    await model.load(audience: workspace,
+                                     canDryRun: session.can(Permission.campaignsManage),
                                      canFinancial: session.can(Permission.analyticsRead))
                 }
             }
@@ -803,14 +820,18 @@ struct CampaignDetailView: View {
     /// reached, and how many will not, rather than a list they will not read.
     private var recipientFooter: String {
         let total = model.recipientTotal
+        let scopeNote = model.recipientGlobalTotal > total
+            ? " Showing \(workspace.label) customers here; the frozen campaign has \(model.recipientGlobalTotal.formatted()) recipients in total."
+            : ""
         guard let dryRun = model.dryRun else {
-            return "\(total.formatted()) in this draft. Run the eligibility check to see how many can be reached."
+            return "\(total.formatted()) in this view.\(scopeNote) Run the eligibility check to see how many can be reached."
         }
         let blocked = dryRun.suppressed
         let base = "\(dryRun.eligible.formatted()) of \(total.formatted()) can be reached."
-        return blocked == 0
+        let result = blocked == 0
             ? base + " Every recipient passed the current safety checks."
             : base + " \(blocked.formatted()) cannot, and the reasons are listed against each one."
+        return result + scopeNote
     }
 
     private func campaignList(_ campaign: CampaignRecord) -> some View {
@@ -844,6 +865,15 @@ struct CampaignDetailView: View {
                                    value: date.formatted(date: .abbreviated, time: .shortened))
                 }
                 LabeledContent("Type", value: campaign.workflowCategory.replacingOccurrences(of: "_", with: " ").capitalized)
+                LabeledContent("Customer space", value: (campaign.isSharedAcrossCustomerSpaces || model.recipientGlobalTotal > model.recipientTotal)
+                               ? "Shared across Main and VIP"
+                               : (campaign.storedCustomerScope?.customerLabel
+                                  ?? "Complete frozen audience"))
+                if model.recipientGlobalTotal > model.recipientTotal {
+                    Text("This campaign is shared. This screen lists only \(workspace.customerLabel.lowercased()), while approval, scheduling and results still belong to one complete campaign.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -1637,6 +1667,7 @@ struct CampaignEditorView: View {
          initialMessage: String = "Vin from Vici: ",
          initialBrief: String = "",
          workflowCategory: String = "manual",
+         customerScope: InboxWorkspace? = nil,
          onSaved: @escaping () -> Void) {
         _model = StateObject(wrappedValue: CampaignEditorModel(campaign: campaign,
                                                                recipients: recipients,
@@ -1644,7 +1675,8 @@ struct CampaignEditorView: View {
                                                                seedTitle: initialTitle,
                                                                seedMessage: initialMessage,
                                                                seedBrief: initialBrief,
-                                                               seedWorkflowCategory: workflowCategory))
+                                                               seedWorkflowCategory: workflowCategory,
+                                                               customerScope: customerScope))
         self.onSaved = onSaved
     }
 
@@ -3319,6 +3351,7 @@ private struct CampaignCouponBuilderSheet: View {
 ///   exist.
 private struct CampaignPlannerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    let customerScope: InboxWorkspace
     let onCreated: () -> Void
 
     @State private var brief = ""
@@ -3483,7 +3516,8 @@ private struct CampaignPlannerSheet: View {
         briefFocused = false
         defer { isPlanning = false }
         do {
-            let result = try await APIClient.shared.planCampaign(brief: brief)
+            let result = try await APIClient.shared.planCampaign(brief: brief,
+                                                                 customerScope: customerScope)
             plan = result
             // Preselect the first, since most of the time it is the one used
             // and an unselected radio list reads as an unfinished screen.
@@ -3510,7 +3544,8 @@ private struct CampaignPlannerSheet: View {
                 message: message,
                 discountPercent: plan.discountPercent,
                 couponCode: plan.couponCode,
-                workflowCategory: plan.workflowCategory
+                workflowCategory: plan.workflowCategory,
+                customerScope: customerScope
             )
             onCreated()
             dismiss()

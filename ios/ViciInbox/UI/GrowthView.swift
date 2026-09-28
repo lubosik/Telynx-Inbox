@@ -41,10 +41,13 @@ struct GrowthView: View {
     @EnvironmentObject private var session: SessionModel
     @EnvironmentObject private var onboarding: OnboardingCoordinator
     @EnvironmentObject private var router: AppRouter
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     var body: some View {
         NavigationStack(path: $router.growthPath) {
             VStack(spacing: 0) {
+                CustomerWorkspacePicker(selection: $workspace, areaLabel: "Growth")
+                Divider()
                 Picker("Growth section", selection: $router.growthSection) {
                     ForEach(GrowthSection.allCases) { value in
                         Text(value.label).tag(value)
@@ -60,9 +63,9 @@ struct GrowthView: View {
                 .onboardingTarget(.campaigns)
 
                 switch router.growthSection {
-                case .automations: AutomationQueueView()
+                case .automations: AutomationQueueView(workspace: workspace)
                 case .campaigns:   CampaignsView(inboxModel: inboxModel)
-                case .audiences:   SegmentsView()
+                case .audiences:   SegmentsView(workspace: workspace)
                 }
             }
             .navigationTitle("Growth")

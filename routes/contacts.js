@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { supabase } = require('../db');
 const { logAudit, diffFields } = require('../lib/audit/log');
 const { readVIPContactSnapshot } = require('../lib/vip-inbox-snapshot');
+const { parseAudience } = require('../lib/inbox-audience');
 
 /**
  * The snapshot stored in an audit row's previous_state/new_state.
@@ -28,6 +29,7 @@ function auditSnapshot(contact) {
 router.get('/', async (req, res) => {
   try {
     const { search, page = 1, per_page: perPage = 100 } = req.query;
+    const audience = parseAudience(req.query.audience);
     const limit = Math.min(1000, Math.max(1, Number.parseInt(perPage, 10) || 100));
     const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1);
     const batchSize = 1000;
@@ -56,7 +58,8 @@ router.get('/', async (req, res) => {
     }
 
     const enriched = await readVIPContactSnapshot(supabase, rows);
-    const normalised = enriched.map(normaliseContact).sort((a, b) => {
+    const normalised = enriched.filter(contact => audience === 'all'
+      || (contact.customer_tier === 'vip') === (audience === 'vip')).map(normaliseContact).sort((a, b) => {
       const aHasName = Boolean(a.first_name || a.last_name || a.name);
       const bHasName = Boolean(b.first_name || b.last_name || b.name);
       if (aHasName !== bHasName) return aHasName ? -1 : 1;
@@ -68,12 +71,13 @@ router.get('/', async (req, res) => {
 
     res.json({
       contacts,
+      audience,
       page: pageNumber,
       total: normalised.length,
       hasMore: start + limit < normalised.length
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load contacts' });
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to load contacts' });
   }
 });
 

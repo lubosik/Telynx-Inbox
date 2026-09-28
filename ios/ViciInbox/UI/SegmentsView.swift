@@ -23,6 +23,7 @@ import SwiftUI
 ///   to explain at the control and the explanation belongs once, at the bottom
 ///   of the list.
 struct SegmentsView: View {
+    let workspace: InboxWorkspace
     @EnvironmentObject private var session: SessionModel
     @StateObject private var model = SegmentListModel()
     @State private var showingNewManual = false
@@ -82,17 +83,17 @@ struct SegmentsView: View {
         }
         .refreshable {
             guard session.can(Permission.campaignsRead) else { return }
-            await model.load(reset: true)
+            await model.load(audience: workspace, reset: true)
         }
-        .task(id: session.can(Permission.campaignsRead)) {
+        .task(id: "\(session.can(Permission.campaignsRead))-\(workspace.rawValue)") {
             guard session.can(Permission.campaignsRead) else { return }
-            await model.load()
+            await model.load(audience: workspace, reset: true)
         }
         .alert("Segments error", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
         )) {
-            Button("Retry") { Task { await model.load(reset: true) } }
+            Button("Retry") { Task { await model.load(audience: workspace, reset: true) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "Please try again.")
@@ -192,7 +193,7 @@ struct SegmentsView: View {
 
             Section {
                 NavigationLink {
-                    SegmentArchiveView(canManage: canManage)
+                    SegmentArchiveView(canManage: canManage, workspace: workspace)
                 } label: {
                     Label("Archived segments", systemImage: "archivebox")
                 }
@@ -221,7 +222,7 @@ struct SegmentsView: View {
                               initialName: segment.name,
                               onRemoved: { message in
                                   model.statusMessage = message
-                                  Task { await model.load(reset: true) }
+                                  Task { await model.load(audience: workspace, reset: true) }
                               })
         } label: {
             SegmentRow(segment: segment)
@@ -250,6 +251,7 @@ struct SegmentsView: View {
 /// find a segment again reaches for the destructive path the next time.
 struct SegmentArchiveView: View {
     let canManage: Bool
+    let workspace: InboxWorkspace
     @StateObject private var model = SegmentArchiveModel()
 
     var body: some View {
@@ -284,8 +286,8 @@ struct SegmentArchiveView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Archived")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.load() }
-        .refreshable { await model.load() }
+        .task(id: workspace) { await model.load(audience: workspace) }
+        .refreshable { await model.load(audience: workspace) }
         .alert("Archive error", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }

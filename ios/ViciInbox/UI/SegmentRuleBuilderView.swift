@@ -28,9 +28,16 @@ import SwiftUI
 struct SegmentRuleBuilderView: View {
     @ObservedObject var listModel: SegmentListModel
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var model = SegmentRuleBuilderModel()
+    @StateObject private var model: SegmentRuleBuilderModel
     @FocusState private var descriptionFocused: Bool
     @State private var editing: SegmentRuleEditTarget?
+
+    init(listModel: SegmentListModel) {
+        _listModel = ObservedObject(wrappedValue: listModel)
+        _model = StateObject(wrappedValue: SegmentRuleBuilderModel(
+            customerScope: listModel.audience
+        ))
+    }
 
     var body: some View {
         NavigationStack {
@@ -250,7 +257,7 @@ struct SegmentRuleBuilderView: View {
             } header: {
                 Text("Who matches right now")
             } footer: {
-                Text(SegmentRuleCopy.previewIsRequired)
+                Text("This preview counts \(model.customerScope.customerLabel.lowercased()). \(SegmentRuleCopy.previewIsRequired) The saved rules stay canonical, and Main or VIP filters them when you open the audience.")
             }
         }
     }

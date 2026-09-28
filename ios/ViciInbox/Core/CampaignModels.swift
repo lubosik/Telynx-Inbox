@@ -63,6 +63,12 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
     let completedAt: String?
     let createdAt: String
     let updatedAt: String
+    /// Scoped list metadata. These are deliberately absent on the canonical
+    /// detail response, whose frozen audience remains complete.
+    let audienceScope: String?
+    let sharedVisible: Bool?
+    let globalRecipientTotal: Int?
+    let scopedRecipientCount: Int?
 
     private enum CodingKeys: String, CodingKey {
         case id, title, status, revision
@@ -82,6 +88,10 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
         case completedAt = "completed_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case audienceScope = "audience_scope"
+        case sharedVisible = "shared_visible"
+        case globalRecipientTotal = "global_recipient_total"
+        case scopedRecipientCount = "scoped_recipient_count"
     }
 
     var message: String {
@@ -116,6 +126,26 @@ struct CampaignRecord: Codable, Identifiable, Hashable {
         guard let percent = effectiveDiscountPercent else { return nil }
         if let couponCode { return "\(couponCode) · \(percent)% off" }
         return "\(percent)% · coupon not attached"
+    }
+
+    /// The customer space chosen when the draft was created. Legacy and
+    /// deliberately cross-space campaigns have no stored scope and remain
+    /// canonical rather than being silently rewritten by the device switch.
+    var storedCustomerScope: InboxWorkspace? {
+        guard case .string(let value)? = audienceDefinition?.child("customer_scope") else { return nil }
+        return InboxWorkspace(rawValue: value)
+    }
+
+    var isSharedAcrossCustomerSpaces: Bool {
+        audienceScope == "mixed" || sharedVisible == true
+    }
+
+    func scopeLabel(visibleIn workspace: InboxWorkspace) -> String? {
+        if isSharedAcrossCustomerSpaces { return "Shared campaign" }
+        if let scope = storedCustomerScope { return scope == .vip ? "VIP campaign" : "Main campaign" }
+        if audienceScope == "vip" { return "VIP campaign" }
+        if audienceScope == "main" { return "Main campaign" }
+        return nil
     }
 }
 
@@ -281,6 +311,8 @@ struct CampaignRecipientPage: Codable, Hashable {
     let page: Int
     let pageSize: Int
     let total: Int
+    let globalTotal: Int?
+    let audience: String?
 }
 
 struct CampaignLiveEligibility: Codable, Hashable {
@@ -733,6 +765,7 @@ struct CampaignTestSendResponse: Codable, Hashable {
 
 struct CampaignReviewCount: Codable, Hashable {
     let count: Int
+    let audience: String?
 }
 
 struct CampaignPerformance: Codable, Hashable {

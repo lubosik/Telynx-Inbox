@@ -29,7 +29,33 @@ protocol AssistantBusinessAPI: Sendable {
                         includeResolved: Bool) async throws -> [ReferralRecord]
 }
 
-extension APIClient: AssistantBusinessAPI {}
+// Keep the Assistant's unscoped, read-only protocol witnesses explicit. Swift
+// default arguments on the newer workspace-aware methods do not satisfy these
+// original protocol signatures.
+extension APIClient: AssistantBusinessAPI {
+    func fetchActivityStats() async throws -> ActivityStats {
+        try await fetchActivityStats(audience: nil)
+    }
+
+    func fetchSegments(page: Int, pageSize: Int,
+                       includeArchived: Bool) async throws -> SegmentListPage {
+        try await fetchSegments(page: page, pageSize: pageSize,
+                                includeArchived: includeArchived, audience: nil)
+    }
+
+    func fetchSegment(id: String, page: Int,
+                      pageSize: Int) async throws -> SegmentDetailResponse {
+        try await fetchSegment(id: id, page: page, pageSize: pageSize, audience: nil)
+    }
+
+    func fetchCampaigns(page: Int, pageSize: Int) async throws -> CampaignPage {
+        try await fetchCampaigns(page: page, pageSize: pageSize, audience: nil)
+    }
+
+    func fetchCampaignReviewCount() async throws -> Int {
+        try await fetchCampaignReviewCount(audience: nil)
+    }
+}
 
 /// The privacy-shaped facade used by the fixed Foundation Models Tool layer.
 ///

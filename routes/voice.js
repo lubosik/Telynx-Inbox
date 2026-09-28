@@ -1,10 +1,11 @@
 const router = require('express').Router();
 const { supabase } = require('../db');
 const { selectIn } = require('../lib/fetch-all-rows');
+const { readCallHistory } = require('../lib/call-history-audience');
 const { isNativeIOSClient } = require('../lib/client-platform');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
-const { isInternalSIPLog, answeredAtFromDuration } = require('../lib/call-status');
+const { answeredAtFromDuration } = require('../lib/call-status');
 const { countUnseenMissedCalls, markMissedCallsSeen } = require('../lib/missed-calls');
 const {
   archiveCallRecording,
@@ -57,65 +58,69 @@ router.get('/token', async (req, res) => {
 
 // GET /api/voice/logs?phone=&page=1
 router.get('/logs', async (req, res) => {
-  const { phone, page = 1 } = req.query;
-  const limit = 50;
-  const offset = (parseInt(page) - 1) * limit;
-
-  let query = supabase
-    .from('call_logs')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (phone) query = query.eq('contact_phone', decodeURIComponent(phone));
-
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  try {
+    const { phone, page = 1, audience = 'all' } = req.query;
 
   // The transfer to sip:USERNAME is an implementation detail, not a second
   // person-facing call. Keep it in the database for diagnostics but never show
   // it as a failed call in History.
-  const logs = (data || []).filter(log => !isInternalSIPLog(log));
-  const phones = [...new Set(logs.map(log => log.contact_phone).filter(Boolean))];
-  let names = new Map();
-  if (phones.length) {
+    const logs = await readCallHistory({ client: supabase, phone, page, audience });
+    const phones = [...new Set(logs.map(log => log.contact_phone).filter(Boolean))];
+    let names = new Map();
+    if (phones.length) {
     // Chunked: `.in()` puts every value in the URL, and a long list overflows
     // the HTTP header limit. See lib/fetch-all-rows.js.
-    let contacts = [];
-    let contactsError = null;
-    try {
-      contacts = await selectIn(supabase, 'sms_contacts', 'phone, first_name, last_name, name', 'phone', phones);
-    } catch (err) {
-      contactsError = err;
+      let contacts = [];
+      let contactsError = null;
+      try {
+        contacts = await selectIn(supabase, 'sms_contacts', 'phone, first_name, last_name, name', 'phone', phones);
+      } catch (err) {
+        contactsError = err;
+      }
+      if (contactsError) console.warn('[VOICE] Call-history contact lookup failed:', contactsError.message);
+      names = new Map((contacts || []).map(contact => {
+        const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name || null;
+        return [contact.phone, fullName];
+      }));
     }
-    if (contactsError) console.warn('[VOICE] Call-history contact lookup failed:', contactsError.message);
-    names = new Map((contacts || []).map(contact => {
-      const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || contact.name || null;
-      return [contact.phone, fullName];
-    }));
-  }
 
-  res.set('Cache-Control', 'no-store');
-  res.json(logs.map(log => privateCallLog({
-    ...log,
-    contact_name: names.get(log.contact_phone) || null
-  })));
+    res.set('Cache-Control', 'no-store');
+    res.json(logs.map(log => privateCallLog({
+      ...log,
+      contact_name: names.get(log.contact_phone) || null
+    })));
+  } catch (error) {
+    res.status(error.status || 503).json({ error: error.status ? error.message
+      : 'Call history could not be loaded. Please try again.' });
+  }
 });
 
 // GET /api/voice/missed-count — outstanding missed calls for the app badge
-router.get('/missed-count', async (_req, res) => {
-  res.json({ count: await countUnseenMissedCalls() });
+router.get('/missed-count', async (req, res) => {
+  try {
+    const { parseAudience } = require('../lib/inbox-audience');
+    const audience = parseAudience(req.query.audience);
+    const globalCount = await countUnseenMissedCalls();
+    const count = audience === 'all' ? globalCount : await countUnseenMissedCalls({ audience });
+    res.json({ count, globalCount });
+  } catch (error) { res.status(error.status || 503).json({ error: error.message }); }
 });
 
 // POST /api/voice/logs/seen — the operator opened call history, so the missed
 // calls in it are no longer new. Registered before /logs/:id so the literal
 // path is never mistaken for a record id.
-router.post('/logs/seen', async (_req, res) => {
-  const { marked, ok } = await markMissedCallsSeen();
+router.post('/logs/seen', async (req, res) => {
+  try {
+    const { parseAudience } = require('../lib/inbox-audience');
+    const audience = parseAudience(req.body?.audience);
+    const { marked, ok } = await markMissedCallsSeen({ audience, ids: req.body?.ids });
   // A failure here only means the badge did not clear server-side; the app
   // keeps its own record of what has been seen, so report the outcome rather
   // than failing the request.
-  res.json({ marked, ok, count: await countUnseenMissedCalls() });
+    const globalCount = await countUnseenMissedCalls();
+    const count = audience === 'all' ? globalCount : await countUnseenMissedCalls({ audience });
+    res.json({ marked, ok, count, globalCount });
+  } catch (error) { res.status(error.status || 503).json({ error: error.message }); }
 });
 
 // GET /api/voice/recordings/:id — authenticated, short-lived playback.

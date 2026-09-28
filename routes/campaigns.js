@@ -291,7 +291,7 @@ function createCampaignRouter({
     require('../telnyx').sendSMS(to, text));
   const router = express.Router();
 
-  const vipWelcomeSnapshot = async () => {
+  const vipWelcomeSnapshot = async audience => {
     const {
       RECENT_CONVERSATION_GAP_HOURS,
       WELCOME_DELAY_HOURS,
@@ -303,7 +303,7 @@ function createCampaignRouter({
     const settings = await loadCampaignSettings(db());
     const [last, queuedRecipients] = await Promise.all([
       latestVIPWelcomeCampaign({ client: db() }).catch(() => null),
-      queuedVIPWelcomeRecipients({ client: db() })
+      queuedVIPWelcomeRecipients({ client: db(), audience })
     ]);
     return {
       available: settings?.vipWelcomeAutomationAvailable === true,
@@ -351,6 +351,7 @@ function createCampaignRouter({
       return res.json(await planCampaign({
         client: db(),
         brief: req.body?.brief,
+        customerScope: req.body?.customerScope,
         segments: segmentService(),
         styleTraits: await styleFor(req.actor)
       }));
@@ -381,7 +382,8 @@ function createCampaignRouter({
           couponCode: req.body?.couponCode,
           discountPercent: req.body?.discountPercent,
           workflowCategory: req.body?.workflowCategory || 'custom',
-          audience: { kind: 'all_contacts' }
+          audience: { kind: 'all_contacts' },
+          customerScope: req.body?.customerScope
         }, req.actor);
         await auditCampaign('campaign.created', req, created.campaign, {
           summary: `Planned "${title}" from a brief for ${created.recipientCount} contacts`,
@@ -429,6 +431,7 @@ function createCampaignRouter({
       const result = await segmentCampaignBuilder({
         client: db(),
         segmentKeys: [segmentKey],
+        customerScope: req.body?.customerScope,
         title,
         message: req.body?.message,
         discountPercent: Number(req.body?.discountPercent) || null,
@@ -466,7 +469,7 @@ function createCampaignRouter({
    * has when they open this screen — "is it running?" and "when does the next
    * one go?" — rather than dumping the settings row.
    */
-  router.get('/automations/check-in', async (_req, res) => {
+  router.get('/automations/check-in', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
       const { SWEEP_WINDOW_DAYS, nextSendTime, queuedCheckInRecipients, sweptRecently } =
@@ -487,7 +490,7 @@ function createCampaignRouter({
       // Unlike `last`, this must not fail open. The owner explicitly manages
       // individual automatic check-ins here; an empty-looking queue caused by
       // a read error would be a dangerous lie.
-      const queuedRecipients = await queuedCheckInRecipients({ client: db() });
+      const queuedRecipients = await queuedCheckInRecipients({ client: db(), audience: req.query?.audience });
 
       return res.json({
         enabled: settings?.checkin_automation_enabled === true,
@@ -577,10 +580,10 @@ function createCampaignRouter({
   });
 
   /** The one-time welcome sent 24 hours after a customer first becomes VIP. */
-  router.get('/automations/vip-welcome', async (_req, res) => {
+  router.get('/automations/vip-welcome', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      return res.json(await vipWelcomeSnapshot());
+      return res.json(await vipWelcomeSnapshot(req.query?.audience));
     } catch (error) { return sendError(res, error, 'loading the VIP welcome automation'); }
   });
 
@@ -688,10 +691,12 @@ function createCampaignRouter({
       const dryRun = req.body?.dryRun === true;
       const actorID = Number(req.actor?.id) || null;
       const result = req.body?.recipe
-        ? await buildFromRecipe({ client: db(), recipeKey: req.body.recipe, actorID, dryRun })
+        ? await buildFromRecipe({ client: db(), recipeKey: req.body.recipe, actorID, dryRun,
+          customerScope: req.body?.customerScope })
         : await buildFromSegment({
           client: db(),
           segmentKeys: req.body?.segments,
+          customerScope: req.body?.customerScope,
           title: req.body?.title,
           message: req.body?.message,
           discountPercent: Number(req.body?.discountPercent) || null,
@@ -719,10 +724,10 @@ function createCampaignRouter({
     } catch (error) { return sendError(res, error, 'building this campaign'); }
   });
 
-  router.get('/review-count', async (_req, res) => {
+  router.get('/review-count', async (req, res) => {
     try {
       res.set('Cache-Control', 'no-store, private');
-      return res.json(await campaigns.reviewCount());
+      return res.json(await campaigns.reviewCount(req.query));
     } catch (error) { return sendError(res, error, 'counting what needs review'); }
   });
 

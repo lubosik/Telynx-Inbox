@@ -68,19 +68,25 @@ final class SegmentListModel: ObservableObject {
     private var nextPage = 1
     private var total = 0
     private let pageSize = 50
+    private var generation = 0
+    private(set) var audience: InboxWorkspace = .main
 
     var hasMore: Bool { segments.count < total }
     var automatic: [SegmentRecord] { segments.filter { $0.kind == .automatic } }
     var manual: [SegmentRecord] { segments.filter { $0.kind != .automatic } }
     var isEmpty: Bool { segments.isEmpty && !isLoading }
 
-    func load(reset: Bool = false) async {
-        guard !isLoading else { return }
+    func load(audience: InboxWorkspace, reset: Bool = false) async {
+        generation += 1
+        let requestGeneration = generation
+        self.audience = audience
         if reset { nextPage = 1; total = 0 }
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
-            let page = try await APIClient.shared.fetchSegments(page: 1, pageSize: pageSize)
+            let page = try await APIClient.shared.fetchSegments(page: 1, pageSize: pageSize,
+                                                                 audience: audience)
+            guard generation == requestGeneration, self.audience == audience else { return }
             segments = page.items
             catalogue = page.catalogue
             total = page.total
@@ -96,7 +102,11 @@ final class SegmentListModel: ObservableObject {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
-            let page = try await APIClient.shared.fetchSegments(page: nextPage, pageSize: pageSize)
+            let requestedAudience = audience
+            let requestGeneration = generation
+            let page = try await APIClient.shared.fetchSegments(page: nextPage, pageSize: pageSize,
+                                                                 audience: requestedAudience)
+            guard generation == requestGeneration, audience == requestedAudience else { return }
             let known = Set(segments.map(\.id))
             segments.append(contentsOf: page.items.filter { !known.contains($0.id) })
             catalogue = page.catalogue
@@ -156,7 +166,7 @@ final class SegmentListModel: ObservableObject {
             errorMessage = "\(entry.name) was saved, but working out who is in it did not finish. Open it and try Update membership. \(error.localizedDescription)"
         }
         statusMessage = outcome
-        await load(reset: true)
+        await load(audience: audience, reset: true)
     }
 
     /// Announce a segment created by another screen.
@@ -192,7 +202,7 @@ final class SegmentListModel: ObservableObject {
             statusMessage = count == 0
                 ? "\(response.segment.name) created. Nobody is in it yet."
                 : "\(response.segment.name) created with \(count == 1 ? "1 person" : "\(count) people")."
-            await load(reset: true)
+            await load(audience: audience, reset: true)
             return response.segment
         } catch {
             errorMessage = error.localizedDescription
@@ -223,7 +233,7 @@ final class SegmentListModel: ObservableObject {
                 message += " \(why)"
             }
             statusMessage = message
-            await load(reset: true)
+        await load(audience: audience, reset: true)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -251,14 +261,22 @@ final class SegmentArchiveModel: ObservableObject {
 
     var isEmpty: Bool { segments.isEmpty && !isLoading }
 
-    func load() async {
+    private var generation = 0
+    private var audience: InboxWorkspace = .main
+
+    func load(audience: InboxWorkspace) async {
+        generation += 1
+        let requestGeneration = generation
+        self.audience = audience
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let page = try await APIClient.shared.fetchSegments(page: 1,
                                                                 pageSize: 100,
-                                                                includeArchived: true)
+                                                                includeArchived: true,
+                                                                audience: audience)
+            guard generation == requestGeneration else { return }
             // The server returns live rows alongside archived ones when asked
             // for both, so this screen keeps only the ones it is about.
             segments = page.items.filter(\.isArchived)
@@ -276,7 +294,7 @@ final class SegmentArchiveModel: ObservableObject {
             _ = try await APIClient.shared.restoreSegment(id: segment.id)
             statusMessage = "\(segment.name) is back on the list."
             errorMessage = nil
-            await load()
+            await load(audience: audience)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -383,6 +401,7 @@ final class SegmentCandidatePickerModel: ObservableObject {
     @Published private(set) var problem: String?
 
     let segmentID: String
+    private(set) var audience: InboxWorkspace = .main
     private var requestID = UUID()
     private var nextPage = 2
     private let pageSize = 50
@@ -393,7 +412,8 @@ final class SegmentCandidatePickerModel: ObservableObject {
 
     var isEmpty: Bool { candidates.isEmpty && held.isEmpty && !isSearching }
 
-    func load() async {
+    func load(audience: InboxWorkspace) async {
+        self.audience = audience
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         let id = UUID()
         requestID = id
@@ -403,7 +423,8 @@ final class SegmentCandidatePickerModel: ObservableObject {
             let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
                                                                              search: query,
                                                                              page: 1,
-                                                                             pageSize: pageSize)
+                                                                             pageSize: pageSize,
+                                                                             audience: audience)
             // A slower earlier keystroke must not overwrite a faster later one.
             guard requestID == id else { return }
             candidates = response.candidates.items
@@ -428,7 +449,8 @@ final class SegmentCandidatePickerModel: ObservableObject {
             let response = try await APIClient.shared.fetchSegmentCandidates(id: segmentID,
                                                                              search: query,
                                                                              page: nextPage,
-                                                                             pageSize: pageSize)
+                                                                             pageSize: pageSize,
+                                                                             audience: audience)
             guard requestID == id else { return }
             let known = Set(candidates.map(\.id))
             candidates.append(contentsOf: response.candidates.items.filter { !known.contains($0.id) })
@@ -449,6 +471,7 @@ final class SegmentDetailModel: ObservableObject {
     @Published private(set) var segment: SegmentRecord?
     @Published private(set) var members: [SegmentMember] = []
     @Published private(set) var memberTotal = 0
+    @Published private(set) var globalMemberTotal = 0
     @Published private(set) var activeOverrides: [SegmentOverride] = []
     @Published private(set) var revokedOverrides: [SegmentOverride] = []
     @Published private(set) var isLoading = false
@@ -461,6 +484,8 @@ final class SegmentDetailModel: ObservableObject {
     let segmentID: String
     private var nextPage = 1
     private let pageSize = 50
+    private var generation = 0
+    private(set) var audience: InboxWorkspace = .main
 
     init(segmentID: String) {
         self.segmentID = segmentID
@@ -481,14 +506,18 @@ final class SegmentDetailModel: ObservableObject {
         activeOverrides.first { $0.contactPhone == phone }
     }
 
-    func load() async {
-        guard !isLoading else { return }
+    func load(audience: InboxWorkspace) async {
+        generation += 1
+        let requestGeneration = generation
+        self.audience = audience
         isLoading = true
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
             let response = try await APIClient.shared.fetchSegment(id: segmentID,
                                                                    page: 1,
-                                                                   pageSize: pageSize)
+                                                                   pageSize: pageSize,
+                                                                   audience: audience)
+            guard generation == requestGeneration, self.audience == audience else { return }
             apply(response)
             nextPage = 2
             errorMessage = nil
@@ -502,12 +531,17 @@ final class SegmentDetailModel: ObservableObject {
         isLoadingMore = true
         defer { isLoadingMore = false }
         do {
+            let requestedAudience = audience
+            let requestGeneration = generation
             let response = try await APIClient.shared.fetchSegment(id: segmentID,
                                                                    page: nextPage,
-                                                                   pageSize: pageSize)
+                                                                   pageSize: pageSize,
+                                                                   audience: requestedAudience)
+            guard generation == requestGeneration, audience == requestedAudience else { return }
             let known = Set(members.map(\.id))
             members.append(contentsOf: response.members.items.filter { !known.contains($0.id) })
             memberTotal = response.members.total
+            globalMemberTotal = response.members.globalTotal ?? response.members.total
             activeOverrides = response.overrides.active
             revokedOverrides = response.overrides.revoked
             nextPage += 1
@@ -521,6 +555,7 @@ final class SegmentDetailModel: ObservableObject {
         segment = response.segment
         members = response.members.items
         memberTotal = response.members.total
+        globalMemberTotal = response.members.globalTotal ?? response.members.total
         activeOverrides = response.overrides.active
         revokedOverrides = response.overrides.revoked
     }
@@ -639,7 +674,7 @@ final class SegmentDetailModel: ObservableObject {
         // `load()` always reads page one and resets the cursor itself on
         // success, and deliberately leaves it alone on failure. Setting it here
         // as well would strand paging at page two over a stale first page.
-        await load()
+        await load(audience: audience)
     }
 }
 
@@ -785,6 +820,11 @@ final class SegmentRuleBuilderModel: ObservableObject {
     @Published private(set) var isPreviewing = false
     @Published private(set) var isSaving = false
     @Published var errorMessage: String?
+    let customerScope: InboxWorkspace
+
+    init(customerScope: InboxWorkspace) {
+        self.customerScope = customerScope
+    }
 
     /// True when a rule changed after the last preview. The preview is kept on
     /// screen but marked out of date, because hiding it would lose the only
@@ -889,7 +929,9 @@ final class SegmentRuleBuilderModel: ObservableObject {
         isPreviewing = true
         defer { isPreviewing = false }
         do {
-            let result = try await APIClient.shared.previewSegmentRules(rules)
+            let result = try await APIClient.shared.previewSegmentRules(
+                rules, customerScope: customerScope
+            )
             preview = result
             plainEnglish = result.plainEnglish
             // The server returns the validated, canonical rules. Adopting them

@@ -189,12 +189,18 @@ final class ContactsModel: ObservableObject {
     @Published private(set) var detail: ContactDetailResponse?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    private var generation = 0
 
-    func load(search: String = "") async {
+    func load(search: String = "", audience: InboxWorkspace? = nil) async {
+        generation += 1
+        let requestGeneration = generation
         isLoading = contacts.isEmpty
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
-            contacts = try await APIClient.shared.fetchAllContacts(search: search)
+            let loaded = try await APIClient.shared.fetchAllContacts(search: search,
+                                                                     audience: audience)
+            guard generation == requestGeneration else { return }
+            contacts = loaded
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
@@ -255,17 +261,26 @@ final class ActivityModel: ObservableObject {
     /// Set while a cancel is in flight so the row can show progress and the
     /// button cannot be tapped twice.
     @Published private(set) var cancellingID: String?
+    private var requestGeneration = 0
+    private(set) var audience: InboxWorkspace?
 
-    func load() async {
+    func load(audience: InboxWorkspace? = nil) async {
+        requestGeneration += 1
+        let generation = requestGeneration
+        if self.audience != audience {
+            stats = nil; queue = []; recent = []; failed = []; cancelled = []
+            queueHasMore = false; recentHasMore = false
+        }
+        self.audience = audience
         isLoading = stats == nil
-        defer { isLoading = false }
+        defer { if requestGeneration == generation { isLoading = false } }
         do {
             let requestedFlow = flow
-            async let newStats = APIClient.shared.fetchActivityStats()
-            async let newQueue = APIClient.shared.fetchActivityQueue(flow: requestedFlow)
-            async let newRecent = APIClient.shared.fetchRecentActivity(flow: requestedFlow)
+            async let newStats = APIClient.shared.fetchActivityStats(audience: audience)
+            async let newQueue = APIClient.shared.fetchActivityQueue(flow: requestedFlow, audience: audience)
+            async let newRecent = APIClient.shared.fetchRecentActivity(flow: requestedFlow, audience: audience)
             let values = try await (newStats, newQueue, newRecent)
-            guard requestedFlow == flow else { return }
+            guard requestedFlow == flow, requestGeneration == generation else { return }
             stats = values.0
             queue = values.1.items
             recent = values.2.items
@@ -281,7 +296,7 @@ final class ActivityModel: ObservableObject {
             recentHasMore = values.2.hasMore
             timeZoneID = values.1.timeZone ?? values.2.timeZone
             errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
+        } catch { if requestGeneration == generation { errorMessage = error.localizedDescription } }
     }
 
     func loadMoreQueue() async {
@@ -291,8 +306,10 @@ final class ActivityModel: ObservableObject {
         do {
             let requestedFlow = flow
             let next = queuePage + 1
-            let page = try await APIClient.shared.fetchActivityQueue(flow: requestedFlow, page: next)
-            guard requestedFlow == flow else { return }
+            let requestedAudience = audience
+            let page = try await APIClient.shared.fetchActivityQueue(flow: requestedFlow, page: next,
+                                                                     audience: requestedAudience)
+            guard requestedFlow == flow, requestedAudience == audience else { return }
             queue.append(contentsOf: page.items)
             queuePage = next
             queueHasMore = page.hasMore
@@ -306,8 +323,10 @@ final class ActivityModel: ObservableObject {
         do {
             let requestedFlow = flow
             let next = recentPage + 1
-            let page = try await APIClient.shared.fetchRecentActivity(flow: requestedFlow, page: next)
-            guard requestedFlow == flow else { return }
+            let requestedAudience = audience
+            let page = try await APIClient.shared.fetchRecentActivity(flow: requestedFlow, page: next,
+                                                                      audience: requestedAudience)
+            guard requestedFlow == flow, requestedAudience == audience else { return }
             recent.append(contentsOf: page.items)
             recentPage = next
             recentHasMore = page.hasMore
@@ -328,9 +347,10 @@ final class ActivityModel: ObservableObject {
         do {
             let requestedFlow = flow
             let next = currentPage + 1
+            let requestedAudience = audience
             let page = try await APIClient.shared.fetchActivityQueue(flow: requestedFlow, page: next,
-                                                                     status: status)
-            guard requestedFlow == flow else { return }
+                                                                     status: status, audience: requestedAudience)
+            guard requestedFlow == flow, requestedAudience == audience else { return }
             if status == "failed" {
                 if next == 1 { failed = page.items } else { failed.append(contentsOf: page.items) }
                 failedPage = next
@@ -349,7 +369,7 @@ final class ActivityModel: ObservableObject {
         defer { cancellingID = nil }
         do {
             try await APIClient.shared.cancelScheduledMessage(id: item.id)
-            await load()
+            await load(audience: audience)
         } catch { errorMessage = error.localizedDescription }
     }
 }
@@ -359,16 +379,23 @@ final class CartRecoveryDashboardModel: ObservableObject {
     @Published private(set) var dashboard: CartRecoveryDashboard?
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    private var generation = 0
+    private var audience: InboxWorkspace?
 
-    func load() async {
-        guard !isLoading else { return }
+    func load(audience: InboxWorkspace? = nil) async {
+        generation += 1
+        let requestGeneration = generation
+        if self.audience != audience { dashboard = nil }
+        self.audience = audience
         isLoading = dashboard == nil
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
-            dashboard = try await APIClient.shared.fetchCartRecoveryDashboard()
+            let result = try await APIClient.shared.fetchCartRecoveryDashboard(audience: audience)
+            guard generation == requestGeneration else { return }
+            dashboard = result
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            if generation == requestGeneration { errorMessage = error.localizedDescription }
         }
     }
 }
@@ -381,23 +408,30 @@ final class CartRecoveryJourneyListModel: ObservableObject {
     @Published var status = "all"
     @Published var errorMessage: String?
     private var nextCursor: String?
+    private var generation = 0
+    private(set) var audience: InboxWorkspace?
 
-    func load() async {
-        guard !isLoading else { return }
+    func load(audience: InboxWorkspace? = nil) async {
+        generation += 1
+        let requestGeneration = generation
+        if self.audience != audience { journeys = []; nextCursor = nil }
+        self.audience = audience
         isLoading = journeys.isEmpty
-        defer { isLoading = false }
+        defer { if generation == requestGeneration { isLoading = false } }
         do {
-            let page = try await APIClient.shared.fetchCartRecoveryJourneys(status: status)
+            let page = try await APIClient.shared.fetchCartRecoveryJourneys(status: status,
+                                                                            audience: audience)
+            guard generation == requestGeneration else { return }
             journeys = page.journeys
             nextCursor = page.nextCursor
             errorMessage = nil
-        } catch { errorMessage = error.localizedDescription }
+        } catch { if generation == requestGeneration { errorMessage = error.localizedDescription } }
     }
 
     func reloadForStatus() async {
         nextCursor = nil
         journeys = []
-        await load()
+        await load(audience: audience)
     }
 
     func loadMoreIfNeeded(current journey: CartRecoveryJourney) async {
@@ -408,7 +442,7 @@ final class CartRecoveryJourneyListModel: ObservableObject {
         defer { isLoadingMore = false }
         do {
             let page = try await APIClient.shared.fetchCartRecoveryJourneys(
-                status: status, cursor: cursor
+                status: status, cursor: cursor, audience: audience
             )
             let existing = Set(journeys.map(\.id))
             journeys.append(contentsOf: page.journeys.filter { !existing.contains($0.id) })
@@ -537,6 +571,7 @@ final class CallHistoryModel: ObservableObject {
     @Published private(set) var isLoading = false
     /// Drives the red count on the Calls tab.
     @Published private(set) var unseenMissed = 0
+    @Published private(set) var globalUnseenMissed = 0
     @Published var errorMessage: String?
 
     /// Missed calls this device has already shown in history.
@@ -551,46 +586,64 @@ final class CallHistoryModel: ObservableObject {
     /// History returns 50 rows a page, so this cannot drop an id still on screen.
     private let seenIDLimit = 300
     private let didSeedKey = "vici.calls.seeded-existing-history"
+    private var generation = 0
+    private(set) var audience: InboxWorkspace = .main
 
     private var seenIDs: [String] {
         get { UserDefaults.standard.stringArray(forKey: seenIDsKey) ?? [] }
         set { UserDefaults.standard.set(newValue.suffix(seenIDLimit).map { $0 }, forKey: seenIDsKey) }
     }
 
-    func load() async {
+    func load(audience: InboxWorkspace) async {
+        generation += 1
+        let requestGeneration = generation
+        self.audience = audience
         isLoading = logs.isEmpty
-        defer { isLoading = false }
-        do { logs = try await APIClient.shared.fetchCallLogs(); errorMessage = nil }
-        catch { errorMessage = error.localizedDescription }
-        seedExistingHistoryIfNeeded()
-        await recount()
+        defer { if generation == requestGeneration { isLoading = false } }
+        do {
+            async let loadedLogs = APIClient.shared.fetchCallLogs(audience: audience)
+            async let counts = APIClient.shared.fetchMissedCallCount(audience: audience)
+            let result = try await (loadedLogs, counts)
+            guard generation == requestGeneration, self.audience == audience else { return }
+            logs = result.0
+            globalUnseenMissed = max(0, result.1.globalCount)
+            errorMessage = nil
+            seedExistingHistoryIfNeeded(audience: audience)
+            await recount(serverScopedCount: result.1.count)
+        } catch {
+            guard generation == requestGeneration else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     /// Calls that happened before this device ever ran the feature are history,
     /// not a backlog of notifications. Without this the badge would open on a
     /// count of every missed call ever recorded. Mirrors the same one-off
     /// backfill in scripts/missed-calls-seen-migration.sql.
-    private func seedExistingHistoryIfNeeded() {
+    private func seedExistingHistoryIfNeeded(audience: InboxWorkspace) {
         let defaults = UserDefaults.standard
-        guard !defaults.bool(forKey: didSeedKey) else { return }
+        let key = "\(didSeedKey).\(audience.rawValue)"
+        guard !defaults.bool(forKey: key) else { return }
         // Only seed once the first response has actually arrived, or a failed
         // load would mark the flag with nothing recorded and let old calls
         // through on the next attempt.
         guard !logs.isEmpty else { return }
         seenIDs = seenIDs + logs.filter(\.isMissedInbound).map(\.id)
-        defaults.set(true, forKey: didSeedKey)
+        defaults.set(true, forKey: key)
     }
 
-    private func recount() async {
+    private func recount(serverScopedCount: Int) async {
         let seen = Set(seenIDs)
-        unseenMissed = logs.filter { $0.isMissedInbound && $0.seenAt == nil && !seen.contains($0.id) }.count
-        await MessageNotificationManager.shared.setMissedCalls(unseenMissed)
+        let local = logs.filter { $0.isMissedInbound && $0.seenAt == nil && !seen.contains($0.id) }.count
+        unseenMissed = min(max(0, serverScopedCount), local)
+        await MessageNotificationManager.shared.setMissedCalls(globalUnseenMissed)
     }
 
     /// Called when call history is actually on screen. Looking at the list is
     /// what clears the count, the same way WhatsApp behaves — the operator does
     /// not have to open each call.
-    func markHistorySeen() async {
+    func markHistorySeen(audience: InboxWorkspace) async {
+        guard self.audience == audience else { return }
         var seen = seenIDs
         let known = Set(seen)
         let newlySeen = logs.filter(\.isMissedInbound).map(\.id).filter { !known.contains($0) }
@@ -603,10 +656,21 @@ final class CallHistoryModel: ObservableObject {
         // background moves the Home Screen badge before its log row is written,
         // so the count can be non-zero with nothing new in the list yet.
         unseenMissed = 0
-        await MessageNotificationManager.shared.setMissedCalls(0)
         // Best effort: this keeps the badge attached to message pushes correct
         // and clears the count on the other signed-in device. A failure only
         // means the server copy lags; this device has already recorded it.
-        await APIClient.shared.markMissedCallsSeen()
+        do {
+            let response = try await APIClient.shared.markMissedCallsSeen(
+                audience: audience,
+                ids: logs.filter(\.isMissedInbound).map(\.id)
+            )
+            guard self.audience == audience else { return }
+            globalUnseenMissed = max(0, response.globalCount)
+            await MessageNotificationManager.shared.setMissedCalls(globalUnseenMissed)
+        } catch {
+            // Local seen IDs still stop this device showing the same rows as
+            // new. Preserve the last verified global badge; zeroing it here
+            // would hide unseen calls in the other customer space.
+        }
     }
 }
