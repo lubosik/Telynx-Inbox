@@ -27,7 +27,11 @@ test('Growth and Calls send the selected customer space to their server reads', 
   assert.match(models, /markMissedCallsSeen\([\s\S]*?audience: audience,[\s\S]*?ids: logs\.filter/);
 });
 
-test('The VIP Calls screen does not promise the VIP number as the outbound caller ID', () => {
+test('The VIP Calls screen identifies the VIP calling line only when configured', () => {
   const screens = read('ios/ViciInbox/UI/WorkspaceViews.swift');
-  assert.match(screens, /New calls still use the configured business calling line/);
+  const dialer = read('ios/ViciInbox/UI/DialerView.swift');
+  const voice = read('ios/ViciInbox/Voice/TelnyxVoiceManager.swift');
+  assert.match(screens, /Outgoing calls here show the VIP number when it is ready/);
+  assert.match(dialer, /VIP calling line unavailable/);
+  assert.match(voice, /VIP outbound aborted.*verified VIP caller number unavailable/);
 });
