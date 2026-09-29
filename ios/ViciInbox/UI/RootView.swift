@@ -577,32 +577,46 @@ struct MainTabView: View {
 
     private var mainTabs: some View {
         TabView(selection: $router.selectedTab) {
-            InboxView(model: inboxModel)
-                .tabItem { Label("Inbox", systemImage: "message.fill") }
-                .badge(workspace.unreadCount(in: inboxModel.conversations))
-                .tag(AppTab.inbox)
-
-            ContactsView()
-                .tabItem { Label("Contacts", systemImage: "person.2.fill") }
-                .tag(AppTab.contacts)
-
-            GrowthView(inboxModel: inboxModel)
-                .tabItem { Label("Growth", systemImage: "bolt.fill") }
-                .badge(campaignReviewCount.count)
-                .tag(AppTab.growth)
-
-            CallsView(model: callsModel)
-                .tabItem { Label("Calls", systemImage: "phone.fill") }
-                .badge(callsModel.unseenMissed)
-                .tag(AppTab.calls)
-
-            if showsAnalytics {
-                AnalyticsView(isSelected: router.selectedTab == .analytics,
-                              inboxModel: inboxModel)
-                    .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
-                    .tag(AppTab.analytics)
-            }
+            inboxTab
+            contactsTab
+            growthTab
+            callsTab
+            if showsAnalytics { analyticsTab }
         }
+    }
+
+    private var inboxTab: some View {
+        InboxView(model: inboxModel)
+            .tabItem { Label("Inbox", systemImage: "message.fill") }
+            .badge(workspace.unreadCount(in: inboxModel.conversations))
+            .tag(AppTab.inbox)
+    }
+
+    private var contactsTab: some View {
+        ContactsView()
+            .tabItem { Label("Contacts", systemImage: "person.2.fill") }
+            .tag(AppTab.contacts)
+    }
+
+    private var growthTab: some View {
+        GrowthView(inboxModel: inboxModel)
+            .tabItem { Label("Growth", systemImage: "bolt.fill") }
+            .badge(campaignReviewCount.count)
+            .tag(AppTab.growth)
+    }
+
+    private var callsTab: some View {
+        CallsView(model: callsModel)
+            .tabItem { Label("Calls", systemImage: "phone.fill") }
+            .badge(callsModel.unseenMissed)
+            .tag(AppTab.calls)
+    }
+
+    private var analyticsTab: some View {
+        AnalyticsView(isSelected: router.selectedTab == .analytics,
+                      inboxModel: inboxModel)
+            .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
+            .tag(AppTab.analytics)
     }
 
     private func applyPendingNavigation() {
