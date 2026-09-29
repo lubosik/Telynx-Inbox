@@ -327,7 +327,7 @@ struct SegmentRuleBuilderView: View {
             let created = await model.save()
             if let created {
                 listModel.noteSegmentCreated(created)
-                await listModel.load(reset: true)
+                await listModel.load(audience: listModel.audience, reset: true)
                 dismiss()
             }
         }

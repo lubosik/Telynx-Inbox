@@ -515,6 +515,67 @@ struct MainTabView: View {
     }
 
     var body: some View {
+        mainTabs
+        // A permission change can arrive mid-session (that is what a
+        // SESSION_STALE re-login means). Leaving the selection on a tab that no
+        // longer exists renders an empty screen.
+        .onChange(of: showsAnalytics) { visible in
+            router.sanitize(access: navigationAccess)
+        }
+        .overlayPreferenceValue(OnboardingTargetFrameKey.self) { contentFrames in
+            if onboarding.isPresented {
+                OnboardingOverlay(contentFrames: contentFrames,
+                                  visibleTabs: visibleOnboardingTabs)
+            }
+        }
+        .sheet(isPresented: $router.isAccountPresented,
+               onDismiss: { router.dismissAccount() }) { AccountMenuSheet() }
+        .onChange(of: onboarding.pendingHandoff) { handoff in
+            guard handoff == .accountMenu else { return }
+            onboarding.consumeHandoff()
+            router.presentAccount()
+        }
+        .onChange(of: onboarding.isPresented) { presented in
+            if presented { router.dismissAccount() }
+        }
+        .onChange(of: onboarding.currentStep?.target) { target in
+            applyOnboardingTarget(target)
+        }
+        .onAppear { applyOnboardingTarget(onboarding.currentStep?.target) }
+        .onAppear { applyPendingNavigation() }
+        .onAppear { reportAssistantTabRootIfVisible() }
+        .onChange(of: router.pendingRoute) { _ in
+            applyPendingNavigation()
+        }
+        .onChange(of: router.currentMainRoute) { _ in
+            reportAssistantTabRootIfVisible()
+        }
+        .onChange(of: session.currentUser) { _ in
+            router.sanitize(access: navigationAccess)
+            applyPendingNavigation()
+        }
+        .task { await callsModel.load() }
+        .task(id: session.can(Permission.campaignsApprove)) {
+            await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+        }
+        .onChange(of: notifications.campaignRefreshSequence) { _ in
+            Task {
+                await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                Task {
+                    await callsModel.load()
+                    await campaignReviewCount.load(
+                        enabled: session.can(Permission.campaignsApprove)
+                    )
+                }
+            }
+        }
+    }
+
+    private var mainTabs: some View {
         TabView(selection: $router.selectedTab) {
             InboxView(model: inboxModel)
                 .tabItem { Label("Inbox", systemImage: "message.fill") }
@@ -540,79 +601,6 @@ struct MainTabView: View {
                               inboxModel: inboxModel)
                     .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
                     .tag(AppTab.analytics)
-            }
-        }
-        // A permission change can arrive mid-session (that is what a
-        // SESSION_STALE re-login means). Leaving the selection on a tab that no
-        // longer exists renders an empty screen.
-        .onChange(of: showsAnalytics) { visible in
-            router.sanitize(access: navigationAccess)
-        }
-        // `overlayPreferenceValue` rather than `overlay`, so the tour is handed
-        // the frames that `.onboardingTarget(_:)` published during this layout
-        // pass. It is the only way an in-content subject — the Campaigns
-        // segment, the revenue breakdown — can be highlighted where it actually
-        // is instead of where the screen width suggests it might be.
-        .overlayPreferenceValue(OnboardingTargetFrameKey.self) { contentFrames in
-            if onboarding.isPresented {
-                OnboardingOverlay(contentFrames: contentFrames,
-                                  visibleTabs: visibleOnboardingTabs)
-            }
-        }
-        .sheet(isPresented: $router.isAccountPresented,
-               onDismiss: { router.dismissAccount() }) { AccountMenuSheet() }
-        .onChange(of: onboarding.pendingHandoff) { handoff in
-            guard handoff == .accountMenu else { return }
-            onboarding.consumeHandoff()
-            router.presentAccount()
-        }
-        // Replay is started from Settings, which is two pushes inside this very
-        // sheet. `AccountToolbarModifier` closes its own presentation when a
-        // tour starts; this one is separate and has to close itself, or the
-        // replay runs underneath the sheet it was launched from.
-        .onChange(of: onboarding.isPresented) { presented in
-            if presented { router.dismissAccount() }
-        }
-        .onChange(of: onboarding.currentStep?.target) { target in
-            applyOnboardingTarget(target)
-        }
-        .onAppear { applyOnboardingTarget(onboarding.currentStep?.target) }
-        // A notification can cold-launch before this hierarchy exists. The app
-        // router parks one typed destination and this view drains it both now and
-        // on change. During a call RootView removes MainTabView, so the request
-        // remains queued until the call screen is gone.
-        .onAppear { applyPendingNavigation() }
-        .onAppear { reportAssistantTabRootIfVisible() }
-        .onChange(of: router.pendingRoute) { _ in
-            applyPendingNavigation()
-        }
-        .onChange(of: router.currentMainRoute) { _ in
-            reportAssistantTabRootIfVisible()
-        }
-        .onChange(of: session.currentUser) { _ in
-            router.sanitize(access: navigationAccess)
-            applyPendingNavigation()
-        }
-        // RootView replaces this whole view with the in-call screen while a call
-        // is up, so this also runs each time a call finishes — which is exactly
-        // when a new missed call would have appeared.
-        .task { await callsModel.load() }
-        .task(id: session.can(Permission.campaignsApprove)) {
-            await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
-        }
-        .onChange(of: notifications.campaignRefreshSequence) { _ in
-            Task {
-                await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
-            }
-        }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                Task {
-                    await callsModel.load()
-                    await campaignReviewCount.load(
-                        enabled: session.can(Permission.campaignsApprove)
-                    )
-                }
             }
         }
     }
