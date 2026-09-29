@@ -551,12 +551,12 @@ struct MainTabView: View {
             applyPendingNavigation()
         }
         .task(id: workspace) { await callsModel.load(audience: workspace) }
-        .task(id: session.can(Permission.campaignsApprove)) {
-            await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+        .task(id: "\(workspace.rawValue):\(session.can(Permission.campaignsApprove))") {
+            await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove), audience: workspace)
         }
         .onChange(of: notifications.campaignRefreshSequence) { _ in
             Task {
-                await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
+                await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove), audience: workspace)
             }
         }
         .onChange(of: scenePhase, perform: refreshWhenActive)
@@ -625,7 +625,7 @@ struct MainTabView: View {
         Task {
             await callsModel.load(audience: workspace)
             await campaignReviewCount.load(
-                enabled: session.can(Permission.campaignsApprove)
+                enabled: session.can(Permission.campaignsApprove), audience: workspace
             )
         }
     }
