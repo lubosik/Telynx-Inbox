@@ -13,7 +13,9 @@ test('Main/VIP selection persists consistently across inbox, contacts and shell'
 });
 
 test('selected inbox badge is scoped while the application badge remains global', () => {
-  assert.match(read('ios/ViciInbox/UI/RootView.swift'), /\.badge\(workspace\.unreadCount\(in: inboxModel\.conversations\)\)/);
+  const root = read('ios/ViciInbox/UI/RootView.swift');
+  assert.match(root, /\.badge\(tabBadge\(for: tab\)\)/);
+  assert.match(root, /case \.inbox: return workspace\.unreadCount\(in: inboxModel\.conversations\)/);
   assert.match(read('ios/ViciInbox/App/FeatureModels.swift'), /setUnreadMessages\(unreadTotal\)/);
 });
 
