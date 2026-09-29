@@ -11,13 +11,16 @@ signed archive and tester distribution succeeded. The owner applied the migratio
 and the business_phone column was verified. Existing schedules are untouched.
 This is an inbox-and-SMS foundation, not the complete VIP business zone.
 
-The follow-up branch `feature/vip-growth-call-workspaces` adds server-side
+The follow-up branch `feature/vip-growth-call-workspaces` was merged to main
+at `c52703c` on 29 September 2026. Server CI, the unsigned iOS cloud build,
+Railway production deployment, and the signed TestFlight workflow succeeded.
+It adds server-side
 Main/VIP Growth and Calls projections. Campaign approvals, recipients, schedules
 and standing automation templates remain canonical/shared. Mixed jobs are marked
 shared rather than duplicated. Scoped pages filter before pagination; incomplete
 membership reads fail visibly instead of inventing zero counts. Native outbound
-and automated voice caller ID remain unchanged. Follow-up cloud compilation and
-deployment are not established by the initial build 116.
+and automated voice caller ID were unchanged in that release. VIP voice work
+is being developed separately in `feature/vip-calling-guide-drafts`.
 
 Implemented locally:
 
