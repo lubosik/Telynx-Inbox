@@ -577,46 +577,60 @@ struct MainTabView: View {
 
     private var mainTabs: some View {
         TabView(selection: $router.selectedTab) {
-            inboxTab
-            contactsTab
-            growthTab
-            callsTab
-            if showsAnalytics { analyticsTab }
+            ForEach(availableTabs, id: \.self) { tab in
+                tabContent(for: tab)
+                    .tabItem { Label(tabTitle(for: tab), systemImage: tabSymbol(for: tab)) }
+                    .badge(tabBadge(for: tab))
+                    .tag(tab)
+            }
         }
     }
 
-    private var inboxTab: some View {
-        InboxView(model: inboxModel)
-            .tabItem { Label("Inbox", systemImage: "message.fill") }
-            .badge(workspace.unreadCount(in: inboxModel.conversations))
-            .tag(AppTab.inbox)
+    private var availableTabs: [AppTab] {
+        var tabs: [AppTab] = [.inbox, .contacts, .growth, .calls]
+        if showsAnalytics { tabs.append(.analytics) }
+        return tabs
     }
 
-    private var contactsTab: some View {
-        ContactsView()
-            .tabItem { Label("Contacts", systemImage: "person.2.fill") }
-            .tag(AppTab.contacts)
+    private func tabContent(for tab: AppTab) -> AnyView {
+        switch tab {
+        case .inbox: return AnyView(InboxView(model: inboxModel))
+        case .contacts: return AnyView(ContactsView())
+        case .growth: return AnyView(GrowthView(inboxModel: inboxModel))
+        case .calls: return AnyView(CallsView(model: callsModel))
+        case .analytics:
+            return AnyView(AnalyticsView(isSelected: router.selectedTab == .analytics,
+                                         inboxModel: inboxModel))
+        }
     }
 
-    private var growthTab: some View {
-        GrowthView(inboxModel: inboxModel)
-            .tabItem { Label("Growth", systemImage: "bolt.fill") }
-            .badge(campaignReviewCount.count)
-            .tag(AppTab.growth)
+    private func tabTitle(for tab: AppTab) -> String {
+        switch tab {
+        case .inbox: return "Inbox"
+        case .contacts: return "Contacts"
+        case .growth: return "Growth"
+        case .calls: return "Calls"
+        case .analytics: return "Analytics"
+        }
     }
 
-    private var callsTab: some View {
-        CallsView(model: callsModel)
-            .tabItem { Label("Calls", systemImage: "phone.fill") }
-            .badge(callsModel.unseenMissed)
-            .tag(AppTab.calls)
+    private func tabSymbol(for tab: AppTab) -> String {
+        switch tab {
+        case .inbox: return "message.fill"
+        case .contacts: return "person.2.fill"
+        case .growth: return "bolt.fill"
+        case .calls: return "phone.fill"
+        case .analytics: return "chart.bar.xaxis"
+        }
     }
 
-    private var analyticsTab: some View {
-        AnalyticsView(isSelected: router.selectedTab == .analytics,
-                      inboxModel: inboxModel)
-            .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
-            .tag(AppTab.analytics)
+    private func tabBadge(for tab: AppTab) -> Int {
+        switch tab {
+        case .inbox: return workspace.unreadCount(in: inboxModel.conversations)
+        case .growth: return campaignReviewCount.count
+        case .calls: return callsModel.unseenMissed
+        case .contacts, .analytics: return 0
+        }
     }
 
     private func applyPendingNavigation() {
