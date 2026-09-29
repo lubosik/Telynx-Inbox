@@ -530,11 +530,7 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $router.isAccountPresented,
                onDismiss: { router.dismissAccount() }) { AccountMenuSheet() }
-        .onChange(of: onboarding.pendingHandoff) { handoff in
-            guard handoff == .accountMenu else { return }
-            onboarding.consumeHandoff()
-            router.presentAccount()
-        }
+        .onChange(of: onboarding.pendingHandoff, perform: handleOnboardingHandoff)
         .onChange(of: onboarding.isPresented) { presented in
             if presented { router.dismissAccount() }
         }
@@ -554,7 +550,7 @@ struct MainTabView: View {
             router.sanitize(access: navigationAccess)
             applyPendingNavigation()
         }
-        .task { await callsModel.load() }
+        .task(id: workspace) { await callsModel.load(audience: workspace) }
         .task(id: session.can(Permission.campaignsApprove)) {
             await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
         }
@@ -627,7 +623,7 @@ struct MainTabView: View {
     private func refreshWhenActive(_ phase: ScenePhase) {
         guard phase == .active else { return }
         Task {
-            await callsModel.load()
+            await callsModel.load(audience: workspace)
             await campaignReviewCount.load(
                 enabled: session.can(Permission.campaignsApprove)
             )
@@ -636,6 +632,12 @@ struct MainTabView: View {
 
     private func applyPendingNavigation() {
         router.processPending(access: navigationAccess)
+    }
+
+    private func handleOnboardingHandoff(_ handoff: OnboardingHandoff?) {
+        guard handoff == .accountMenu else { return }
+        onboarding.consumeHandoff()
+        router.presentAccount()
     }
 
     private func reportAssistantTabRootIfVisible() {
