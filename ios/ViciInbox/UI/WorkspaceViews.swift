@@ -64,7 +64,8 @@ struct ContactsView: View {
                                             .font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text("SMS line").font(.caption2).foregroundStyle(.secondary)
+                                    Text(workspace == .vip ? "SMS + calls" : "SMS line")
+                                        .font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -94,7 +95,7 @@ struct ContactsView: View {
             .navigationDestination(for: AppRoute.self) { route in
                 switch route {
                 case .businessLine:
-                    BusinessLineDetailView(phone: businessLineNumber)
+                    BusinessLineDetailView(phone: businessLineNumber, workspace: workspace)
                 case .contact(let phone):
                     ContactDetailView(phone: phone, model: model)
                 default:
@@ -127,6 +128,7 @@ struct ContactsView: View {
 
 private struct BusinessLineDetailView: View {
     let phone: String
+    let workspace: InboxWorkspace
     @State private var copied = false
 
     var body: some View {
@@ -148,10 +150,14 @@ private struct BusinessLineDetailView: View {
                     Label(copied ? "Number copied" : "Copy business number", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
             } footer: {
-                Text("This is the Vici Peptides line used for SMS in this inbox. Phone calls use the separately configured calling line.")
+                if workspace == .vip {
+                    Text("VIP customers can text or call this number. Calls route to the Vici team in the app.")
+                } else {
+                    Text("This is the Vici Peptides messaging line for the Main workspace.")
+                }
             }
         }
-        .navigationTitle("SMS Line")
+        .navigationTitle(workspace == .vip ? "VIP Line" : "SMS Line")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

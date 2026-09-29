@@ -33,4 +33,5 @@ test('iPhone calling uses server-issued VIP line and history displays actual lin
   assert.match(source('ios/ViciInbox/UI/DialerView.swift'), /VIP calling line unavailable/);
   assert.match(source('ios/ViciInbox/Core/MobileModels.swift'), /direction == "inbound" \? toNumber : fromNumber/);
   assert.match(source('ios/ViciInbox/UI/WorkspaceViews.swift'), /log\.businessLineNumber/);
+  assert.match(source('ios/ViciInbox/UI/WorkspaceViews.swift'), /VIP customers can text or call this number/);
 });
