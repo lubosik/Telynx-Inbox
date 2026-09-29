@@ -889,7 +889,21 @@ extension TelnyxVoiceManager: CallKitActionHandler {
             }
 
             do {
-                let callerNumber = CredentialStore.get(.callerNumber) ?? ""
+                let selectedWorkspace = InboxWorkspace(rawValue:
+                    UserDefaults.standard.string(forKey: InboxWorkspace.storageKey) ?? "") ?? .main
+                let callerNumber: String
+                if selectedWorkspace == .vip {
+                    guard let vipNumber = CredentialStore.get(.vipCallerNumber), !vipNumber.isEmpty else {
+                        Log.voice("VIP outbound aborted — verified VIP caller number unavailable")
+                        action.fail()
+                        CallKitCoordinator.shared.forgetCall(action.callUUID)
+                        self.clearCall(action.callUUID)
+                        return
+                    }
+                    callerNumber = vipNumber
+                } else {
+                    callerNumber = CredentialStore.get(.callerNumber) ?? ""
+                }
                 _ = try self.telnyxClient.newCall(callerName: AppConfig.callKitDisplayName,
                                                   callerNumber: callerNumber,
                                                   destinationNumber: action.handle.value,

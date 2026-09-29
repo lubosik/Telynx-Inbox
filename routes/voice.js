@@ -5,6 +5,7 @@ const { readCallHistory } = require('../lib/call-history-audience');
 const { isNativeIOSClient } = require('../lib/client-platform');
 const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { normalisePhone } = require('../lib/phone');
+const { vipVoiceNumber } = require('../lib/vip-voice-line');
 const { answeredAtFromDuration } = require('../lib/call-status');
 const { countUnseenMissedCalls, markMissedCallsSeen } = require('../lib/missed-calls');
 const {
@@ -48,7 +49,8 @@ router.get('/token', async (req, res) => {
     res.json({
       login: credentials.login,
       password: credentials.password,
-      callerNumber: process.env.TELNYX_PHONE_NUMBER
+      callerNumber: process.env.TELNYX_PHONE_NUMBER,
+      vipCallerNumber: vipVoiceNumber()
     });
   } catch (err) {
     console.error('[VOICE] Token error:', err.message);

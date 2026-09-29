@@ -2624,7 +2624,7 @@ struct CallsView: View {
             VStack(spacing: 0) {
                 CustomerWorkspacePicker(selection: $workspace, areaLabel: "Calls")
                 if workspace == .vip {
-                    Text("History is filtered to VIP customers. New calls still use the configured business calling line.")
+                    Text("VIP customers can call the VIP line. Outgoing calls here show the VIP number when it is ready.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 16)
@@ -2667,6 +2667,10 @@ private struct CallHistoryView: View {
                                     Text((log.status ?? "unknown").capitalized)
                                     if let duration = log.durationSeconds, duration > 0 { Text("• \(duration / 60):\(String(format: "%02d", duration % 60))") }
                                 }.font(.caption).foregroundStyle(.secondary)
+                                if let line = log.businessLineNumber, !line.isEmpty {
+                                    Text("\(log.direction == "inbound" ? "To" : "From") \(PhoneFormatter.pretty(line))")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             if let date = ServerDate.parse(log.startedAt) { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary) }

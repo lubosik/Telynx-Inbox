@@ -1070,6 +1070,8 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     let recordID: FlexibleID
     let direction: String?
     let contactPhone: String?
+    let fromNumber: String?
+    let toNumber: String?
     let durationSeconds: Int?
     let status: String?
     let startedAt: String?
@@ -1099,10 +1101,17 @@ struct CallLogRecord: Codable, Identifiable, Hashable {
     /// older server, so fall back to the presence of a playback URL.
     var hasRecording: Bool { recordingAvailable ?? (recordingURL != nil) }
 
+    /// Actual phone line on the stored call, not the customer's current tier.
+    var businessLineNumber: String? {
+        direction == "inbound" ? toNumber : fromNumber
+    }
+
     enum CodingKeys: String, CodingKey {
         case recordID = "id"
         case direction
         case contactPhone = "contact_phone"
+        case fromNumber = "from_number"
+        case toNumber = "to_number"
         case durationSeconds = "duration_seconds"
         case status
         case startedAt = "started_at"

@@ -1703,7 +1703,8 @@ actor APIClient {
 
         let creds = SIPCredentials(login: login,
                                    password: password,
-                                   callerNumber: json["callerNumber"] as? String ?? "")
+                                   callerNumber: json["callerNumber"] as? String ?? "",
+                                   vipCallerNumber: json["vipCallerNumber"] as? String ?? "")
         CredentialStore.store(creds)
         return creds
     }

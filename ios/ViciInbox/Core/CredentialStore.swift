@@ -15,6 +15,7 @@ enum CredentialStore {
         case sipUser         = "sip_user"
         case sipPassword     = "sip_password"
         case callerNumber    = "caller_number"
+        case vipCallerNumber = "vip_caller_number"
     }
 
     static func set(_ value: String?, for key: Key) {
@@ -67,13 +68,15 @@ enum CredentialStore {
         guard let user = get(.sipUser), let password = get(.sipPassword) else { return nil }
         return SIPCredentials(login: user,
                               password: password,
-                              callerNumber: get(.callerNumber) ?? "")
+                              callerNumber: get(.callerNumber) ?? "",
+                              vipCallerNumber: get(.vipCallerNumber) ?? "")
     }
 
     static func store(_ creds: SIPCredentials) {
         set(creds.login, for: .sipUser)
         set(creds.password, for: .sipPassword)
         set(creds.callerNumber, for: .callerNumber)
+        set(creds.vipCallerNumber, for: .vipCallerNumber)
     }
 
     /// Destroys every stored credential, including the SIP login the VoIP
@@ -88,7 +91,7 @@ enum CredentialStore {
     /// this from a 401 handler, a failed session restore, an ACCOUNT_DISABLED
     /// or SESSION_STALE response, or any other non-interactive path.
     static func clearAll() {
-        [Key.inboxEmail, .inboxPassword, .sipUser, .sipPassword, .callerNumber].forEach(remove)
+        [Key.inboxEmail, .inboxPassword, .sipUser, .sipPassword, .callerNumber, .vipCallerNumber].forEach(remove)
     }
 }
 
@@ -96,4 +99,5 @@ struct SIPCredentials: Equatable {
     let login: String
     let password: String
     let callerNumber: String
+    let vipCallerNumber: String
 }

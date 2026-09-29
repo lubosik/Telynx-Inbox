@@ -4,8 +4,13 @@ import UIKit
 /// Keypad for outbound calls. Inbound calls never appear here — those are
 /// handled entirely by the system call screen via CallKit.
 struct DialerView: View {
+    @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @EnvironmentObject private var session: SessionModel
     @State private var number = ""
+
+    private var outboundLine: String {
+        workspace == .vip ? (CredentialStore.get(.vipCallerNumber) ?? "") : session.callerNumber
+    }
 
     private let keys: [[String]] = [
         ["1", "2", "3"],
@@ -79,7 +84,7 @@ struct DialerView: View {
     }
 
     private var canCall: Bool {
-        number.filter(\.isNumber).count >= 7 && session.isVoiceReady
+        number.filter(\.isNumber).count >= 7 && session.isVoiceReady && !outboundLine.isEmpty
     }
 
     @ViewBuilder
@@ -92,10 +97,14 @@ struct DialerView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
-            if !session.callerNumber.isEmpty {
-                Text(PhoneFormatter.pretty(session.callerNumber))
+            if !outboundLine.isEmpty {
+                Text("From \(PhoneFormatter.pretty(outboundLine))")
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
+            } else if workspace == .vip {
+                Text("VIP calling line unavailable")
+                    .font(.footnote)
+                    .foregroundStyle(ViciTheme.warning)
             }
         }
         .padding(.vertical, 8)

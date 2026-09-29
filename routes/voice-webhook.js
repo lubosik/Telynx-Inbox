@@ -9,6 +9,7 @@ const { getIOSVoiceCredentials } = require('../lib/voice-credentials');
 const { decodeVerifiedTelnyxEvent, digestTelnyxEvent } = require('../lib/telnyx-webhook-claim');
 const { createVoiceEventHandler } = require('../lib/cart-recovery/voice-events');
 const { createVoiceOptOutHandler } = require('../lib/voice-opt-out-handler');
+const { inboundCallerLabel } = require('../lib/vip-voice-line');
 const recoveryVoice = createVoiceEventHandler({ client: supabase, env: process.env });
 const voiceOptOut = createVoiceOptOutHandler({ client: supabase, env: process.env });
 
@@ -68,15 +69,15 @@ async function lookupCallerName(phone) {
  */
 async function resolveCallerIdentity(cid) {
   const cached = inFlightCalls.get(cid);
-  if (cached?.phone) return { phone: cached.phone, callerName: cached.callerName };
+  if (cached?.phone) return { phone: cached.phone, callerName: cached.callerName, toNumber: cached.toNumber };
 
   try {
     const { data } = await supabase.from('call_logs')
-      .select('contact_phone').eq('call_control_id', cid).maybeSingle();
+      .select('contact_phone, to_number').eq('call_control_id', cid).maybeSingle();
     const phone = data?.contact_phone || null;
-    return { phone, callerName: await lookupCallerName(phone) };
+    return { phone, callerName: await lookupCallerName(phone), toNumber: data?.to_number || null };
   } catch (_) {
-    return { phone: null, callerName: null };
+    return { phone: null, callerName: null, toNumber: null };
   }
 }
 
@@ -99,15 +100,16 @@ function resolveCallerIdentityCapped(cid) {
     resolveCallerIdentity(cid),
     new Promise(resolve => setTimeout(() => {
       console.warn('[VOICE] caller identity lookup timed out — transferring without a name');
-      resolve({ phone: null, callerName: null });
+      resolve({ phone: null, callerName: null, toNumber: null });
     }, IDENTITY_LOOKUP_TIMEOUT_MS))
-  ]).catch(() => ({ phone: null, callerName: null }));
+  ]).catch(() => ({ phone: null, callerName: null, toNumber: null }));
 }
 
 async function transferToOperator(cid) {
   const { login } = getIOSVoiceCredentials();
   const sipTarget = `sip:${login}@sip.telnyx.com`;
-  const { phone, callerName } = await resolveCallerIdentityCapped(cid);
+  const { phone, callerName, toNumber } = await resolveCallerIdentityCapped(cid);
+  const { isVIPLine, displayName } = inboundCallerLabel(callerName, toNumber);
 
   // Telnyx requires `from` in +E.164. A malformed caller number would fail the
   // whole transfer and drop the call, so anything that doesn't validate falls
@@ -118,8 +120,8 @@ async function transferToOperator(cid) {
     console.warn(`[VOICE] caller number ${phone} is not E.164 — using business number as from`);
   }
 
-  await transferCall(cid, sipTarget, fromNumber, callerName);
-  console.log(`[VOICE] Transfer initiated to ${sipTarget} as ${callerName || fromNumber}`);
+  await transferCall(cid, sipTarget, fromNumber, displayName);
+  console.log(`[VOICE] Transfer initiated to ${sipTarget} on ${isVIPLine ? 'VIP' : 'main'} line`);
 }
 
 router.post('/', async (req, res) => {
@@ -217,7 +219,7 @@ router.post('/', async (req, res) => {
         // Caller name lookup — reused by the push, the SSE broadcast, and the
         // SIP transfer's display name.
         const callerName = await lookupCallerName(contactPhone);
-        rememberCall(cid, { phone: contactPhone, callerName });
+        rememberCall(cid, { phone: contactPhone, callerName, toNumber: to });
 
         broadcast({ type: 'call_update', event: 'initiated', call_control_id: cid, direction: 'inbound', contact_phone: contactPhone });
 
