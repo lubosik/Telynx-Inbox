@@ -11,12 +11,12 @@ const env = { VIP_INBOX_PHONE_NUMBER: '+19177254009' };
 test('VIP voice line labels the line called without changing customer tier', () => {
   assert.equal(vipVoiceNumber(env), '+19177254009');
   assert.deepEqual(inboundCallerLabel('Jane Doe', '+19177254009', env), {
-    isVIPLine: true, displayName: 'VIP · Jane Doe'
+    isVIPLine: true, displayName: 'VIP - Jane Doe'
   });
   assert.deepEqual(inboundCallerLabel('Jane Doe', '+12125553184', env), {
     isVIPLine: false, displayName: 'Jane Doe'
   });
-  assert.equal(inboundCallerLabel(null, '+19177254009', env).displayName, 'VIP · Caller');
+  assert.equal(inboundCallerLabel(null, '+19177254009', env).displayName, 'VIP - Caller');
 });
 
 test('VIP number is not invented when configuration is absent', () => {
