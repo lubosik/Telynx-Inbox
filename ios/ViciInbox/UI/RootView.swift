@@ -563,16 +563,7 @@ struct MainTabView: View {
                 await campaignReviewCount.load(enabled: session.can(Permission.campaignsApprove))
             }
         }
-        .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                Task {
-                    await callsModel.load()
-                    await campaignReviewCount.load(
-                        enabled: session.can(Permission.campaignsApprove)
-                    )
-                }
-            }
-        }
+        .onChange(of: scenePhase, perform: refreshWhenActive)
     }
 
     private var mainTabs: some View {
@@ -630,6 +621,16 @@ struct MainTabView: View {
         case .growth: return campaignReviewCount.count
         case .calls: return callsModel.unseenMissed
         case .contacts, .analytics: return 0
+        }
+    }
+
+    private func refreshWhenActive(_ phase: ScenePhase) {
+        guard phase == .active else { return }
+        Task {
+            await callsModel.load()
+            await campaignReviewCount.load(
+                enabled: session.can(Permission.campaignsApprove)
+            )
         }
     }
 
