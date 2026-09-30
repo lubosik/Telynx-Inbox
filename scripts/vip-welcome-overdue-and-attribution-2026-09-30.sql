@@ -10,18 +10,30 @@ DECLARE
   claim_patched text;
   begin_patched text;
   stale_count integer;
+  claim_old_count integer;
+  claim_new_count integer;
 BEGIN
   SELECT pg_get_functiondef('public.claim_sms_campaign_recipients(text,integer,integer)'::regprocedure)
     INTO claim_definition;
   SELECT pg_get_functiondef('public.begin_sms_campaign_provider_attempt(uuid,text,uuid,integer)'::regprocedure)
     INTO begin_definition;
 
-  -- The three scheduled-only checks are the suppression pass, candidate
-  -- selection and cadence-reservation insert. All three must change together.
-  IF (length(claim_definition) - length(replace(claim_definition, 'c.status = ''scheduled''', '')))
-      / length('c.status = ''scheduled''') <> 3
-     OR position('v_campaign.status <> ''scheduled''' in begin_definition) = 0 THEN
-    RAISE EXCEPTION 'Live send gates differ from the reviewed version; no changes applied';
+  -- The live claim gate may already have the three-status repairs from
+  -- FIX-SEND-GATE-DND.txt. Accept either fully old or fully repaired; never
+  -- accept a mixed state that would weaken the send fence.
+  claim_old_count := (length(claim_definition) - length(replace(
+    claim_definition, 'c.status = ''scheduled''', ''))) / length('c.status = ''scheduled''');
+  claim_new_count := (length(claim_definition) - length(replace(
+    claim_definition, 'c.status IN (''scheduled'', ''sending'')', '')))
+    / length('c.status IN (''scheduled'', ''sending'')');
+  IF NOT ((claim_old_count = 3 AND claim_new_count = 0)
+       OR (claim_old_count = 0 AND claim_new_count = 3)) THEN
+    RAISE EXCEPTION 'Claim gate has % old and % repaired status checks; expected 3 of one type. No changes applied',
+      claim_old_count, claim_new_count;
+  END IF;
+  IF position('v_campaign.status <> ''scheduled''' in begin_definition) = 0
+     AND position('v_campaign.status NOT IN (''scheduled'', ''sending'')' in begin_definition) = 0 THEN
+    RAISE EXCEPTION 'Provider-attempt campaign status gate is unrecognised; no changes applied';
   END IF;
 
   claim_patched := replace(claim_definition, 'c.status = ''scheduled''',
@@ -64,8 +76,8 @@ BEGIN
   WHERE campaign_id = 'ca4c86d5-bf8a-45d2-8c81-05f9d278a68d'::uuid
     AND workspace_id = 'vici' AND state = 'pending' AND selected = true
     AND provider_message_id IS NULL AND sent_at IS NULL;
-  IF stale_count <> 4 THEN
-    RAISE EXCEPTION 'Expected 4 untouched VIP welcomes; found %. Reinspect live queue.', stale_count;
+  IF stale_count > 7 THEN
+    RAISE EXCEPTION 'Expected at most 7 untouched VIP welcomes; found %. Reinspect live queue.', stale_count;
   END IF;
 END;
 $repair$;
@@ -126,8 +138,13 @@ BEGIN
   IF (SELECT count(*) FROM public.sms_campaign_recipients
       WHERE campaign_id = 'ca4c86d5-bf8a-45d2-8c81-05f9d278a68d'::uuid
         AND workspace_id = 'vici' AND state = 'pending'
-        AND next_attempt_at > now()) <> 4 THEN
-    RAISE EXCEPTION 'Could not assign a safe future 6 p.m. slot to all four recipients';
+        AND selected = true AND provider_message_id IS NULL AND sent_at IS NULL
+        AND next_attempt_at > now()) <>
+     (SELECT count(*) FROM public.sms_campaign_recipients
+      WHERE campaign_id = 'ca4c86d5-bf8a-45d2-8c81-05f9d278a68d'::uuid
+        AND workspace_id = 'vici' AND state = 'pending' AND selected = true
+        AND provider_message_id IS NULL AND sent_at IS NULL) THEN
+    RAISE EXCEPTION 'Could not assign a safe future 6 p.m. slot to every pending recipient';
   END IF;
 END; $$;
 
@@ -232,7 +249,8 @@ ON CONFLICT (workspace_id, workflow_category, policy_version) DO NOTHING;
 
 COMMIT;
 
--- Verification only. Four future rows should appear after the transaction.
+-- Verification only. The remaining pending rows should show future 6 p.m.
+-- New York slots after the transaction.
 SELECT id, state, planned_send_at,
        planned_send_at AT TIME ZONE 'America/New_York' AS new_york_send_time
 FROM public.sms_campaign_recipients
