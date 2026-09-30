@@ -399,15 +399,19 @@ actor APIClient {
         // parsing inside the comparator caused O(n log n) formatter work on
         // the MainActor and visibly froze long inboxes while scrolling.
         return loaded.map { conversation in
-            let latest = [
-                conversation.latestOrderDate,
-                conversation.lastSeen,
-                conversation.lastMessage?.createdAt
-            ].compactMap(ServerDate.parse).max() ?? .distantPast
-            return (conversation, latest)
+            let messageDate = conversation.lastMessage?.createdAt.flatMap(ServerDate.parse)
+            let contactDate = conversation.createdAt.flatMap(ServerDate.parse) ?? .distantPast
+            return (conversation, messageDate, contactDate)
         }
-        .sorted { $0.1 > $1.1 }
+        .sorted {
+            if ($0.1 != nil) != ($1.1 != nil) { return $0.1 != nil }
+            return ($0.1 ?? $0.2) > ($1.1 ?? $1.2)
+        }
         .map { $0.0 }
+    }
+
+    func searchConversationMessages(_ query: String) async throws -> [ConversationSearchMatch] {
+        try await decodedGET("/api/conversations/search", queryItems: [URLQueryItem(name: "q", value: query)])
     }
 
     func fetchThread(phone: String) async throws -> [MessageRecord] {

@@ -169,6 +169,7 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
     let avatarURL: String?
     let unreadCount: Int?
     let lastSeen: String?
+    let createdAt: String?
     let lastMessage: MessagePreview?
     let latestOrderStatus: String?
     let latestOrderDate: String?
@@ -262,6 +263,7 @@ struct ConversationSummary: Codable, Identifiable, Hashable {
         case avatarURL = "avatar_url"
         case unreadCount = "unread_count"
         case lastSeen = "last_seen"
+        case createdAt = "created_at"
         case lastMessage
         case latestOrderStatus = "latest_order_status"
         case latestOrderDate = "latest_order_date"
@@ -291,6 +293,20 @@ struct MessagePreview: Codable, Hashable {
         case body, direction
         case createdAt = "created_at"
         case mediaURLs = "media_urls"
+    }
+}
+
+struct ConversationSearchMatch: Codable, Hashable {
+    let id: FlexibleID
+    let contactPhone: String
+    let body: String?
+    let direction: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, body, direction
+        case contactPhone = "contact_phone"
+        case createdAt = "created_at"
     }
 }
 
