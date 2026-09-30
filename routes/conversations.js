@@ -5,6 +5,7 @@ const { fetchAllRows } = require('../lib/fetch-all-rows');
 const { enrichVIPContacts, readVIPManualMembership } = require('../lib/vip-inbox-snapshot');
 const { logAuditSafely } = require('../lib/audit/log');
 const { hideFailedInboxMessage } = require('../lib/failed-message-cleanup');
+const { literalIlikePattern, latestConversationMatches } = require('../lib/inbox-message-search');
 
 router.get('/', async (req, res) => {
   try {
@@ -60,6 +61,27 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('Conversations load error:', err.message);
     res.status(500).json({ error: 'Failed to load conversations' });
+  }
+});
+
+// Literal, case-insensitive substring search. Regex/full-text tokenisation would
+// make exact phrases and order-number fragments behave unexpectedly here.
+router.get('/search', async (req, res) => {
+  const term = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (term.length < 2 || term.length > 100) {
+    return res.status(400).json({ error: 'Enter at least 2 and at most 100 characters to search messages.' });
+  }
+  try {
+    const pattern = literalIlikePattern(term);
+    const rows = await fetchAllRows(supabase, 'sms_messages',
+      'id,contact_phone,body,direction,created_at', {
+        thenBy: 'id',
+        filter: query => query.is('hidden_at', null).ilike('body', pattern)
+      });
+    return res.json(latestConversationMatches(rows, term));
+  } catch (err) {
+    console.error('Conversation search error:', err.message);
+    return res.status(500).json({ error: 'Message search is unavailable. Please try again.' });
   }
 });
 

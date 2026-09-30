@@ -5,6 +5,11 @@ import UIKit
 struct InboxView: View {
     @ObservedObject var model: InboxModel
     @State private var search = ""
+    @State private var messageMatches: [ConversationSearchMatch] = []
+    @State private var searchedTerm = ""
+    @State private var isSearchingMessages = false
+    @State private var searchError: String?
+    @State private var selectedMatchIDs: [String: String] = [:]
     @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var session: SessionModel
@@ -16,13 +21,20 @@ struct InboxView: View {
     }
 
     private var filtered: [ConversationSummary] {
-        guard !search.isEmpty else { return audienceConversations }
-        let query = search.lowercased()
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return audienceConversations }
+        let hitPhones = Set(messageMatches.map(\.contactPhone))
         return audienceConversations.filter {
             $0.displayName.lowercased().contains(query) ||
             $0.phone.lowercased().contains(query) ||
-            ($0.email?.lowercased().contains(query) ?? false)
+            ($0.email?.lowercased().contains(query) ?? false) ||
+            (searchedTerm == query && hitPhones.contains($0.phone))
         }
+    }
+
+    private var matchByPhone: [String: ConversationSearchMatch] {
+        guard searchedTerm == search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return [:] }
+        return Dictionary(uniqueKeysWithValues: messageMatches.map { ($0.contactPhone, $0) })
     }
 
     var body: some View {
@@ -41,9 +53,24 @@ struct InboxView: View {
 
                 Divider()
 
+                if isSearchingMessages && !search.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Searching messages…").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal).padding(.vertical, 6)
+                } else if let searchError, !search.isEmpty {
+                    Text(searchError).font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal).padding(.vertical, 6)
+                }
+
                 Group {
                     if model.isLoading && model.conversations.isEmpty {
                         ProgressView("Loading inbox…")
+                    } else if filtered.isEmpty && isSearchingMessages {
+                        ProgressView("Searching messages…")
                     } else if filtered.isEmpty {
                         EmptyState(
                             icon: workspace == .vip ? "crown" : "message",
@@ -52,9 +79,13 @@ struct InboxView: View {
                         )
                     } else {
                         List(filtered) { conversation in
-                            NavigationLink(value: AppRoute.conversation(phone: conversation.phone)) {
-                                ConversationRow(conversation: conversation)
+                            Button {
+                                selectedMatchIDs[conversation.phone] = matchByPhone[conversation.phone]?.id.rawValue
+                                router.inboxPath.append(AppRoute.conversation(phone: conversation.phone))
+                            } label: {
+                                ConversationRow(conversation: conversation, match: matchByPhone[conversation.phone])
                             }
+                            .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 vipActions(for: conversation)
                             }
@@ -68,14 +99,36 @@ struct InboxView: View {
             .navigationTitle(workspace == .vip ? "VIP Inbox" : "Main Inbox")
             .navigationDestination(for: AppRoute.self) { route in
                 if case .conversation(let phone) = route {
-                    ConversationDestinationView(phone: phone, model: model)
+                    ConversationDestinationView(phone: phone, model: model,
+                                                focusMessageID: selectedMatchIDs[phone])
                 } else if case .referral(let id, let phone) = route {
                     ConversationDestinationView(phone: phone, referralID: id, model: model)
                 } else {
                     EmptyView()
                 }
             }
-            .searchable(text: $search, prompt: "Name or phone")
+            .searchable(text: $search, prompt: "Name, phone, or message")
+            .task(id: search) {
+                let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+                messageMatches = []
+                searchedTerm = ""
+                searchError = nil
+                guard query.count >= 2 else { isSearchingMessages = false; return }
+                isSearchingMessages = true
+                do {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    let matches = try await APIClient.shared.searchConversationMessages(query)
+                    guard !Task.isCancelled else { return }
+                    messageMatches = matches
+                    searchedTerm = query.lowercased()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    searchError = "Message search is unavailable. Name and phone search still work."
+                }
+                isSearchingMessages = false
+            }
             // Settings, Team, Activity and Sign out all live behind the account
             // button now, which is on every tab rather than only on the two
             // that happened to have a gear icon. Inbox previously carried a
@@ -99,6 +152,9 @@ struct InboxView: View {
             .onChange(of: scenePhase) { phase in
                 guard phase == .active else { return }
                 Task { await model.load() }
+            }
+            .onChange(of: router.inboxPath) { path in
+                if path.isEmpty { selectedMatchIDs.removeAll() }
             }
         }
     }
@@ -142,6 +198,7 @@ private struct ConversationDestinationView: View {
     let phone: String
     var referralID: String? = nil
     @ObservedObject var model: InboxModel
+    var focusMessageID: String? = nil
     @AppStorage(InboxWorkspace.storageKey) private var workspace: InboxWorkspace = .main
 
     private var conversation: ConversationSummary? {
@@ -153,7 +210,8 @@ private struct ConversationDestinationView: View {
             if let conversation {
                 MessageThreadView(conversation: conversation,
                                   model: model,
-                                  referralID: referralID)
+                                  referralID: referralID,
+                                  focusMessageID: focusMessageID)
             } else if model.isLoading {
                 ProgressView("Loading conversation")
             } else {
@@ -175,6 +233,7 @@ private struct ConversationDestinationView: View {
 
 private struct ConversationRow: View {
     let conversation: ConversationSummary
+    var match: ConversationSearchMatch? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -186,12 +245,12 @@ private struct ConversationRow: View {
                         CustomerTag(text: "VIP", systemImage: "crown.fill", color: .orange)
                     }
                     Spacer()
-                    if let date = ServerDate.parse(conversation.lastMessage?.createdAt ?? conversation.lastSeen) {
+                    if let date = ServerDate.parse(match?.createdAt ?? conversation.lastMessage?.createdAt) {
                         Text(date, style: .relative).font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 HStack(spacing: 5) {
-                    if conversation.lastMessage?.direction == "outbound" {
+                    if (match?.direction ?? conversation.lastMessage?.direction) == "outbound" {
                         Image(systemName: "arrow.up.right").font(.caption2)
                     }
                     Text(preview)
@@ -205,12 +264,21 @@ private struct ConversationRow: View {
             }
         }
         .padding(.vertical, 4)
+        .opacity(conversation.lastMessage == nil ? 0.65 : 1)
     }
 
     private var preview: String {
+        if let body = match?.body, !body.isEmpty { return body }
         if let body = conversation.lastMessage?.body, !body.isEmpty { return body }
         if !(conversation.lastMessage?.mediaURLs ?? []).isEmpty { return "Photo" }
-        return conversation.latestOrderStatus.map { "Order: \($0.replacingOccurrences(of: "-", with: " "))" } ?? conversation.phone
+        if conversation.lastMessage == nil {
+            if let created = ServerDate.parse(conversation.createdAt),
+               (0..<86_400).contains(Date().timeIntervalSince(created)) {
+                return "New contact · no messages yet"
+            }
+            return "No messages yet"
+        }
+        return conversation.phone
     }
 }
 
@@ -304,6 +372,7 @@ struct MessageThreadView: View {
     let conversation: ConversationSummary
     @ObservedObject var model: InboxModel
     var referralID: String? = nil
+    var focusMessageID: String? = nil
     // Needed for the call button. Supplied at the app root (ViciInboxApp) and
     // inherited through the NavigationLink that pushes this view.
     @EnvironmentObject private var session: SessionModel
@@ -344,6 +413,9 @@ struct MessageThreadView: View {
                             } deleteFailed: {
                                 failedMessageToHide = message
                             }
+                            .padding(message.id == focusMessageID ? 3 : 0)
+                            .background(message.id == focusMessageID ? ViciTheme.tealFill.opacity(0.14) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 12))
                             .id(message.id)
                         }
                     }
@@ -351,10 +423,22 @@ struct MessageThreadView: View {
                 }
                 .onChange(of: messages.count) { _ in
                     guard let last = messages.last else { return }
-                    if didInitialScroll {
+                    if !didInitialScroll,
+                       let focusMessageID,
+                       messages.contains(where: { $0.id == focusMessageID }) {
+                        proxy.scrollTo(focusMessageID, anchor: .center)
+                        didInitialScroll = true
+                    } else if didInitialScroll {
                         withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                     } else {
                         proxy.scrollTo(last.id, anchor: .bottom)
+                        didInitialScroll = true
+                    }
+                }
+                .onAppear {
+                    if let focusMessageID,
+                       messages.contains(where: { $0.id == focusMessageID }) {
+                        proxy.scrollTo(focusMessageID, anchor: .center)
                         didInitialScroll = true
                     }
                 }
