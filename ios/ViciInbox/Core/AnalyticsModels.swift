@@ -281,12 +281,18 @@ struct AnalyticsActivityPoint: Codable, Hashable, Identifiable {
     var id: String { date }
 }
 
+struct VIPWelcomeRevenueMetrics: Codable, Hashable {
+    let influencedRevenue: FlexibleDecimal
+    let influencedOrders: Int
+}
+
 struct AnalyticsOverview: Codable, Hashable {
     let generatedAt: String
     let version: Int
     let currency: String
     let range: AnalyticsDateRange
     let revenue: AnalyticsRevenue
+    let vipWelcome: VIPWelcomeRevenueMetrics?
     /// Added after the first Analytics release. Optional keeps the iOS rollout
     /// compatible with an older backend while never fabricating categories.
     let revenueDrivers: [AnalyticsRevenueDriver]?
@@ -333,6 +339,8 @@ struct AttributionRecord: Codable, Hashable, Identifiable {
     let id: String
     let orderId: String
     let customerId: String?
+    let contactPhone: String?
+    let campaignRecipientId: String?
     let category: String?
     let workflow: String?
     let grossAmount: FlexibleDecimal

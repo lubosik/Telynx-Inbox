@@ -1860,9 +1860,15 @@ struct VIPWelcomeAutomationSection: View {
                     // batch actually goes out. Shown once, with the owner's own
                     // time beside it, rather than on all hundred rows.
                     if let soonest = queued.compactMap(\.sendDate).min() {
-                        AutomationSendTimeRows(label: "Sends at", date: soonest,
+                        AutomationSendTimeRows(label: soonest < Date() ? "Overdue since" : "Sends at", date: soonest,
                                                storeZoneID: automation?.timeZone,
                                                viewerZone: appearance.effectiveTimeZone)
+                        if soonest < Date() {
+                            Label("This time has passed. These messages need a new eligible send time; they are not confirmed as sent.",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(ViciTheme.warning)
+                        }
                     }
                     ForEach(Array(queued.prefix(3))) { recipient in
                         AutomationRecipientPreview(name: recipient.contactName,

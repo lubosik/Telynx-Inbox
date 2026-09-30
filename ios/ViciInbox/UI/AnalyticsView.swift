@@ -161,6 +161,35 @@ struct AnalyticsView: View {
         }
         .buttonStyle(.plain)
 
+        if overview.availability.revenueAttribution {
+            NavigationLink(value: AnalyticsRouteValues.route(
+                query: model.query,
+                scope: .influenced,
+                category: "vip_welcome"
+            )) {
+                AnalyticsCard {
+                    HStack(spacing: 12) {
+                        Image(systemName: "star.bubble.fill")
+                            .font(.title2)
+                            .foregroundStyle(ViciTheme.tint)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("VIP Welcome Orders").font(.headline)
+                            if let vip = overview.vipWelcome {
+                                Text("\(AnalyticsFormatting.money(vip.influencedRevenue, currency: overview.currency)) after verified welcomes · \(vip.influencedOrders) paid orders")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            Text("Paid orders after a verified welcome, linked to each customer and message. Timing alone is not proven recovery.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+
         NavigationLink {
             VIPLeaderboardView(initialQuery: model.query)
         } label: {
@@ -1487,6 +1516,9 @@ private struct AttributionRow: View {
             }
             Text(AnalyticsFormatting.humanized(record.workflow ?? record.category ?? "other"))
                 .font(.subheadline.weight(.medium))
+            if record.category == "vip_welcome", let phone = record.contactPhone {
+                Text(phone).font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Text("Order #\(record.orderId)")
                 Spacer()
@@ -1547,6 +1579,11 @@ private struct AttributionDetailView: View {
             }
             Section("Audit evidence") {
                 LabeledContent("Order", value: "#\(record.orderId)")
+                if record.category == "vip_welcome" {
+                    if let phone = record.contactPhone { LabeledContent("Customer phone", value: phone) }
+                    if let recipient = record.campaignRecipientId { LabeledContent("Welcome recipient", value: recipient) }
+                    if let message = record.originatingActionId { LabeledContent("Telnyx message", value: message) }
+                }
                 if let action = record.originatingActionType {
                     LabeledContent("Origin", value: AnalyticsFormatting.humanized(action))
                 }

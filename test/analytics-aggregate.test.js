@@ -448,6 +448,22 @@ test('detail serialization exposes audit codes but not raw supporting evidence',
   }), ['trusted_provider_delivery', 'exact_target_product']);
 });
 
+test('VIP welcome analytics keeps money influenced and links its exact recipient and message', () => {
+  const row = attribution({
+    category: 'vip_welcome', confidence_level: 'influenced',
+    contact_phone: '+15551234567', campaign_recipient_id: 'recipient-1',
+    originating_action_id: 'telnyx-1', net_amount: '179.00'
+  });
+  const publicRow = publicAttribution(row);
+  assert.equal(publicRow.contactPhone, '+15551234567');
+  assert.equal(publicRow.campaignRecipientId, 'recipient-1');
+  assert.equal(publicRow.originatingActionId, 'telnyx-1');
+  assert.equal(publicRow.confidenceLevel, 'influenced');
+  const campaignRow = publicCampaignAttribution(row, 'campaign-1');
+  assert.equal(campaignRow.contactPhone, undefined);
+  assert.equal(campaignRow.campaignRecipientId, undefined);
+});
+
 test('public attribution explanations never expose free-text database reasons', () => {
   const secret = 'Customer wrote private medical details and phone +15551234567';
   const item = publicAttribution(attribution({

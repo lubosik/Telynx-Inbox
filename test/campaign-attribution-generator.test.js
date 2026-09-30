@@ -121,6 +121,40 @@ test('exact signed delivery plus frozen customer/product and Woo payment stages 
   assert.equal(JSON.stringify(staged).includes('message body'), false);
 });
 
+test('VIP welcome creates only an Influenced per-recipient candidate after trusted delivery', async () => {
+  const data = seed();
+  data.sms_campaigns[0].workflow_category = 'vip_welcome';
+  data.campaign_attribution_policies.push({
+    workflow_category: 'vip_welcome', policy_version: 1,
+    methodology_version: 'vici-campaign-revenue-v1',
+    strong_window_seconds: 259200, maximum_window_seconds: 259200,
+    product_identity_required: false, allowed_direct_evidence: [],
+    active: true, workspace_id: 'vici'
+  });
+  const client = fakeClient(data);
+  const result = await reconcileCampaignAttributionsForOrder({
+    client, order: order(), financialObservedAt: '2026-08-22T12:30:01Z'
+  });
+  assert.equal(result.staged, 1);
+  const candidate = client.rpcCalls[0].args.p_candidate;
+  assert.equal(candidate.category, 'vip_welcome');
+  assert.equal(candidate.confidence_level, 'influenced');
+  assert.equal(candidate.campaign_recipient_id, data.sms_campaign_recipients[0].id);
+  assert.equal(candidate.originating_action_id, 'telnyx-message-1');
+  assert.equal(candidate.net_amount, '219.00');
+
+  // A release before the policy migration must not make unrelated order
+  // attribution fail; this VIP touch simply waits for its policy.
+  const unconfigured = seed();
+  unconfigured.sms_campaigns[0].workflow_category = 'vip_welcome';
+  const withoutPolicy = fakeClient(unconfigured);
+  const skipped = await reconcileCampaignAttributionsForOrder({
+    client: withoutPolicy, order: order(), financialObservedAt: '2026-08-22T12:30:01Z'
+  });
+  assert.equal(skipped.staged, 0);
+  assert.equal(withoutPolicy.rpcCalls.length, 0);
+});
+
 test('untrusted delivery, mismatched variation and missing schema never invent revenue', async () => {
   const unsafe = seed();
   unsafe.sms_campaign_recipient_events[0].trusted = false;

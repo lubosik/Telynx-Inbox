@@ -477,6 +477,17 @@ function startCampaignDelivery() {
       if (Date.now() < dueAt) return;
       lastSendAt = Date.now();
 
+      // Repair missed VIP send windows before claiming work. The database RPC
+      // calculates each person's next 6 p.m. New York slot under the same
+      // promotional frequency limits as the send gate; it never sends SMS.
+      const { data: replanned, error: replanError } = await supabase.rpc(
+        'reschedule_overdue_vip_welcomes', { p_workspace_id: 'vici' }
+      );
+      if (replanError) {
+        console.error('[VIP WELCOME] Overdue schedule repair unavailable:', replanError.message);
+      } else if (Number(replanned) > 0) {
+        console.log(`[VIP WELCOME] Replanned ${replanned} overdue recipient(s) for an eligible 6 p.m. New York slot`);
+      }
       const summary = await deliverBatch({
         client: supabase,
         send: async (phone, text) => {
