@@ -20,6 +20,7 @@ This index is the synthesis. Read it first, then go to the source documents for 
 | 05 | `05-attribution-and-testing.md` | 13,962 | Attribution models, holdout maths at our N, test-suite spec, data model |
 | 06 | `06-activity-center.md` | 16,129 | Auth prerequisite, prior art, event taxonomy, phased scope |
 | 07 | `07-source-doc-digest.md` | 12,440 | Digest of the client-supplied SMS Marketing transcript |
+| 08 | `08-vici-omnisend-lifecycle-research.md` | New | October 2026 Vici first-purchase/VIP cohort evidence, Omnisend identity gaps, public peptide competitor mechanics, legal/provider boundaries, and an experiment-first integration sequence. Research only; not a live campaign prompt. |
 
 ---
 

@@ -4,6 +4,7 @@ const { recordWooOrderEvent } = require('../lib/analytics/events');
 const { normalizePhone, wooGet } = require('../woocommerce');
 const { searchContactByEmail } = require('../ghl');
 const { verifyWooSignature, wooDeliveryID } = require('../lib/woocommerce-webhook');
+const { wooContactOwnershipConflict } = require('../lib/woocommerce-contact-identity');
 const { recordTrustedProductEvent } = require('../lib/campaigns/product-webhooks');
 const { refreshProfileQuietly } = require('../lib/profiles/profile-builder');
 const { reconcileWooOrder: reconcileCartRecoveryOrder } = require('../lib/cart-recovery/runtime');
@@ -97,20 +98,38 @@ module.exports = (broadcastSSE) => {
       const country   = customer.billing?.country || null;
       const wooId     = customer.id || null;
 
-      // Check if contact already exists (match by phone or woo_customer_id)
-      const { data: existing } = await supabase
-        .from('sms_contacts')
-        .select('phone, name, email, city, state, country, woo_customer_id')
-        .or(`phone.eq.${phone}${wooId ? `,woo_customer_id.eq.${wooId}` : ''}`)
-        .maybeSingle();
+      // Check each identity key separately. An OR query with maybeSingle used to
+      // treat two different matching rows as "no contact" and then upsert over
+      // whichever phone won the race. Never reassign a phone to another Woo ID.
+      const [phoneMatch, customerMatch] = await Promise.all([
+        supabase.from('sms_contacts')
+          .select('id, phone, name, email, city, state, country, woo_customer_id')
+          .eq('phone', phone).maybeSingle(),
+        wooId ? supabase.from('sms_contacts')
+          .select('id, phone, name, email, city, state, country, woo_customer_id')
+          .eq('woo_customer_id', wooId).limit(2)
+          : Promise.resolve({ data: [], error: null })
+      ]);
+      if (phoneMatch.error || customerMatch.error) throw new Error('Woo customer contact lookup failed.');
+      if (wooContactOwnershipConflict({ phone, customerID: wooId, incomingEmail: email,
+        phoneContact: phoneMatch.data, customerContacts: customerMatch.data || [] })) {
+        console.warn(`${topic} #${customer.id}: contact identity conflict; skipped`);
+        return;
+      }
+      const existing = phoneMatch.data;
 
       if (!existing) {
-        // Brand new contact
-        await supabase.from('sms_contacts').upsert({
-          phone, name, email, city, state, country,
-          woo_customer_id: wooId,
-          last_seen: new Date().toISOString()
-        }, { onConflict: 'phone' });
+        // Insert, never an overwrite-on-conflict. Another registration event
+        // may create the phone concurrently; that becomes a reviewed conflict.
+        const inserted = await supabase.from('sms_contacts').insert({
+          phone, name, email, city, state, country, woo_customer_id: wooId,
+          source: 'woocommerce_customer'
+        });
+        if (inserted.error?.code === '23505') {
+          console.warn(`${topic} #${customer.id}: concurrent contact identity; skipped`);
+          return;
+        }
+        if (inserted.error) throw new Error('Woo customer contact insert failed.');
 
         broadcastSSE({ type: 'contact_added', phone, name });
         console.log(`${topic}: new contact created — ${phone} (${name})`);
@@ -124,18 +143,18 @@ module.exports = (broadcastSSE) => {
       if (city    && city    !== existing.city)     updates.city    = city;
       if (state   && state   !== existing.state)   updates.state   = state;
       if (country && country !== existing.country) updates.country = country;
-      if (wooId   && wooId   !== existing.woo_customer_id) updates.woo_customer_id = wooId;
+      if (wooId && existing.woo_customer_id == null) updates.woo_customer_id = wooId;
 
       if (Object.keys(updates).length === 0) {
         console.log(`${topic}: contact ${phone} already up to date — no changes`);
         return;
       }
 
-      updates.last_seen = new Date().toISOString();
-
-      await supabase.from('sms_contacts')
+      const updated = await supabase.from('sms_contacts')
         .update(updates)
-        .eq('phone', existing.phone);
+        .eq('phone', existing.phone)
+        .eq('id', existing.id);
+      if (updated.error) throw new Error('Woo customer contact update failed.');
 
       broadcastSSE({ type: 'contact_updated', phone: existing.phone, updates });
       console.log(`${topic}: updated contact ${existing.phone} — changed fields: ${Object.keys(updates).filter(k => k !== 'last_seen').join(', ')}`);
