@@ -3,6 +3,7 @@ const { normalizePhone, fetchOrders, wooGet, extractTracking } = require('./wooc
 const { searchContactByEmail } = require('./ghl');
 const { wooOrderItems } = require('./lib/woocommerce-order-items');
 const { invalidateVIPMembership } = require('./lib/vip-inbox-messaging');
+const { wooContactOwnershipConflict } = require('./lib/woocommerce-contact-identity');
 
 // fromWebhook=true means this is a live inbound order — don't pre-mark SMS as sent.
 // fromWebhook=false (default, manual sync) marks historical orders as already sent to avoid spam.
@@ -36,16 +37,48 @@ async function syncOrder(order, { fromWebhook = false, phoneOverride = null } = 
   const lastName = order.billing?.last_name || '';
   const name = [firstName, lastName].filter(Boolean).join(' ') || null;
 
-  await supabase.from('sms_contacts').upsert({
-    phone,
-    name,
-    email: order.billing?.email || null,
-    city: order.billing?.city || null,
-    state: order.billing?.state || null,
-    country: order.billing?.country || null,
-    woo_customer_id: order.customer_id || null,
-    last_seen: fromWebhook ? new Date().toISOString() : (order.date_modified || order.date_created || new Date().toISOString())
-  }, { onConflict: 'phone' });
+  try {
+  const customerID = Number(order.customer_id) > 0 ? Number(order.customer_id) : null;
+  const [phoneContact, customerContacts] = await Promise.all([
+    supabase.from('sms_contacts').select('id,phone,email,woo_customer_id').eq('phone', phone).maybeSingle(),
+    customerID ? supabase.from('sms_contacts').select('id,phone,woo_customer_id')
+      .eq('woo_customer_id', customerID).limit(2)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (phoneContact.error || customerContacts.error) throw new Error('Woo order contact lookup failed.');
+  const contactConflict = wooContactOwnershipConflict({ phone, customerID,
+    incomingEmail: order.billing?.email, phoneContact: phoneContact.data,
+    customerContacts: customerContacts.data || [] });
+  if (contactConflict) {
+    // The order still syncs below; only the unsafe contact reassignment stops.
+    console.warn(`Woo order #${order.id}: contact identity conflict; contact unchanged`);
+  } else if (phoneContact.data) {
+    const values = {
+      name: name || undefined,
+      email: order.billing?.email || undefined,
+      city: order.billing?.city || undefined,
+      state: order.billing?.state || undefined,
+      country: order.billing?.country || undefined,
+      last_seen: fromWebhook ? new Date().toISOString() : (order.date_modified || order.date_created || new Date().toISOString())
+    };
+    if (customerID && phoneContact.data.woo_customer_id == null) values.woo_customer_id = customerID;
+    const safeValues = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+    const updated = await supabase.from('sms_contacts').update(safeValues).eq('id', phoneContact.data.id);
+    if (updated.error) throw new Error('Woo order contact update failed.');
+  } else {
+    const inserted = await supabase.from('sms_contacts').insert({
+      phone, name, email: order.billing?.email || null,
+      city: order.billing?.city || null, state: order.billing?.state || null,
+      country: order.billing?.country || null, woo_customer_id: customerID,
+      last_seen: fromWebhook ? new Date().toISOString() : (order.date_modified || order.date_created || new Date().toISOString())
+    });
+    if (inserted.error?.code !== '23505' && inserted.error) throw new Error('Woo order contact insert failed.');
+  }
+  } catch (error) {
+    // A profile conflict or temporary contact read failure must not stop an
+    // authoritative order from entering the order and purchase-exit ledgers.
+    console.error(`Woo order #${order.id}: contact profile sync deferred: ${error.message}`);
+  }
 
   const items = wooOrderItems(order);
 

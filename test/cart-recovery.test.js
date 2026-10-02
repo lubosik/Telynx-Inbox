@@ -679,7 +679,7 @@ test('WordPress connector preserves OTP flow and uses HPOS-safe auditable order 
   assert.match(plugin, /\^luko-go\//);
   assert.match(plugin, /'click_channel' => 'push'/);
   assert.match(plugin, /'applied_coupons' => array_values/);
-  assert.match(plugin, /Version: 0\.4\.0/);
+  assert.match(plugin, /Version: 0\.4\.1/);
   assert.match(plugin, /FeaturesUtil::declare_compatibility\( 'custom_order_tables'/);
   assert.match(plugin, /woocommerce_checkout_create_order/);
   assert.match(plugin, /woocommerce_store_api_checkout_update_order_meta/);

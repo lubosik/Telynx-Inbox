@@ -2,7 +2,7 @@
 /**
  * Plugin Name: LUKO Vici Connector
  * Description: WooCommerce abandoned-cart recovery, combined SMS and AI voice consent bridge, and LUKO event connector for Vici.
- * Version: 0.4.0
+ * Version: 0.4.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: LUKO
@@ -12,7 +12,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 final class LUKO_Vici_Connector {
-    const VERSION = '0.4.0';
+    const VERSION = '0.4.1';
     const CONSENT_VERSION = 'vici_marketing_sms_voice_v1';
     const ATTRIBUTION_MODEL_VERSION = 'vici-cart-recovery-v2';
     const RECOVERY_COUPON = 'VICI15';
@@ -872,6 +872,11 @@ final class LUKO_Vici_Connector {
             'permission_callback' => [ __CLASS__, 'verify_rest_hmac' ],
             'callback' => [ __CLASS__, 'order_attribution' ],
         ] );
+        register_rest_route( 'luko/v1', '/consent-audit', [
+            'methods' => 'POST',
+            'permission_callback' => [ __CLASS__, 'verify_rest_hmac' ],
+            'callback' => [ __CLASS__, 'consent_audit' ],
+        ] );
     }
 
     public static function verify_rest_hmac( $request ) {
@@ -886,6 +891,58 @@ final class LUKO_Vici_Connector {
         if ( get_transient( $replay_key ) ) return new WP_Error( 'luko_replay', 'Duplicate request.', [ 'status' => 409 ] );
         set_transient( $replay_key, 1, 5 * MINUTE_IN_SECONDS );
         return true;
+    }
+
+    /** Read-only, explicitly scoped proof for the LUKO registration audit. */
+    public static function consent_audit( $request ) {
+        $data = $request->get_json_params();
+        $ids = is_array( $data ) && isset( $data['user_ids'] ) && is_array( $data['user_ids'] ) ? $data['user_ids'] : null;
+        if ( null === $ids || count( $ids ) < 1 || count( $ids ) > 200 ) {
+            return new WP_Error( 'luko_invalid_audit', 'Provide 1 to 200 WordPress user IDs.', [ 'status' => 400 ] );
+        }
+        $unique = [];
+        foreach ( $ids as $id ) {
+            if ( ! is_int( $id ) && ! ( is_string( $id ) && ctype_digit( $id ) ) ) {
+                return new WP_Error( 'luko_invalid_audit', 'Invalid WordPress user ID.', [ 'status' => 400 ] );
+            }
+            $number = absint( $id );
+            if ( ! $number ) return new WP_Error( 'luko_invalid_audit', 'Invalid WordPress user ID.', [ 'status' => 400 ] );
+            $unique[$number] = true;
+        }
+        $results = [];
+        foreach ( array_keys( $unique ) as $user_id ) {
+            $user = get_userdata( $user_id );
+            if ( ! $user ) {
+                $results[] = [ 'wordpress_user_id' => $user_id, 'verified' => false, 'reason' => 'user_missing' ];
+                continue;
+            }
+            $evidence = get_user_meta( $user_id, '_luko_consent_evidence', true );
+            $phone = self::resolve_phone( $user_id );
+            $otp_pending = '1' === get_user_meta( $user_id, '_eael_otp_pending', true );
+            $verified = self::has_consent( $user_id );
+            $reason = 'verified';
+            if ( $otp_pending ) $reason = 'otp_pending';
+            elseif ( ! $phone ) $reason = 'phone_missing';
+            elseif ( ! is_array( $evidence ) ) $reason = 'evidence_missing';
+            elseif ( true !== ( $evidence['granted'] ?? false ) || true !== ( $evidence['sms_consent'] ?? false ) ) $reason = 'checkbox_not_granted';
+            elseif ( $phone !== ( $evidence['phone'] ?? '' ) ) $reason = 'phone_changed';
+            elseif ( ! $verified ) $reason = 'consent_meta_mismatch';
+            $results[] = [
+                'wordpress_user_id' => $user_id,
+                'verified' => $verified,
+                'reason' => $reason,
+                'phone' => $phone,
+                'evidence' => $verified ? [
+                    'source' => sanitize_text_field( (string) ( $evidence['source'] ?? '' ) ),
+                    'occurred_at' => sanitize_text_field( (string) ( $evidence['occurred_at'] ?? '' ) ),
+                    'version' => sanitize_text_field( (string) ( $evidence['version'] ?? '' ) ),
+                    'disclosure' => sanitize_text_field( (string) ( $evidence['disclosure'] ?? '' ) ),
+                    'privacy_url' => esc_url_raw( (string) ( $evidence['privacy_url'] ?? '' ) ),
+                    'terms_url' => esc_url_raw( (string) ( $evidence['terms_url'] ?? '' ) ),
+                ] : null,
+            ];
+        }
+        return rest_ensure_response( [ 'results' => $results ] );
     }
 
     public static function cart_status( $request ) {

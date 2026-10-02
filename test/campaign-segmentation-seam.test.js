@@ -71,6 +71,23 @@ const CLEARED = [{
   evidence_ref: 'case-snapshot:1', observed_at: '2026-08-22T11:00:00Z'
 }];
 
+test('linked registrations with zero paid orders form a dynamic segment, never a send list', () => {
+  const account = { ...sources(), orders: [], contacts: [{ id: 77, phone: PHONE, name: 'New researcher', woo_customer_id: 42 }],
+    customerIdentities: [{ wordpress_user_id: '42', contact_phone: PHONE, luko_contact_linked: true }] };
+  const observed = buildSegmentationInput(account, { now: NOW, workflows: ['reorder'] });
+  assert.equal(observed.segmentationOnly, true);
+  assert.equal(computeSegmentMembers('registered_no_paid_order', observed).length, 1);
+  assert.deepEqual(buildGenerationInput(account, { now: NOW, workflows: ['reorder'] }).registeredNoOrderCandidates, []);
+  const paid = { ...account, orders: [{ id: 99, contact_phone: PHONE, status: 'processing', created_at: NOW.toISOString(),
+    total: 100, items: [] }] };
+  assert.equal(computeSegmentMembers('registered_no_paid_order',
+    buildSegmentationInput(paid, { now: NOW, workflows: ['reorder'] })).length, 0);
+  const shared = { ...account, customerIdentities: [...account.customerIdentities,
+    { wordpress_user_id: '43', contact_phone: PHONE, luko_contact_linked: true }] };
+  assert.equal(computeSegmentMembers('registered_no_paid_order',
+    buildSegmentationInput(shared, { now: NOW, workflows: ['reorder'] })).length, 0);
+});
+
 // ── The gate is exactly where it was ────────────────────────────────────────
 
 test('gate mode is unchanged: no clearance means no candidate, and the reason is recorded', () => {
